@@ -50,6 +50,11 @@ export type Param = {
   readonly decorators: readonly Decorator[];
 };
 
+export type UnsafeMark = {
+  readonly loc: int;
+  readonly options?: Expr;
+};
+
 export type FunctionDecl = {
   readonly kind: StmtKind.Function;
   readonly loc: int;
@@ -67,4 +72,5 @@ export type FunctionDecl = {
   readonly isGenerator: boolean;
   readonly isAsync: boolean;
   readonly role?: ClassMember;
+  readonly unsafe?: UnsafeMark;
 };

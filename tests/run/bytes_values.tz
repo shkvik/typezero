@@ -13,50 +13,55 @@ class Image {
     for (let i = 0; i < p.length; i++) p[i] = p[i].toInt() + by
   }
 }
-const img = new Image(2, 2)
-img.brighten(100)
-img.brighten(200)
-console.log(img, img.pixels)
-function first<T>(xs: T[]): T | undefined {
+function first<T>(xs: Lent<T[]>): Read<T> | undefined {
   return xs[0]
 }
-const list: Uint8Array[] = [new Uint8Array([1]), new Uint8Array([2, 3])]
-console.log(first(list), list)
-let maybe: Uint8Array | undefined = undefined
-console.log(maybe?.length, maybe)
-maybe = list[1]
-if (maybe) console.log(maybe.length, maybe[0]?.toInt() ?? -1)
-const make = (n: int) => new Float32Array(Math.max(n, 0)).fill(0.5)
-console.log(make(3))
-const bytes = new Uint8Array([10, 20, 30])
-for (const [i, b] of bytes.entries()) console.log(i, b)
-console.log([...bytes.keys()], [...bytes.values()].map(x => x.toInt() * 2))
-let total = 0
-for (const b of bytes) {
-  if (b > 20) break
-  total += b.toInt()
-}
-console.log(total)
-const mixed = [...bytes, 4, ...new Uint8Array([255])]
-console.log(mixed)
 function* gen() {
   yield 1
   yield 2
 }
-console.log(Int32Array.from(gen(), x => x.toInt32()), Uint8Array.from(gen(), x => ((x * 3) & 0xff).toUint8()))
-const big = bytes.find(x => x > 15)
-if (big != undefined) console.log(`too big: ${big}`)
-const n = -1
-const size = n + bytes.length - 4
-if (size >= 0) console.log(new Uint8Array(size))
-else console.log("negative size", size)
-const view = new DataView(bytes.buffer)
-if (view.byteLength >= 4) console.log(view.getUint16(2))
-else console.log("too short for 16 bits at 2", view.byteLength)
-const buf = Buffer.from("abc")
-if (buf.length >= 4) console.log(buf.readUInt32LE(0))
-else console.log("too short for 32 bits", buf.length)
-console.log(buf.length, buf.byteLength, buf.byteOffset >= 0, buf.buffer.byteLength >= 3)
-const sorted = new Int32Array([3, -1, 2]).sort((a, b) => a.toInt() - b.toInt())
-console.log(sorted, new Float64Array([0.5, -2]).reduce((a, b) => a + b, 10))
-console.log(bytes == bytes, bytes == new Uint8Array([10, 20, 30]), typeof bytes)
+
+function main(): void {
+  const img = new Image(2, 2)
+  img.brighten(100)
+  img.brighten(200)
+  console.log(img, img.pixels)
+  const list: Uint8Array[] = [new Uint8Array([1]), new Uint8Array([2, 3])]
+  console.log(first(list), list)
+  let maybe: Uint8Array | undefined = undefined
+  console.log(maybe?.length, maybe)
+  maybe = list[1]
+  if (maybe) console.log(maybe.length, maybe[0]?.toInt() ?? -1)
+  const make = (n: int) => new Float32Array(Math.max(n, 0)).fill(0.5)
+  console.log(make(3))
+  const bytes = new Uint8Array([10, 20, 30])
+  for (const [i, b] of bytes.entries()) console.log(i, b)
+  console.log([...bytes.keys()], [...bytes.values()].map(x => x.toInt() * 2))
+  let total = 0
+  for (const b of bytes) {
+    if (b > 20) break
+    total += b.toInt()
+  }
+  console.log(total)
+  const mixed = [...bytes, 4, ...new Uint8Array([255])]
+  console.log(mixed)
+  console.log(Int32Array.from(gen(), x => x.toInt32()), Uint8Array.from(gen(), x => ((x * 3) & 0xff).toUint8()))
+  const big = bytes.find(x => x > 15)
+  if (big != undefined) console.log(`too big: ${big}`)
+  const n = -1
+  const size = n + bytes.length - 4
+  if (size >= 0) console.log(new Uint8Array(size))
+  else console.log("negative size", size)
+  const view = new DataView(bytes.buffer)
+  if (view.byteLength >= 4) console.log(view.getUint16(2))
+  else console.log("too short for 16 bits at 2", view.byteLength)
+  const buf = Buffer.from("abc")
+  if (buf.length >= 4) console.log(buf.readUInt32LE(0))
+  else console.log("too short for 32 bits", buf.length)
+  console.log(buf.length, buf.byteLength, buf.byteOffset >= 0, buf.buffer.byteLength >= 3)
+  const sorted = new Int32Array([3, -1, 2]).sort((a, b) => a.toInt() - b.toInt())
+  console.log(sorted, new Float64Array([0.5, -2]).reduce((a, b) => a + b, 10))
+  console.log(bytes == bytes, bytes == new Uint8Array([10, 20, 30]), typeof bytes)
+}
+
+main()

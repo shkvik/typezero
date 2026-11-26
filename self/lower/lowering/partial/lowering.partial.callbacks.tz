@@ -193,13 +193,15 @@ partial class Lowering {
       }
 
       const pointer = frame.made.slot(type, param.name);
-      const place: Place = { pointer, type, tz, owner: frame.id };
+      const isLent = value.owned != true && this.isManaged(tz);
+      const flag = this.dropFlag(frame, isLent);
+      const place: Place = { pointer, type, tz, owner: frame.id, flag };
       const key = this.placeKey(frame.module, param.loc);
 
       frame.made.entryStore(this.ir.zero(type), pointer);
       this.places.set(key, place);
       this.keepPlace(frame, place);
-      this.stored(frame, place, value);
+      this.initialized(frame, place, value);
     }
 
     return true;

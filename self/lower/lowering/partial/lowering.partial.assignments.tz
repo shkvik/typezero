@@ -7,8 +7,16 @@ import {
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
-import { kDoubleType } from "../const/lowering.const.tz";
+import {
+  kArraySetLength,
+  kDoubleType,
+  kIntType,
+  kLengthName,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
@@ -20,6 +28,12 @@ partial class Lowering {
     if (target.kind == ExprKind.Member) {
       if (this.isProcessName(frame, target.object)) {
         return this.processAssigned(frame, expr, target);
+      }
+      if (target.name == kLengthName && expr.op == undefined) {
+        const object = this.typeOf(target.object);
+        if (object != undefined && object.kind == TypeKind.Array) {
+          return this.lengthAssigned(frame, expr, target.object, object);
+        }
       }
     }
 
@@ -36,6 +50,46 @@ partial class Lowering {
     this.stored(frame, place, value);
 
     return { type: value.type, value: value.value, tz: value.tz };
+  }
+
+  private lengthAssigned(
+    frame: Frame,
+    expr: AssignExpr,
+    owner: Expr,
+    type: Type,
+  ): IrValue | undefined {
+    if (type.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const isPlain = !this.isManaged(type.item) || this.isString(type.item);
+    if (!isPlain) {
+      this.notLowered(frame.module, expr.loc, "a length set on this array");
+
+      return undefined;
+    }
+
+    const array = this.value(frame, owner);
+    const int = this.store.integer(64, false);
+    const given = this.wantedValue(frame, expr.value, int);
+    if (array == undefined || given == undefined) {
+      return undefined;
+    }
+
+    const length = this.converted(frame, given, int, expr.value.loc);
+    if (length == undefined) {
+      return undefined;
+    }
+
+    const setting = this.ir.declare(kArraySetLength, kVoidType, [
+      kPointerType,
+      kIntType,
+    ]);
+
+    frame.made.call(setting, [array.value, length.value]);
+    this.dropping(frame, array);
+
+    return length;
   }
 
   private assignedValue(
@@ -114,15 +168,15 @@ partial class Lowering {
     return { type: place.type, value, tz: place.tz };
   }
 
-  private updated(frame: Read<Frame>, expr: UpdateExpr): IrValue | undefined {
+  private updated(frame: Frame, expr: UpdateExpr): IrValue | undefined {
     const target = expr.target;
-    if (target.kind != ExprKind.Name) {
+    if (target.kind != ExprKind.Name && target.kind != ExprKind.Member) {
       this.notLowered(frame.module, expr.loc, "an update of this target");
 
       return undefined;
     }
 
-    const place = this.namePlace(frame, target);
+    const place = this.targetPlace(frame, target);
     if (place == undefined) {
       return undefined;
     }

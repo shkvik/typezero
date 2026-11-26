@@ -38,7 +38,7 @@ export function kinds<T>(items: T[], path: (x: T) => string): string[] {
   })
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

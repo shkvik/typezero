@@ -9,16 +9,17 @@ const samples = [
   Buffer.from([0xf0, 0x9f, 0x98, 0xe2, 0x82, 0xac, 0x80, 0x80, 0xed, 0xa0, 0x80, 0x41]),
   Buffer.from([0xc3, 0x28, 0xa0, 0xa1, 0xe2, 0x28, 0xa1, 0xf0, 0x28, 0x8c, 0xbc]),
 ]
-let seed = 7
-function rand(n: int): int {
-  seed = (seed * 75 + 74) % 65537
-  return seed % n
+type Seed = { value: int }
+const seed: Seed = { value: 7 }
+function rand(seed: Seed, n: int): int {
+  seed.value = (seed.value * 75 + 74) % 65537
+  return seed.value % n
 }
 for (let k = 0; k < 20; k++) {
   const bytes = Buffer.alloc(12)
   for (let i = 0; i < bytes.length; i++) {
-    const r = rand(10)
-    bytes[i] = ((r < 3 ? 0x41 + rand(26) : r < 5 ? 0x80 + rand(64) : r < 7 ? 0xc0 + rand(32) : r < 9 ? 0xe0 + rand(16) : 0xf0 + rand(8)) & 0xff).toUint8()
+    const r = rand(seed, 10)
+    bytes[i] = ((r < 3 ? 0x41 + rand(seed, 26) : r < 5 ? 0x80 + rand(seed, 64) : r < 7 ? 0xc0 + rand(seed, 32) : r < 9 ? 0xe0 + rand(seed, 16) : 0xf0 + rand(seed, 8)) & 0xff).toUint8()
   }
   samples.push(bytes)
 }

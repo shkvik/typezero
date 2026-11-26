@@ -5,3 +5,4 @@ export const kReferenceWord = "<reference";
 export const kNewlineByte = 10;
 export const kSpaceByte = 32;
 export const kTabByte = 9;
+export const kMapLibrary = "tz:map";

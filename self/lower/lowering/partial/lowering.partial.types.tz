@@ -80,6 +80,7 @@ partial class Lowering {
       case TypeKind.Object:
       case TypeKind.Tuple:
       case TypeKind.Dict:
+      case TypeKind.Function:
         return kPointerType;
       case TypeKind.Void:
         return kVoidType;
@@ -149,7 +150,11 @@ partial class Lowering {
   }
 
   private isCounted(type: Type): boolean {
-    return this.isObjectLike(type) || type.kind == TypeKind.Dict;
+    return (
+      this.isObjectLike(type) ||
+      type.kind == TypeKind.Dict ||
+      type.kind == TypeKind.Function
+    );
   }
 
   private isObjectLike(type: Type): boolean {

@@ -106,7 +106,7 @@ for (const kind of kinds) {
 const points: Constructor<Point>[] = [Point]
 for (const kind of points) console.log(must(c.build(kind, [7, 8])).sum(), c.made)
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

@@ -14,7 +14,7 @@ interface Node {
   parent?: Node
 }
 
-function tree(depth: int, name: string, parent?: Node): Node {
+function tree(depth: int, name: string, parent?: Own<Node>): Node {
   const node: Node = { name, children: [], parent }
   if (depth > 0)
     for (let i = 0; i < 2; i++) node.children.push(tree(depth - 1, `${name}.${i}`, node))

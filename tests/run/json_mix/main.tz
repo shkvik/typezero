@@ -6,7 +6,7 @@
 // decimals and Results.
 import { Store, readSettings } from "./store"
 
-function hold<T>(value: T) {
+function hold<T>(value: Own<T>) {
   return { value }
 }
 

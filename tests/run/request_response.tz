@@ -39,7 +39,7 @@ console.log(ab.byteLength)
 const b = must(await new Response(new Uint8Array([1, 2, 3])).bytes())
 console.log(b)
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

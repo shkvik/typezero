@@ -44,7 +44,10 @@ partial class ExpressionTypes {
 
   private readonly report(module: int, loc: int, code: Code, details: Details): void {
     const record = this.record(module);
-    if (record == undefined || this.modules.isTypedLibrary(module)) {
+    const isQuiet =
+      this.modules.isTypedLibrary(module) &&
+      !this.modules.isCheckedLibrary(module);
+    if (record == undefined || isQuiet) {
       return;
     }
 

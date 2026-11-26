@@ -7,10 +7,8 @@ import { DeclarationTypes } from "../../semantic/declaration/declaration-types/d
 import { ModuleBinder } from "../../semantic/declaration/module-binder/module-binder.tz";
 import { NameResolver } from "../../semantic/declaration/name-resolver/name-resolver.tz";
 import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
-import {
-  kCheckedLibraryModules,
-  kRecoverableCodes,
-} from "./const/front-end.const.tz";
+import { kRecoverableCodes } from "./const/front-end.const.tz";
+import { kCheckedLibraries } from "../../semantic/declaration/module-questions/const/module-questions.const.tz";
 import { CheckedProgram, ModuleProblems } from "./types/front-end.types.tz";
 
 export class FrontEnd {
@@ -66,7 +64,7 @@ export class FrontEnd {
       return true;
     }
 
-    return kCheckedLibraryModules.includes(module.name);
+    return kCheckedLibraries.includes(module.name);
   }
 
   public readonly problems(checked: Read<CheckedProgram>): ModuleProblems[] {

@@ -1,0 +1,23 @@
+// Generic methods: lower makes a copy of a method for each set of its own types
+// (and of the class's, for a generic class).
+class Shelf {
+  private readonly count: int;
+
+  public constructor() {
+    this.count = 2;
+  }
+
+  public readonly first<T>(items: Lent<T[]>): Read<T> | undefined {
+    return items[0];
+  }
+
+  public readonly both<T>(first: Own<T>, second: Own<T>): T[] {
+    return [first, second];
+  }
+}
+
+const shelf = new Shelf();
+const words = ["a", "b"];
+const pair = shelf.both(1, 2);
+
+console.log(shelf.first(words), pair.length);

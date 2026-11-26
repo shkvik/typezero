@@ -25,7 +25,7 @@ function show<T, E extends { kind: string; code: string; message: string }>(r: R
   console.log(r.isErr() ? `${r.error.kind} | ${r.error.code} | ${r.error.message}` : "no error")
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

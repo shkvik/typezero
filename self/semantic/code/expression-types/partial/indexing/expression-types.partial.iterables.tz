@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly iteratedItem(given: Type): Type | undefined {
+  public readonly iteratedItem(given: Type): Type | undefined {
     const base = this.types.apparent(given);
 
     switch (base.kind) {

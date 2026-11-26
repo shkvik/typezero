@@ -15,6 +15,10 @@ export class List<T> {
   private count: int;
   private capacity: int;
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the list is empty: there are no cells, count and capacity are 0",
+  })
   public constructor() {
     this.data = allocate<T>(0);
     this.count = 0;
@@ -25,6 +29,10 @@ export class List<T> {
     return this.count;
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "after grow the cell count exists and is empty",
+  })
   public push(item: Own<T>): void {
     if (this.count == this.capacity) {
       this.grow();
@@ -34,6 +42,10 @@ export class List<T> {
     this.count += 1;
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cell count - 1 is full; after take it counts as empty",
+  })
   public pop(): T | undefined {
     if (this.count == 0) {
       return undefined;
@@ -44,6 +56,10 @@ export class List<T> {
     return takeAt(this.data, this.count);
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "index is checked: the cell is full",
+  })
   public readonly at(index: int): Read<T> | undefined {
     if (index < 0 || index >= this.count) {
       return undefined;
@@ -52,6 +68,10 @@ export class List<T> {
     return peekAt(this.data, index);
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "cells index … count - 1 move one up into room grow made; the cell index is then empty",
+  })
   public insert(index: int, item: Own<T>): void {
     if (index < 0 || index > this.count) {
       return;
@@ -65,6 +85,10 @@ export class List<T> {
     this.count += 1;
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cell index is full; the cells after it move one down",
+  })
   public remove(index: int): T | undefined {
     if (index < 0 || index >= this.count) {
       return undefined;
@@ -78,6 +102,10 @@ export class List<T> {
     return item;
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "cells 0 … count - 1 are full; each is freed once",
+  })
   public clear(): void {
     for (let index = 0; index < this.count; index++) {
       destroyAt(this.data, index);
@@ -86,6 +114,10 @@ export class List<T> {
     this.count = 0;
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "after clear no cell is full, so the memory can go",
+  })
   public free(): void {
     this.clear();
     release(this.data);
@@ -93,11 +125,19 @@ export class List<T> {
     this.capacity = 0;
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the list dies: its full cells are freed once, then its memory",
+  })
   public [Symbol.dispose](): void {
     this.clear();
     release(this.data);
   }
 
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "reallocate moves count full cells; the new place is bigger",
+  })
   private grow(): void {
     let capacity: int = this.capacity * 2;
     if (capacity < 4) {

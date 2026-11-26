@@ -25,6 +25,7 @@ import {
   kBytesStruct,
   kBytesSubarray,
   kCharType,
+  kEncodingField,
   kFlagType,
   kIntType,
   kPointerType,
@@ -143,11 +144,19 @@ partial class Lowering {
   }
 
   private encodingOf(frame: Frame, expr: Expr | undefined): LLVMValue {
-    if (expr == undefined) {
+    const source = this.encodingSource(expr);
+    if (source == undefined) {
       return this.ir.zero(kFlagType);
     }
 
-    const given = this.value(frame, expr);
+    const type = this.typeOf(source);
+    if (type == undefined || !this.isString(type)) {
+      this.notLowered(frame.module, source.loc, "these options");
+
+      return this.ir.zero(kFlagType);
+    }
+
+    const given = this.value(frame, source);
     if (given == undefined) {
       return this.ir.zero(kFlagType);
     }
@@ -159,6 +168,16 @@ partial class Lowering {
     this.dropping(frame, given);
 
     return code;
+  }
+
+  private readonly encodingSource(expr: Expr | undefined): Expr | undefined {
+    if (expr == undefined || expr.kind != ExprKind.ObjectLit) {
+      return expr;
+    }
+
+    const field = expr.props.find((one) => one.name == kEncodingField);
+
+    return field?.value;
   }
 
   private positionsOf(

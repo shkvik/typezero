@@ -84,7 +84,7 @@ function v1<TBuf extends Uint8Array = never>(
 
 // (Private!)  Do not use.  This method is only exported for testing purposes
 // and may change without notice.
-export function updateV1State(state: V1State, now: int, rnds: Uint8Array) {
+export function updateV1State(state: Own<V1State>, now: int, rnds: Uint8Array) {
   // tz: no time yet is undefined, where JavaScript starts from -Infinity.
   const last = state.msecs;
   let nsecs = state.nsecs ?? 0;

@@ -92,7 +92,7 @@ console.log(must(await readFile(other, "utf8")))
 must(await rm(dir, { recursive: true }))
 console.log("done")
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

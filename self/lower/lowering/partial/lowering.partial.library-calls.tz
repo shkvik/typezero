@@ -21,6 +21,7 @@ import {
   kFsModule,
   kMemModule,
   kUnsafeModule,
+  kInspectModule,
   kVoidType,
   kCharType,
   kReplaceName,
@@ -28,6 +29,8 @@ import {
   kTakeName,
   kDropName,
   kStructuredCloneName,
+  kStringName,
+  kBooleanName,
   kArrayCopy,
   kNumberName,
   kOsModule,
@@ -86,6 +89,11 @@ partial class Lowering {
       return undefined;
     }
 
+    const handed = this.handedOver(frame, place, current, value);
+    if (handed != undefined) {
+      return handed;
+    }
+
     const old = this.owning(frame, current);
     const assignment: AssignExpr = {
       kind: ExprKind.Assign,
@@ -97,6 +105,69 @@ partial class Lowering {
     this.assigned(frame, assignment);
 
     return old;
+  }
+
+  private handedOver(
+    frame: Frame,
+    place: Expr,
+    current: IrValue,
+    value: Expr,
+  ): IrValue | undefined {
+    const isPlace = place.kind == ExprKind.Name || place.kind == ExprKind.Member;
+    if (!isPlace || current.owned == true || !this.isManaged(current.tz)) {
+      return undefined;
+    }
+
+    const target = this.targetPlace(frame, place);
+    if (target == undefined || target.flag != undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, value);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const converted = this.converted(frame, given, target.tz, value.loc);
+    if (converted == undefined) {
+      return undefined;
+    }
+
+    const owned = this.owning(frame, converted);
+
+    frame.made.store(owned.value, target.pointer);
+
+    return {
+      type: current.type,
+      value: current.value,
+      tz: current.tz,
+      owned: true,
+    };
+  }
+
+  private stringCalled(frame: Frame, call: CallExpr): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined) {
+      return this.stringValue("");
+    }
+
+    return this.aloneValue(frame, argument.expr);
+  }
+
+  private booleanCalled(frame: Frame, call: CallExpr): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined) {
+      return this.booleanValue(false);
+    }
+
+    const test = this.truth(frame, argument.expr);
+    if (test == undefined) {
+      return undefined;
+    }
+
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    return { type: kBooleanType, value: test, tz };
   }
 
   private clonedValue(frame: Frame, call: CallExpr): IrValue | undefined {
@@ -162,6 +233,23 @@ partial class Lowering {
     const target = this.targetPlace(frame, place);
     if (empty == undefined || target == undefined) {
       return undefined;
+    }
+
+    const isHanded =
+      current.owned != true &&
+      target.flag == undefined &&
+      this.isManaged(current.tz);
+    if (isHanded) {
+      const owned = this.owning(frame, empty);
+
+      frame.made.store(owned.value, target.pointer);
+
+      return {
+        type: current.type,
+        value: current.value,
+        tz: current.tz,
+        owned: true,
+      };
     }
 
     const old = this.owning(frame, current);
@@ -246,6 +334,12 @@ partial class Lowering {
     if (callee.name == kStructuredCloneName) {
       return this.clonedValue(frame, call);
     }
+    if (callee.name == kStringName) {
+      return this.stringCalled(frame, call);
+    }
+    if (callee.name == kBooleanName) {
+      return this.booleanCalled(frame, call);
+    }
 
     const opened = this.program.modules[module];
     if (opened != undefined && opened.name == kMemModule) {
@@ -253,6 +347,9 @@ partial class Lowering {
     }
     if (opened != undefined && opened.name == kUnsafeModule) {
       return this.unsafeCall(frame, call, callee);
+    }
+    if (opened != undefined && opened.name == kInspectModule) {
+      return this.inspectCall(frame, call, callee);
     }
     if (opened != undefined && opened.name == kFsModule) {
       return this.filesCall(frame, call, callee);

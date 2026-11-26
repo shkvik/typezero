@@ -9,6 +9,7 @@ import {
   LLVMConstNull,
   LLVMSizeOf,
   LLVMConstReal,
+  LLVMConstRealOfString,
   LLVMConstStringInContext2,
   LLVMConstStructInContext,
   LLVMContext,
@@ -127,6 +128,10 @@ export class IrModule {
 
   public readonly real(value: double): LLVMValue {
     return LLVMConstReal(this.type("double"), value);
+  }
+
+  public readonly realOf(digits: string): LLVMValue {
+    return LLVMConstRealOfString(this.type("double"), this.cname(digits));
   }
 
   public readonly zero(key: string): LLVMValue {

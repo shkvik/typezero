@@ -14,10 +14,10 @@ interface B extends StreamError {
 class Box<E extends StreamError = StreamError> {
   private value?: E
   public constructor() {}
-  protected put(value: E): void {
+  protected put(value: Own<E>): void {
     this.value = value
   }
-  public get(): E | undefined {
+  public get(): Read<E> | undefined {
     return this.value
   }
   public async *[Symbol.asyncIterator](): AsyncGenerator<Result<int, E>> {

@@ -103,6 +103,7 @@ partial class FileParser {
 
     return {
       kind: StmtKind.Function,
+      unsafe: this.takenUnsafe(),
       loc: named.loc,
       name: named.name,
       typeParams,
@@ -499,6 +500,7 @@ partial class FileParser {
 
     return {
       kind: StmtKind.Function,
+      unsafe: this.takenUnsafe(),
       loc,
       name,
       typeParams,

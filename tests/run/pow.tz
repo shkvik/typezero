@@ -1,14 +1,19 @@
 // `**` of integers stays an integer, like `*`, and must fit its type
 // (errors/overflow_input.tz); a negative power loses its fraction, like `/`
 // (JavaScript would give 0.5).
-let two: int = 2
-let minusOne: int = -1
-console.log(two ** 30, two ** minusOne, (-two) ** minusOne, 1 ** minusOne)
-let base: int = 2
-console.log(base ** 62, (-base) ** 3)
-let x: int = 5
-x **= 2
-console.log(x)
-// Where the context wants a double, the literals are doubles.
-const half: double = 2 ** -1
-console.log(half)
+
+function main(): void {
+  let two: int = 2
+  let minusOne: int = -1
+  console.log(two ** 30, two ** minusOne, (-two) ** minusOne, 1 ** minusOne)
+  let base: int = 2
+  console.log(base ** 62, (-base) ** 3)
+  let x: int = 5
+  x **= 2
+  console.log(x)
+  // Where the context wants a double, the literals are doubles.
+  const half: double = 2 ** -1
+  console.log(half)
+}
+
+main()

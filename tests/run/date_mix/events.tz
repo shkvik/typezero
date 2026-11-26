@@ -33,7 +33,7 @@ export class Meeting extends Event {
 // An error with dates in it: a value of a type with a tag, not a class.
 export type Late = { code: "late"; message: string; due: Date; now: Date }
 
-export function checkDue(due: Date, now: Date): Result<Date, Late> {
+export function checkDue(due: Own<Date>, now: Own<Date>): Result<Date, Late> {
   if (now > due) {
     const minutes = (now.getTime() - due.getTime()) / 60000
     const hours = minutes.toDouble() / 60

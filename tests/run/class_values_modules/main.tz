@@ -4,8 +4,12 @@
 import { CountedNote, Note, show } from "./model"
 import { created } from "./mixin"
 
-const a = new Note("a")
-const b = new CountedNote("b")
-console.log(a, b, show(a), show(b), created, b.serial)
-const kinds: Constructor<Note>[] = [Note, CountedNote]
-console.log(kinds.map(k => new k("k").tag), created)
+function main(): void {
+  const a = new Note("a")
+  const b = new CountedNote("b")
+  console.log(a, b, show(a), show(b), created, b.serial)
+  const kinds: Constructor<Note>[] = [Note, CountedNote]
+  console.log(kinds.map(k => new k("k").tag), created)
+}
+
+main()

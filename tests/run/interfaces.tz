@@ -51,41 +51,12 @@ function older(a: Aged) {
   return `${a.age + 1} (born ${a.born})`
 }
 
-const ann = new Person("Ann", 30)
-const r2 = new Robot("R2")
-const sam = new Student("Sam", 16)
-// A literal of an interface with methods: a function in a field, or a
-// method of the literal.
-const lit: Greeter = { name: "Lit", greet: (o: string) => `lit greets ${o}` }
-const polite: Greeter = {
-  name: "Polite",
-  greet(other) {
-    return `${this.name} bows to ${other}`
-  },
-}
-const greeters: Greeter[] = [ann, r2, sam, lit, polite]
-for (const g of greeters) console.log(hello(g), "|", g.greet("you"))
-const aged: Aged[] = [ann, sam, { age: 70, born: 1956 }]
-for (const a of aged) console.log(older(a))
-const names: Named[] = [ann, r2, { name: "plain" }]
-console.log(names.map(n => n.name).join(", "))
-console.log(greeters)
-
-// instanceof finds the class of an object known by an interface.
-for (const g of greeters)
-  console.log(g.name, g instanceof Person, g instanceof Robot, g instanceof Student)
-
 // Literals with methods of one interface go in one array.
 interface Counter {
   n: int
   inc(): void
   get(): int
 }
-let step = 2
-const counters: Counter[] = [
-  { n: 0, inc() { this.n += step }, get() { return this.n } },
-  { n: 10, inc() { this.n-- }, get() { return this.n * 100 } },
-]
 class Real implements Counter {
   n: int
 
@@ -100,10 +71,46 @@ class Real implements Counter {
     return -this.n
   }
 }
-counters.push(new Real())
-for (const c of counters) {
-  c.inc()
-  c.inc()
-  console.log(c.get(), c.n)
+
+function main(): void {
+  const ann = new Person("Ann", 30)
+  const r2 = new Robot("R2")
+  const sam = new Student("Sam", 16)
+  // A literal of an interface with methods: a function in a field, or a
+  // method of the literal.
+  const lit: Greeter = { name: "Lit", greet: (o: string) => `lit greets ${o}` }
+  const polite: Greeter = {
+    name: "Polite",
+    greet(other) {
+      return `${this.name} bows to ${other}`
+    },
+  }
+  const greeters: Read<Greeter>[] = [ann, r2, sam, lit, polite]
+  for (const g of greeters) console.log(hello(g), "|", g.greet("you"))
+  const elder: Aged = { age: 70, born: 1956 }
+  const aged: Read<Aged>[] = [ann, sam, elder]
+  for (const a of aged) console.log(older(a))
+  const plain: Named = { name: "plain" }
+  const names: Read<Named>[] = [ann, r2, plain]
+  console.log(names.map(n => n.name).join(", "))
+  console.log(greeters)
+
+  // instanceof finds the class of an object known by an interface.
+  for (const g of greeters)
+    console.log(g.name, g instanceof Person, g instanceof Robot, g instanceof Student)
+
+  let step = 2
+  const counters: Counter[] = [
+    { n: 0, inc() { this.n += step }, get() { return this.n } },
+    { n: 10, inc() { this.n-- }, get() { return this.n * 100 } },
+  ]
+  counters.push(new Real())
+  for (const c of counters) {
+    c.inc()
+    c.inc()
+    console.log(c.get(), c.n)
+  }
+  console.log(counters)
 }
-console.log(counters)
+
+main()

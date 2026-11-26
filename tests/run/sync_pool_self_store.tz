@@ -17,7 +17,7 @@ class Reader {
     this.pending = Buffer.alloc(0)
   }
 
-  public push(chunk: Buffer): void {
+  public push(chunk: Own<Buffer>): void {
     this.pending = this.pending.length == 0 ? chunk : Buffer.concat([this.pending, chunk])
   }
 
@@ -81,36 +81,40 @@ async function transaction(text: string): Promise<Result<string, never>> {
   return pool.use(async (connection) => transactions.run({ connection }, async () => query(text)))
 }
 
-const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
-  const path = new URL(request.url).pathname()
-  const answer = path.startsWith("/t") ? await transaction(path) : await query(path)
-  return new Response(answer.value)
-})
-const started = server.listen()
-if (started.isErr()) {
-  console.log("cannot listen:", started.error.message)
-  process.exit(1)
-}
-const listening = started.value
-
-const base = `http://127.0.0.1:${listening.port}`
-let right = 0
-for (let round = 0; round < 2; round++) {
-  const ids: string[] = []
-  for (let i = 0; i < 20; i++) ids.push(i % 2 == 0 ? `/q${round}-${i}` : `/t${round}-${i}`)
-  const texts = await Promise.all(ids.map(async (id) => must(await (must(await fetch(base + id))).text())))
-  ids.forEach((id, i) => {
-    if (texts[i] == id.split("").reverse().join("")) right++
-  })
-}
-console.log(`reversed: ${right} of 40`)
-await listening.stop()
-console.log("stopped")
-
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)
   }
   return r.value
 }
+
+async function main(): Promise<void> {
+  const server = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+    const path = new URL(request.url).pathname()
+    const answer = path.startsWith("/t") ? await transaction(path) : await query(path)
+    return new Response(answer.value)
+  })
+  const started = server.listen()
+  if (started.isErr()) {
+    console.log("cannot listen:", started.error.message)
+    process.exit(1)
+  }
+  const listening = started.value
+
+  const base = `http://127.0.0.1:${listening.port}`
+  let right = 0
+  for (let round = 0; round < 2; round++) {
+    const ids: string[] = []
+    for (let i = 0; i < 20; i++) ids.push(i % 2 == 0 ? `/q${round}-${i}` : `/t${round}-${i}`)
+    const texts = await Promise.all(ids.map(async (id) => must(await (must(await fetch(base + id))).text())))
+    ids.forEach((id, i) => {
+      if (texts[i] == id.split("").reverse().join("")) right++
+    })
+  }
+  console.log(`reversed: ${right} of 40`)
+  await listening.stop()
+  console.log("stopped")
+}
+
+await main()

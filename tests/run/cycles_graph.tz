@@ -43,7 +43,7 @@ class Graph {
 }
 
 // Breadth-first: how many vertices are reachable from `start`.
-function reachable(start: Vertex): int {
+function reachable(start: Own<Vertex>): int {
   const seen = new Set<Vertex>([start])
   const queue = [start]
   while (queue.length > 0) {

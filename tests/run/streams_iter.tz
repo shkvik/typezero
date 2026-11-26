@@ -3,48 +3,53 @@
 // and an error ends it with an Err; and Readable.from() of an array, an async
 // generator and a string.
 import { PassThrough, Readable } from "node:stream"
-const log = (s: string) => console.log(s)
-const pt = new PassThrough<Buffer>()
-pt.write("one ")
-pt.write("two ")
-const ending = new Promise<void>((resolve) => setTimeout(resolve, 1)).then(() => pt.end("three"))
-let text = ""
-for await (const item of pt) {
-  if (item.isErr()) break
-  log(`chunk ${item.value.toString()}`)
-  text += item.value.toString()
-}
-log(`ended ${(await ending).isOk()}`)
-log(`text ${text} destroyed ${pt.destroyed()}`)
-
-const words = Readable.from(["alpha", "beta", "gamma"])
-for await (const item of words) {
-  const w = item.unwrapOr("")
-  log(`word ${w.toUpperCase()}`)
-  if (w == "beta") break
-}
-log(`after break destroyed ${words.destroyed()}`)
-
 async function* gen() {
   yield 1
   yield 2
   yield 3
 }
-const nums = Readable.from(gen())
-let sum = 0
-for await (const n of nums) sum += n.unwrapOr(0)
-log(`sum ${sum}`)
-
-const one = Readable.from("whole string")
-one.on("error", (e) => log(`one error ${e.message}`))
-one.on("data", (s) => log(`one ${s} ${typeof s}`))
 class Broken extends Readable<Buffer> {
   onRead() {
     setTimeout(() => this.destroy({ message: "broken" }), 1)
   }
 }
-const bad = new Broken()
-for await (const c of bad) {
-  if (c.isErr()) log(`error ${c.error.message}`)
-  else log(`never ${c.value.length}`)
+
+async function main(): Promise<void> {
+  const log = (s: string) => console.log(s)
+  const pt = new PassThrough<Buffer>()
+  pt.write("one ")
+  pt.write("two ")
+  const ending = new Promise<void>((resolve) => setTimeout(resolve, 1)).then(() => pt.end("three"))
+  let text = ""
+  for await (const item of pt) {
+    if (item.isErr()) break
+    log(`chunk ${item.value.toString()}`)
+    text += item.value.toString()
+  }
+  log(`ended ${(await ending).isOk()}`)
+  log(`text ${text} destroyed ${pt.destroyed()}`)
+
+  const words = Readable.from(["alpha", "beta", "gamma"])
+  for await (const item of words) {
+    const w = item.unwrapOr("")
+    log(`word ${w.toUpperCase()}`)
+    if (w == "beta") break
+  }
+  log(`after break destroyed ${words.destroyed()}`)
+
+  const nums = Readable.from(gen())
+  let sum = 0
+  for await (const n of nums) sum += n.unwrapOr(0)
+  log(`sum ${sum}`)
+
+  const one = Readable.from("whole string")
+  one.on("error", (e) => log(`one error ${e.message}`))
+  one.on("data", (s) => log(`one ${s} ${typeof s}`))
+  const bad = new Broken()
+  for await (const c of bad) {
+    if (c.isErr()) log(`error ${c.error.message}`)
+    else log(`never ${c.value.length}`)
+  }
 }
+
+await main()

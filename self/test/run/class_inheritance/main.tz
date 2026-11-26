@@ -1,0 +1,82 @@
+// Classes with a base: the base's fields come first in the layout, so its
+// methods work on the derived object; overridden methods are called through
+// the table of the class; freeing calls the derived dispose, then the base's.
+class Shape {
+  public readonly name: string;
+  protected count: int;
+
+  public constructor(name: string) {
+    this.name = name;
+    this.count = 0;
+  }
+
+  public readonly area(): int {
+    return 0;
+  }
+
+  public describe(): string {
+    this.count += 1;
+
+    return `${this.name}:${this.area()}:${this.count}`;
+  }
+
+  public [Symbol.dispose](): void {
+    console.log(`free ${this.name}`);
+  }
+}
+
+class Square extends Shape {
+  private readonly side: int;
+
+  public constructor(side: int) {
+    super("square");
+    this.side = side;
+  }
+
+  public override readonly area(): int {
+    return this.side * this.side;
+  }
+
+  public [Symbol.dispose](): void {
+    console.log(`free side ${this.side}`);
+  }
+}
+
+class Circle extends Shape {
+  private readonly radius: int;
+
+  public constructor(radius: int) {
+    super("circle");
+    this.radius = radius;
+  }
+
+  public override readonly area(): int {
+    return 3 * this.radius * this.radius;
+  }
+
+  public override describe(): string {
+    return `round ${super.describe()}`;
+  }
+}
+
+function total(shapes: Read<Shape[]>): int {
+  let sum = 0;
+
+  for (const shape of shapes) {
+    sum += shape.area();
+  }
+
+  return sum;
+}
+
+function run(): void {
+  const shapes: Shape[] = [new Square(2), new Circle(1), new Shape("dot")];
+
+  console.log(total(shapes));
+
+  for (const shape of shapes) {
+    console.log(shape.describe());
+  }
+}
+
+run();

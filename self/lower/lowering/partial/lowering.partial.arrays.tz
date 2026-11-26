@@ -6,7 +6,13 @@ import {
   ExprKind,
   IndexExpr,
   MemberExpr,
+  NewExpr,
+  NewKind,
 } from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../semantic/types/type-resolver/types/type-resolver.types.tz";
 import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
 import {
   DictKind,
@@ -22,6 +28,7 @@ import { Lowering } from "../lowering.tz";
 import {
   kArrayAppend,
   kArrayCapacityField,
+  kArrayClassName,
   kArrayDataField,
   kArrayGrow,
   kArrayLayout,
@@ -63,6 +70,14 @@ partial class Lowering {
     const literal = this.wantedText(expr, wanted);
     if (literal != undefined) {
       return literal;
+    }
+
+    const isUntypedArray =
+      expr.kind == ExprKind.New &&
+      wanted.kind == TypeKind.Array &&
+      this.madeArrayType(known) == undefined;
+    if (isUntypedArray && expr.kind == ExprKind.New) {
+      return this.arrayOfLength(frame, expr, wanted);
     }
 
     return this.value(frame, expr);
@@ -164,6 +179,89 @@ partial class Lowering {
     }
 
     return { type: kPointerType, value: array, tz: type, owned: true };
+  }
+
+  private arrayOfLength(frame: Frame, expr: NewExpr, type: Type): IrValue | undefined {
+    const argument = expr.args[0];
+    const item = this.descriptorOfArray(type);
+    if (argument == undefined || item == undefined || expr.args.length != 1) {
+      this.notLowered(frame.module, expr.loc, "this new");
+
+      return undefined;
+    }
+
+    const int = this.store.integer(64, false);
+    const given = this.wantedValue(frame, argument.expr, int);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const count = this.converted(frame, given, int, argument.expr.loc);
+    if (count == undefined) {
+      return undefined;
+    }
+
+    const tz = this.store.integer(64, false);
+    const args: IrValue[] = [
+      { type: kPointerType, value: item, tz },
+      count,
+      count,
+    ];
+    const value = this.runtimeValue(frame, kArrayNew, kPointerType, args);
+
+    return { type: kPointerType, value, tz: type, owned: true };
+  }
+
+  private readonly madeArrayType(type: Type | undefined): Type | undefined {
+    if (type == undefined) {
+      return undefined;
+    }
+    if (type.kind == TypeKind.Array) {
+      return type;
+    }
+
+    if (type.kind != TypeKind.Instance || type.name != kArrayClassName) {
+      return undefined;
+    }
+
+    const item = type.args[0];
+    if (item == undefined || type.args.length != 1) {
+      return undefined;
+    }
+
+    return this.store.arrayOf(item);
+  }
+
+  private writtenArrayType(frame: Read<Frame>, expr: NewExpr): Type | undefined {
+    const form = expr.form;
+    const written = expr.typeArgs[0];
+    const isArray =
+      form.kind == NewKind.Named &&
+      form.name == kArrayClassName &&
+      form.member == undefined;
+    if (!isArray || written == undefined || expr.typeArgs.length != 1) {
+      return undefined;
+    }
+
+    const context: TypeContext = {
+      module: frame.module,
+      bindings: new Map<int, Type>(this.binding),
+      place: TypePlace.Plain,
+    };
+    const item = this.resolver.resolve(written, context);
+    if (item.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return this.store.arrayOf(item);
+  }
+
+  private descriptorOfArray(type: Type): LLVMValue | undefined {
+    if (type.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    return this.descriptor(type.item);
   }
 
   private readonly newArray(frame: Read<Frame>, descriptor: LLVMValue, count: int): LLVMValue {
@@ -631,13 +729,14 @@ partial class Lowering {
       type: kPointerType,
       tz: iterable,
       owner: frame.id,
+      flag: this.dropFlag(frame, true),
     };
     const counter = frame.made.slot(kIntType, "for.index");
     const none = this.ir.zero(kPointerType);
 
     frame.made.entryStore(none, holder.pointer);
     this.keepPlace(frame, holder);
-    this.stored(frame, holder, source);
+    this.initialized(frame, holder, source);
     frame.made.store(this.ir.zero(kIntType), counter);
     frame.made.open(cond);
 
@@ -727,7 +826,7 @@ partial class Lowering {
 
     const value = this.converted(frame, item, place.tz, binding.loc);
     if (value != undefined) {
-      this.stored(frame, place, value);
+      this.initialized(frame, place, value);
     }
   }
 }

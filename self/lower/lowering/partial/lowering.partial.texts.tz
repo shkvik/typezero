@@ -19,6 +19,7 @@ import {
   kStringConcat,
   kStringType,
   kTrue,
+  kUndefinedText,
   kVoidType,
   kTextFromUnsigned,
 } from "../const/lowering.const.tz";
@@ -69,7 +70,54 @@ partial class Lowering {
       return undefined;
     }
 
-    const value = this.proven(frame, given);
+    const inner = this.optionalInner(given.tz);
+    if (inner == undefined) {
+      return this.textPart(frame, given, expr.loc);
+    }
+
+    return this.optionalTextPart(frame, given, inner, expr.loc);
+  }
+
+  private optionalTextPart(
+    frame: Frame,
+    given: IrValue,
+    inner: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const has = this.hasValue(frame, given);
+    const present = frame.made.block("text.present");
+    const absent = frame.made.block("text.absent");
+    const end = frame.made.block("text.end");
+
+    frame.made.conditionalBranch(has, present, absent);
+    frame.made.open(present);
+
+    const inside = this.insideValue(frame, given, inner);
+    const part = this.textPart(frame, inside, loc);
+    if (part == undefined) {
+      return undefined;
+    }
+
+    const presentEnd = frame.made.currentBlock();
+
+    frame.made.branch(end);
+    frame.made.open(absent);
+
+    const none = this.stringValue(kUndefinedText);
+
+    frame.made.branch(end);
+    frame.made.open(end);
+
+    const value = frame.made.phi(
+      kStringType,
+      [part.value, none.value],
+      [presentEnd, absent],
+    );
+
+    return { type: kStringType, value, tz: part.tz, owned: part.owned };
+  }
+
+  private textPart(frame: Frame, value: IrValue, loc: int): IrValue | undefined {
     if (this.isString(value.tz)) {
       return value;
     }
@@ -103,7 +151,7 @@ partial class Lowering {
       return this.numberPart(frame, bits, kNumberPartDouble);
     }
 
-    this.notLowered(frame.module, expr.loc, "this value in a text");
+    this.notLowered(frame.module, loc, "this value in a text");
 
     return undefined;
   }

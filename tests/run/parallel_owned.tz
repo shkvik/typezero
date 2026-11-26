@@ -20,7 +20,7 @@ function size(request: Request): string {
   return request.headers.get("x-size") ?? "0"
 }
 
-async function later(request: Request): Promise<void> {
+async function later(request: Own<Request>): Promise<void> {
   await Promise.resolve()
   request.headers.set("x-later", "1")
 }

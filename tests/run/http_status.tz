@@ -58,7 +58,7 @@ for (const reply of replies) {
   console.log(r.status, reply.status + 1, reply.status >= 400, must(await r.json()))
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

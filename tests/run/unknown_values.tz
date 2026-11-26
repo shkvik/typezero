@@ -58,7 +58,7 @@ if (typeof two == "double") console.log(two * 10)
 const f: unknown = (x: int) => x + 1
 console.log(typeof f, f)
 
-function must<T>(r: Result<T, JsonError>): T {
+function must<T>(r: Own<Result<T, JsonError>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

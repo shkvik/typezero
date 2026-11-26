@@ -42,10 +42,15 @@ import {
   MemberName,
   Modifiers,
 } from "../types/file-parser.types.classes.tz";
-import { kThisName } from "../const/file-parser.const.classes.tz";
+import {
+  kThisName,
+  kUnsafeDecorator,
+} from "../const/file-parser.const.classes.tz";
 
 partial class FileParser {
   private classDeclaration(): ClassDeclDraft {
+    this.unsafeMark = undefined;
+
     if (!this.classNameAhead()) {
       const next = this.cursor.lookahead();
 
@@ -127,6 +132,7 @@ partial class FileParser {
   ): FunctionDecl {
     return {
       kind: StmtKind.Function,
+      unsafe: fn.unsafe,
       loc: fn.loc,
       name: fn.name,
       typeParams: fn.typeParams,
@@ -309,7 +315,9 @@ partial class FileParser {
       const at = this.cursor.next();
       const loc = at.start;
       const expr = this.decoratorExpr();
-      if (expr != undefined) {
+      if (expr != undefined && this.isUnsafeDecorator(expr)) {
+        this.unsafeMark = { loc, options: this.unsafeOptions(expr) };
+      } else if (expr != undefined) {
         decorators.push({ loc, expr });
       }
       if (this.cursor.isRecovering()) {
@@ -361,6 +369,24 @@ partial class FileParser {
     }
 
     return expr;
+  }
+
+  private readonly isUnsafeDecorator(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+
+    return callee.kind == ExprKind.Name && callee.name == kUnsafeDecorator;
+  }
+
+  private readonly unsafeOptions(expr: Expr): Expr | undefined {
+    if (expr.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    return expr.args[0]?.expr;
   }
 
   private rejectDecorators(decorators: Read<Decorator[]>): void {

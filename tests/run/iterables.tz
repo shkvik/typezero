@@ -61,7 +61,7 @@ class Registry<T> {
     this.values = []
   }
 
-  add(name: string, value: T) {
+  add(name: string, value: Own<T>) {
     this.names.push(name)
     this.values.push(value)
     return this
@@ -87,7 +87,7 @@ function* evens(limit: int) {
 }
 console.log(sum([1, 2, 3]), sum(new Set([4, 5])), sum(r), sum(new Countdown(4)), sum(evens(7)),
             sum(new Fib(6)))
-function collect<T>(xs: Iterable<T>): T[] { return [...xs] }
+function collect<T>(xs: Own<Iterable<T>>): T[] { return [...xs] }
 console.log(collect("héllo"), collect(new Map([["k", true]])), collect(reg), collect(new Countdown(2)))
 function largest<T extends number>(xs: Iterable<T>) {
   let best: double | undefined = undefined

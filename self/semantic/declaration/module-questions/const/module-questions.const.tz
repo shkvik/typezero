@@ -8,4 +8,7 @@ export const kTypedLibraries = [
   "node:stream",
   "tz:list",
   "tz:array",
+  "tz:map",
 ];
+
+export const kCheckedLibraries = ["tz:list", "tz:array", "tz:map"];

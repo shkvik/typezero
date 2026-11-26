@@ -20,7 +20,7 @@ function longest(pets: Animal[]) {
   for (const p of pets) if (best == undefined || p.name.length > best.name.length) best = p
   return best?.name
 }
-function withCat(pets: Animal[]) {
+function withCat(pets: Own<Animal[]>) {
   const all = [...pets]           // a new array: a Cat may go into it
   all.push(new Cat("Tom"))
   return all
@@ -56,7 +56,7 @@ console.log(ivan.pet.bark())
 class Kennel {
   pet: Animal
   open: boolean
-  constructor(pet: Animal) {
+  constructor(pet: Own<Animal>) {
     this.open = true
     this.pet = pet
   }

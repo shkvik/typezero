@@ -55,7 +55,7 @@ function last<T>(items: T[]): T | undefined {
   return items[items.length - 1]
 }
 console.log(last([new Uint16Array([7]), new Uint16Array([8, 9])]), last<Buffer>([]))
-function pairs<A, B>(a: A, b: B): [A, B] {
+function pairs<A, B>(a: Own<A>, b: Own<B>): [A, B] {
   return [a, b]
 }
 console.log(pairs(Buffer.from("a"), new Int8Array([-1])))

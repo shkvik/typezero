@@ -117,7 +117,7 @@ export function readText(source: Source, key: string): Promise<Result<string, st
   return source.read(key)
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

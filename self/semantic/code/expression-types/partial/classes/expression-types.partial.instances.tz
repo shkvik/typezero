@@ -344,6 +344,12 @@ partial class ExpressionTypes {
 
     this.newArrayCheck(expr, form.name, wanted, module);
     this.madeSizeCheck(expr, form.name, module);
+
+    const arrayMade = this.arrayNew(expr, form.name, wanted, module);
+    if (arrayMade != undefined) {
+      return arrayMade;
+    }
+
     const executorErrors = this.library.executorCheck(expr, form.name);
 
     this.reportAll(module, executorErrors);

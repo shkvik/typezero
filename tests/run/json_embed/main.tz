@@ -15,7 +15,7 @@ type Config = { port: int; host: string; debug: boolean; users: { name: string; 
 if (typeof config.port == "double" && Array.isArray(config.users) && typeof config.debug == "boolean")
   console.log(config.port + 1, config.users.length, config.debug)
 
-function must<T>(r: Result<T, JsonError>): T {
+function must<T>(r: Own<Result<T, JsonError>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

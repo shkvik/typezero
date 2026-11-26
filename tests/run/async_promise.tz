@@ -2,31 +2,36 @@
 // The functions of Promise and how console.log shows Promises. A Promise
 // is not rejected in tz (docs/errors.md, section 4): no Promise.reject,
 // allSettled or any.
-const a = Promise.resolve(1)
-const b = new Promise<string>(resolve => setTimeout(() => resolve("later"), 5))
-console.log(a, b)
-console.log(await Promise.all([a, b, Promise.resolve(3)]))
-console.log(await Promise.all([1, 2, 3].map(async n => n * 10)))
-console.log(await Promise.all([Promise.resolve(1), "two", true]))
-const slow = new Promise<int>(resolve => setTimeout(() => resolve(1), 60))
-const fast = new Promise<int>(resolve => setTimeout(() => resolve(2), 5))
-console.log("race", await Promise.race([slow, fast]))
-const none: Promise<int>[] = []
-console.log(await Promise.all(none), await Promise.race([Promise.resolve(0), ...none]))
-const { promise, resolve } = Promise.withResolvers<int>()
-setTimeout(() => resolve(42), 1)
-console.log(await promise)
-console.log(await Promise.resolve(5).then(x => x + 1).then(x => `${x}!`))
-const p = Promise.resolve([1, 2])
-console.log(p, await p, { p })
-console.log(new Promise<int>(() => {}))
-console.log(Promise.resolve())
-const tasks: Promise<void>[] = []
-let done = 0
-for (let i = 0; i < 1000; i++)
-  tasks.push((async () => {
-    await undefined
-    done++
-  })())
-await Promise.all(tasks)
-console.log("done", done)
+
+async function main(): Promise<void> {
+  const a = Promise.resolve(1)
+  const b = new Promise<string>(resolve => setTimeout(() => resolve("later"), 5))
+  console.log(a, b)
+  console.log(await Promise.all([a, b, Promise.resolve(3)]))
+  console.log(await Promise.all([1, 2, 3].map(async n => n * 10)))
+  console.log(await Promise.all([Promise.resolve(1), "two", true]))
+  const slow = new Promise<int>(resolve => setTimeout(() => resolve(1), 60))
+  const fast = new Promise<int>(resolve => setTimeout(() => resolve(2), 5))
+  console.log("race", await Promise.race([slow, fast]))
+  const none: Promise<int>[] = []
+  console.log(await Promise.all(none), await Promise.race([Promise.resolve(0), ...none]))
+  const { promise, resolve } = Promise.withResolvers<int>()
+  setTimeout(() => resolve(42), 1)
+  console.log(await promise)
+  console.log(await Promise.resolve(5).then(x => x + 1).then(x => `${x}!`))
+  const p = Promise.resolve([1, 2])
+  console.log(p, await p, { p })
+  console.log(new Promise<int>(() => {}))
+  console.log(Promise.resolve())
+  const tasks: Promise<void>[] = []
+  let done = 0
+  for (let i = 0; i < 1000; i++)
+    tasks.push((async () => {
+      await undefined
+      done++
+    })())
+  await Promise.all(tasks)
+  console.log("done", done)
+}
+
+await main()

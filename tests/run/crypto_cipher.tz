@@ -14,10 +14,11 @@ gcm.setAAD(Buffer.from("header"))
 const part1 = gcm.update(text.slice(0, 10), "utf8")
 const part2 = gcm.update(text.slice(10), "utf8")
 const last = must(gcm.final())
+const sizes = [part1.length, part2.length, last.length]
 const sealed = Buffer.concat([part1, part2, last])
 const tag = must(gcm.getAuthTag())
 console.log(sealed.toString("hex"))
-console.log(tag.toString("hex"), part1.length, part2.length, last.length)
+console.log(tag.toString("hex"), ...sizes)
 const open = must(createDecipheriv("aes-256-gcm", key, iv))
 open.setAAD(Buffer.from("header"))
 open.setAuthTag(tag)
@@ -63,7 +64,7 @@ console.log(must(cd.final()).length)
 
 export const ciphered = true
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

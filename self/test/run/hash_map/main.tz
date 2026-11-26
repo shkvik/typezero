@@ -1,0 +1,78 @@
+// A hash table written in tz over Raw<T> (library/core/map.tz): the hash of a
+// key is built by the compiler for its type, strings are hashed in tz.
+import { HashMap } from "tz:map";
+
+class Point {
+  public readonly x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+function counts(): string {
+  const words = new HashMap<string, int>();
+
+  words.set("one", 1);
+  words.set("two", 2);
+  words.set("one", 11);
+
+  const missing = words.get("three") == undefined;
+
+  return `${words.size()} ${words.get("one")} ${words.get("two")} ${missing}`;
+}
+
+function many(): string {
+  const squares = new HashMap<int, string>();
+
+  for (let index = 0; index < 1000; index++) {
+    squares.set(index, `${index * index}`);
+  }
+
+  for (let index = 0; index < 1000; index += 2) {
+    squares.delete(index);
+  }
+
+  return `${squares.size()} ${squares.get(999)} ${squares.has(998)}`;
+}
+
+function points(): int {
+  const named = new HashMap<string, Point>();
+
+  named.set("a", new Point(1));
+  named.set("b", new Point(2));
+  named.set("a", new Point(3));
+  named.delete("b");
+
+  return named.get("a")?.x ?? -1;
+}
+
+function order(): string {
+  const items = new HashMap<string, int>();
+  const seen: string[] = [];
+
+  for (let index = 0; index < 20; index++) {
+    items.set(`k${index}`, index);
+  }
+
+  items.delete("k3");
+  items.set("k3", 3);
+  items.delete("k0");
+
+  let entry = items.next(0);
+
+  while (entry >= 0) {
+    if (entry < 3 || items.size() - entry < 3) {
+      seen.push(items.keyAt(entry));
+    }
+
+    entry = items.next(entry + 1);
+  }
+
+  return seen.join(",");
+}
+
+console.log(counts());
+console.log(order());
+console.log(many());
+console.log(points());

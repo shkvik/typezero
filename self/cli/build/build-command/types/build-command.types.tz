@@ -3,5 +3,6 @@ export type BuildOptions = {
   readonly output?: string;
   readonly libraries: string[];
   readonly isEmittingIr: boolean;
+  readonly isAuditing: boolean;
   readonly isWrong: boolean;
 };

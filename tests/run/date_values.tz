@@ -28,7 +28,7 @@ function latest<T>(items: T[], time: (item: T) => int): T | undefined {
 }
 const days = [new Date(Date.UTC(2026, 0, 5)), new Date(Date.UTC(2026, 6, 1)), new Date(Date.UTC(2025, 11, 31))]
 console.log(latest(days, d => d.getTime()), latest<Date>([], d => d.getTime()))
-function pair<T>(a: T, b: T): T[] {
+function pair<T>(a: Own<T>, b: Own<T>): T[] {
   return [a, b]
 }
 const [day0, day1] = days

@@ -96,7 +96,7 @@ console.log(p1, p2, p3)
 
 // Key remapping: `as` in a mapped type names each field anew, and never
 // drops it.
-interface User { id: int; name: string; email?: string }
+interface User { readonly id: int; readonly name: string; readonly email?: string }
 type Getters<T> = { [K in keyof T as `get${Capitalize<K & string>}`]: () => T[K] }
 type WithoutId<T> = { [K in keyof T as Exclude<K, "id">]: T[K] }
 type Methods<T> = { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never }[keyof T]

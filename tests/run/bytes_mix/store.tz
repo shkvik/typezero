@@ -15,7 +15,7 @@ export class Store {
   path(name: string): string {
     return join(this.dir, name)
   }
-  save(name: string, bytes: Uint8Array) {
+  save(name: string, bytes: Own<Uint8Array>) {
     must(writeFileSync(this.path(name), bytes))
     this.written.set(name, bytes)
   }
@@ -46,7 +46,7 @@ export class Store {
   }
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

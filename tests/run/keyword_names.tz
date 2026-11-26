@@ -1,25 +1,10 @@
 type Range = { from: int; to: int }
-const from = 1
-let type = "a"
-type = "b"
-const of = [1, 2, 3]
-let sum = 0
-for (const item of of) {
-  sum += item
-}
-for (const set of [4]) {
-  sum += set
-}
 function get(module: int, namespace: int): int {
   return module + namespace
 }
-const async = (readonly: int) => readonly + 1
 async function load(declare: int): Promise<int> {
   return declare * 2
 }
-const box: Range = { from, to: 5 }
-const { to } = box
-const start = ({ from }: Range) => from
 class Store {
   private readonly items: int[]
   public constructor() {
@@ -32,13 +17,33 @@ class Store {
     this.items.push(value)
   }
 }
-const store = new Store()
-store.set(get(from, 2))
-abstract: for (const x of of) {
-  if (x > 1) {
-    break abstract
+
+async function main(): Promise<void> {
+  const from = 1
+  let type = "a"
+  type = "b"
+  const of = [1, 2, 3]
+  let sum = 0
+  for (const item of of) {
+    sum += item
   }
-  sum += 10
+  for (const set of [4]) {
+    sum += set
+  }
+  const async = (readonly: int) => readonly + 1
+  const box: Range = { from, to: 5 }
+  const { to } = box
+  const start = ({ from }: Range) => from
+  const store = new Store()
+  store.set(get(from, 2))
+  abstract: for (const x of of) {
+    if (x > 1) {
+      break abstract
+    }
+    sum += 10
+  }
+  const loaded = await load(3)
+  console.log(from, type, sum, async(1), loaded, box.to, to, start(box), store.get(0))
 }
-const loaded = await load(3)
-console.log(from, type, sum, async(1), loaded, box.to, to, start(box), store.get(0))
+
+await main()

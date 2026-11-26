@@ -4034,7 +4034,7 @@ export const kMessages: Record<Code, Message> = {
     text: "'[Symbol.dispose]' is an instance method with no parameters that gives nothing: tz calls it when the last reference to the object is gone",
   },
   [Code.DisposeNoSuper]: {
-    text: "this '[Symbol.dispose]' replaces the one of '{word}': call 'super[Symbol.dispose]()' in it, or what '{word}' holds leaks",
+    text: "the '[Symbol.dispose]' of '{word}' is called by itself right after this one, so 'super[Symbol.dispose]()' here would free what '{word}' holds twice",
   },
   [Code.DisposeThisLeaves]: {
     text: "'this' cannot leave '[Symbol.dispose]': the object is dying; use its fields",
@@ -4485,6 +4485,18 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.OwnWeakCopy]: {
     text: "'{word}' is copied, so it has no address for a weak reference to follow",
+  },
+  [Code.OwnUnsafeOutside]: {
+    text: "'{word}' of tz:unsafe is a dangerous operation: call it only inside a function or method marked @Unsafe({ uses, reason })",
+  },
+  [Code.OwnUnsafeReason]: {
+    text: "@Unsafe needs 'reason': a string that says why the dangerous operations here are right",
+  },
+  [Code.OwnUnsafeUses]: {
+    text: "the function does '{word}' operations of tz:unsafe, so @Unsafe lists UnsafeUse.{word} in 'uses' (UnsafeUse has Memory, Cell and Foreign)",
+  },
+  [Code.OwnUnsafeUnused]: {
+    text: "@Unsafe lists UnsafeUse.{word}, but the function does no such operation; take it out of 'uses'",
   },
   [Code.OwnMutVariance]: {
     text: "'{word}' is passed to be changed as a wider type, so the function may put another kind of value into it; take Read<...> if it only reads, or pass a copy",

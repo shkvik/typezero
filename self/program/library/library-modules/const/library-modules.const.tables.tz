@@ -119,6 +119,20 @@ export const kLibraryModules: LibraryModule[] = [
     access: LibraryAccess.Program,
   },
   {
+    name: "tz:inspect",
+    file: "inspect.tz",
+    parts: [],
+    specs: ["tz:inspect"],
+    access: LibraryAccess.Library,
+  },
+  {
+    name: "tz:map",
+    file: "map.tz",
+    parts: [],
+    specs: ["tz:map"],
+    access: LibraryAccess.Program,
+  },
+  {
     name: "tz:array",
     file: "array.tz",
     parts: [],

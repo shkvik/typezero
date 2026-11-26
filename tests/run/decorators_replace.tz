@@ -75,7 +75,7 @@ for (const o of orders) console.log(o.describe(), o.id, o instanceof Order)
 console.log(big, Order.name == "", Item.name == "")
 
 // A decorator that gives back the class it got leaves it as it is.
-function Same<T extends Constructor>(cls: T) {
+function Same<T extends Constructor>(cls: Own<T>) {
   return cls
 }
 @Same

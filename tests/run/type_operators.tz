@@ -25,7 +25,7 @@ console.log(pluck([ann, bob], "name"), pluck([ann, bob], "id"))
 class Column<T, K extends keyof T> {
   private rows: T[]
   private k: K
-  constructor(rows: T[], k: K) {
+  constructor(rows: Own<T[]>, k: Own<K>) {
     this.rows = rows
     this.k = k
   }
@@ -63,7 +63,7 @@ console.log(args, result)
 
 // Mapped types of one's own, with `?`, `-?`, `readonly`, `-readonly`.
 type Checks<T> = { [K in keyof T]?: (value: T[K]) => boolean }
-function validate<T>(o: T, checks: Checks<T>) { return checks }
+function validate<T>(o: T, checks: Own<Checks<T>>) { return checks }
 const checks = validate(ann, { id: v => v > 0, name: v => v.length > 2 })
 console.log(checks.id?.(ann.id), checks.name?.("al"), checks.email)
 type Getters<T> = { [K in keyof T]: () => T[K] }

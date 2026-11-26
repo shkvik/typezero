@@ -1,5 +1,9 @@
 import { arrayCells, peekAt, putAt, takeAt } from "tz:unsafe";
 
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "cells 0 … length - 1 of an array are full",
+})
 export function indexOf<T>(items: Read<T[]>, value: Read<T>): int {
   const cells = arrayCells(items);
 
@@ -12,6 +16,10 @@ export function indexOf<T>(items: Read<T[]>, value: Read<T>): int {
   return -1;
 }
 
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "cells 0 … length - 1 of an array are full",
+})
 export function lastIndexOf<T>(items: Read<T[]>, value: Read<T>): int {
   const cells = arrayCells(items);
 
@@ -28,6 +36,10 @@ export function includes<T>(items: Read<T[]>, value: Read<T>): boolean {
   return indexOf(items, value) >= 0;
 }
 
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "each pair of full cells is taken and put back swapped",
+})
 export function reverse<T>(items: T[]): void {
   const cells = arrayCells(items);
   const last = items.length - 1;
@@ -40,4 +52,55 @@ export function reverse<T>(items: T[]): void {
     putAt(cells, low, second);
     putAt(cells, high, first);
   }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "cells from … to - 1 are below length, so full",
+})
+export function slice<T>(
+  items: Read<T[]>,
+  start: int,
+  end: int,
+  hasEnd: boolean,
+): T[] {
+  const length = items.length;
+  const from = boundedIndex(start, length);
+  const to = endIndex(end, hasEnd, length);
+  const cells = arrayCells(items);
+  const out: T[] = [];
+
+  for (let index = from; index < to; index++) {
+    out.push(peekAt(cells, index));
+  }
+
+  return out;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "cells 0 … length - 1 of the source are full",
+})
+export function append<T>(target: T[], source: Read<T[]>): void {
+  const cells = arrayCells(source);
+
+  for (let index = 0; index < source.length; index++) {
+    target.push(peekAt(cells, index));
+  }
+}
+
+function boundedIndex(index: int, length: int): int {
+  if (index < 0) {
+    return Math.max(length + index, 0);
+  }
+
+  return Math.min(index, length);
+}
+
+function endIndex(end: int, hasEnd: boolean, length: int): int {
+  if (!hasEnd) {
+    return length;
+  }
+
+  return boundedIndex(end, length);
 }

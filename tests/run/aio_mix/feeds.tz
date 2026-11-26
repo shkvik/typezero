@@ -51,7 +51,7 @@ export class Queue<T> {
     this.items = []
   }
 
-  push(x: T) {
+  push(x: Own<T>) {
     this.items.push(x)
   }
   async *drain() {
@@ -71,7 +71,7 @@ export async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
   return out
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

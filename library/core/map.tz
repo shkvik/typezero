@@ -1,0 +1,519 @@
+import {
+  Raw,
+  allocate,
+  destroyAt,
+  hashOf,
+  peekAt,
+  putAt,
+  release,
+  takeAt,
+} from "tz:unsafe";
+import { printNested, printText } from "tz:inspect";
+
+export function textHash(text: Read<string>): int {
+  let hash: int = 2166136261;
+
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+
+    hash = ((hash ^ code) * 16777619) & 4294967295;
+  }
+
+  return hash;
+}
+
+export class HashMap<K, V> {
+  private keys: Raw<K>;
+  private values: Raw<V>;
+  private alive: Raw<int>;
+  private slots: Raw<int>;
+  private entries: int;
+  private room: int;
+  private count: int;
+  private used: int;
+  private capacity: int;
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "no cells yet: the first set makes them",
+  })
+  public constructor() {
+    this.keys = allocate<K>(0);
+    this.values = allocate<V>(0);
+    this.alive = allocate<int>(0);
+    this.slots = allocate<int>(0);
+    this.entries = 0;
+    this.room = 0;
+    this.count = 0;
+    this.used = 0;
+    this.capacity = 0;
+  }
+
+  public readonly size(): int {
+    return this.count;
+  }
+
+  public readonly has(key: Read<K>): boolean {
+    return this.entryOf(key) >= 0;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "entryOf gives only live entries",
+  })
+  public readonly get(key: Read<K>): Read<V> | undefined {
+    const entry = this.entryOf(key);
+    if (entry < 0) {
+      return undefined;
+    }
+
+    return peekAt(this.values, entry);
+  }
+
+  public getOrInsert(key: Own<K>, value: Own<V>): Read<V> {
+    const found = this.entryOf(key);
+    if (found >= 0) {
+      return this.valueAt(found);
+    }
+
+    this.set(key, value);
+
+    return this.valueAt(this.entries - 1);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "a found entry is live; a new entry goes to the first cell after the last one",
+  })
+  public set(key: Own<K>, value: Own<V>): void {
+    if (this.capacity == 0) {
+      this.started();
+    }
+
+    const hash = hashOf(key);
+    const probe = this.probed(key, hash);
+    if (probe >= 0) {
+      const found = peekAt(this.slots, probe);
+
+      destroyAt(this.values, found);
+      putAt(this.values, found, value);
+
+      return;
+    }
+
+    let slot: int = -probe - 2;
+    const isFull = (this.used + 1) * 4 > this.capacity * 3;
+    const isCrowded = this.entries == this.room;
+    if (isFull) {
+      this.grow();
+    }
+    if (isCrowded) {
+      this.packed();
+    }
+    if (isFull || isCrowded) {
+      slot = this.freeSlot(hash);
+    }
+
+    const entry = this.entries;
+    const state = peekAt(this.slots, slot);
+
+    putAt(this.keys, entry, key);
+    putAt(this.values, entry, value);
+    putAt(this.alive, entry, 1);
+    putAt(this.slots, slot, entry);
+    this.entries += 1;
+    this.count += 1;
+    if (state == -1) {
+      this.used += 1;
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "slotOf gives the slot of a live entry; the entry dies once and its slot is marked removed",
+  })
+  public delete(key: Read<K>): boolean {
+    const slot = this.slotOf(key);
+    if (slot < 0) {
+      return false;
+    }
+
+    const entry = peekAt(this.slots, slot);
+
+    destroyAt(this.keys, entry);
+    destroyAt(this.values, entry);
+    putAt(this.alive, entry, 0);
+    putAt(this.slots, slot, -2);
+    this.count -= 1;
+
+    return true;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "only live entries are freed, each once; then nothing is live and every slot is empty",
+  })
+  public clear(): void {
+    for (let entry = 0; entry < this.entries; entry++) {
+      if (peekAt(this.alive, entry) == 1) {
+        destroyAt(this.keys, entry);
+        destroyAt(this.values, entry);
+      }
+    }
+
+    this.entries = 0;
+    this.count = 0;
+    this.used = 0;
+    this.emptiedSlots();
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "entries are read only below the count of written entries",
+  })
+  public readonly next(position: int): int {
+    for (let entry = position; entry < this.entries; entry++) {
+      if (peekAt(this.alive, entry) == 1) {
+        return entry;
+      }
+    }
+
+    return -1;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "next gives only live entries",
+  })
+  public readonly keyAt(entry: int): Read<K> {
+    return peekAt(this.keys, entry);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "next gives only live entries",
+  })
+  public readonly valueAt(entry: int): Read<V> {
+    return peekAt(this.values, entry);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the map dies: its live entries are freed once, then its memory",
+  })
+  public [Symbol.dispose](): void {
+    this.clear();
+    release(this.keys);
+    release(this.values);
+    release(this.alive);
+    release(this.slots);
+  }
+
+  public readonly entryOf(key: Read<K>): int {
+    const slot = this.slotOf(key);
+    if (slot < 0) {
+      return -1;
+    }
+
+    return this.entryAt(slot);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "slot is below capacity",
+  })
+  private readonly entryAt(slot: int): int {
+    return peekAt(this.slots, slot);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the walk stops at an empty slot, and one always exists: used < capacity",
+  })
+  private readonly slotOf(key: Read<K>): int {
+    if (this.capacity == 0) {
+      return -1;
+    }
+
+    const mask = this.capacity - 1;
+    let slot: int = hashOf(key) & mask;
+
+    while (peekAt(this.slots, slot) != -1) {
+      const entry = peekAt(this.slots, slot);
+      if (entry >= 0 && peekAt(this.keys, entry) == key) {
+        return slot;
+      }
+
+      slot = (slot + 1) & mask;
+    }
+
+    return -1;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the walk stops at an empty slot, and one always exists: used < capacity",
+  })
+  private readonly probed(key: Read<K>, hash: int): int {
+    const mask = this.capacity - 1;
+    let slot: int = hash & mask;
+    let free: int = -1;
+
+    while (peekAt(this.slots, slot) != -1) {
+      const entry = peekAt(this.slots, slot);
+      if (entry >= 0 && peekAt(this.keys, entry) == key) {
+        return slot;
+      }
+      if (entry == -2 && free < 0) {
+        free = slot;
+      }
+
+      slot = (slot + 1) & mask;
+    }
+    if (free < 0) {
+      free = slot;
+    }
+
+    return -free - 2;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the walk stops at an empty or removed slot, and one always exists",
+  })
+  private readonly freeSlot(hash: int): int {
+    const mask = this.capacity - 1;
+    let slot: int = hash & mask;
+
+    while (peekAt(this.slots, slot) >= 0) {
+      slot = (slot + 1) & mask;
+    }
+
+    return slot;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the empty cells of a new map are replaced by eight of each",
+  })
+  private started(): void {
+    release(this.keys);
+    release(this.values);
+    release(this.alive);
+    release(this.slots);
+    this.keys = allocate<K>(8);
+    this.values = allocate<V>(8);
+    this.alive = allocate<int>(8);
+    this.slots = allocate<int>(8);
+    this.room = 8;
+    this.capacity = 8;
+    this.emptiedSlots();
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "slots has capacity cells",
+  })
+  private emptiedSlots(): void {
+    for (let slot = 0; slot < this.capacity; slot++) {
+      putAt(this.slots, slot, -1);
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "live entries move down in order into cells of dead ones; then every slot points anew",
+  })
+  private packed(): void {
+    if (this.count == this.entries) {
+      return this.roomGrown();
+    }
+
+    let kept: int = 0;
+
+    for (let entry = 0; entry < this.entries; entry++) {
+      if (peekAt(this.alive, entry) == 1) {
+        if (kept != entry) {
+          putAt(this.keys, kept, takeAt(this.keys, entry));
+          putAt(this.values, kept, takeAt(this.values, entry));
+          putAt(this.alive, kept, 1);
+        }
+
+        kept += 1;
+      }
+    }
+
+    this.entries = kept;
+    this.reindexed();
+
+    if (this.entries == this.room) {
+      this.roomGrown();
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the entry cells move to bigger memory with all their values",
+  })
+  private roomGrown(): void {
+    const room = this.room * 2;
+    const keys = allocate<K>(room);
+    const values = allocate<V>(room);
+    const alive = allocate<int>(room);
+
+    for (let entry = 0; entry < this.entries; entry++) {
+      putAt(keys, entry, takeAt(this.keys, entry));
+      putAt(values, entry, takeAt(this.values, entry));
+      putAt(alive, entry, takeAt(this.alive, entry));
+    }
+
+    release(this.keys);
+    release(this.values);
+    release(this.alive);
+    this.keys = keys;
+    this.values = values;
+    this.alive = alive;
+    this.room = room;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the old slots go; the new ones are filled from live entries",
+  })
+  private grow(): void {
+    release(this.slots);
+    this.capacity = this.capacity * 2;
+    this.slots = allocate<int>(this.capacity);
+    this.reindexed();
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "every live entry gets one slot",
+  })
+  private reindexed(): void {
+    this.emptiedSlots();
+    this.used = 0;
+
+    for (let entry = 0; entry < this.entries; entry++) {
+      if (peekAt(this.alive, entry) == 1) {
+        const slot = this.freeSlot(hashOf(peekAt(this.keys, entry)));
+
+        putAt(this.slots, slot, entry);
+        this.used += 1;
+      }
+    }
+  }
+}
+
+export function mapKeys<K, V>(map: Read<HashMap<K, V>>): K[] {
+  const items: K[] = [];
+  let entry = map.next(0);
+
+  while (entry >= 0) {
+    items.push(map.keyAt(entry));
+    entry = map.next(entry + 1);
+  }
+
+  return items;
+}
+
+export function mapValues<K, V>(map: Read<HashMap<K, V>>): V[] {
+  const items: V[] = [];
+  let entry = map.next(0);
+
+  while (entry >= 0) {
+    items.push(map.valueAt(entry));
+    entry = map.next(entry + 1);
+  }
+
+  return items;
+}
+
+export function mapEntries<K, V>(map: Read<HashMap<K, V>>): [K, V][] {
+  const items: [K, V][] = [];
+  let entry = map.next(0);
+
+  while (entry >= 0) {
+    const pair: [K, V] = [map.keyAt(entry), map.valueAt(entry)];
+
+    items.push(pair);
+    entry = map.next(entry + 1);
+  }
+
+  return items;
+}
+
+export function mapCopy<K, V>(map: Read<HashMap<K, V>>): HashMap<K, V> {
+  const copy = new HashMap<K, V>();
+  let entry = map.next(0);
+
+  while (entry >= 0) {
+    copy.set(map.keyAt(entry), map.valueAt(entry));
+    entry = map.next(entry + 1);
+  }
+
+  return copy;
+}
+
+export function mapAdded<K, V>(map: HashMap<K, V>, entries: Read<[K, V][]>): void {
+  for (const entry of entries) {
+    map.set(entry[0], entry[1]);
+  }
+}
+
+export function setAdd<T>(set: HashMap<T, boolean>, item: Own<T>): void {
+  set.set(item, true);
+}
+
+export function setAdded<T>(set: HashMap<T, boolean>, items: Read<T[]>): void {
+  for (const item of items) {
+    set.set(item, true);
+  }
+}
+
+export function mapPrint<K, V>(map: Read<HashMap<K, V>>, isSet: boolean): void {
+  const word = collectionWord(isSet);
+  let entry = map.next(0);
+  let isFirst = true;
+
+  printText(`${word}(${map.size()}) {`);
+
+  while (entry >= 0) {
+    printText(separatorOf(isFirst));
+    printNested(map.keyAt(entry));
+    if (!isSet) {
+      printText(" => ");
+      printNested(map.valueAt(entry));
+    }
+
+    isFirst = false;
+    entry = map.next(entry + 1);
+  }
+
+  printText(closingOf(isFirst));
+}
+
+function collectionWord(isSet: boolean): string {
+  if (isSet) {
+    return "Set";
+  }
+
+  return "Map";
+}
+
+function separatorOf(isFirst: boolean): string {
+  if (isFirst) {
+    return " ";
+  }
+
+  return ", ";
+}
+
+function closingOf(isEmpty: boolean): string {
+  if (isEmpty) {
+    return "}";
+  }
+
+  return " }";
+}

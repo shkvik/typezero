@@ -1,5 +1,8 @@
 import { Program } from "../../../program/module/types/module.types.tz";
-import { kTypedLibraries } from "./const/module-questions.const.tz";
+import {
+  kCheckedLibraries,
+  kTypedLibraries,
+} from "./const/module-questions.const.tz";
 
 export class ModuleQuestions {
   private readonly program: Program;
@@ -24,5 +27,14 @@ export class ModuleQuestions {
     }
 
     return kTypedLibraries.includes(opened.name);
+  }
+
+  public readonly isCheckedLibrary(module: int): boolean {
+    const opened = this.program.modules[module];
+    if (opened == undefined || !opened.source.isLibrary) {
+      return false;
+    }
+
+    return kCheckedLibraries.includes(opened.name);
   }
 }

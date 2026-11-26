@@ -11,7 +11,7 @@ class Fmt {
   exact(x: int) { return "int" }
   exact<T>(x: T) { return "generic" }
   static wrap(x: string) { return [x] }
-  static wrap<T>(x: T, n: int) {
+  static wrap<T>(x: Own<T>, n: int) {
     const out: T[] = []
     for (let i = 0; i < n; i++) out.push(x)
     return out
@@ -33,7 +33,7 @@ class Store<T> {
     this.items = []
   }
 
-  add(x: T) { this.items.push(x); return this }
+  add(x: Own<T>) { this.items.push(x); return this }
   add(xs: T[]) { for (const x of xs) this.items.push(x); return this }
   find(i: int): T | undefined { return this.items[i] }
   find<K>(key: K, by: (x: T) => K): T | undefined {

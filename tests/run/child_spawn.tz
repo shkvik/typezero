@@ -90,7 +90,7 @@ if (at >= 0) {
   console.log(must(spawnSync(process.execPath, [...self, "big"], { encoding: "utf8" })).stdout?.length)
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

@@ -41,12 +41,17 @@ import "./partial/lowering.partial.bytes-extras.tz";
 import "./partial/lowering.partial.children.tz";
 import "./partial/lowering.partial.generics.tz";
 import "./partial/lowering.partial.unsafe.tz";
+import "./partial/lowering.partial.maps.tz";
+import "./partial/lowering.partial.inheritance.tz";
+import "./partial/lowering.partial.closures.tz";
+import "./partial/lowering.partial.field-inits.tz";
 import { ExpressionAnswers } from "../../program/expression-answers/expression-answers.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
 import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
 import { CheckedProgram } from "../../pipeline/front-end/types/front-end.types.tz";
+import { TypeTraits } from "../../semantic/ownership/type-traits/type-traits.tz";
 import { IrFunction } from "../ir-function/ir-function.tz";
 import { IrCallee } from "../ir-function/types/ir-function.types.tz";
 import { IrModule } from "../ir-module/ir-module.tz";
@@ -69,6 +74,7 @@ import {
   Frame,
   IrValue,
   LoweredProgram,
+  PendingClosure,
   PendingInstance,
   Place,
   Unlowered,
@@ -110,11 +116,24 @@ export class Lowering {
   private instanceStart: int;
   private instanceEnd: int;
   private instanceSuffix: string;
+  private readonly moves: Set<Expr>;
+  private readonly borrows: Set<string>;
+  private readonly traits: TypeTraits;
+  private isAuditing: boolean;
+  private readonly audited: string[];
+  private statementLoc: int;
+  private readonly pendingClosures: PendingClosure[];
+  private readonly letKeys: Set<string>;
+  private readonly functionObjects: Map<string, LLVMValue>;
+  private readonly initFunctions: Map<int, IrCallee>;
+  private readonly noInits: Set<int>;
 
   public constructor(
     store: TypeStore,
     program: Own<Program>,
     checked: Read<CheckedProgram>,
+    moves: Own<Set<Expr>>,
+    borrows: Own<Set<string>>,
   ) {
     const name = program.modules[0]?.name ?? "";
 
@@ -153,6 +172,25 @@ export class Lowering {
     this.instanceStart = 0;
     this.instanceEnd = 0;
     this.instanceSuffix = "";
+    this.moves = moves;
+    this.borrows = borrows;
+    this.traits = new TypeTraits(store, this.values, this.program);
+    this.isAuditing = false;
+    this.audited = [];
+    this.statementLoc = 0;
+    this.pendingClosures = [];
+    this.letKeys = new Set<string>();
+    this.functionObjects = new Map<string, LLVMValue>();
+    this.initFunctions = new Map<int, IrCallee>();
+    this.noInits = new Set<int>();
+  }
+
+  public audit(): void {
+    this.isAuditing = true;
+  }
+
+  public auditedCounts(): string[] {
+    return replace(this.audited, []);
   }
 
   public run(): LoweredProgram {
@@ -182,6 +220,11 @@ export class Lowering {
     }
 
     this.instancesLowered();
+
+    while (this.closuresLowered()) {
+      this.instancesLowered();
+    }
+
     this.runtimeCall(main, kRuntimeMainDone, []);
     this.globalsReleased(main);
     this.runtimeCall(main, kRuntimeShutdown, []);

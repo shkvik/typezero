@@ -20,7 +20,7 @@ export class Cart {
     this.items = []
   }
 
-  add(item: Item) {
+  add(item: Own<Item>) {
     this.items.push(item)
   }
   // The object stays alive while its iterator does.

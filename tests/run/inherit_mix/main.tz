@@ -6,7 +6,7 @@
 // JSON.parse into an interface of fields only.
 import { Circle, Named, Rect, Shape, largest } from "./shapes"
 
-function hold<T>(value: T) {
+function hold<T>(value: Own<T>) {
   return { value }
 }
 
@@ -48,7 +48,7 @@ const named: Named = { name: typeof namedJson.name == "string" ? namedJson.name 
 const asNamed: Named = new Circle(3)
 console.log(named, asNamed.name)
 
-function must<T>(r: Result<T, JsonError>): T {
+function must<T>(r: Own<Result<T, JsonError>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

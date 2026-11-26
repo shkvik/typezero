@@ -12,7 +12,7 @@ for (let i = 0; i < 2; i++) {
 }
 must(writeFileSync(2, "to stderr\n"))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

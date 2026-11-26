@@ -16,13 +16,17 @@ async function parse(i: int): Promise<string> {
   return again.length > 0 ? "ok" : "empty";
 }
 
-const tasks: Promise<string>[] = [];
-for (let i: int = 0; i < 200; i++) tasks.push(parse(i));
-const results = await Promise.all(tasks);
-let good = 0;
-let bad = 0;
-for (const r of results) {
-  if (r == "ok") good++;
-  else if (r == "ERR_INVALID_JSON") bad++;
+async function main(): Promise<void> {
+  const tasks: Promise<string>[] = [];
+  for (let i: int = 0; i < 200; i++) tasks.push(parse(i));
+  const results = await Promise.all(tasks);
+  let good = 0;
+  let bad = 0;
+  for (const r of results) {
+    if (r == "ok") good++;
+    else if (r == "ERR_INVALID_JSON") bad++;
+  }
+  console.log(good, bad);
 }
-console.log(good, bad);
+
+await main()

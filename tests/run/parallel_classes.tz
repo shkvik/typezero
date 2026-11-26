@@ -9,8 +9,6 @@ import { Server } from "tz:http"
 
 const registry: Counter[] = []
 const sharedItems: string[] = []
-let total = 0
-
 class Counter {
   public n: int
   public items: string[]
@@ -54,70 +52,76 @@ async function later(work: () => void): Promise<void> {
   work()
 }
 
-const own = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
-  const counter = new Counter()
-  counter.add(request.method)
-  let seen = 0
-  each(["a", "b"], (item) => {
-    counter.add(item)
-    seen += 1
+async function main(): Promise<void> {
+  let total = 0
+
+  const own = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+    const counter = new Counter()
+    counter.add(request.method)
+    let seen = 0
+    each(["a", "b"], (item) => {
+      counter.add(item)
+      seen += 1
+    })
+    await afterTick(() => {
+      counter.n += 10
+    })
+    return new Response(`own ${counter.n} ${counter.items.length} ${seen}`)
   })
-  await afterTick(() => {
-    counter.n += 10
+
+  const counted = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+    await afterTick(() => {
+      total += 1
+    })
+    return new Response(`counted ${request.method}`)
   })
-  return new Response(`own ${counter.n} ${counter.items.length} ${seen}`)
-})
 
-const counted = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
-  await afterTick(() => {
-    total += 1
+  const remembered = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+    const counter = new Counter()
+    counter.add(request.method)
+    counter.remember()
+    return new Response(`remembered ${counter.n}`)
   })
-  return new Response(`counted ${request.method}`)
-})
 
-const remembered = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
-  const counter = new Counter()
-  counter.add(request.method)
-  counter.remember()
-  return new Response(`remembered ${counter.n}`)
-})
-
-const shares = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
-  const bag = new Bag()
-  bag.share()
-  bag.add(request.method)
-  return new Response(`shares ${bag.items.length > 0}`)
-})
-
-const spawns = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
-  const counter = new Counter()
-  void later(() => {
-    counter.n += 1
+  const shares = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+    const bag = new Bag()
+    bag.share()
+    bag.add(request.method)
+    return new Response(`shares ${bag.items.length > 0}`)
   })
-  return new Response(`spawns ${request.method}`)
-})
 
-const servers = [own, counted, remembered, shares, spawns]
-for (const server of servers) {
-  const started = server.listen()
-  if (started.isErr()) {
-    console.log("cannot listen:", started.error.message)
-    process.exit(1)
+  const spawns = new Server({ port: 0, hostname: "127.0.0.1" }, async (request: Request) => {
+    const counter = new Counter()
+    void later(() => {
+      counter.n += 1
+    })
+    return new Response(`spawns ${request.method}`)
+  })
+
+  const servers = [own, counted, remembered, shares, spawns]
+  for (const server of servers) {
+    const started = server.listen()
+    if (started.isErr()) {
+      console.log("cannot listen:", started.error.message)
+      process.exit(1)
+    }
+    const listening = started.value
+    const answers: Promise<string>[] = []
+    for (let i = 0; i < 20; i++) {
+      answers.push(
+        (async () => {
+          const answered = await fetch(`http://127.0.0.1:${listening.port}/`)
+          if (answered.isErr()) return "no answer"
+          const text = await answered.value.text()
+          return text.isOk() ? text.value : "no text"
+        })(),
+      )
+    }
+    const texts = await Promise.all(answers)
+    console.log(texts[0] ?? "none", texts.every((text) => text == texts[0]))
+    await listening.stop()
   }
-  const listening = started.value
-  const answers: Promise<string>[] = []
-  for (let i = 0; i < 20; i++) {
-    answers.push(
-      (async () => {
-        const answered = await fetch(`http://127.0.0.1:${listening.port}/`)
-        if (answered.isErr()) return "no answer"
-        const text = await answered.value.text()
-        return text.isOk() ? text.value : "no text"
-      })(),
-    )
-  }
-  const texts = await Promise.all(answers)
-  console.log(texts[0] ?? "none", texts.every((text) => text == texts[0]))
-  await listening.stop()
+  console.log(`total ${total}, registry ${registry.length}, shared ${sharedItems.length}`)
 }
-console.log(`total ${total}, registry ${registry.length}, shared ${sharedItems.length}`)
+
+await main()

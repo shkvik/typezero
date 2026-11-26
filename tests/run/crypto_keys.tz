@@ -97,7 +97,7 @@ console.log(k.type)
 // Last: node leaves an error of OpenSSL behind here for the next call to find.
 console.log(edPub.equals(rsaPub))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

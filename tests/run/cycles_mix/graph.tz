@@ -23,7 +23,7 @@ export class Room extends EventEmitter {
 // `@Route("/path")`: the class handles that path.
 export const routes = new Map<string, Constructor<Handler>>()
 export function Route(path: string) {
-  return (cls: Constructor<Handler>) => {
+  return (cls: Own<Constructor<Handler>>) => {
     routes.set(path, cls)
   }
 }

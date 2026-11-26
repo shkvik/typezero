@@ -1,0 +1,46 @@
+// Function values: arrows with what they capture (a let through its address while the call
+// runs, a constant or this kept in the closure), functions declared by name as values, calls
+// through a variable, a parameter and a returned function.
+function apply(f: (x: int) => int, x: int): int {
+  return f(x)
+}
+function twice(x: int): int {
+  return x * 2
+}
+function adder(n: int): (x: int) => int {
+  return (x: int) => x + n
+}
+function each(items: string[], visit: (item: string) => void): void {
+  for (const item of items) visit(item)
+}
+class Counter {
+  public count: int = 0
+  public run(items: string[]): void {
+    each(items, (item) => {
+      this.count += item.length
+    })
+  }
+}
+function main(): void {
+  const g = (x: int) => x + 1
+  console.log(g(1), apply(g, 5), apply(twice, 7))
+  const add3 = adder(3)
+  console.log(add3(4), adder(10)(1))
+  let total = 0
+  each(["a", "bb", "ccc"], (item) => {
+    total += item.length
+  })
+  console.log(total)
+  const names: string[] = []
+  each(["x", "y"], (item) => names.push(item.toUpperCase()))
+  console.log(names)
+  const c = new Counter()
+  c.run(["abc", "de"])
+  console.log(c.count)
+  const log = (s: string) => console.log(s)
+  log("hello")
+  const prefix = "p-"
+  const tag = (s: string): string => prefix + s
+  console.log(tag("q"))
+}
+main()

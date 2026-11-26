@@ -1,0 +1,236 @@
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallArgument,
+  Expr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import { Module } from "../../../program/module/types/module.types.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kHashMapName,
+  kMapAddedName,
+  kSetAddName,
+  kSetAddedName,
+  kMapModule,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private readonly isTzMap(type: Type): boolean {
+    if (type.kind != TypeKind.Dict || type.dict == DictKind.Record) {
+      return false;
+    }
+
+    return this.mapClass() != undefined;
+  }
+
+  private readonly isTzSet(type: Type): boolean {
+    return type.kind == TypeKind.Dict && type.dict == DictKind.Set;
+  }
+
+  private readonly mapHome(): Module | undefined {
+    return this.program.modules.find((one) => one.name == kMapModule);
+  }
+
+  private readonly mapClass(): ClassDecl | undefined {
+    const home = this.mapHome();
+    if (home == undefined) {
+      return undefined;
+    }
+
+    for (const item of home.file.items) {
+      if (item.kind == StmtKind.Class && item.name == kHashMapName) {
+        return item;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readonly mapInstance(type: Type): Type | undefined {
+    const home = this.mapHome();
+    const decl = this.mapClass();
+    if (home == undefined || decl == undefined || type.kind != TypeKind.Dict) {
+      return undefined;
+    }
+
+    const value = this.mapValueType(type);
+
+    return this.resolver.classInstance(home.id, decl, [type.key, value]);
+  }
+
+  private readonly mapValueType(type: Type): Type {
+    if (type.kind != TypeKind.Dict || type.dict == DictKind.Set) {
+      return this.store.plain(TypeKind.Boolean);
+    }
+
+    return type.value;
+  }
+
+  private setAdded(
+    frame: Frame,
+    type: Type,
+    owner: Expr,
+    passed: Read<CallArgument[]>,
+    loc: int,
+  ): IrValue | undefined {
+    const argument = passed[0];
+    if (argument == undefined || type.kind != TypeKind.Dict) {
+      this.notLowered(frame.module, loc, "a call of Set.add");
+
+      return undefined;
+    }
+
+    const set = this.value(frame, owner);
+    const given = this.wantedValue(frame, argument.expr, type.key);
+    if (set == undefined || given == undefined) {
+      return undefined;
+    }
+
+    const item = this.converted(frame, given, type.key, argument.expr.loc);
+    if (item == undefined) {
+      return undefined;
+    }
+
+    const target = { module: kMapModule, name: kSetAddName };
+
+    this.runtimeFunctionCall(frame, target, [type.key], [set, item], loc);
+    this.dropping(frame, item);
+
+    return set;
+  }
+
+  private mapMade(frame: Read<Frame>, type: Type, loc: int): IrValue | undefined {
+    const instance = this.mapInstance(type);
+    const decl = this.mapClass();
+    const ctor = decl?.constructors[0];
+    if (instance == undefined || decl == undefined || ctor == undefined) {
+      this.notLowered(frame.module, loc, "a map of these types");
+
+      return undefined;
+    }
+
+    const layout = this.layoutOf(instance);
+    const target = this.methodTarget(instance, decl, ctor);
+    if (layout == undefined || target == undefined) {
+      this.notLowered(frame.module, loc, "a map of these types");
+
+      return undefined;
+    }
+
+    const object = this.allocated(frame, layout);
+    const callee = this.ir.declare(target.name, kVoidType, [kPointerType]);
+
+    frame.made.call(callee, [object]);
+
+    return { type: kPointerType, value: object, tz: type, owned: true };
+  }
+
+  private mapMethod(
+    frame: Frame,
+    type: Type,
+    name: string,
+    owner: Expr,
+    passed: Read<CallArgument[]>,
+    loc: int,
+  ): IrValue | undefined {
+    const instance = this.mapInstance(type);
+    const decl = this.mapClass();
+    const fn = decl?.methods.find((one) => one.name == name);
+    if (instance == undefined || decl == undefined || fn == undefined) {
+      this.notLowered(frame.module, loc, `a call of Map.${name}`);
+
+      return undefined;
+    }
+
+    const target = this.methodTarget(instance, decl, fn);
+    const shape = target?.shape;
+    const result = this.resultType(shape);
+    const params = this.shapeTypesOf(shape);
+    if (target == undefined || result == undefined || params == undefined) {
+      this.notLowered(frame.module, loc, `a call of Map.${name}`);
+
+      return undefined;
+    }
+
+    const map = this.value(frame, owner);
+    if (map == undefined) {
+      return undefined;
+    }
+
+    const kept: IrValue[] = [];
+    const args = this.callArguments(frame, passed, target.shape, loc, fn, kept);
+    if (args == undefined) {
+      return undefined;
+    }
+
+    const all = [kPointerType].concat(params);
+    const callee = this.ir.declare(target.name, result, all);
+    const value = frame.made.call(callee, [map.value].concat(args));
+
+    this.droppedAll(frame, kept);
+
+    if (result == kVoidType) {
+      return map;
+    }
+
+    const answer: IrValue = { type: result, value, tz: target.shape.result };
+    const returned = this.callResult(frame, answer, fn, [map]);
+
+    this.dropping(frame, map);
+
+    return returned;
+  }
+
+  private mapListed(
+    frame: Frame,
+    name: string,
+    owner: Expr,
+    type: Type,
+  ): IrValue | undefined {
+    const map = this.value(frame, owner);
+    if (map == undefined || type.kind != TypeKind.Dict) {
+      return undefined;
+    }
+
+    const target = { module: kMapModule, name };
+    const value = this.mapValueType(type);
+    const items = [type.key, value];
+    const listed = this.runtimeFunctionCall(frame, target, items, [map], owner.loc);
+
+    this.dropping(frame, map);
+
+    return listed;
+  }
+
+  private mapFilled(
+    frame: Read<Frame>,
+    map: IrValue,
+    entries: IrValue,
+    type: Type,
+  ): void {
+    if (type.kind != TypeKind.Dict) {
+      return;
+    }
+
+    if (this.isTzSet(type)) {
+      const target = { module: kMapModule, name: kSetAddedName };
+
+      this.runtimeFunctionCall(frame, target, [type.key], [map, entries], 0);
+
+      return;
+    }
+
+    const target = { module: kMapModule, name: kMapAddedName };
+    const items = [type.key, type.value];
+
+    this.runtimeFunctionCall(frame, target, items, [map, entries], 0);
+  }
+}

@@ -16,8 +16,8 @@ const first: Row = { id: 1, score: 1.5, tags: [] };
 const second: Row = { id: 2, name: "two", score: -0, tags: ["a"], note: "n" };
 const third: Row = { tags: ["x", "y"], score: 1e21, id: 3, inner: { label: "in", on: true } };
 const fourth: Row = { note: "first", id: 4, score: 0.1, tags: [] };
-const fifth: Row = { ...second, id: 5 };
-const rows: Row[] = [first, second, third, fourth, fifth];
+const fifth: Row = { ...structuredClone(second), id: 5 };
+const rows: Read<Row>[] = [first, second, third, fourth, fifth];
 console.log(JSON.stringify(rows));
 console.log(JSON.stringify(third));
 
@@ -60,5 +60,6 @@ const withFn: WithFn = { name: "f", run: () => 1, after: 2 };
 console.log(JSON.stringify(withFn));
 
 const odd: Inner = { label: "жé😀\n\"\\\u0001 tail of a longer string", on: false };
-console.log(JSON.stringify(odd), JSON.stringify([odd, odd]));
+const twice: Read<Inner>[] = [odd, odd];
+console.log(JSON.stringify(odd), JSON.stringify(twice));
 console.log(JSON.stringify("t\"x"), JSON.stringify(42), JSON.stringify(true), JSON.stringify(1.5));

@@ -1,7 +1,11 @@
 import { replace } from "tz:mem";
 import { OwnershipCheck } from "../ownership-check.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ArrayLitExpr,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   ForOfStmt,
   IfStmt,
@@ -12,9 +16,14 @@ import {
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
+  DictKind,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
   CallbackMode,
   FlowState,
   Holding,
+  Loan,
   LoanKind,
   Operand,
   OperandKind,
@@ -110,10 +119,59 @@ partial class OwnershipCheck {
 
       return;
     }
+    if (variable.isBorrowArray == true && init.kind == ExprKind.ArrayLit) {
+      return this.borrowsListed(variable, init);
+    }
+    if (this.isRecordCopy(declarator.loc, init)) {
+      this.evaluate(init);
+      variable.holding = Holding.Own;
+      variable.loans = [];
+
+      return;
+    }
 
     const operand = this.evaluateFor(init, CallbackMode.Local);
 
     this.bind(variable, operand, init);
+    this.noteBorrowDecl(variable, declarator.loc);
+
+    if (this.isInternedPart(init)) {
+      this.borrowDecls.add(`${this.module} ${declarator.loc}`);
+    }
+  }
+
+  private readonly isRecordCopy(loc: int, init: Expr): boolean {
+    const target = this.values.variableOf(this.module, loc);
+    const given = this.values.answers.typeOf(init);
+    const isRecord =
+      target != undefined &&
+      target.kind == TypeKind.Dict &&
+      target.dict == DictKind.Record;
+
+    return isRecord && given != undefined && given.kind == TypeKind.Object;
+  }
+
+  private borrowsListed(variable: Variable, init: ArrayLitExpr): void {
+    let loans: Loan[] = [];
+
+    for (const element of init.elements) {
+      if (element.hole) {
+        continue;
+      }
+
+      const operand = this.evaluate(element.expr);
+
+      loans = loans.concat(this.loansOf(operand));
+    }
+
+    variable.holding = Holding.Own;
+    variable.loans = loans;
+  }
+
+  private noteBorrowDecl(variable: Read<Variable>, loc: int): void {
+    if (variable.holding == Holding.Borrow) {
+      this.borrowDecls.add(`${this.module} ${loc}`);
+    }
   }
 
   private declaredHolding(loc: int): Holding {
@@ -214,6 +272,7 @@ partial class OwnershipCheck {
       frame.bindings.add(binding.key);
       binding.lastUse = this.lastLocOf(stmt);
       this.bindElement(binding.key, operand, stmt);
+      this.noteBorrowDecl(binding, stmt.binding.loc);
       this.checkUsingElement(binding, stmt);
     }
 

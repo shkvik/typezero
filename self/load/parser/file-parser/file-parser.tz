@@ -42,8 +42,9 @@ import {
   ParseResult,
 } from "./types/file-parser.types.result.tz";
 
+import { UnsafeMark } from "../../../program/ast/types/ast.types.functions.tz";
+
 export class FileParser {
-  private readonly source: Buffer;
   private readonly cursor: Cursor;
   private readonly literals: LiteralReader;
   private readonly library: boolean;
@@ -55,11 +56,11 @@ export class FileParser {
   private context: ParseContext;
   private names: int;
   private statementStart: int;
+  private unsafeMark?: UnsafeMark;
 
   public constructor(source: Own<Buffer>, tokens: readonly Token[], library: boolean) {
-    this.source = source;
     this.cursor = new Cursor(tokens);
-    this.literals = new LiteralReader(this.source);
+    this.literals = new LiteralReader(source);
     this.library = library;
     this.bracesMissing = this.cursor.bracesMissing();
     this.fieldNames = new Set<string>();
@@ -73,6 +74,15 @@ export class FileParser {
     };
     this.names = 0;
     this.statementStart = kNoStatement;
+    this.unsafeMark = undefined;
+  }
+
+  private takenUnsafe(): UnsafeMark | undefined {
+    const mark = this.unsafeMark;
+
+    this.unsafeMark = undefined;
+
+    return mark;
   }
 
   public run(): ParseResult {
@@ -132,7 +142,7 @@ export class FileParser {
   }
 
   private readonly written(start: int, end: int): string {
-    return this.source.toString("utf8", start, end);
+    return this.literals.written(start, end);
   }
 
   private hiddenName(): string {

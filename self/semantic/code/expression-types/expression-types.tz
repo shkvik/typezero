@@ -381,6 +381,7 @@ export class ExpressionTypes {
   private writtenFields?: Cell<Set<string>>;
   private methodParts: Cell<Map<FunctionDecl, ClassDecl>>;
   private partHomes: Cell<Map<ClassDecl, int>>;
+  private unsafeUsed: Cell<Set<FunctionDecl>>;
   private typeArguments: Cell<Map<string, readonly Type[]>>;
 
   public constructor(
@@ -697,6 +698,7 @@ export class ExpressionTypes {
     this.ownedCalls = new Map<string, PendingCall[]>();
     this.methodParts = new Map<FunctionDecl, ClassDecl>();
     this.partHomes = new Map<ClassDecl, int>();
+    this.unsafeUsed = new Set<FunctionDecl>();
     this.typeArguments = new Map<string, readonly Type[]>();
 
     for (const scopes of resolved) {

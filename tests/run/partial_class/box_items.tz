@@ -1,7 +1,7 @@
 import { Box } from "./box.tz"
 
 partial class Box<T> {
-  public put(item: T): void {
+  public put(item: Own<T>): void {
     this.items.push(item)
   }
 

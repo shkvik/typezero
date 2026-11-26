@@ -56,7 +56,7 @@ const settings = Buffer.from([0, 0, 0, 4, 0, 0, 0, 0, 0])
 
 type Frame = { type: int; flags: int; stream: int; payload: Buffer }
 
-function frame(type: uint8, flags: uint8, stream: uint8, payload: Buffer): Buffer {
+function frame(type: uint8, flags: uint8, stream: uint8, payload: Own<Buffer>): Buffer {
   const length = payload.length
   const high = ((length >> 16) & 255).toUint8()
   const middle = ((length >> 8) & 255).toUint8()
@@ -113,7 +113,7 @@ async function readFrames(socket: Socket, onFrame: (received: Frame) => boolean)
   return "closed"
 }
 
-async function stuck(port: int, name: string, frames: Buffer[]): Promise<string> {
+async function stuck(port: int, name: string, frames: Own<Buffer[]>): Promise<string> {
   const socket = new Socket({ host: "127.0.0.1", port: port, timeout: 5000 })
   const connected = await socket.connect()
   if (connected.isErr()) return `${name}: no connection`

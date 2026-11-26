@@ -2,11 +2,11 @@
 // the value of a Result<void, E> already is, and goes where undefined goes: into an array, a field,
 // JSON.stringify (which gives undefined, as in JavaScript). Inside Result and Promise T stays
 // void, so a decorator over a method that gives Promise<Result<void, E>> takes it as it is.
-function wrap<T>(value: T): T[] {
+function wrap<T>(value: Own<T>): T[] {
   return [value];
 }
 
-function keep<T>(value: T): T {
+function keep<T>(value: Own<T>): T {
   return value;
 }
 
@@ -23,7 +23,7 @@ function body<T>(result: Result<T, string>): string | undefined {
 class Box<T> {
   readonly value: T;
 
-  constructor(value: T) {
+  constructor(value: Own<T>) {
     this.value = value;
   }
 }

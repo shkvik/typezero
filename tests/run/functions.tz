@@ -10,15 +10,9 @@ function factorial(n: int): double {
   return result
 }
 
-// Functions can be called before their declaration.
-console.log(square(7))
 function square(x: double): double {
   return x * x
 }
-
-console.log(fib(20))
-console.log(factorial(20))
-console.log(gcd(1071, 462))
 
 function gcd(a: int, b: int): int {
   while (b != 0) {
@@ -38,8 +32,6 @@ function sign(x: double): int {
     return 0
   }
 }
-console.log(sign(-2.5), sign(0), sign(3))
-
 function untilThree(): int {
   let i: int = 0
   while (true) {
@@ -47,20 +39,34 @@ function untilThree(): int {
     if (i == 3) return i
   }
 }
-console.log(untilThree())
-
 function greet(): void {
   console.log("hi from a void function")
   return
 }
-greet()
-
-// Top-level variables are globals shared by all functions.
-let counter: int = 0
-function bump(): void {
-  counter += 1
+// A function changes the state its caller gives it: a module has no `let`.
+type Counter = { value: int }
+function bump(counter: Counter): void {
+  counter.value += 1
 }
-bump()
-bump()
-bump()
-console.log(counter)
+
+function main(): void {
+  // Functions can be called before their declaration.
+  console.log(square(7))
+  console.log(fib(20))
+  console.log(factorial(20))
+  console.log(gcd(1071, 462))
+
+  console.log(sign(-2.5), sign(0), sign(3))
+
+  console.log(untilThree())
+
+  greet()
+
+  const counter: Counter = { value: 0 }
+  bump(counter)
+  bump(counter)
+  bump(counter)
+  console.log(counter.value)
+}
+
+main()

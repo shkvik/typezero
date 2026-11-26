@@ -25,7 +25,7 @@ list[1] = list
 console.log(list)
 if (Array.isArray(list)) list.pop()
 
-function must<T>(r: Result<T, JsonError>): T {
+function must<T>(r: Own<Result<T, JsonError>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

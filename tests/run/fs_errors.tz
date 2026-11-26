@@ -90,7 +90,7 @@ console.log(existsSync(file), must(readFileSync(other, "utf8")))
 must(rmSync(dir, { recursive: true }))
 console.log(existsSync(dir))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

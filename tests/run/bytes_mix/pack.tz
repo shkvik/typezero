@@ -63,7 +63,7 @@ export function decode(bytes: Uint8Array): Result<Record[], string> {
 }
 
 // The bytes of text or of bytes, as one kind.
-export function bytesOf(data: Uint8Array | string | ArrayBuffer): Uint8Array {
+export function bytesOf(data: Own<Uint8Array | string | ArrayBuffer>): Uint8Array {
   if (typeof data == "string")
     return new TextEncoder().encode(data)
   if (data instanceof ArrayBuffer)

@@ -1,0 +1,2 @@
+export declare function printText(text: Read<string>): void;
+export declare function printNested<T>(value: Read<T>): void;

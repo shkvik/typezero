@@ -59,7 +59,7 @@ interface Event {
 class Meeting {
   title: string
   at: Date
-  constructor(title: string, at: Date) {
+  constructor(title: string, at: Own<Date>) {
     this.title = title
     this.at = at
   }

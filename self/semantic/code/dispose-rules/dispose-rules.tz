@@ -56,7 +56,7 @@ export class DisposeRules {
     if (isWrong) {
       errors.push({ code: Code.DisposeShape, loc, details: kNoDetails });
     }
-    if (inherited != undefined && !this.hasSuperDisposeCall(dispose)) {
+    if (inherited != undefined && this.hasSuperDisposeCall(dispose)) {
       errors.push({
         code: Code.DisposeNoSuper,
         loc,

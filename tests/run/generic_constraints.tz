@@ -61,7 +61,7 @@ class Ranked<T extends { name: string }> {
     this.items = []
   }
 
-  add(x: T) { this.items.push(x); return this }
+  add(x: Own<T>) { this.items.push(x); return this }
   names() { return this.items.map(x => x.name).join(", ") }
 }
 console.log(new Ranked<User>().add(ann).names(), new Ranked<Post>().add(post).add(post).names())

@@ -1,0 +1,50 @@
+// The built-in Set is a HashMap<T, boolean> of tz:map: add, has, delete, size,
+// for…of in the order of adding, Array.from and new Set from an array or a set.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+function words(): string {
+  const seen = new Set<string>();
+
+  for (const word of ["b", "a", "b", "c", "a"]) {
+    seen.add(word);
+  }
+
+  seen.delete("c");
+
+  const order: string[] = [];
+
+  for (const word of seen) {
+    order.push(word);
+  }
+
+  return `${seen.size} ${order.join(",")} ${seen.has("a")} ${seen.has("c")}`;
+}
+
+function numbers(): string {
+  const items = new Set<int>([3, 1, 3, 2, 1]);
+  const copy = new Set<int>(items);
+
+  copy.add(9);
+
+  return `${Array.from(items).join(",")} ${copy.size}`;
+}
+
+function points(): int {
+  const first = new Point(1);
+  const all = new Set<Point>();
+
+  all.add(first);
+  all.add(new Point(2));
+
+  return all.size;
+}
+
+console.log(words());
+console.log(numbers());
+console.log(points());

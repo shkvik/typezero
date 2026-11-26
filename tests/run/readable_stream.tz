@@ -4,69 +4,74 @@
 // chunk comes in a Result and an error of the source, of the type the stream
 // names as its second argument, is an Err (docs/errors.md, step 5); cancel; `locked`, a field that a reader changes. How a stream prints
 // is in library_print.tz.
-const enc = new TextEncoder()
-const dec = new TextDecoder()
-
-const words = ["alpha", "beta", "gamma"]
-let next = 0
-const pulled = new ReadableStream<string>({
-  pull: async c => {
-    await new Promise<void>(resolve => setTimeout(resolve, 5))
-    const word = words[next++]
-    if (word == undefined) c.close()
-    else c.enqueue(word)
-  },
-})
-console.log(pulled.locked())
-const reader = pulled.getReader()
-console.log(pulled.locked())
-for (;;) {
-  const r = await reader.read()
-  if (r.isErr()) break
-  const step = r.value
-  if (step.done) break
-  console.log("read", step.value)
-}
-reader.releaseLock()
-console.log(pulled.locked())
-
-const bytes = new ReadableStream({
-  start: c => {
-    c.enqueue(enc.encode("one "))
-    c.enqueue(enc.encode("two"))
-    c.close()
-  },
-})
-let text = ""
-for await (const chunk of bytes) if (chunk.isOk()) text += dec.decode(chunk.value)
-console.log(text)
-
 type SourceError = { kind: "SOURCE"; code: "ERR_SOURCE"; message: string }
-const failing = new ReadableStream<int, SourceError>({
-  start: c => {
-    c.enqueue(1)
-    c.error({ kind: "SOURCE", code: "ERR_SOURCE", message: "source failed" })
-  },
-})
-for await (const n of failing) {
-  if (n.isOk()) console.log("got", n.value)
-  else console.log("failed", n.error.message)
+
+async function main(): Promise<void> {
+  const enc = new TextEncoder()
+  const dec = new TextDecoder()
+
+  const words = ["alpha", "beta", "gamma"]
+  let next = 0
+  const pulled = new ReadableStream<string>({
+    pull: async c => {
+      await new Promise<void>(resolve => setTimeout(resolve, 5))
+      const word = words[next++]
+      if (word == undefined) c.close()
+      else c.enqueue(word)
+    },
+  })
+  console.log(pulled.locked())
+  const reader = pulled.getReader()
+  console.log(pulled.locked())
+  for (;;) {
+    const r = await reader.read()
+    if (r.isErr()) break
+    const step = r.value
+    if (step.done) break
+    console.log("read", step.value)
+  }
+  reader.releaseLock()
+  console.log(pulled.locked())
+
+  const bytes = new ReadableStream({
+    start: c => {
+      c.enqueue(enc.encode("one "))
+      c.enqueue(enc.encode("two"))
+      c.close()
+    },
+  })
+  let text = ""
+  for await (const chunk of bytes) if (chunk.isOk()) text += dec.decode(chunk.value)
+  console.log(text)
+
+  const failing = new ReadableStream<int, SourceError>({
+    start: c => {
+      c.enqueue(1)
+      c.error({ kind: "SOURCE", code: "ERR_SOURCE", message: "source failed" })
+    },
+  })
+  for await (const n of failing) {
+    if (n.isOk()) console.log("got", n.value)
+    else console.log("failed", n.error.message)
+  }
+
+  let cancelled = ""
+  const endless = new ReadableStream<int>({
+    pull: c => {
+      c.enqueue(7)
+    },
+    cancel: reason => {
+      cancelled = reason ?? "no reason"
+    },
+  })
+  for await (const n of endless) {
+    console.log("first", n.isOk() ? n.value : 0)
+    break
+  }
+  console.log("cancelled:", cancelled)
+  const other = new ReadableStream<int>({ cancel: reason => { cancelled = reason ?? "" } })
+  await other.cancel("enough")
+  console.log("cancelled:", cancelled, other.locked())
 }
 
-let cancelled = ""
-const endless = new ReadableStream<int>({
-  pull: c => {
-    c.enqueue(7)
-  },
-  cancel: reason => {
-    cancelled = reason ?? "no reason"
-  },
-})
-for await (const n of endless) {
-  console.log("first", n.isOk() ? n.value : 0)
-  break
-}
-console.log("cancelled:", cancelled)
-const other = new ReadableStream<int>({ cancel: reason => { cancelled = reason ?? "" } })
-await other.cancel("enough")
-console.log("cancelled:", cancelled, other.locked())
+await main()

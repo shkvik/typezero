@@ -24,7 +24,16 @@ import {
 import {
   kInferenceRounds,
   kNoPlace,
+  kUnsafeMemory,
+  kUnsafeReason,
+  kUnsafeUses,
+  kUnsafeUsesName,
 } from "../../const/expression-types.const.tz";
+import {
+  Expr,
+  ExprKind,
+  NameExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
   FunctionDoor,
   FunctionFrame,
@@ -35,6 +44,104 @@ import {
 partial class ExpressionTypes {
   public readonly functionOf(module: int, loc: int): Type {
     return this.functionAt(module, loc);
+  }
+
+  private readonly unsafeMarkCheck(fn: FunctionDecl, module: int): void {
+    const mark = fn.unsafe;
+    if (mark == undefined) {
+      return;
+    }
+
+    const options = mark.options;
+    const reason = this.unsafeReason(options);
+    if (reason == undefined || reason.trim().length == 0) {
+      this.report(module, mark.loc, Code.OwnUnsafeReason, kNoDetails);
+    }
+  }
+
+  private readonly unsafeReason(options: Expr | undefined): string | undefined {
+    if (options == undefined || options.kind != ExprKind.ObjectLit) {
+      return undefined;
+    }
+
+    for (const property of options.props) {
+      const value = property.value;
+      const isReason =
+        property.name == kUnsafeReason && value.kind == ExprKind.StringLit;
+      if (isReason && value.kind == ExprKind.StringLit) {
+        return value.value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readonly unsafeUsesCheck(fn: FunctionDecl, module: int): void {
+    const mark = fn.unsafe;
+    if (mark == undefined) {
+      return;
+    }
+
+    const listed = this.unsafeUses(mark.options);
+    const isUsed = this.unsafeUsed.has(fn);
+
+    for (const name of listed) {
+      if (!kUnsafeUses.includes(name)) {
+        this.report(module, mark.loc, Code.OwnUnsafeUses, { word: name });
+      } else if (name != kUnsafeMemory || !isUsed) {
+        this.report(module, mark.loc, Code.OwnUnsafeUnused, { word: name });
+      }
+    }
+
+    if (isUsed && !listed.includes(kUnsafeMemory)) {
+      this.report(module, mark.loc, Code.OwnUnsafeUses, {
+        word: kUnsafeMemory,
+      });
+    }
+  }
+
+  private readonly unsafeUses(options: Expr | undefined): string[] {
+    const names: string[] = [];
+    if (options == undefined || options.kind != ExprKind.ObjectLit) {
+      return names;
+    }
+
+    for (const property of options.props) {
+      const value = property.value;
+      if (property.name != kUnsafeUsesName || value.kind != ExprKind.ArrayLit) {
+        continue;
+      }
+
+      for (const element of value.elements) {
+        const item = element.expr;
+        if (item.kind == ExprKind.Member) {
+          names.push(item.name);
+        }
+      }
+    }
+
+    return names;
+  }
+
+  private readonly unsafeCallCheck(name: NameExpr, module: int): void {
+    const open = this.openFunctions.slice();
+
+    for (let index = open.length - 1; index >= 0; index--) {
+      const fn = open[index];
+      if (fn == undefined) {
+        continue;
+      }
+      if (fn.unsafe != undefined) {
+        this.unsafeUsed.add(fn);
+
+        return;
+      }
+      if (!fn.isArrow) {
+        break;
+      }
+    }
+
+    this.report(module, name.loc, Code.OwnUnsafeOutside, { word: name.name });
   }
 
   public readonly typedFunctionOf(module: int, loc: int): Type | undefined {
@@ -116,10 +223,12 @@ partial class ExpressionTypes {
       this.thisPlaces.push(place);
     }
 
+    this.unsafeMarkCheck(fn, module);
     this.openFunctions.push(fn);
     this.openBody(door, fn, shape, context, module);
     this.errorPathsCheck(fn, module);
     this.openFunctions.pop();
+    this.unsafeUsesCheck(fn, module);
 
     if (place != undefined) {
       this.thisPlaces.pop();

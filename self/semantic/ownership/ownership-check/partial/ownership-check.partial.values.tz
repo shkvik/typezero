@@ -56,9 +56,16 @@ partial class OwnershipCheck {
       return;
     }
 
+    const isOwnField = place.root == kThisKey && place.path.length > 0;
+    if (variable.holding == Holding.Own && isOwnField) {
+      this.report(expr.loc, Code.OwnTakeBorrowed, { word });
+
+      return;
+    }
+
     switch (variable.holding) {
       case Holding.Own:
-        return this.moveOwned(place, expr.loc);
+        return this.ownedTaken(place, expr);
       case Holding.Borrow:
         this.report(expr.loc, Code.OwnStoreBorrow, { word });
         return;
@@ -72,20 +79,32 @@ partial class OwnershipCheck {
     }
   }
 
-  private moveOwned(place: Place, loc: int): void {
+  private ownedTaken(place: Place, expr: Expr): void {
+    const isWhole = place.path.length == 0;
+    const isField = expr.kind == ExprKind.Member;
+    const isMoved = this.moveOwned(place, expr.loc);
+
+    if (isMoved && (isWhole || isField)) {
+      this.moveUses.add(expr);
+    }
+  }
+
+  private moveOwned(place: Place, loc: int): boolean {
     if (place.path.includes(kElementStep)) {
       const word = this.placeText(place);
 
       this.report(loc, Code.OwnTakeElement, { word });
 
-      return;
+      return false;
     }
     if (!this.checkUsable(place, loc)) {
-      return;
+      return false;
     }
 
     this.checkWrite(place, loc, true);
     this.markMoved(place, loc);
+
+    return true;
   }
 
   private readonly reportLentTaken(variable: Read<Variable>, place: Place, loc: int): void {

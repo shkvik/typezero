@@ -68,7 +68,7 @@ console.log(roll >= 1 && roll < 7, randomUUID().length)
 
 must(await rm(dir, { recursive: true }))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

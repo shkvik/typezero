@@ -46,7 +46,7 @@ class Notes {
 
 const notes = new Notes()
 
-async function dispatch(request: Request): Promise<Response> {
+async function dispatch(request: Own<Request>): Promise<Response> {
   const url = URL.parse(request.url)
   if (url.isErr()) return new Response("bad url")
   const path = url.value.pathname()
@@ -58,7 +58,7 @@ async function dispatch(request: Request): Promise<Response> {
   return new Response("none")
 }
 
-async function keep(request: Request): Promise<Response> {
+async function keep(request: Own<Request>): Promise<Response> {
   const context: Context = { request, params: paramsOf("/kept"), query: new URLSearchParams() }
   kept.push(context)
   return new Response(`kept ${context.params.get("id") ?? "?"}`)

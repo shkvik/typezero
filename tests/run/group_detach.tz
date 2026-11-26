@@ -19,7 +19,7 @@ class Item {
   constructor(public name: string) {}
 }
 
-function add(list: List, name: string): WeakRef<Item> {
+function add(list: Own<List>, name: string): WeakRef<Item> {
   const item = new Item(name)
   item.list = list
   item.next = list.head
@@ -95,7 +95,7 @@ class Room {
   last?: Pair
 }
 
-function enter(room: Room, paired: boolean): WeakRef<Pair> {
+function enter(room: Own<Room>, paired: boolean): WeakRef<Pair> {
   const a = new Pair()
   if (paired) {
     const b = new Pair()

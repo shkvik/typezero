@@ -35,6 +35,7 @@ import {
   IrValue,
   LayoutField,
   LayoutShape,
+  MethodCallSite,
   MethodTarget,
   Place,
 } from "../types/lowering.types.tz";
@@ -57,7 +58,7 @@ partial class Lowering {
     }
 
     for (const fn of decl.methods) {
-      if (fn.body != undefined) {
+      if (fn.body != undefined && fn.typeParams.length == 0) {
         const name = this.methodName(frame.module, decl, fn);
 
         this.methodLowered(frame.module, decl, fn, name, self);
@@ -66,8 +67,10 @@ partial class Lowering {
   }
 
   private readonly isPlainClass(decl: ClassDecl): boolean {
+    const isSimpleBase = decl.base == undefined || decl.typeParams.length == 0;
+
     return (
-      decl.base == undefined &&
+      isSimpleBase &&
       decl.baseExpr == undefined &&
       decl.decorators.length == 0 &&
       !decl.isPartial
@@ -78,6 +81,7 @@ partial class Lowering {
     object: Type,
     decl: ClassDecl,
     fn: FunctionDecl,
+    call?: MethodCallSite,
   ): MethodTarget | undefined {
     if (object.kind != TypeKind.Instance) {
       return undefined;
@@ -88,17 +92,27 @@ partial class Lowering {
     if (shape == undefined) {
       return undefined;
     }
-    if (decl.typeParams.length == 0) {
+    if (decl.typeParams.length == 0 && fn.typeParams.length == 0) {
       return { name, shape };
     }
 
-    const params = this.resolver.parameterTypes(object.module, decl.typeParams);
-    const args = object.args;
+    const home = this.methodHome(object.module, decl, fn);
+    const classParams = this.resolver.parameterTypes(
+      object.module,
+      decl.typeParams,
+    );
+    const ownParams = this.resolver.parameterTypes(home, fn.typeParams);
+    const ownArgs = this.methodTypeArguments(fn, call);
+    if (ownArgs == undefined) {
+      return undefined;
+    }
+
+    const params = classParams.concat(ownParams);
+    const args = object.args.concat(ownArgs);
     const binding = this.bindingOf(params, args);
     const bound = this.shapeWith(shape, binding);
     const ids = args.map((type) => `${type.id}`);
     const instance = `${name}.i${ids.join("_")}`;
-    const home = this.methodHome(object.module, decl, fn);
 
     this.instanceWanted({
       module: home,
@@ -111,6 +125,40 @@ partial class Lowering {
     });
 
     return { name: instance, shape: bound };
+  }
+
+  private readonly methodTypeArguments(
+    fn: FunctionDecl,
+    call: MethodCallSite | undefined,
+  ): Type[] | undefined {
+    if (fn.typeParams.length == 0) {
+      return [];
+    }
+    if (call == undefined) {
+      return undefined;
+    }
+
+    const written = this.values.typeArgumentsOf(call.module, call.loc);
+    if (written == undefined) {
+      return undefined;
+    }
+
+    return written.map((type) => this.bound(type));
+  }
+
+  private virtualCall(
+    frame: Read<Frame>,
+    object: Type,
+    fn: FunctionDecl,
+    self: IrValue,
+    args: Read<LLVMValue[]>,
+    target: MethodTarget,
+  ): LLVMValue | undefined {
+    if (!this.isInHierarchy(object) || fn.typeParams.length > 0) {
+      return undefined;
+    }
+
+    return this.dispatchedCall(frame, object, fn.name, self, args.slice(), target);
   }
 
   private readonly methodName(module: int, decl: ClassDecl, fn: FunctionDecl): string {
@@ -166,7 +214,6 @@ partial class Lowering {
     }
 
     const isPlain =
-      fn.typeParams.length == 0 &&
       !fn.isAsync &&
       !fn.isGenerator &&
       !shape.rest &&
@@ -200,6 +247,7 @@ partial class Lowering {
       scopes: [],
       self: selfPlace,
       place: this.methodTitle(decl, fn),
+      isLending: this.isLending(fn),
     };
 
     made.store(made.param(0), selfPlace.pointer);
@@ -207,7 +255,7 @@ partial class Lowering {
     this.parametersStored(inner, fn, shape, params);
     this.statements(inner, body.body);
     this.closeScope(inner);
-    this.finished(made, result);
+    this.finished(made, result, shape.result);
   }
 
   private layoutOf(type: Type): ClassLayout | undefined {
@@ -221,8 +269,14 @@ partial class Lowering {
       return undefined;
     }
 
-    const fields = shape.fields;
-    const placed = this.placedFields(fields);
+    const parent = this.classParent(type);
+    const base = this.baseLayoutOf(parent);
+    if (parent != undefined && base == undefined) {
+      return undefined;
+    }
+
+    const own = this.ownShapeFields(shape, base);
+    const placed = this.placedAfter(own, base);
     if (placed == undefined) {
       return undefined;
     }
@@ -234,18 +288,27 @@ partial class Lowering {
     const size = this.structSize(placed);
     const name = shape.name;
     const classId = this.nextClassId();
-    const disposer = this.disposeTarget(type);
+    const disposers = this.disposeChain(type);
     const title = this.layoutTitle(name);
-    const drop = this.dropFunction(title, struct, placed, disposer);
-    const descriptor = this.layoutDescriptor(shape, drop, placed, classId);
+    const drop = this.dropFunction(title, struct, placed, disposers);
+    const slots = this.slotsOf(type);
+    const fullShape = this.shapeWithBase(shape, base);
+    const descriptor = this.layoutDescriptor(
+      fullShape,
+      drop,
+      placed,
+      classId,
+      slots,
+    );
     const layout: ClassLayout = {
       struct,
       size,
       fields: placed,
       descriptor,
       classId,
-      shape,
+      shape: fullShape,
       drop,
+      slots,
     };
 
     this.layouts.set(type.id, layout);
@@ -346,13 +409,77 @@ partial class Lowering {
     return { name: field.name, loc: 0, type };
   }
 
-  private placedFields(fields: Read<InstanceField[]>): LayoutField[] | undefined {
+  private baseLayoutOf(parent: Type | undefined): ClassLayout | undefined {
+    if (parent == undefined) {
+      return undefined;
+    }
+
+    return this.layoutOf(parent);
+  }
+
+  private readonly ownShapeFields(
+    shape: Read<LayoutShape>,
+    base: Read<ClassLayout | undefined>,
+  ): InstanceField[] {
+    if (base == undefined) {
+      return shape.fields.slice();
+    }
+
+    const inherited = base.shape.fields.map((field) => field.name);
+
+    return shape.fields.filter((field) => !inherited.includes(field.name));
+  }
+
+  private readonly shapeWithBase(
+    shape: Read<LayoutShape>,
+    base: Read<ClassLayout | undefined>,
+  ): LayoutShape {
+    if (base == undefined) {
+      return { name: shape.name, fields: shape.fields, flags: shape.flags };
+    }
+
+    const own = this.ownShapeFields(shape, base);
+    const fields = base.shape.fields.concat(own);
+
+    return { name: shape.name, fields, flags: shape.flags };
+  }
+
+  private placedAfter(
+    fields: Read<InstanceField[]>,
+    base: Read<ClassLayout | undefined>,
+  ): LayoutField[] | undefined {
+    if (base == undefined) {
+      return this.placedFields(fields, 16, 0);
+    }
+
+    const end = this.structSize(base.fields);
+    const own = this.placedFields(fields, end, base.fields.length);
+    if (own == undefined) {
+      return undefined;
+    }
+
+    return base.fields.concat(own);
+  }
+
+  private slotsOf(type: Type): LLVMValue[] {
+    if (!this.isInHierarchy(type)) {
+      return [];
+    }
+
+    return this.slotTable(type);
+  }
+
+  private placedFields(
+    fields: Read<InstanceField[]>,
+    start: int,
+    first: int,
+  ): LayoutField[] | undefined {
     const order = fields.slice();
 
-    order.sort((first, second) => this.fieldOrder(first, second));
+    order.sort((one, other) => this.fieldOrder(one, other));
 
     const placed: LayoutField[] = [];
-    let offset: int = 16;
+    let offset: int = start;
 
     for (let index = 0; index < order.length; index++) {
       const field = order[index];
@@ -370,7 +497,7 @@ partial class Lowering {
       offset = this.aligned(offset, align);
       placed.push({
         name: field.name,
-        index: index + 2,
+        index: first + index + 2,
         offset,
         type: field.type,
         ir,
@@ -428,29 +555,17 @@ partial class Lowering {
     return offset + align - rest;
   }
 
-  private disposeTarget(type: Type): MethodTarget | undefined {
-    const decl = this.values.classDeclOf(type);
-    const fn = decl?.methods.find(
-      (one) => one.name == kDisposeName && one.body != undefined,
-    );
-    if (decl == undefined || fn == undefined) {
-      return undefined;
-    }
-
-    return this.methodTarget(type, decl, fn);
-  }
-
   private dropFunction(
     name: string,
     struct: string,
     fields: Read<LayoutField[]>,
-    disposer: MethodTarget | undefined,
+    disposers: Read<MethodTarget[]>,
   ): LLVMValue {
     const dropName = this.ir.uniqueName(`tz.drop.${name}.`);
     const made = new IrFunction(this.ir, dropName, kVoidType, [kPointerType]);
     const object = made.param(0);
 
-    if (disposer != undefined) {
+    for (const disposer of disposers) {
       const disposing = this.ir.declare(disposer.name, kVoidType, [kPointerType]);
 
       made.call(disposing, [object]);
@@ -494,6 +609,7 @@ partial class Lowering {
     drop: LLVMValue,
     placed: Read<LayoutField[]>,
     classId: int,
+    methods: Read<LLVMValue[]>,
   ): LLVMValue {
     const entries: LLVMValue[] = [];
     const name = shape.name;
@@ -529,14 +645,14 @@ partial class Lowering {
       this.ir.integer(kFlagType, `${name.length}`),
       this.ir.integer(kFlagType, `${classId}`),
     ]);
-    const slots = this.ir.constArray(kPointerType, []);
+    const slots = this.ir.constArray(kPointerType, methods);
     const descriptor = this.ir.constStruct([
       head,
       this.ir.zero(kPointerType),
       slots,
     ]);
     const globalName = this.ir.uniqueName(`tz.layout.${title}.`);
-    const globalType = `{ ${kLayoutHead}, ptr, [0 x ptr] }`;
+    const globalType = `{ ${kLayoutHead}, ptr, [${methods.length} x ptr] }`;
 
     return this.ir.global(globalName, globalType, descriptor, true);
   }
@@ -611,8 +727,14 @@ partial class Lowering {
     if (type != undefined && type.kind == TypeKind.Dict) {
       return this.newDictFrom(frame, expr, type);
     }
+    const array = this.madeArrayType(type) ?? this.writtenArrayType(frame, expr);
+    if (array != undefined) {
+      return this.arrayOfLength(frame, expr, array);
+    }
     if (type == undefined || type.kind != TypeKind.Instance) {
-      this.notLowered(frame.module, expr.loc, "this new");
+      const kind = this.kindName(type);
+
+      this.notLowered(frame.module, expr.loc, `a new ${kind}`);
 
       return undefined;
     }
@@ -627,18 +749,21 @@ partial class Lowering {
 
     const object = this.allocated(frame, layout);
 
+    this.fieldsInitialized(frame, type, object);
+
     const value: IrValue = {
       type: kPointerType,
       value: object,
       tz: type,
       owned: true,
     };
-    const ctor = decl.constructors[0];
-    if (ctor == undefined) {
+    const owned = this.ownConstructor(type);
+    if (owned == undefined) {
       return value;
     }
 
-    const target = this.methodTarget(type, decl, ctor);
+    const ctor = owned.fn;
+    const target = this.methodTarget(owned.owner, owned.decl, ctor);
     const params = this.shapeTypesOf(target?.shape);
     if (target == undefined || params == undefined) {
       this.notLowered(frame.module, expr.loc, "this new");
@@ -701,6 +826,7 @@ partial class Lowering {
       layout.drop,
       layout.fields,
       layout.classId,
+      layout.slots,
     );
 
     this.orderedDescriptors.set(key, descriptor);
@@ -803,7 +929,12 @@ partial class Lowering {
     }
 
     const loaded = this.seenAs(frame, this.loaded(frame, place), expr);
-    if (object.owned != true) {
+    if (object.owned != true && this.isMovedField(frame, expr, place)) {
+      frame.made.store(this.ir.zero(place.type), place.pointer);
+
+      return { type: loaded.type, value: loaded.value, tz: loaded.tz, owned: true };
+    }
+    if (object.owned != true || !this.isManaged(object.tz)) {
       return loaded;
     }
 
@@ -812,6 +943,19 @@ partial class Lowering {
     this.dropping(frame, object);
 
     return kept;
+  }
+
+  private isMovedField(
+    frame: Read<Frame>,
+    expr: MemberExpr,
+    place: Read<Place>,
+  ): boolean {
+    return (
+      this.moves.has(expr) &&
+      frame.inline == undefined &&
+      place.type == kPointerType &&
+      this.isManaged(place.tz)
+    );
   }
 
   private seenAs(frame: Frame, loaded: IrValue, expr: Expr): IrValue {
@@ -839,9 +983,11 @@ partial class Lowering {
     member: MemberExpr,
     object: Type,
   ): IrValue | undefined {
-    const decl = this.values.classDeclOf(object);
-    const fn = decl?.methods.find((one) => one.name == member.name);
+    const found = this.ownedMethod(object, member.name);
+    const decl = found?.decl;
+    const fn = found?.fn;
     if (
+      found == undefined ||
       decl == undefined ||
       fn == undefined ||
       object.kind != TypeKind.Instance
@@ -853,7 +999,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const target = this.methodTarget(object, decl, fn);
+    const site: MethodCallSite = { module: frame.module, loc: member.loc };
+    const target = this.methodTarget(found.owner, decl, fn, site);
     const shape = target?.shape;
     const result = this.resultType(shape);
     const params = this.shapeTypesOf(shape);
@@ -883,11 +1030,15 @@ partial class Lowering {
 
     const all = [kPointerType].concat(params);
     const callee = this.ir.declare(target.name, result, all);
-    const made = frame.made.call(callee, [self.value].concat(args));
+    const dispatched = this.virtualCall(frame, object, fn, self, args, target);
+    const made = dispatched ?? frame.made.call(callee, [self.value].concat(args));
+    const answer: IrValue = { type: result, value: made, tz: shape.result };
+    const temporaries = kept.concat([self]);
+    const given = this.callResult(frame, answer, fn, temporaries);
 
     this.droppedAll(frame, kept);
     this.dropping(frame, self);
 
-    return { type: result, value: made, tz: shape.result, owned: true };
+    return given;
   }
 }

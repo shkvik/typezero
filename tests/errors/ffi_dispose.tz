@@ -18,9 +18,10 @@ class Child extends Holder {
     super(2)
   }
 
-  // expect-error: call 'super[Symbol.dispose]()' in it, or what 'Holder' holds leaks
+  // expect-error: 'super[Symbol.dispose]()' here would free what 'Holder' holds twice
   public [Symbol.dispose](): void {
     console.log("child")
+    super[Symbol.dispose]()
   }
 }
 

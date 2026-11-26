@@ -14,7 +14,7 @@ export function Log<A extends unknown[], R>(_cls: object, name: string, method: 
 // Counts the calls, and gives the descriptor back, as TypeScript code often
 // does.
 const calls: Record<string, int> = {}
-function Counted<A extends unknown[], R>(_cls: object, name: string, method: MethodDescriptor<A, R>) {
+function Counted<A extends unknown[], R>(_cls: object, name: string, method: Own<MethodDescriptor<A, R>>) {
   const original = method.value
   method.value = function (this: unknown, ...args: A): R {
     calls[name] = (calls[name] ?? 0) + 1

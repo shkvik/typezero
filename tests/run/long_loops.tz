@@ -72,7 +72,7 @@ function depths(lines: string[]): int {
   return first + second + down(n) + downIf(n)
 }
 
-function last(item: Item): Item {
+function last(item: Lent<Item>): Read<Item> {
   // expect-hint: how deep this tail recursion goes depends on data
   return item.next == undefined ? item : last(item.next)
 }

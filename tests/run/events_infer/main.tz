@@ -23,7 +23,7 @@ bus.once("count", (c) => console.log("count", c.n * 2, c.label))
 bus.on("chain", (n) => bus.emit("chained", `${n}!`))
 bus.on("chained", (text) => console.log("chained", text))
 
-function checkout(items: string[]) {
+function checkout(items: Own<string[]>) {
   bus.emit("order", { id: 7, items, note: items.length > 1 ? "many" : undefined })
   bus.emit("total", { sum: items.length.toDouble() * 2.5, currency: "EUR" })
 }

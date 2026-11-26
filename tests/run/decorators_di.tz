@@ -6,7 +6,7 @@
 // `design:paramtypes`, which the compiler writes for a decorated class, lists
 // the classes of its parameters.
 const injectable: Constructor[] = []
-function Injectable(cls: Constructor) {
+function Injectable(cls: Own<Constructor>) {
   injectable.push(cls)
 }
 
@@ -17,7 +17,7 @@ class Container {
     this.instances = new Map<Constructor, object>()
   }
 
-  resolve<T extends object>(cls: Constructor<T>): Result<T, string> {
+  resolve<T extends object>(cls: Own<Constructor<T>>): Result<T, string> {
     const found = this.instances.get(cls)
     if (found instanceof cls)
       return ok(found)
@@ -36,7 +36,7 @@ class Container {
   }
 }
 
-function must<T>(r: Result<T, string>): T {
+function must<T>(r: Own<Result<T, string>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)
@@ -93,7 +93,7 @@ if (unknown.isErr()) console.log(unknown.error)
 type Route = { path: string; cls: Constructor; method: string }
 const routes: Route[] = []
 function Get(path: string) {
-  return (cls: Constructor, method: string) => {
+  return (cls: Own<Constructor>, method: string) => {
     routes.push({ path, cls, method })
   }
 }

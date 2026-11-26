@@ -68,7 +68,7 @@ const names = getHashes()
 console.log(names.length, names.includes("sha256"), names.includes("md4"))
 console.log(names.join(","))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

@@ -1,0 +1,49 @@
+// A class with no constructor of its own or of a base: a field takes the
+// literal written next to it, base fields first, and the other fields get empty
+// values: "", 0, false, [], an empty Map, the first literal of a union, an
+// object of empty fields, an object of such a class; an optional one stays
+// undefined.
+class Rules {
+  public readonly points: 8 | 10 | 12;
+  public readonly limited: boolean;
+}
+
+class Page {
+  public readonly page: int;
+  public readonly take: int = 10;
+}
+
+class Request extends Page {
+  public readonly query: string;
+  public readonly rules: Rules;
+  public readonly tags: string[];
+  public readonly seen: Map<string, int>;
+  public readonly point: { x: int; y: double };
+  public readonly note?: string;
+}
+
+class Tally {
+  public count: int = 5;
+  public readonly items: string[];
+
+  public add(item: string): void {
+    this.items.push(item);
+    this.count++;
+  }
+}
+
+function main(): void {
+  const request = new Request();
+
+  console.log(request.page, request.take, request.query.length, request.rules.points);
+  console.log(request.rules.limited, request.tags.length, request.seen.size);
+  console.log(request.point.x, request.point.y, request.note == undefined);
+
+  const tally = new Tally();
+
+  tally.add("a");
+  tally.add("b");
+  console.log(tally.count, tally.items);
+}
+
+main();

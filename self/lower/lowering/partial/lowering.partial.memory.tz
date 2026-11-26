@@ -80,10 +80,32 @@ partial class Lowering {
       !this.isManaged(value.tz) ||
       this.isConstant(value);
     if (!isFree) {
+      this.auditCount(frame, value.tz);
       this.countCall(frame, true, value);
     }
 
     return { type: value.type, value: value.value, tz: value.tz, owned: true };
+  }
+
+  private auditCount(frame: Read<Frame>, type: Type): void {
+    const inner = this.optionalInner(type) ?? type;
+    if (!this.isAuditing || this.isString(inner) || this.isDecimal(inner)) {
+      return;
+    }
+    if (this.traits.isCopy(inner)) {
+      return;
+    }
+
+    const module = this.program.modules[frame.module];
+    if (module == undefined) {
+      return;
+    }
+
+    const lines = this.linesOf(frame.module, module.source.text);
+    const line = lines.placeOf(this.statementLoc).line;
+    const kind = this.kindName(inner);
+
+    this.audited.push(`${module.source.path}:${line}: ${kind}`);
   }
 
   private readonly isArena(type: Type): boolean {

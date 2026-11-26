@@ -36,7 +36,7 @@ console.log("finished")
 const after = await fetch(`http://127.0.0.1:${listening.port}/`)
 if (after.isErr()) console.log(after.error.kind, after.error.code)
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

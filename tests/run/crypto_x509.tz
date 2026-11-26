@@ -28,7 +28,7 @@ console.log(must(cert.verify(ca.publicKey)), must(cert.verify(cert.publicKey)),
             must(cert.checkPrivateKey(must(createPrivateKey(leafKeyPem)))))
 console.log(must(X509Certificate.parse(cert.raw)).serialNumber)
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

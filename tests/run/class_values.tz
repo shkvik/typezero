@@ -55,13 +55,16 @@ const any: Constructor = Cat
 console.log(any, any.name, [Dog, Cat])
 
 // A test with a class that is a value narrows to its objects.
-function find(pets: Animal[], kind: Constructor<Animal>) {
+function find(pets: Read<Animal[]>, kind: Constructor<Animal>) {
   for (const p of pets)
     if (p instanceof kind)
       return p.name
   return "none"
 }
-console.log(find([rex, new Cat("kit")], Cat), find([rex], Cat))
+const kit = new Cat("kit")
+const both: Read<Animal>[] = [rex, kit]
+const alone: Read<Animal>[] = [rex]
+console.log(find(both, Cat), find(alone, Cat))
 
 // Class expressions: named by the constant, by themselves, or not at all.
 const Point = class {

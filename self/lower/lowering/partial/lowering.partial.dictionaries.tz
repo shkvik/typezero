@@ -17,30 +17,34 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kArrayName,
+  kArraySlice,
   kBooleanType,
   kByteType,
   kDictLayoutFlag,
   kFlagType,
+  kFromName,
   kIntType,
   kLayoutHead,
   kMapAdd,
-  kArrayName,
-  kArraySlice,
-  kFromName,
   kMapAddText,
   kMapCopy,
+  kMapCopyName,
   kMapCountField,
   kMapDelete,
   kMapDeleteText,
   kMapDrop,
   kMapEntries,
+  kMapEntriesName,
   kMapFind,
   kMapFindText,
   kMapKeys,
+  kMapKeysName,
   kMapLayout,
   kMapNew,
   kMapStruct,
   kMapValues,
+  kMapValuesName,
   kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
@@ -184,6 +188,10 @@ partial class Lowering {
   }
 
   private newDict(frame: Read<Frame>, type: Type, loc: int): IrValue | undefined {
+    if (this.isTzMap(type)) {
+      return this.mapMade(frame, type, loc);
+    }
+
     const layout = this.dictLayout(type);
     if (layout == undefined) {
       this.notLowered(frame.module, loc, "a dictionary of these types");
@@ -203,6 +211,15 @@ partial class Lowering {
     member: MemberExpr,
     object: Type,
   ): IrValue | undefined {
+    if (this.isTzSet(object) && member.name == "add") {
+      return this.setAdded(frame, object, member.object, call.args, call.loc);
+    }
+    if (this.isTzMap(object)) {
+      const name = member.name;
+
+      return this.mapMethod(frame, object, name, member.object, call.args, call.loc);
+    }
+
     const layout = this.dictLayout(object);
     if (layout == undefined || object.kind != TypeKind.Dict) {
       this.notLowered(frame.module, call.loc, "a dictionary of these types");
@@ -599,6 +616,11 @@ partial class Lowering {
       return undefined;
     }
 
+    const object = this.typeOf(expr.object);
+    if (object != undefined && this.isTzMap(object)) {
+      return this.mapMethod(frame, object, "size", expr.object, [], expr.loc);
+    }
+
     const map = this.value(frame, expr.object);
     if (map == undefined) {
       return undefined;
@@ -620,6 +642,12 @@ partial class Lowering {
     isKeys: boolean,
   ): IrValue | undefined {
     const object = this.typeOf(expr);
+    if (object != undefined && this.isTzMap(object)) {
+      const name = this.pick(isKeys, kMapKeysName, kMapValuesName);
+
+      return this.mapListed(frame, name, expr, object);
+    }
+
     const map = this.value(frame, expr);
     if (object == undefined || object.kind != TypeKind.Dict) {
       this.notLowered(frame.module, expr.loc, "this dictionary");
@@ -693,6 +721,12 @@ partial class Lowering {
     if (made == undefined) {
       return undefined;
     }
+    if (this.isTzMap(type)) {
+      this.mapFilled(frame, made, items, type);
+      this.dropping(frame, items);
+
+      return made;
+    }
 
     this.itemsAdded(frame, made, items, type);
     this.dropping(frame, items);
@@ -733,6 +767,10 @@ partial class Lowering {
     source: Expr,
     type: Type,
   ): IrValue | undefined {
+    if (this.isTzMap(type)) {
+      return this.mapListed(frame, kMapCopyName, source, type);
+    }
+
     const layout = this.dictLayout(type);
     const from = this.value(frame, source);
     if (layout == undefined || from == undefined) {
@@ -912,6 +950,9 @@ partial class Lowering {
   ): IrValue | undefined {
     if (type.kind != TypeKind.Dict) {
       return undefined;
+    }
+    if (this.isTzMap(type)) {
+      return this.mapListed(frame, kMapEntriesName, expr, type);
     }
 
     const tuple = this.store.plainTuple([type.key, type.value]);

@@ -1,32 +1,37 @@
 // Integer constants are computed at compile time, where an overflow is an
 // error (see errors/constants.tz). These fit.
-const MS_PER_DAY = 24 * 60 * 60 * 1000
-const month: int = MS_PER_DAY * 30
-const big: int = 2 ** 40
-const huge: double = 2 ** 70
-console.log(MS_PER_DAY, month, big, huge)
-
-// Bounds of the types are still constants.
-const min = -2147483648
-const max = 2147483647
-console.log(min, max, -max, min + max, min / 2, max % 7, -(min + 1))
-
-// Bitwise operators on constants work on all 64 bits of an int.
-console.log(max + 1, (max * 31 + 7) & 0xffffffff, (min - 1) >> 1, ~(max + 1), (2 ** 40 + 5) & 0xff)
-const FNV_PRIME = 16777619
-const FNV_OFFSET = -2128831035
-console.log(FNV_OFFSET, (FNV_OFFSET * 31) ^ FNV_PRIME, 1 << 31, (1 << 31) >> 31)
-
 // Enum members are constants too.
 enum Size {
   Small = 1000,
   Large = 1000000,
 }
-const area: int = Size.Large * Size.Large
-console.log(area, Size.Small * Size.Large)
 
-// Only `const` is constant: `let` may change, and the compiler proves its
-// arithmetic fits (docs/numbers.md, section 2).
-let grows = max
-grows += 0
-console.log(grows + 1)
+function main(): void {
+  const MS_PER_DAY = 24 * 60 * 60 * 1000
+  const month: int = MS_PER_DAY * 30
+  const big: int = 2 ** 40
+  const huge: double = 2 ** 70
+  console.log(MS_PER_DAY, month, big, huge)
+
+  // Bounds of the types are still constants.
+  const min = -2147483648
+  const max = 2147483647
+  console.log(min, max, -max, min + max, min / 2, max % 7, -(min + 1))
+
+  // Bitwise operators on constants work on all 64 bits of an int.
+  console.log(max + 1, (max * 31 + 7) & 0xffffffff, (min - 1) >> 1, ~(max + 1), (2 ** 40 + 5) & 0xff)
+  const FNV_PRIME = 16777619
+  const FNV_OFFSET = -2128831035
+  console.log(FNV_OFFSET, (FNV_OFFSET * 31) ^ FNV_PRIME, 1 << 31, (1 << 31) >> 31)
+
+  const area: int = Size.Large * Size.Large
+  console.log(area, Size.Small * Size.Large)
+
+  // Only `const` is constant: `let` may change, and the compiler proves its
+  // arithmetic fits (docs/numbers.md, section 2).
+  let grows = max
+  grows += 0
+  console.log(grows + 1)
+}
+
+main()

@@ -11,6 +11,10 @@ import {
   Param,
   ParamKind,
 } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
 import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
 import {
   FunctionParameter,
@@ -26,6 +30,7 @@ import {
   kDecimalName,
   kErrName,
   kGivenModes,
+  kLendingResults,
   kOkName,
   kRuntimeModules,
   kVoidType,
@@ -76,21 +81,35 @@ partial class Lowering {
       loops: [],
       scopes: [],
       place: fn.name,
+      isLending: this.isLending(fn),
     };
 
     this.openScope(inner);
     this.parametersStored(inner, fn, shape, params);
     this.statements(inner, body.body);
     this.closeScope(inner);
-    this.finished(made, result);
+    this.finished(made, result, shape.result);
   }
 
-  private readonly finished(made: IrFunction, result: string): void {
+  private finished(made: IrFunction, result: string, tz?: Type): void {
     if (result == kVoidType) {
       return made.finishVoid();
     }
 
+    const ending = this.fallenOff(made, tz);
+    if (ending != undefined) {
+      return made.finishValue(ending);
+    }
+
     made.finishUnreachable();
+  }
+
+  private fallenOff(made: IrFunction, tz: Type | undefined): LLVMValue | undefined {
+    if (tz == undefined || made.isClosed() || this.optionalInner(tz) == undefined) {
+      return undefined;
+    }
+
+    return this.undefinedValue(tz)?.value;
   }
 
   private readonly shapeOf(module: int, loc: int): FunctionShape | undefined {
@@ -119,7 +138,7 @@ partial class Lowering {
       }
 
       const type = this.irType(this.passedType(param));
-      if (type == undefined) {
+      if (type == undefined || type == kVoidType) {
         return undefined;
       }
 
@@ -165,7 +184,10 @@ partial class Lowering {
 
       const tz = this.passedType(passed);
       const position = index + this.selfOffset(frame);
-      const isBorrowed = this.isBorrowedParam(param) && this.isManaged(tz);
+      const isBorrowed =
+        frame.isClosure != true &&
+        this.isBorrowedParam(param) &&
+        this.isManaged(tz);
       const given: IrValue = {
         type,
         value: frame.made.param(position),
@@ -284,7 +306,7 @@ partial class Lowering {
   }
 
   private readonly selfOffset(frame: Read<Frame>): int {
-    if (frame.self != undefined) {
+    if (frame.self != undefined || frame.isClosure == true) {
       return 1;
     }
 
@@ -302,13 +324,19 @@ partial class Lowering {
 
   private callValue(frame: Frame, call: CallExpr): IrValue | undefined {
     const callee = call.callee;
+    if (this.isSuperName(call)) {
+      return this.superCall(frame, call);
+    }
+
+    const superMember = this.isSuperMember(call);
+    if (superMember != undefined) {
+      return this.superMethodCall(frame, call, superMember);
+    }
     if (callee.kind == ExprKind.Member) {
       return this.memberCall(frame, call);
     }
     if (callee.kind != ExprKind.Name) {
-      this.notLowered(frame.module, call.loc, "this call");
-
-      return undefined;
+      return this.closureCall(frame, call, callee);
     }
 
     return this.namedCall(frame, call, callee);
@@ -321,6 +349,15 @@ partial class Lowering {
   ): IrValue | undefined {
     const target = this.values.valueTargetOf(callee, frame.module);
     const opened = this.program.modules[target?.module ?? -1];
+    const isValue =
+      target != undefined &&
+      opened != undefined &&
+      !opened.source.isLibrary &&
+      (target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter);
+    if (isValue) {
+      return this.closureCall(frame, call, callee);
+    }
+
     const isOwn =
       target != undefined &&
       target.kind == SymbolKind.Function &&
@@ -379,10 +416,61 @@ partial class Lowering {
     const name = this.functionName(target.module, target.loc);
     const declared = this.ir.declare(name, result, params);
     const value = frame.made.call(declared, args);
+    const answer: IrValue = { type: result, value, tz: shape.result };
+    const made = this.callResult(frame, answer, calleeDecl, kept);
+
+    if (opened != undefined && opened.source.isLibrary && calleeDecl != undefined) {
+      this.instanceWanted({
+        module: target.module,
+        fn: calleeDecl,
+        name,
+        params: [],
+        args: [],
+      });
+    }
 
     this.droppedAll(frame, kept);
 
-    return { type: result, value, tz: shape.result, owned: true };
+    return made;
+  }
+
+  private readonly isLending(fn: FunctionDecl | undefined): boolean {
+    const ref = fn?.returnType;
+    if (ref == undefined) {
+      return false;
+    }
+
+    return this.isLendingRef(ref);
+  }
+
+  private readonly isLendingRef(ref: TypeRef): boolean {
+    if (ref.form.kind == TypeRefKind.Union) {
+      return ref.args.some((part) => this.isLendingRef(part));
+    }
+
+    return ref.args.length == 1 && kLendingResults.includes(ref.name);
+  }
+
+  private callResult(
+    frame: Read<Frame>,
+    answer: IrValue,
+    decl: FunctionDecl | undefined,
+    temporaries: Read<IrValue[]>,
+  ): IrValue {
+    const { type, value, tz } = answer;
+    if (!this.isLending(decl)) {
+      return { type, value, tz, owned: true };
+    }
+
+    const lent: IrValue = { type, value, tz, owned: false };
+    const isFromTemporary = temporaries.some(
+      (one) => one.owned == true && this.isManaged(one.tz),
+    );
+    if (!isFromTemporary) {
+      return lent;
+    }
+
+    return this.owning(frame, lent);
   }
 
   private shapeProblem(shape: Read<FunctionShape>): string {

@@ -1,0 +1,91 @@
+// What lower does without counting: a local that only looks at a value (an
+// element, a field, the result of a Read<T> method), the array a for...of goes
+// over, a field given away from an owned value, and replace / take, which hand
+// the old value over. Nothing leaks and nothing is freed twice.
+import { replace, take } from "tz:mem";
+
+class Point {
+  public x: int;
+  public y: int;
+
+  public constructor(x: int, y: int) {
+    this.x = x;
+    this.y = y;
+  }
+}
+
+class Polygon {
+  public points: Point[];
+  public name: string;
+
+  public constructor(points: Own<Point[]>, name: string) {
+    this.points = points;
+    this.name = name;
+  }
+
+  public readonly first(): Read<Point> | undefined {
+    return this.points[0];
+  }
+
+  public readonly widest(): Read<Point> | undefined {
+    let found: Read<Point> | undefined = undefined;
+
+    for (const point of this.points) {
+      if (found == undefined || point.x > found.x) {
+        found = point;
+      }
+    }
+
+    return found;
+  }
+}
+
+type Draft = { points: Point[]; label: string };
+type Shape = { points: Point[]; label: string; size: int };
+
+function finished(draft: Own<Draft>): Shape {
+  const size = draft.points.length;
+
+  return { points: draft.points, label: draft.label, size };
+}
+
+function total(polygon: Read<Polygon>): int {
+  let sum = 0;
+
+  for (const point of polygon.points) {
+    sum += point.x + point.y;
+  }
+
+  return sum;
+}
+
+function main(): void {
+  const polygon = new Polygon([new Point(1, 2), new Point(5, 1), new Point(3, 3)], "tri");
+  const head = polygon.points[0];
+  const first = polygon.first();
+  const widest = polygon.widest();
+
+  console.log(head?.x, first?.y, widest?.x, total(polygon));
+
+  const draft: Draft = { points: [new Point(0, 0), new Point(1, 1)], label: "line" };
+  const shape = finished(draft);
+
+  console.log(shape.label, shape.size, shape.points.length);
+
+  const old = replace(polygon.points, [new Point(9, 9)]);
+
+  console.log(old.length, polygon.points.length, polygon.first()?.x);
+
+  const taken = take(polygon.points);
+
+  console.log(taken.length, polygon.points.length, polygon.first()?.x);
+
+  for (let round = 0; round < 3; round++) {
+    const again = new Polygon([new Point(round, round)], "one");
+    const seen = again.first();
+
+    console.log(seen?.x, again.widest()?.y);
+  }
+}
+
+main();

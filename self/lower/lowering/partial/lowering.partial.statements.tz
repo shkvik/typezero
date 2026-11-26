@@ -17,11 +17,13 @@ import { Module } from "../../../program/module/types/module.types.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { LLVMBlock } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
-import { kDebugger, kNoOwner } from "../const/lowering.const.tz";
+import { kBooleanType, kDebugger, kNoOwner } from "../const/lowering.const.tz";
 import { Frame, IrValue, LoopTarget, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private statement(frame: Frame, statement: Stmt): void {
+    this.statementLoc = statement.loc;
+
     switch (statement.kind) {
       case StmtKind.Expr:
         return this.discarded(frame, statement.expr);
@@ -154,6 +156,10 @@ partial class Lowering {
 
   private variables(frame: Frame, statement: VarDeclStmt): void {
     for (const decl of statement.decls) {
+      if (!statement.isConst) {
+        this.letKeys.add(this.placeKey(frame.module, decl.loc));
+      }
+
       this.variable(frame, decl);
     }
   }
@@ -171,7 +177,7 @@ partial class Lowering {
       return frame.made.store(this.ir.zero(place.type), place.pointer);
     }
 
-    const given = this.value(frame, init);
+    const given = this.wantedValue(frame, init, place.tz);
     if (given == undefined) {
       return;
     }
@@ -181,7 +187,22 @@ partial class Lowering {
       return;
     }
 
-    this.stored(frame, place, value);
+    this.initialized(frame, place, value);
+  }
+
+  private initialized(frame: Read<Frame>, place: Place, value: IrValue): void {
+    const flag = place.flag;
+    if (flag == undefined) {
+      return this.stored(frame, place, value);
+    }
+    if (value.owned == true) {
+      frame.made.store(this.ir.zero(kBooleanType), flag);
+
+      return this.stored(frame, place, value);
+    }
+
+    frame.made.store(value.value, place.pointer);
+    frame.made.store(this.ir.zero(kBooleanType), flag);
   }
 
   private readonly globalOrNone(place: Place | undefined): Place | undefined {
@@ -226,8 +247,10 @@ partial class Lowering {
     }
 
     const pointer = frame.made.slot(type, decl.name);
-    const place: Place = { pointer, type, tz, owner: frame.id };
     const key = this.placeKey(frame.module, decl.loc);
+    const isBorrow = this.borrows.has(key) && this.isManaged(tz);
+    const flag = this.dropFlag(frame, isBorrow);
+    const place: Place = { pointer, type, tz, owner: frame.id, flag };
 
     frame.made.entryStore(this.ir.zero(type), pointer);
     this.places.set(key, place);
@@ -278,7 +301,8 @@ partial class Lowering {
     const isLoop =
       body.kind == StmtKind.While ||
       body.kind == StmtKind.DoWhile ||
-      body.kind == StmtKind.For;
+      body.kind == StmtKind.For ||
+      body.kind == StmtKind.ForOf;
     if (isLoop) {
       this.pendingLabel = statement.label;
 
@@ -366,11 +390,20 @@ partial class Lowering {
     if (returned == undefined) {
       return;
     }
+    if (frame.isLending == true) {
+      return this.lentReturned(frame, returned);
+    }
 
     const owned = this.owning(frame, returned);
 
     this.cleanupsTo(frame, 0);
     frame.made.returned(owned.value);
+  }
+
+  private lentReturned(frame: Read<Frame>, returned: IrValue): void {
+    this.cleanupsTo(frame, 0);
+    this.dropping(frame, returned);
+    frame.made.returned(returned.value);
   }
 
   private movedLocal(frame: Read<Frame>, given: Expr): IrValue | undefined {
@@ -385,7 +418,7 @@ partial class Lowering {
 
     const key = this.placeKey(target.module, target.loc);
     const place = this.places.get(key);
-    if (place == undefined || place.owner != frame.id) {
+    if (place == undefined || place.owner != frame.id || place.isCaptured == true) {
       return undefined;
     }
     if (place.flag != undefined || !this.isManaged(place.tz)) {

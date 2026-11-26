@@ -40,27 +40,31 @@ async function logged(i: int): Promise<void> {
   });
 }
 
-const ids = await Promise.all([create(1), create(2), create(3), create(4), create(5)]);
-console.log(ids.join(","));
-console.log(notes.size(), counts.get("created") ?? -1);
+async function main(): Promise<void> {
+  const ids = await Promise.all([create(1), create(2), create(3), create(4), create(5)]);
+  console.log(ids.join(","));
+  console.log(notes.size(), counts.get("created") ?? -1);
 
-const works: Promise<int>[] = [];
-for (let i: int = 0; i < 50; i++) works.push(work(i));
-const found = await Promise.all(works);
-let total = 0;
-for (const [key, n] of counts.entries()) {
-  if (key.startsWith("k")) total += n;
+  const works: Promise<int>[] = [];
+  for (let i: int = 0; i < 50; i++) works.push(work(i));
+  const found = await Promise.all(works);
+  let total = 0;
+  for (const [key, n] of counts.entries()) {
+    if (key.startsWith("k")) total += n;
+  }
+  console.log(total, found.every((n) => n > 0));
+
+  await Promise.all([logged(1), logged(2), logged(3)]);
+  console.log(seen.join(","), counts.get("logged") ?? -1);
+
+  console.log(notes.get("n3")?.title ?? "none", notes.get("n9")?.title ?? "none");
+  console.log(notes.has("n2"), notes.delete("n2"), notes.has("n2"), notes.delete("n2"));
+  console.log(notes.keys().sort().join(","));
+  console.log(notes.values().map((note) => note.title).sort().join(","));
+  console.log(counts.update("missing", (old) => old + 1) ?? "no key");
+  console.log(counts.getOrSet("made", () => 7), counts.getOrSet("made", () => 8));
+  notes.clear();
+  console.log(notes.size(), notes.entries().length);
 }
-console.log(total, found.every((n) => n > 0));
 
-await Promise.all([logged(1), logged(2), logged(3)]);
-console.log(seen.join(","), counts.get("logged") ?? -1);
-
-console.log(notes.get("n3")?.title ?? "none", notes.get("n9")?.title ?? "none");
-console.log(notes.has("n2"), notes.delete("n2"), notes.has("n2"), notes.delete("n2"));
-console.log(notes.keys().sort().join(","));
-console.log(notes.values().map((note) => note.title).sort().join(","));
-console.log(counts.update("missing", (old) => old + 1) ?? "no key");
-console.log(counts.getOrSet("made", () => 7), counts.getOrSet("made", () => 8));
-notes.clear();
-console.log(notes.size(), notes.entries().length);
+await main()

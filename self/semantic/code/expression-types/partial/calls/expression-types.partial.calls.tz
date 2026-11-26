@@ -24,8 +24,9 @@ import {
   kNumberErrorName,
   kNumberName,
   kPushName,
-  kTextStatics,
   kStrictGlobals,
+  kTextStatics,
+  kUnsafeModuleName,
 } from "../../const/expression-types.const.tz";
 import { DoorState } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import {
@@ -206,6 +207,9 @@ partial class ExpressionTypes {
     const type = this.functionAt(target.module, target.loc);
     if (type.kind != TypeKind.Function) {
       return this.store.plain(TypeKind.Error);
+    }
+    if (this.program.modules[target.module]?.name == kUnsafeModuleName) {
+      this.unsafeCallCheck(callee, module);
     }
     if (fn.typeParams.length > 0) {
       const generic = this.genericFunction(callee, fn, type, target);

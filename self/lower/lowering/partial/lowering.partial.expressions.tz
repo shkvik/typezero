@@ -97,6 +97,8 @@ partial class Lowering {
         return this.memberValue(frame, expr);
       case ExprKind.OptionalChain:
         return this.chainValue(frame, expr);
+      case ExprKind.Function:
+        return this.closureMade(frame, expr);
       default:
         this.notLowered(frame.module, expr.loc, `an expression #${expr.kind}`);
 
@@ -182,6 +184,17 @@ partial class Lowering {
     if (expr.name == kThisName && self != undefined) {
       return this.loaded(frame, self);
     }
+    if (this.moves.has(expr) && frame.inline == undefined) {
+      const moved = this.movedLocal(frame, expr);
+      if (moved != undefined) {
+        return moved;
+      }
+    }
+
+    const target = this.values.valueTargetOf(expr, frame.module);
+    if (target != undefined && target.kind == SymbolKind.Function) {
+      return this.functionValue(frame, expr);
+    }
 
     const place = this.namePlace(frame, expr);
     if (place == undefined) {
@@ -265,9 +278,28 @@ partial class Lowering {
   }
 
   private minus(frame: Frame, expr: UnaryExpr): IrValue | undefined {
+    const literal = this.negativeLiteral(frame, expr);
+    if (literal != undefined) {
+      return literal;
+    }
+
     const operand = this.value(frame, expr.operand);
     if (operand == undefined) {
       return undefined;
+    }
+
+    const answered = this.typeOf(expr);
+    const isWidened =
+      answered != undefined &&
+      this.isDouble(answered) &&
+      this.isInteger(operand.tz);
+    if (isWidened && answered != undefined) {
+      const wide = this.converted(frame, operand, answered, expr.loc);
+      if (wide != undefined) {
+        const value = frame.made.negated(wide.value);
+
+        return { type: wide.type, value, tz: wide.tz };
+      }
     }
 
     const given = this.proven(frame, operand);
@@ -488,6 +520,16 @@ partial class Lowering {
     if (written == undefined) {
       return this.integerValue(type, `${expr.value}`, tz);
     }
+
+    const isWide =
+      answered != undefined &&
+      this.isDouble(answered) &&
+      !written.startsWith(kHexPrefix);
+    if (isWide) {
+      const wide = this.store.plain(TypeKind.Double);
+
+      return { type: kDoubleType, value: this.ir.realOf(written), tz: wide };
+    }
     if (written.startsWith(kHexPrefix)) {
       const digits = written.slice(kHexPrefix.length);
 
@@ -495,6 +537,26 @@ partial class Lowering {
     }
 
     return this.integerValue(type, written, tz);
+  }
+
+  private negativeLiteral(frame: Read<Frame>, expr: UnaryExpr): IrValue | undefined {
+    const operand = expr.operand;
+    const answered = this.typeOf(expr);
+    if (operand.kind != ExprKind.IntLit || answered == undefined) {
+      return undefined;
+    }
+    if (!this.isDouble(answered)) {
+      return undefined;
+    }
+
+    const written = this.writtenDigits(frame, operand);
+    if (written == undefined || written.startsWith(kHexPrefix)) {
+      return undefined;
+    }
+
+    const wide = this.store.plain(TypeKind.Double);
+
+    return { type: kDoubleType, value: this.ir.realOf(`-${written}`), tz: wide };
   }
 
   private readonly writtenDigits(frame: Read<Frame>, expr: IntLitExpr): string | undefined {

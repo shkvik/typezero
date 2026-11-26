@@ -50,6 +50,10 @@ export class LiteralReader {
     this.source = source;
   }
 
+  public readonly written(start: int, end: int): string {
+    return this.source.toString("utf8", start, end);
+  }
+
   public readonly string(token: Token): DecodedText {
     const quote = this.byteAt(token.start);
     const closing = this.byteAt(token.end - 1);

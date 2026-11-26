@@ -4,38 +4,42 @@
 // `break` stops.
 import { setTimeout as wait, setImmediate as soon, setInterval as every, scheduler } from "node:timers/promises"
 
-const log = (s: string) => console.log(s)
-// A chain of microtasks, to show the turns each takes.
-void Promise.resolve().then(() => log("m1")).then(() => log("m2")).then(() => log("m3"))
-  .then(() => log("m4")).then(() => log("m5"))
-log(`timeout ${await wait(10, "value")}`)
-const n: int = await wait(1, 42)
-log(`int ${n + 1}`)
-await wait()
-log(`immediate ${await soon(true)}`)
-await scheduler.wait(5)
-await scheduler.yield()
+async function main(): Promise<void> {
+  const log = (s: string) => console.log(s)
+  // A chain of microtasks, to show the turns each takes.
+  void Promise.resolve().then(() => log("m1")).then(() => log("m2")).then(() => log("m3"))
+    .then(() => log("m4")).then(() => log("m5"))
+  log(`timeout ${await wait(10, "value")}`)
+  const n: int = await wait(1, 42)
+  log(`int ${n + 1}`)
+  await wait()
+  log(`immediate ${await soon(true)}`)
+  await scheduler.wait(5)
+  await scheduler.yield()
 
-// Against the timers of the globals: the same lists, so a promise of 20 ms
-// set after a callback of 20 ms comes after it.
-setTimeout(() => log("callback 20"), 20)
-void wait(20).then(() => log("promise 20"))
-setTimeout(() => log("callback 10"), 10)
-await wait(40)
+  // Against the timers of the globals: the same lists, so a promise of 20 ms
+  // set after a callback of 20 ms comes after it.
+  setTimeout(() => log("callback 20"), 20)
+  void wait(20).then(() => log("promise 20"))
+  setTimeout(() => log("callback 10"), 10)
+  await wait(40)
 
-// Next to microtasks.
-void wait(5, "later").then((v) => log(v))
-void Promise.resolve().then(() => log("x1")).then(() => log("x2")).then(() => log("x3"))
-await wait(20)
+  // Next to microtasks.
+  void wait(5, "later").then((v) => log(v))
+  void Promise.resolve().then(() => log("x1")).then(() => log("x2")).then(() => log("x3"))
+  await wait(20)
 
-// An interval as an async iterator: `break` stops it.
-let count = 0
-for await (const tick of every(5, "tick")) {
-  count++
-  log(`${tick} ${count}`)
-  if (count == 3) break
+  // An interval as an async iterator: `break` stops it.
+  let count = 0
+  for await (const tick of every(5, "tick")) {
+    count++
+    log(`${tick} ${count}`)
+    if (count == 3) break
+  }
+
+  // An unref()'d timer does not keep the program alive.
+  void wait(10000, undefined, { ref: false }).then(() => log("never"))
+  log("end")
 }
 
-// An unref()'d timer does not keep the program alive.
-void wait(10000, undefined, { ref: false }).then(() => log("never"))
-log("end")
+await main()

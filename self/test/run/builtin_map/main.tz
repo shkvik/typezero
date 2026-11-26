@@ -1,0 +1,56 @@
+// The built-in Map is the HashMap of tz:map (library/core/map.tz): the
+// compiler turns its methods, size, keys, values and for…of into it.
+class Point {
+  public readonly x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+function words(): string {
+  const counts = new Map<string, int>();
+
+  for (const word of ["b", "a", "b", "c", "a", "b"]) {
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+
+  const parts: string[] = [];
+
+  for (const [word, count] of counts) {
+    parts.push(`${word}=${count}`);
+  }
+
+  return `${counts.size} ${parts.join(" ")} ${counts.has("z")}`;
+}
+
+function listed(): string {
+  const groups = new Map<int, string[]>();
+
+  groups.getOrInsert(1, []).push("one");
+  groups.getOrInsert(2, []).push("two");
+  groups.getOrInsert(1, []).push("uno");
+  groups.delete(2);
+
+  const keys = Array.from(groups.keys());
+  const values = Array.from(groups.values());
+
+  return `${keys.join(",")} ${values.map((items) => items.join("+")).join(",")}`;
+}
+
+function copied(): int {
+  const first = new Map<string, Point>();
+
+  first.set("a", new Point(1));
+  first.set("b", new Point(2));
+
+  const second = new Map(first);
+
+  second.delete("a");
+
+  return first.size * 10 + second.size;
+}
+
+console.log(words());
+console.log(listed());
+console.log(copied());

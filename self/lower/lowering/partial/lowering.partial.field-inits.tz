@@ -1,0 +1,267 @@
+import {
+  ClassField,
+  FieldKind,
+  FieldPresence,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import { InstanceField } from "../../../program/expression-answers/types/expression-answers.types.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { IrCallee } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kPointerType,
+  kTrue,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private fieldsInitialized(frame: Read<Frame>, type: Type, object: LLVMValue): void {
+    const init = this.initFunction(type);
+    if (init != undefined) {
+      frame.made.call(init, [object]);
+    }
+  }
+
+  private initFunction(type: Type): IrCallee | undefined {
+    const known = this.initFunctions.get(type.id);
+    if (known != undefined || this.noInits.has(type.id)) {
+      return known;
+    }
+
+    const made = this.initMade(type);
+    if (made == undefined) {
+      this.noInits.add(type.id);
+
+      return undefined;
+    }
+
+    this.initFunctions.set(type.id, made);
+
+    return made;
+  }
+
+  private initMade(type: Type): IrCallee | undefined {
+    const decl = this.values.classDeclOf(type);
+    if (type.kind != TypeKind.Instance || decl == undefined) {
+      return undefined;
+    }
+    if (decl.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const parent = this.classParent(type);
+    const parentInit = this.parentInit(parent);
+    const isBare = this.ownConstructor(type) == undefined;
+    const fields = decl.fields.filter((field) => this.isInitialized(field, isBare));
+    if (fields.length == 0 && parentInit == undefined) {
+      return undefined;
+    }
+
+    const name = this.ir.uniqueName(`tz.init.${decl.name ?? ""}.`);
+    const made = new IrFunction(this.ir, name, kVoidType, [kPointerType]);
+    const object = made.param(0);
+    const pointer = made.slot(kPointerType, "this");
+    const self: Place = { pointer, type: kPointerType, tz: type, owner: 0 };
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: type.module,
+      loops: [],
+      scopes: [],
+      self,
+      place: decl.name ?? "",
+    };
+
+    made.store(object, pointer);
+
+    if (parentInit != undefined) {
+      made.call(parentInit, [object]);
+    }
+
+    this.openScope(frame);
+
+    for (const field of fields) {
+      this.fieldInitialized(frame, type, object, field);
+    }
+
+    this.closeScope(frame);
+    made.finishVoid();
+
+    return made.callee;
+  }
+
+  private parentInit(parent: Type | undefined): IrCallee | undefined {
+    if (parent == undefined) {
+      return undefined;
+    }
+
+    return this.initFunction(parent);
+  }
+
+  private readonly isInitialized(field: ClassField, isBare: boolean): boolean {
+    if (field.form != FieldKind.Instance) {
+      return false;
+    }
+    if (field.init != undefined) {
+      return true;
+    }
+
+    return isBare && field.presence != FieldPresence.Optional;
+  }
+
+  private fieldInitialized(
+    frame: Frame,
+    type: Type,
+    object: LLVMValue,
+    field: ClassField,
+  ): void {
+    const place = this.fieldAt(frame, object, type, field.name, field.loc);
+    if (place == undefined) {
+      return;
+    }
+
+    const value = this.fieldStart(frame, field, place.tz);
+    if (value == undefined) {
+      return;
+    }
+
+    const owned = this.owning(frame, value);
+
+    frame.made.store(owned.value, place.pointer);
+  }
+
+  private fieldStart(frame: Frame, field: ClassField, type: Type): IrValue | undefined {
+    const init = field.init;
+    if (init == undefined) {
+      return this.emptyFieldValue(frame, type, field.loc);
+    }
+
+    const given = this.wantedValue(frame, init, type);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    return this.converted(frame, given, type, init.loc);
+  }
+
+  private emptyFieldValue(frame: Frame, type: Type, loc: int): IrValue | undefined {
+    const first = this.firstLiteral(type);
+    if (first != undefined) {
+      return this.literalValue(type, first);
+    }
+    if (this.optionalInner(type) != undefined) {
+      return this.undefinedValue(type);
+    }
+
+    switch (type.kind) {
+      case TypeKind.Dict:
+        return this.newDict(frame, type, loc);
+      case TypeKind.Instance:
+        return this.emptyInstance(frame, type, loc);
+      case TypeKind.Object:
+        return this.emptyObject(frame, type, loc);
+      default:
+        return this.emptyValueOf(frame, type, loc);
+    }
+  }
+
+  private readonly firstLiteral(type: Type): Type | undefined {
+    if (type.kind == TypeKind.Literal) {
+      return type;
+    }
+    if (type.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    const first = type.parts[0];
+    const isLiterals = type.parts.every((part) => part.kind == TypeKind.Literal);
+    if (!isLiterals) {
+      return undefined;
+    }
+
+    return first;
+  }
+
+  private literalValue(type: Type, literal: Type): IrValue | undefined {
+    if (literal.kind != TypeKind.Literal) {
+      return undefined;
+    }
+
+    const plain = this.widened(type);
+    const ir = this.irType(plain);
+    if (ir == undefined) {
+      return undefined;
+    }
+
+    switch (literal.literal) {
+      case LiteralKind.String:
+        return this.stringValue(literal.text);
+      case LiteralKind.Int:
+        return this.integerValue(ir, literal.text, plain);
+      case LiteralKind.Boolean:
+        return this.booleanValue(literal.text == kTrue);
+      default:
+        return undefined;
+    }
+  }
+
+  private emptyInstance(frame: Frame, type: Type, loc: int): IrValue | undefined {
+    const layout = this.layoutOf(type);
+    if (layout == undefined || this.ownConstructor(type) != undefined) {
+      this.notLowered(frame.module, loc, "an empty value of this class");
+
+      return undefined;
+    }
+
+    const object = this.allocated(frame, layout);
+
+    this.fieldsInitialized(frame, type, object);
+
+    return { type: kPointerType, value: object, tz: type, owned: true };
+  }
+
+  private emptyObject(frame: Frame, type: Type, loc: int): IrValue | undefined {
+    const layout = this.layoutOf(type);
+    if (layout == undefined || type.kind != TypeKind.Object) {
+      this.notLowered(frame.module, loc, "an empty value of this object");
+
+      return undefined;
+    }
+
+    const object = this.allocated(frame, layout);
+
+    for (const field of layout.shape.fields) {
+      this.emptyFieldStored(frame, type, object, field, loc);
+    }
+
+    return { type: kPointerType, value: object, tz: type, owned: true };
+  }
+
+  private emptyFieldStored(
+    frame: Frame,
+    type: Type,
+    object: LLVMValue,
+    field: Read<InstanceField>,
+    loc: int,
+  ): void {
+    const place = this.fieldAt(frame, object, type, field.name, loc);
+    if (place == undefined) {
+      return;
+    }
+
+    const value = this.emptyFieldValue(frame, place.tz, loc);
+    if (value == undefined) {
+      return;
+    }
+
+    const owned = this.owning(frame, value);
+
+    frame.made.store(owned.value, place.pointer);
+  }
+}

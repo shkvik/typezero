@@ -33,7 +33,7 @@ console.log(contact({ name: "Ann", email: "ANN@X.ORG" }), contact({ name: "Bob" 
 
 // Ranges and lengths prove indices, as the condition would.
 function validIndex(a: int[], k: int) { return k >= 0 && k < a.length }
-function bump(a: int[], k: int) {
+function bump(a: Own<int[]>, k: int) {
   if (validIndex(a, k)) a[k] += 100
   return a
 }

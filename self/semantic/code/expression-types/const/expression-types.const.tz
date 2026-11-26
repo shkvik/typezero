@@ -380,3 +380,8 @@ export const kBitCounts = [
   "onesCount32",
   "onesCount64",
 ];
+export const kUnsafeReason = "reason";
+export const kUnsafeModuleName = "tz:unsafe";
+export const kUnsafeUsesName = "uses";
+export const kUnsafeMemory = "Memory";
+export const kUnsafeUses = ["Memory", "Cell", "Foreign"];

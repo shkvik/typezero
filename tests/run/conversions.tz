@@ -1,30 +1,34 @@
 // same-as-node
 // Converting numbers works as in JavaScript: there is no `as`.
 
-// A double becomes an int through rounding, which says what happens to the
-// fraction (bitwise operators take only integers, docs/numbers.md).
-let f: double = 1.9
-console.log(Math.trunc(f).toInt(), Math.trunc(-f).toInt(), Math.floor(-f).toInt(), Math.round(f).toInt())
-const n: int = Math.trunc(f * 10).toInt()
-console.log(n, Math.trunc(2147483648.5).toInt(), Math.trunc(-1e10).toInt())
+function main(): void {
+  // A double becomes an int through rounding, which says what happens to the
+  // fraction (bitwise operators take only integers, docs/numbers.md).
+  let f: double = 1.9
+  console.log(Math.trunc(f).toInt(), Math.trunc(-f).toInt(), Math.floor(-f).toInt(), Math.round(f).toInt())
+  const n: int = Math.trunc(f * 10).toInt()
+  console.log(n, Math.trunc(2147483648.5).toInt(), Math.trunc(-1e10).toInt())
 
-// Math functions return doubles, and integers where an int or a long is
-// expected.
-const values: double[] = [2.5, -2.5, 0.5, -0.5, -0.4, 0.49999999999999994, 1.5, -0, 1e21]
-for (const v of values)
-  console.log(v, Math.floor(v), Math.ceil(v), Math.round(v), Math.trunc(v))
-const rounded: int = Math.round(1234.5).toInt()
-const floored: int = Math.floor(-1e15 - 0.5).toInt()
-const cents: int = Math.round(19.99 * 100).toInt()
-console.log(rounded, floored, cents, rounded + 1)
-const count: int = 7
-console.log(Math.floor(count.toDouble()), Math.round(count.toDouble()))
-const big: int = 5000000000
-const small: int = big - 4000000000
-console.log(small)
+  // Math functions return doubles, and integers where an int or a long is
+  // expected.
+  const values: double[] = [2.5, -2.5, 0.5, -0.5, -0.4, 0.49999999999999994, 1.5, -0, 1e21]
+  for (const v of values)
+    console.log(v, Math.floor(v), Math.ceil(v), Math.round(v), Math.trunc(v))
+  const rounded: int = Math.round(1234.5).toInt()
+  const floored: int = Math.floor(-1e15 - 0.5).toInt()
+  const cents: int = Math.round(19.99 * 100).toInt()
+  console.log(rounded, floored, cents, rounded + 1)
+  const count: int = 7
+  console.log(Math.floor(count.toDouble()), Math.round(count.toDouble()))
+  const big: int = 5000000000
+  const small: int = big - 4000000000
+  console.log(small)
 
-// An int becomes a double only explicitly; beyond 2^53 it rounds, as every
-// number does in JavaScript.
-const huge: int = 9007199254740993
-const asDouble: double = huge.toDouble()
-console.log(asDouble, huge.toDouble() + 0.5, huge.toDouble() * 2.0 > 1e16)
+  // An int becomes a double only explicitly; beyond 2^53 it rounds, as every
+  // number does in JavaScript.
+  const huge: int = 9007199254740993
+  const asDouble: double = huge.toDouble()
+  console.log(asDouble, huge.toDouble() + 0.5, huge.toDouble() * 2.0 > 1e16)
+}
+
+main()

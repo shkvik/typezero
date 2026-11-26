@@ -1,43 +1,48 @@
 // Integer arithmetic that may not fit its type is an error, in constants too
 // (errors/overflow_input.tz, errors/constants.tz).
-let big: int = 9223372036854775807
-console.log(big, big / 2 + 1)
-let small: int = -9223372036854775808
-console.log(small, small / 2 - 1)
 
-// Integer division truncates; the remainder takes the sign of the dividend.
-console.log(7 / 2, -7 / 2, 7 % 3, -7 % 3)
-let min: int = -9223372036854775808
-let minusOne: int = -1
-console.log(min / 2, min % minusOne)
+function main(): void {
+  let big: int = 9223372036854775807
+  console.log(big, big / 2 + 1)
+  let small: int = -9223372036854775808
+  console.log(small, small / 2 - 1)
 
-// Literals take the type the context expects.
-let half: double = 1 / 2
-console.log(half)
-let wide: int = 2147483647 + 1
-console.log(wide)
+  // Integer division truncates; the remainder takes the sign of the dividend.
+  console.log(7 / 2, -7 / 2, 7 % 3, -7 % 3)
+  let min: int = -9223372036854775808
+  let minusOne: int = -1
+  console.log(min / 2, min % minusOne)
 
-// int is 64 bits; it becomes a double only explicitly.
-let n: int = 10
-let l: int = 3000000000
-console.log(n + l)
-let x: double = n.toDouble() * 1.5
-console.log(x)
+  // Literals take the type the context expects.
+  let half: double = 1 / 2
+  console.log(half)
+  let wide: int = 2147483647 + 1
+  console.log(wide)
 
-// Bitwise operators; shift counts are masked like in JavaScript.
-console.log(6 & 3, 6 | 3, 6 ^ 3, ~5)
-console.log(1 << 4, -16 >> 2, 1 << 33)
+  // int is 64 bits; it becomes a double only explicitly.
+  let n: int = 10
+  let l: int = 3000000000
+  console.log(n + l)
+  let x: double = n.toDouble() * 1.5
+  console.log(x)
 
-// Compound assignment, increment and decrement.
-let c: int = 5
-c += 3
-c -= 1
-c *= 2
-c /= 3
-c %= 3
-console.log(c)
-let d: double = 1
-d /= 4
-console.log(d)
-let i: int = 0
-console.log(i++, i, ++i, i--, --i)
+  // Bitwise operators; shift counts are masked like in JavaScript.
+  console.log(6 & 3, 6 | 3, 6 ^ 3, ~5)
+  console.log(1 << 4, -16 >> 2, 1 << 33)
+
+  // Compound assignment, increment and decrement.
+  let c: int = 5
+  c += 3
+  c -= 1
+  c *= 2
+  c /= 3
+  c %= 3
+  console.log(c)
+  let d: double = 1
+  d /= 4
+  console.log(d)
+  let i: int = 0
+  console.log(i++, i, ++i, i--, --i)
+}
+
+main()

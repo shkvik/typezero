@@ -71,6 +71,56 @@ partial class ExpressionTypes {
     }
   }
 
+  private readonly arrayNew(
+    expr: NewExpr,
+    name: string,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    if (name != kArrayClass || expr.args.length != 1) {
+      return undefined;
+    }
+
+    const target = this.targetOfUse(expr.loc, name, module);
+    if (target != undefined && !this.modules.isLibraryModule(target.module)) {
+      return undefined;
+    }
+
+    const element = this.arrayNewElement(expr, wanted, module);
+    const length = expr.args[0];
+    if (element == undefined || length == undefined) {
+      return undefined;
+    }
+
+    this.typed(length.expr, this.store.integer(64, false), module);
+
+    return this.store.arrayOf(element);
+  }
+
+  private readonly arrayNewElement(
+    expr: NewExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const written = expr.typeArgs[0];
+    if (written != undefined) {
+      const context: TypeContext = {
+        module,
+        bindings: new Map<int, Type>(),
+        place: TypePlace.Plain,
+      };
+
+      return this.resolver.value(written, context);
+    }
+
+    const goal = this.types.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    return goal.item;
+  }
+
   private readonly newArrayCheck(
     expr: NewExpr,
     name: string,

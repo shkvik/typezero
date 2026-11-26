@@ -5,140 +5,144 @@
 // timeout of a fetch whose response or body comes late, and stop().
 import { Server } from "tz:http"
 
-const enc = new TextEncoder()
-const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
-  const url = new URL(req.url)
-  switch (url.pathname()) {
-    case "/hello":
-      return new Response(`hello ${url.searchParams.get("name") ?? "world"}`)
-    case "/users": {
-      const user = (await req.json()).unwrapOr(null)
-      return Response.json({ id: 1, user, method: req.method }, { status: 201 })
-    }
-    case "/boom":
-      return new Response("boom", { status: 500 })
-    case "/stream":
-      return Response.stream(new ReadableStream({
-        start: c => {
-          c.enqueue(enc.encode("one "))
-          c.enqueue(enc.encode("two "))
-          c.close()
-        },
-      }))
-    case "/count": {
-      let total = 0
-      const body = req.body()
-      if (body != undefined) for await (const chunk of body) total += chunk.isOk() ? chunk.value.length : 0
-      return new Response(`${total} bytes`)
-    }
-    case "/echo":
-      return new Response(must(await req.bytes()), {
-        headers: { "x-got": req.headers.get("x-sent") ?? "-", "content-type": "application/octet-stream" },
-      })
-    case "/cookies":
-      return new Response("c", { headers: [["set-cookie", "a=1"], ["set-cookie", "b=2"]] })
-    case "/redirect":
-      return Response.redirect(new URL("/final", req.url), 302)
-    case "/loop":
-      return new Response("", { status: 301, headers: { location: "/loop" } })
-    case "/final":
-      return new Response(`final ${req.method}`)
-    case "/empty":
-      return new Response(undefined, { status: 204 })
-    case "/slow":
-      await new Promise<void>(resolve => setTimeout(resolve, 300))
-      return new Response("slow")
-    case "/trickle":
-      return Response.stream(new ReadableStream({
-        start: c => {
-          c.enqueue(enc.encode("first "))
-        },
-        pull: async c => {
-          await new Promise<void>(resolve => setTimeout(resolve, 300))
-          c.enqueue(enc.encode("late"))
-          c.close()
-        },
-      }))
-  }
-  return new Response("not found", { status: 404, statusText: "Nope" })
-})
-const started = server.listen()
-if (started.isErr()) {
-  console.log("cannot listen:", started.error.message)
-  process.exit(1)
-}
-const listening = started.value
-const base = `http://127.0.0.1:${listening.port}`
-const port = (s: string) => s.replaceAll(String(listening.port), "PORT")
-
-let r = must(await fetch(`${base}/hello?name=tz`))
-console.log(r.status, r.ok, r.statusText, r.headers.get("content-type"), must(await r.text()))
-r = must(await fetch(`${base}/users`, {
-  method: "POST",
-  body: JSON.stringify({ name: "Ann" }),
-  headers: { "content-type": "application/json" },
-}))
-console.log(r.status, await r.json())
-r = must(await fetch(`${base}/boom`))
-console.log(r.status, must(await r.text()))
-r = must(await fetch(`${base}/missing`))
-console.log(r.status, r.statusText, r.ok, must(await r.text()))
-r = must(await fetch(`${base}/stream`))
-console.log(r.status, must(await r.text()))
-r = must(await fetch(`${base}/count`, { method: "POST", body: "hello world" }))
-console.log(must(await r.text()))
-r = must(await fetch(`${base}/count`, {
-  method: "PUT",
-  body: new ReadableStream({
-    start: c => {
-      c.enqueue(enc.encode("abc"))
-      c.enqueue(enc.encode("defg"))
-      c.close()
-    },
-  }),
-  duplex: "half",
-}))
-console.log(must(await r.text()))
-r = must(await fetch(`${base}/echo`, { method: "POST", body: new Uint8Array([1, 2, 255]), headers: { "x-sent": "yes" } }))
-console.log(r.headers.get("x-got"), must(await r.bytes()))
-r = must(await fetch(`${base}/cookies`))
-console.log(r.headers.getSetCookie(), must(await r.text()))
-
-r = must(await fetch(`${base}/redirect`, { method: "POST", body: "x" }))
-console.log(r.status, r.redirected, port(r.url), must(await r.text()))
-r = must(await fetch(`${base}/redirect`, { redirect: "manual" }))
-console.log(r.status, port(r.headers.get("location") ?? ""), r.redirected)
-must(await r.arrayBuffer())
-for (const path of ["/redirect", "/loop"]) {
-  const failed = await fetch(`${base}${path}`, { redirect: path == "/loop" ? "follow" : "error" })
-  if (failed.isErr()) console.log(failed.error.kind, failed.error.code)
-}
-r = must(await fetch(`${base}/empty`))
-console.log(r.status, r.body() == undefined, JSON.stringify(must(await r.text())))
-r = must(await fetch(`${base}/hello`, { method: "HEAD" }))
-console.log(r.status, JSON.stringify(must(await r.text())))
-
-const names = ["a", "b", "c", "d", "e", "f"]
-console.log(await Promise.all(names.map(async n => must(await must(await fetch(`${base}/hello?name=${n}`)).text()))))
-
-const quick = must(await fetch(`${base}/hello?name=quick`, { timeout: 5000 }))
-console.log(must(await quick.text()))
-const late = await fetch(`${base}/slow`, { timeout: 50 })
-if (late.isErr()) console.log(late.error.kind, late.error.code, late.error.message)
-const trickle = must(await fetch(`${base}/trickle`, { timeout: 100 }))
-const lateBody = await trickle.text()
-if (lateBody.isErr())
-  console.log(trickle.status, lateBody.error.kind, lateBody.error.code, lateBody.error.message)
-
-await listening.stop()
-const refused = await fetch(`http://127.0.0.1:${listening.port}/hello`)
-if (refused.isErr())
-  console.log(refused.error.kind, refused.error.code, port(refused.error.message))
-
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)
   }
   return r.value
 }
+
+async function main(): Promise<void> {
+  const enc = new TextEncoder()
+  const server = new Server({ port: 0, hostname: "127.0.0.1" }, async req => {
+    const url = new URL(req.url)
+    switch (url.pathname()) {
+      case "/hello":
+        return new Response(`hello ${url.searchParams.get("name") ?? "world"}`)
+      case "/users": {
+        const user = (await req.json()).unwrapOr(null)
+        return Response.json({ id: 1, user, method: req.method }, { status: 201 })
+      }
+      case "/boom":
+        return new Response("boom", { status: 500 })
+      case "/stream":
+        return Response.stream(new ReadableStream({
+          start: c => {
+            c.enqueue(enc.encode("one "))
+            c.enqueue(enc.encode("two "))
+            c.close()
+          },
+        }))
+      case "/count": {
+        let total = 0
+        const body = req.body()
+        if (body != undefined) for await (const chunk of body) total += chunk.isOk() ? chunk.value.length : 0
+        return new Response(`${total} bytes`)
+      }
+      case "/echo":
+        return new Response(must(await req.bytes()), {
+          headers: { "x-got": req.headers.get("x-sent") ?? "-", "content-type": "application/octet-stream" },
+        })
+      case "/cookies":
+        return new Response("c", { headers: [["set-cookie", "a=1"], ["set-cookie", "b=2"]] })
+      case "/redirect":
+        return Response.redirect(new URL("/final", req.url), 302)
+      case "/loop":
+        return new Response("", { status: 301, headers: { location: "/loop" } })
+      case "/final":
+        return new Response(`final ${req.method}`)
+      case "/empty":
+        return new Response(undefined, { status: 204 })
+      case "/slow":
+        await new Promise<void>(resolve => setTimeout(resolve, 300))
+        return new Response("slow")
+      case "/trickle":
+        return Response.stream(new ReadableStream({
+          start: c => {
+            c.enqueue(enc.encode("first "))
+          },
+          pull: async c => {
+            await new Promise<void>(resolve => setTimeout(resolve, 300))
+            c.enqueue(enc.encode("late"))
+            c.close()
+          },
+        }))
+    }
+    return new Response("not found", { status: 404, statusText: "Nope" })
+  })
+  const started = server.listen()
+  if (started.isErr()) {
+    console.log("cannot listen:", started.error.message)
+    process.exit(1)
+  }
+  const listening = started.value
+  const base = `http://127.0.0.1:${listening.port}`
+  const port = (s: string) => s.replaceAll(String(listening.port), "PORT")
+
+  let r = must(await fetch(`${base}/hello?name=tz`))
+  console.log(r.status, r.ok, r.statusText, r.headers.get("content-type"), must(await r.text()))
+  r = must(await fetch(`${base}/users`, {
+    method: "POST",
+    body: JSON.stringify({ name: "Ann" }),
+    headers: { "content-type": "application/json" },
+  }))
+  console.log(r.status, await r.json())
+  r = must(await fetch(`${base}/boom`))
+  console.log(r.status, must(await r.text()))
+  r = must(await fetch(`${base}/missing`))
+  console.log(r.status, r.statusText, r.ok, must(await r.text()))
+  r = must(await fetch(`${base}/stream`))
+  console.log(r.status, must(await r.text()))
+  r = must(await fetch(`${base}/count`, { method: "POST", body: "hello world" }))
+  console.log(must(await r.text()))
+  r = must(await fetch(`${base}/count`, {
+    method: "PUT",
+    body: new ReadableStream({
+      start: c => {
+        c.enqueue(enc.encode("abc"))
+        c.enqueue(enc.encode("defg"))
+        c.close()
+      },
+    }),
+    duplex: "half",
+  }))
+  console.log(must(await r.text()))
+  r = must(await fetch(`${base}/echo`, { method: "POST", body: new Uint8Array([1, 2, 255]), headers: { "x-sent": "yes" } }))
+  console.log(r.headers.get("x-got"), must(await r.bytes()))
+  r = must(await fetch(`${base}/cookies`))
+  console.log(r.headers.getSetCookie(), must(await r.text()))
+
+  r = must(await fetch(`${base}/redirect`, { method: "POST", body: "x" }))
+  console.log(r.status, r.redirected, port(r.url), must(await r.text()))
+  r = must(await fetch(`${base}/redirect`, { redirect: "manual" }))
+  console.log(r.status, port(r.headers.get("location") ?? ""), r.redirected)
+  must(await r.arrayBuffer())
+  for (const path of ["/redirect", "/loop"]) {
+    const failed = await fetch(`${base}${path}`, { redirect: path == "/loop" ? "follow" : "error" })
+    if (failed.isErr()) console.log(failed.error.kind, failed.error.code)
+  }
+  r = must(await fetch(`${base}/empty`))
+  console.log(r.status, r.body() == undefined, JSON.stringify(must(await r.text())))
+  r = must(await fetch(`${base}/hello`, { method: "HEAD" }))
+  console.log(r.status, JSON.stringify(must(await r.text())))
+
+  const names = ["a", "b", "c", "d", "e", "f"]
+  console.log(await Promise.all(names.map(async n => must(await must(await fetch(`${base}/hello?name=${n}`)).text()))))
+
+  const quick = must(await fetch(`${base}/hello?name=quick`, { timeout: 5000 }))
+  console.log(must(await quick.text()))
+  const late = await fetch(`${base}/slow`, { timeout: 50 })
+  if (late.isErr()) console.log(late.error.kind, late.error.code, late.error.message)
+  const trickle = must(await fetch(`${base}/trickle`, { timeout: 100 }))
+  const lateBody = await trickle.text()
+  if (lateBody.isErr())
+    console.log(trickle.status, lateBody.error.kind, lateBody.error.code, lateBody.error.message)
+
+  await listening.stop()
+  const refused = await fetch(`http://127.0.0.1:${listening.port}/hello`)
+  if (refused.isErr())
+    console.log(refused.error.kind, refused.error.code, port(refused.error.message))
+}
+
+await main()

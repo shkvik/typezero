@@ -61,7 +61,7 @@ export class Ledger {
     this.closed = new Set<Date>()
   }
 
-  note(day: Date, text: string) {
+  note(day: Own<Date>, text: string) {
     const list = this.byDay.get(day)
     if (list == undefined) this.byDay.set(day, [text])
     else list.push(text)

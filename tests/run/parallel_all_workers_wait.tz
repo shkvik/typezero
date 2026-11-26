@@ -10,18 +10,6 @@
 import { Server } from "tz:http"
 import { Http2Connection, Http2Client } from "tz:http2"
 
-const options = { port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } }
-const server = new Server(options, request => {
-  const path = new URL(request.url).pathname()
-  if (path == "/slow") {
-    const start = performance.now()
-    let spins = 0
-    while (performance.now() - start < 2) spins++
-    return new Response(`slow ${spins > 0}`)
-  }
-  return new Response("fast")
-})
-
 async function call(connection: Http2Connection, path: string): Promise<boolean> {
   const opened = await connection.request({ method: "GET", path })
   if (opened.isErr()) return false
@@ -52,19 +40,35 @@ async function visit(url: string): Promise<int> {
   return results.filter(ok => ok).length
 }
 
-const listened = server.listen()
-if (listened.isErr()) {
-  console.log(listened.error.message)
-  process.exit(1)
+async function main(): Promise<void> {
+  const options = { port: 0, hostname: "127.0.0.1", http2: { enabled: true, cleartext: true } }
+  const server = new Server(options, request => {
+    const path = new URL(request.url).pathname()
+    if (path == "/slow") {
+      const start = performance.now()
+      let spins = 0
+      while (performance.now() - start < 2) spins++
+      return new Response(`slow ${spins > 0}`)
+    }
+    return new Response("fast")
+  })
+
+  const listened = server.listen()
+  if (listened.isErr()) {
+    console.log(listened.error.message)
+    process.exit(1)
+  }
+  const listening = listened.value
+  const url = `http://127.0.0.1:${listening.port}`
+  let answered = 0
+  for (let round = 0; round < 60; round++) {
+    const visits: Promise<int>[] = []
+    for (let index = 0; index < 8; index++) visits.push(visit(url))
+    const counts = await Promise.all(visits)
+    for (const count of counts) answered += count
+  }
+  console.log(`answered: ${answered}`)
+  await listening.stop()
 }
-const listening = listened.value
-const url = `http://127.0.0.1:${listening.port}`
-let answered = 0
-for (let round = 0; round < 60; round++) {
-  const visits: Promise<int>[] = []
-  for (let index = 0; index < 8; index++) visits.push(visit(url))
-  const counts = await Promise.all(visits)
-  for (const count of counts) answered += count
-}
-console.log(`answered: ${answered}`)
-await listening.stop()
+
+await main()

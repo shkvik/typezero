@@ -42,7 +42,7 @@ const odd: Record<string, string> = {}
 console.log(odd.hasOwnPropertyX)
 odd["__proto__x"] = "a"
 console.log(odd, JSON.stringify(odd))
-console.log(JSON.stringify(scores), JSON.stringify({ r: base }, null, 2))
+console.log(JSON.stringify(scores), JSON.stringify({ r: structuredClone(base) }, null, 2))
 console.log(Object.fromEntries([["a", 1], ["b", 2]]), Object.fromEntries(new Map([["c", true]])))
 const byLength = Object.groupBy(["one", "three", "two"], w => String(w.length))
 console.log(byLength)

@@ -6,8 +6,8 @@ const posts: Post[] = [{ title: "hi", tags: ["a", "b"] }]
 
 // Type arguments from the arguments.
 function first<T>(xs: T[]) { return xs[0] }
-function identity<T>(x: T): T { return x }
-function pair<T>(a: T, b: T) { return [a, b] }
+function identity<T>(x: Own<T>): T { return x }
+function pair<T>(a: Own<T>, b: Own<T>) { return [a, b] }
 console.log(first([1, 2, 3]), first(["a", "b"]), first(users), first(posts))
 console.log(identity(5), identity("x"), identity(true), identity(users[1]))
 // The same rule as for the literal [1, 2.5]: T is a double, and so is 1.
@@ -16,7 +16,7 @@ const none: int[] = []
 console.log(first(none))
 
 // Arrows after the other arguments: T comes from xs, then U from the arrow.
-function mapAll<T, U>(xs: T[], f: (x: T) => U): U[] {
+function mapAll<T, U>(xs: Own<T[]>, f: (x: T) => U): U[] {
   const out: U[] = []
   for (const x of xs) out.push(f(x))
   return out
@@ -61,7 +61,7 @@ type Maybe<T> = T | undefined
 type Pair<A, B> = { first: A; second: B }
 type Mapper<T, U> = (x: T) => U
 type List<T> = { value: T; next?: List<T> }
-function makePair<A, B>(a: A, b: B): Pair<A, B> { return { first: a, second: b } }
+function makePair<A, B>(a: Own<A>, b: Own<B>): Pair<A, B> { return { first: a, second: b } }
 const p = makePair(1, "one")
 console.log(p, p.first + 1, p.second.length)
 const maybeUser: Maybe<User> = undefined
@@ -83,7 +83,7 @@ function swap<T>(xs: T[], i: int, j: int) {
 const order = users.slice(0)
 swap(order, 0, 1)
 console.log(order)
-function wrap<T>(x: T) { return { value: x, count: 1 } }
+function wrap<T>(x: Own<T>) { return { value: x, count: 1 } }
 const wrapped = wrap(posts[0])
 console.log(wrapped, wrapped.value?.tags)
 function constant<T>(x: T) { return () => x }
@@ -105,7 +105,7 @@ console.log(pick(handlers, f => f(1) == 1).length)
 // One copy serves all objects (and one all functions): it holds, stores
 // and releases them without knowing their fields.
 type Box<T> = { value: T; tags: string[] }
-function rebox<T>(b: Box<T>, x: T) {
+function rebox<T>(b: Box<T>, x: Own<T>) {
   b.value = x
   return { value: b.value, tags: ["new"] }
 }

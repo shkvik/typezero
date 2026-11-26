@@ -127,7 +127,7 @@ partial class OwnershipCheck {
     except: int,
   ): void {
     for (const target of this.underlying(place)) {
-      const isReported = this.checkWriteOn(target, loc, except, isMove);
+      const isReported = this.checkWriteOn(target, loc, [except, place.root], isMove);
       if (isReported) {
         return;
       }
@@ -137,7 +137,7 @@ partial class OwnershipCheck {
   private checkWriteOn(
     place: Place,
     loc: int,
-    except: int,
+    except: Read<int[]>,
     isMove: boolean,
   ): boolean {
     const frame = this.frame();
@@ -146,7 +146,7 @@ partial class OwnershipCheck {
     }
 
     for (const variable of frame.variables.values()) {
-      if (variable.key == except || !this.isLive(variable, loc)) {
+      if (except.includes(variable.key) || !this.isLive(variable, loc)) {
         continue;
       }
 

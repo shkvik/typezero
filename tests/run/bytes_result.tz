@@ -30,7 +30,7 @@ for (const n of [-1, 0, 2])
   console.log(either(n).match(v => typeof v == "string" ? v : `${v.length} bytes`, e => e))
 must(rmSync(dir, { recursive: true }))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

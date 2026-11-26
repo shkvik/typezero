@@ -7,7 +7,7 @@
 class Box<T> {
   constructor(public value: T) {}
   get(): T { return this.value }
-  set(v: T) { this.value = v; return this }
+  set(v: Own<T>) { this.value = v; return this }
   map<U>(f: (x: T) => U): Box<U> { return new Box(f(this.value)) }
 }
 const b = new Box(1)
@@ -27,7 +27,7 @@ class Stack<T> {
     this.items = []
     Stack.created++
   }
-  push(x: T) { this.items.push(x); return this }
+  push(x: Own<T>) { this.items.push(x); return this }
   pop(): T | undefined { return this.items.pop() }
   peek() { return this.items.length > 0 ? this.items[this.items.length - 1] : undefined }
   size() { return this.items.length }
@@ -93,7 +93,7 @@ class MemRepo<T> implements Repo<T> {
     this.items = []
   }
 
-  add(x: T) { this.items.push(x); return this }
+  add(x: Own<T>) { this.items.push(x); return this }
   get(id: int) { return this.items[id] }
   all() { return this.items }
 }
@@ -128,7 +128,7 @@ class Wallet<T> {
     this.coins = []
   }
 
-  add(x: T) { this.coins.push(x) }
+  add(x: Own<T>) { this.coins.push(x) }
   merge(other: Wallet<T>) { for (const x of other.coins) this.coins.push(x) }
   count() { return this.coins.length }
 }

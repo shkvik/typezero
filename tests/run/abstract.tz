@@ -50,15 +50,6 @@ class Square extends Rect {
   }
 }
 
-const shapes: Shape[] = [new Circle(1), new Rect(2, 3), new Square(4)]
-let total = 0.0
-for (const s of shapes) {
-  console.log(s.describe())
-  total += s.area()
-}
-console.log(total.toFixed(3), Shape.made)
-console.log(shapes)
-
 // An abstract method with one implementation: calls go straight to it.
 abstract class Greeter {
   abstract greet(name: string): string
@@ -71,5 +62,19 @@ class Hello extends Greeter {
     return `hello ${name}`
   }
 }
-const g: Greeter = new Hello()
-console.log(g.twice("Ann"), g instanceof Greeter)
+
+function main(): void {
+  const shapes: Shape[] = [new Circle(1), new Rect(2, 3), new Square(4)]
+  let total = 0.0
+  for (const s of shapes) {
+    console.log(s.describe())
+    total += s.area()
+  }
+  console.log(total.toFixed(3), Shape.made)
+  console.log(shapes)
+
+  const g: Greeter = new Hello()
+  console.log(g.twice("Ann"), g instanceof Greeter)
+}
+
+main()

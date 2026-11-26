@@ -4,12 +4,16 @@
 // UTF-8 become U+FFFD; the last line may have no "\n".
 import { readLine } from "tz:io"
 
-const name = readLine("Имя? ")
-console.log(`привет, ${name}!`)
-let line: string | undefined
-let count = 0
-while ((line = readLine()) != undefined) {
-  count++
-  console.log(count, JSON.stringify(line), line.length)
+function main(): void {
+  const name = readLine("Имя? ")
+  console.log(`привет, ${name}!`)
+  let line: string | undefined
+  let count = 0
+  while ((line = readLine()) != undefined) {
+    count++
+    console.log(count, JSON.stringify(line), line.length)
+  }
+  console.log(readLine(), readLine("again? "))
 }
-console.log(readLine(), readLine("again? "))
+
+main()

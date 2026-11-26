@@ -35,7 +35,7 @@ export class Counter<T> {
     this.counts = new Map<T, int>()
   }
 
-  add(x: T): int {
+  add(x: Own<T>): int {
     const n = (this.counts.get(x) ?? 0) + 1
     this.counts.set(x, n)
     return n

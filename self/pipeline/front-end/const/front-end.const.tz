@@ -6,5 +6,3 @@ export const kRecoverableCodes: Code[] = [
   Code.NoExportNamed,
   Code.FieldNeedsType,
 ];
-
-export const kCheckedLibraryModules = ["tz:list", "tz:array"];

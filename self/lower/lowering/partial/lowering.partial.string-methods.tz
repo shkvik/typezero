@@ -100,7 +100,7 @@ partial class Lowering {
   }
 
   private stringMethodValue(
-    frame: Read<Frame>,
+    frame: Frame,
     call: CallExpr,
     member: MemberExpr,
     receiver: IrValue,
@@ -134,6 +134,8 @@ partial class Lowering {
         return this.textCode(frame, call, name, receiver, given);
       case "charAt":
         return this.textCharAt(frame, receiver, given);
+      case "at":
+        return this.textAt(frame, call, receiver, given);
       case "split":
         return this.textSplit(frame, receiver, given);
       case "replace":
@@ -367,19 +369,56 @@ partial class Lowering {
     return { type: resultIr, value, tz: result };
   }
 
+  private textAt(
+    frame: Frame,
+    call: CallExpr,
+    receiver: IrValue,
+    given: Read<TextArguments>,
+  ): IrValue | undefined {
+    const string = this.store.plain(TypeKind.String);
+    const empty = this.store.plain(TypeKind.Undefined);
+    const result = this.store.unionOf([string, empty]);
+    const index = this.numberAt(given, 0);
+    const length = this.textLength(frame, receiver);
+    const zero = this.ir.zero(kIntType);
+    const isFromEnd = frame.made.integerCompare(IrIntPredicate.SignedLess, index, zero);
+    const fromEnd = frame.made.binary(IrOpcode.Add, index, length);
+    const position = frame.made.select(isFromEnd, fromEnd, index);
+
+    return this.textCharOr(frame, receiver, position, result, call.loc);
+  }
+
   private textIndexed(
     frame: Frame,
     expr: IndexExpr,
     result: Type,
   ): IrValue | undefined {
-    const resultIr = this.irType(result);
     const text = this.value(frame, expr.object);
     const index = this.value(frame, expr.index);
-    if (resultIr == undefined || text == undefined || index == undefined) {
+    if (text == undefined || index == undefined) {
       return undefined;
     }
 
     const position = this.toLong(frame, index).value;
+    const read = this.textCharOr(frame, text, position, result, expr.loc);
+
+    this.dropping(frame, text);
+
+    return read;
+  }
+
+  private textCharOr(
+    frame: Frame,
+    text: IrValue,
+    position: LLVMValue,
+    result: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const resultIr = this.irType(result);
+    if (resultIr == undefined) {
+      return undefined;
+    }
+
     const length = this.textLength(frame, text);
     const isInside = frame.made.integerCompare(
       IrIntPredicate.UnsignedLess,
@@ -396,7 +435,7 @@ partial class Lowering {
     const args = this.textParts(frame, text).concat([position]);
     const params = [kPointerType, kIntType, kIntType];
     const char = this.textOut(frame, kTextCharAt, params, args);
-    const placed = this.converted(frame, char, result, expr.loc);
+    const placed = this.converted(frame, char, result, loc);
     const readEnd = frame.made.currentBlock();
 
     frame.made.branch(end);
@@ -412,8 +451,6 @@ partial class Lowering {
       [missing, placed.value],
       [before, readEnd],
     );
-
-    this.dropping(frame, text);
 
     return { type: resultIr, value, tz: result, owned: true };
   }

@@ -75,9 +75,9 @@ partial class ExpressionTypes {
   private readonly mapFromPairs(source: Expr, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     if (source.kind != ExprKind.ArrayLit) {
-      this.typed(source, undefined, module);
+      const from = this.typed(source, undefined, module);
 
-      return error;
+      return this.mapFromValue(from);
     }
 
     let key: Type | undefined = undefined;
@@ -140,6 +140,24 @@ partial class ExpressionTypes {
 
     if (key == undefined || value == undefined) {
       return error;
+    }
+
+    return this.store.dictOf(DictKind.Map, key, value);
+  }
+
+  private readonly mapFromValue(from: Type): Type {
+    const base = this.types.apparent(from);
+    if (base.kind == TypeKind.Dict && base.dict == DictKind.Map) {
+      return this.store.dictOf(DictKind.Map, base.key, base.value);
+    }
+    if (base.kind != TypeKind.Array || base.item.kind != TypeKind.Tuple) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const key = base.item.items[0];
+    const value = base.item.items[1];
+    if (key == undefined || value == undefined || base.item.items.length != 2) {
+      return this.store.plain(TypeKind.Error);
     }
 
     return this.store.dictOf(DictKind.Map, key, value);

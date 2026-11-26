@@ -26,7 +26,7 @@ for (const name of ["expired", "future", "wrongname", "self", "other", "chain", 
   await listening.stop()
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

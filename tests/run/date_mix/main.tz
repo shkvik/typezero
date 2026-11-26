@@ -33,7 +33,7 @@ function latest<T>(items: T[], when: (x: T) => Date): T | undefined {
   for (const x of items) if (best == undefined || when(x) > when(best)) best = x
   return best
 }
-function pair<A, B>(a: A, b: B): [A, B] {
+function pair<A, B>(a: Own<A>, b: Own<B>): [A, B] {
   return [a, b]
 }
 console.log(latest(events, (e) => e.at)?.title, latest(moments, (d) => d)?.toISOString())
@@ -94,7 +94,7 @@ for (const timeZone of zones) {
 }
 console.log(new Meeting("printed", new Date(base), 5))
 
-function must<T>(r: Result<T, JsonError>): T {
+function must<T>(r: Own<Result<T, JsonError>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

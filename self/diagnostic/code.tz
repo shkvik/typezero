@@ -1501,4 +1501,8 @@ export enum Code {
   OwnWeakCopy = "TZ4036",
   OwnMutCopy = "TZ4037",
   OwnMutVariance = "TZ4038",
+  OwnUnsafeOutside = "TZ4039",
+  OwnUnsafeReason = "TZ4040",
+  OwnUnsafeUses = "TZ4041",
+  OwnUnsafeUnused = "TZ4042",
 }

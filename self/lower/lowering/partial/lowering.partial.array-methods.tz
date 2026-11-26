@@ -14,23 +14,28 @@ import {
 import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kAppendName,
   kArrayAppend,
   kArrayIndexOf,
   kArrayJoin,
   kArrayLengthField,
+  kArrayModule,
   kArrayNew,
   kArrayReverse,
   kArraySetLength,
   kArraySlice,
-  kArraySplice,
   kArraySort,
   kArraySortWith,
+  kArraySplice,
   kBooleanType,
   kCharType,
   kDoubleType,
+  kFindName,
   kFlagType,
   kIntType,
   kPointerType,
+  kReverseName,
+  kSliceName,
   kStringType,
   kVoidType,
 } from "../const/lowering.const.tz";
@@ -45,6 +50,42 @@ import {
 } from "../types/lowering.types.tz";
 
 partial class Lowering {
+  private arrayAt(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const argument = call.args[0];
+    if (object.kind != TypeKind.Array || argument == undefined) {
+      this.notLowered(frame.module, call.loc, "a call of method array.at");
+
+      return undefined;
+    }
+
+    const item = object.item;
+    const empty = this.store.plain(TypeKind.Undefined);
+    const result = this.store.unionOf([item, empty]);
+    const array = this.value(frame, member.object);
+    const int = this.store.integer(64, false);
+    const given = this.wantedValue(frame, argument.expr, int);
+    if (array == undefined || given == undefined) {
+      return undefined;
+    }
+
+    const index = this.toLong(frame, given).value;
+    const length = this.arrayLength(frame, array.value);
+    const zero = this.ir.zero(kIntType);
+    const isFromEnd = frame.made.integerCompare(IrIntPredicate.SignedLess, index, zero);
+    const fromEnd = frame.made.binary(IrOpcode.Add, index, length);
+    const position = frame.made.select(isFromEnd, fromEnd, index);
+    const read = this.checkedRead(frame, array, position, item, result);
+
+    this.dropping(frame, array);
+
+    return read;
+  }
+
   private arrayMethod(
     frame: Frame,
     call: CallExpr,
@@ -58,6 +99,8 @@ partial class Lowering {
     switch (member.name) {
       case "push":
         return this.arrayCall(frame, call, member, object);
+      case "at":
+        return this.arrayAt(frame, call, member, object);
       case "some":
       case "every":
       case "find":
@@ -251,12 +294,19 @@ partial class Lowering {
       return undefined;
     }
 
+    const isLent = member.name == kFindName && array.owned != true;
     const isStepped = this.callbackStep(
       frame,
       member.name,
       callback.expr,
       place,
-      { item: loop.item, index: loop.index, array: borrowed, done: loop.done },
+      {
+        item: loop.item,
+        index: loop.index,
+        array: borrowed,
+        done: loop.done,
+        isLent,
+      },
     );
     if (!isStepped) {
       return undefined;
@@ -269,7 +319,7 @@ partial class Lowering {
     frame.made.store(this.ir.zero(slotType), slot);
     this.dropping(frame, array);
 
-    return { type: resultIr, value, tz: result, owned: true };
+    return { type: resultIr, value, tz: result, owned: !isLent };
   }
 
   private readonly slotTypeOf(type: string): string {
@@ -431,7 +481,7 @@ partial class Lowering {
 
         return true;
       case "find": {
-        const kept = this.owning(frame, step.item);
+        const kept = this.foundItem(frame, step);
         const value = this.converted(frame, kept, place.tz, 0);
         if (value == undefined) {
           return false;
@@ -456,6 +506,14 @@ partial class Lowering {
       default:
         return false;
     }
+  }
+
+  private foundItem(frame: Read<Frame>, step: Read<CallbackStep>): IrValue {
+    if (step.isLent == true) {
+      return step.item;
+    }
+
+    return this.owning(frame, step.item);
   }
 
   private readonly emptyArray(frame: Read<Frame>, descriptor: LLVMValue): LLVMValue {
@@ -503,7 +561,8 @@ partial class Lowering {
     if (this.isPlainElement(object.item)) {
       const items = [object.item];
       const given = [array, wanted];
-      const found = this.runtimeFunctionCall(frame, member.name, items, given, loc);
+      const target = { module: kArrayModule, name: member.name };
+      const found = this.runtimeFunctionCall(frame, target, items, given, loc);
 
       this.dropping(frame, wanted);
       this.dropping(frame, array);
@@ -653,6 +712,25 @@ partial class Lowering {
     const end = this.integerArgument(frame, call, 1);
     if (array == undefined || start == undefined || end == undefined) {
       return undefined;
+    }
+
+    if (object.kind == TypeKind.Array && this.isPlainElement(object.item)) {
+      const target = { module: kArrayModule, name: kSliceName };
+      const int = this.store.integer(64, false);
+      const boolean = this.store.plain(TypeKind.Boolean);
+      const isEnded = this.ir.integer(kBooleanType, `${end.given}`);
+      const given: IrValue[] = [
+        array,
+        { type: kIntType, value: start.value, tz: int },
+        { type: kIntType, value: end.value, tz: int },
+        { type: kBooleanType, value: isEnded, tz: boolean },
+      ];
+      const items = [object.item];
+      const sliced = this.runtimeFunctionCall(frame, target, items, given, call.loc);
+
+      this.dropping(frame, array);
+
+      return sliced;
     }
 
     const hasEnd = this.ir.integer(kFlagType, `${end.given}`);
@@ -849,6 +927,57 @@ partial class Lowering {
     return { type: resultIr, value, tz: result, owned: true };
   }
 
+  private joinedArrays(
+    frame: Frame,
+    call: CallExpr,
+    array: IrValue,
+    object: Type,
+  ): IrValue | undefined {
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const items = [object.item];
+    const int = this.store.integer(64, false);
+    const boolean = this.store.plain(TypeKind.Boolean);
+    const zero: IrValue = { type: kIntType, value: this.ir.zero(kIntType), tz: int };
+    const whole: IrValue = {
+      type: kBooleanType,
+      value: this.ir.zero(kBooleanType),
+      tz: boolean,
+    };
+    const slicing = { module: kArrayModule, name: kSliceName };
+    const given = [array, zero, zero, whole];
+    const copy = this.runtimeFunctionCall(frame, slicing, items, given, call.loc);
+
+    this.dropping(frame, array);
+
+    if (copy == undefined) {
+      return undefined;
+    }
+
+    const appending = { module: kArrayModule, name: kAppendName };
+
+    for (const argument of call.args) {
+      const passed = this.wantedValue(frame, argument.expr, object);
+      if (passed == undefined) {
+        return undefined;
+      }
+
+      const other = this.converted(frame, passed, object, argument.expr.loc);
+      if (other == undefined || argument.spread) {
+        this.notLowered(frame.module, argument.expr.loc, "this argument");
+
+        return undefined;
+      }
+
+      this.runtimeFunctionCall(frame, appending, items, [copy, other], call.loc);
+      this.dropping(frame, other);
+    }
+
+    return copy;
+  }
+
   private concatArrays(
     frame: Frame,
     call: CallExpr,
@@ -858,6 +987,9 @@ partial class Lowering {
     const array = this.value(frame, member.object);
     if (array == undefined) {
       return undefined;
+    }
+    if (object.kind == TypeKind.Array && this.isPlainElement(object.item)) {
+      return this.joinedArrays(frame, call, array, object);
     }
 
     const copying = this.ir.declare(kArraySlice, kPointerType, [
@@ -1052,9 +1184,10 @@ partial class Lowering {
     }
     if (object.kind == TypeKind.Array && this.isPlainElement(object.item)) {
       const items = [object.item];
+      const target = { module: kArrayModule, name: kReverseName };
       const reversed = this.runtimeFunctionCall(
         frame,
-        "reverse",
+        target,
         items,
         [array],
         call.loc,

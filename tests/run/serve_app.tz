@@ -6,14 +6,14 @@ import { Server } from "tz:http"
 
 class Context {
   req: Request
-  constructor(req: Request) {
+  constructor(req: Own<Request>) {
     this.req = req
   }
   text(s: string) { return new Response(s) }
 }
 class App {
   private routes: Map<string, (c: Context) => Response | Promise<Response>>
-  get(path: string, handler: (c: Context) => Response | Promise<Response>) {
+  get(path: string, handler: Own<(c: Context) => Response | Promise<Response>>) {
     this.routes.set(path, handler)
     return this
   }
@@ -44,7 +44,7 @@ for (const path of ["/", "/async", "/nope"]) {
 }
 await listening.stop()
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

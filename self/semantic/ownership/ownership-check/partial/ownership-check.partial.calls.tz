@@ -274,6 +274,13 @@ partial class OwnershipCheck {
       const param = this.paramAt(info, index);
       const callback = this.callbackModeOf(param.mode);
       const operand = this.evaluateFor(arg.expr, callback);
+      if (arg.spread && this.isSpreadOfCopies(arg.expr)) {
+        const copy = this.copyOperand(arg.expr.loc);
+
+        uses.push({ operand: copy, mode: ParamMode.Read, expr: arg.expr });
+
+        continue;
+      }
 
       uses.push({ operand, mode: param.mode, expr: arg.expr });
     }

@@ -15,7 +15,7 @@ export function Logged<A extends unknown[], R>(_cls: object, name: string, metho
 
 export class Runner {
   self: string[]
-  constructor(self: string[]) {
+  constructor(self: Own<string[]>) {
     this.self = self
   }
   @Logged

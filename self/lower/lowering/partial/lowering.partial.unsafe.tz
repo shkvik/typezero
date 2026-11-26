@@ -13,6 +13,10 @@ import {
   kMemoryFree,
   kMemoryMove,
   kMemoryResize,
+  kHashMask,
+  kHashMultiplier,
+  kMapModule,
+  kTextHashName,
   kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
@@ -55,6 +59,8 @@ partial class Lowering {
         return this.forgotten(frame, call);
       case "arrayCells":
         return this.arrayCellsOf(frame, call);
+      case "hashOf":
+        return this.keyHash(frame, call, item);
       default:
         this.notLowered(frame.module, call.loc, "a call of this unsafe function");
 
@@ -240,6 +246,89 @@ partial class Lowering {
     const data = this.arrayData(frame, array.value);
 
     return this.rawMade(call, data);
+  }
+
+  private keyHash(
+    frame: Frame,
+    call: CallExpr,
+    item: Type,
+  ): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+    if (this.isString(item)) {
+      const target = { module: kMapModule, name: kTextHashName };
+      const hashed = this.runtimeFunctionCall(frame, target, [], [given], call.loc);
+
+      this.dropping(frame, given);
+
+      return hashed;
+    }
+
+    const bits = this.keyBits(frame, given, item);
+    if (bits == undefined) {
+      this.notLowered(frame.module, call.loc, "a hash of this key");
+
+      return undefined;
+    }
+
+    const tz = this.store.integer(64, false);
+    const mixed = this.mixedBits(frame, bits);
+
+    this.dropping(frame, given);
+
+    return { type: kIntType, value: mixed, tz };
+  }
+
+  private readonly keyBits(
+    frame: Read<Frame>,
+    given: IrValue,
+    item: Type,
+  ): LLVMValue | undefined {
+    if (this.isInteger(item)) {
+      return this.wideInteger(frame, given, item);
+    }
+    if (this.isBoolean(item)) {
+      return frame.made.cast(IrOpcode.ZExt, given.value, kIntType);
+    }
+    if (given.type == kPointerType) {
+      return frame.made.cast(IrOpcode.PtrToInt, given.value, kIntType);
+    }
+
+    return undefined;
+  }
+
+  private readonly wideInteger(
+    frame: Read<Frame>,
+    given: IrValue,
+    item: Type,
+  ): LLVMValue {
+    if (given.type == kIntType) {
+      return given.value;
+    }
+
+    if (this.isUnsigned(item)) {
+      return frame.made.cast(IrOpcode.ZExt, given.value, kIntType);
+    }
+
+    return frame.made.cast(IrOpcode.SExt, given.value, kIntType);
+  }
+
+  private readonly mixedBits(frame: Read<Frame>, bits: LLVMValue): LLVMValue {
+    const golden = this.ir.hexInteger(kIntType, kHashMultiplier);
+    const shift = this.ir.integer(kIntType, "32");
+    const spread = frame.made.binary(IrOpcode.Mul, bits, golden);
+    const high = frame.made.binary(IrOpcode.LShr, spread, shift);
+    const mixed = frame.made.binary(IrOpcode.Xor, spread, high);
+    const keep = this.ir.hexInteger(kIntType, kHashMask);
+
+    return frame.made.binary(IrOpcode.And, mixed, keep);
   }
 
   private readonly cellBytes(

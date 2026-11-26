@@ -50,21 +50,25 @@ function pairUp<T>(items: T[], pairs: T[][]) {
   }
 }
 
-let total = 0
-for (let round = 0; round < 100; round++) {
-  const numbers = new Ring<int>()
-  for (let i = 0; i < 10; i++) numbers.add(i)
-  const words = new Ring<string>().add("a").add("b").add("c")
-  total += numbers.values().length + words.values().length
+function main(): void {
+  let total = 0
+  for (let round = 0; round < 100; round++) {
+    const numbers = new Ring<int>()
+    for (let i = 0; i < 10; i++) numbers.add(i)
+    const words = new Ring<string>().add("a").add("b").add("c")
+    total += numbers.values().length + words.values().length
+  }
+  console.log(total)
+
+  const rings = [new Ring<string>().add("x"), new Ring<string>().add("y").add("z")]
+  const pairs: Ring<string>[][] = []
+  pairUp(rings, pairs)
+  console.log(pairs.length, pairs[0]?.[1]?.values().join(""))
+
+  // Rings of rings: a generic class whose values are its own kind.
+  const outer = new Ring<Ring<int>>()
+  for (let i = 0; i < 3; i++) outer.add(new Ring<int>().add(i).add(i * 2))
+  console.log(outer.values().map(r => r.values().join("+")).join(" "))
 }
-console.log(total)
 
-const rings = [new Ring<string>().add("x"), new Ring<string>().add("y").add("z")]
-const pairs: Ring<string>[][] = []
-pairUp(rings, pairs)
-console.log(pairs.length, pairs[0]?.[1]?.values().join(""))
-
-// Rings of rings: a generic class whose values are its own kind.
-const outer = new Ring<Ring<int>>()
-for (let i = 0; i < 3; i++) outer.add(new Ring<int>().add(i).add(i * 2))
-console.log(outer.values().map(r => r.values().join("+")).join(" "))
+main()

@@ -11,7 +11,7 @@ class Cache<T> {
   pending: Promise<T> | undefined
   items: Map<string, T>
   load: (key: string) => Promise<T>
-  constructor(load: (key: string) => Promise<T>) {
+  constructor(load: Own<(key: string) => Promise<T>>) {
     this.pending = undefined
     this.items = new Map<string, T>()
     this.load = load
@@ -37,7 +37,7 @@ class Holder<T> {
   pattern: RegExp
   bytes: Buffer
   either: int | string
-  constructor(value: T) {
+  constructor(value: Own<T>) {
     this.when = new Date(0)
     this.pattern = /x+/g
     this.bytes = Buffer.from("hi")
@@ -81,7 +81,7 @@ await walk()
 
 class Box<T> {
   value: T
-  constructor(value: T) {
+  constructor(value: Own<T>) {
     this.value = value
   }
 }

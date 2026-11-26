@@ -1,0 +1,367 @@
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { MethodKind } from "../../../program/ast/types/ast.types.classes.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kDescriptorWithSlots,
+  kDisposeName,
+  kIntType,
+  kObjectHeader,
+  kPointerType,
+  kSuperWord,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  MethodTarget,
+  OwnedMethod,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private readonly classParent(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    if (decl == undefined || decl.base == undefined) {
+      return undefined;
+    }
+
+    return this.store
+      .parentsOf(type)
+      .find((parent) => parent.kind == TypeKind.Instance);
+  }
+
+  private readonly ownedMethod(
+    type: Type,
+    name: string,
+  ): OwnedMethod | undefined {
+    let current: Type | undefined = type;
+
+    while (current != undefined) {
+      const decl = this.values.classDeclOf(current);
+      const fn = decl?.methods.find(
+        (one) => one.name == name && one.body != undefined,
+      );
+      if (decl != undefined && fn != undefined) {
+        return { owner: current, decl, fn };
+      }
+
+      current = this.classParent(current);
+    }
+
+    return undefined;
+  }
+
+  private readonly isInHierarchy(type: Type): boolean {
+    const decl = this.values.classDeclOf(type);
+    if (decl == undefined) {
+      return false;
+    }
+
+    return decl.base != undefined || this.hasChildren(decl);
+  }
+
+  private readonly hasChildren(decl: ClassDecl): boolean {
+    const name = decl.name ?? "";
+
+    for (const module of this.program.modules) {
+      for (const item of module.file.items) {
+        const isChild =
+          item.kind == StmtKind.Class &&
+          item.base != undefined &&
+          item.base.name == name;
+        if (isChild) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private readonly slotNames(type: Type): string[] {
+    const chain: Type[] = [];
+    let current: Type | undefined = type;
+
+    while (current != undefined) {
+      chain.unshift(current);
+      current = this.classParent(current);
+    }
+
+    const names: string[] = [];
+
+    for (const link of chain) {
+      const decl = this.values.classDeclOf(link);
+
+      for (const fn of decl?.methods ?? []) {
+        const isSlot =
+          fn.body != undefined &&
+          fn.typeParams.length == 0 &&
+          fn.role?.method != MethodKind.Static &&
+          fn.name != kDisposeName &&
+          !names.includes(fn.name);
+        if (isSlot) {
+          names.push(fn.name);
+        }
+      }
+    }
+
+    return names;
+  }
+
+  private slotTable(type: Type): LLVMValue[] {
+    const table: LLVMValue[] = [];
+
+    for (const name of this.slotNames(type)) {
+      const found = this.ownedMethod(type, name);
+      const target = this.targetOfOwned(found);
+      if (target == undefined) {
+        table.push(this.ir.zero(kPointerType));
+
+        continue;
+      }
+
+      const result = this.resultType(target.shape) ?? kVoidType;
+      const params = this.shapeTypesOf(target.shape) ?? [];
+      const all = [kPointerType].concat(params);
+      const callee = this.ir.declare(target.name, result, all);
+
+      table.push(callee.fn);
+    }
+
+    return table;
+  }
+
+  private targetOfOwned(found: OwnedMethod | undefined): MethodTarget | undefined {
+    if (found == undefined) {
+      return undefined;
+    }
+
+    return this.methodTarget(found.owner, found.decl, found.fn);
+  }
+
+  private dispatchedCall(
+    frame: Read<Frame>,
+    object: Type,
+    name: string,
+    self: IrValue,
+    args: Own<LLVMValue[]>,
+    target: MethodTarget,
+  ): LLVMValue | undefined {
+    const index = this.slotNames(object).indexOf(name);
+    const result = this.resultType(target.shape);
+    const params = this.shapeTypesOf(target.shape);
+    if (index < 0 || result == undefined || params == undefined) {
+      return undefined;
+    }
+
+    const kind = frame.made.field(kObjectHeader, self.value, 1);
+    const layout = frame.made.load(kPointerType, kind);
+    const slots = frame.made.field(kDescriptorWithSlots, layout, 2);
+    const at = this.ir.integer(kIntType, `${index}`);
+    const address = frame.made.element(kPointerType, slots, at);
+    const fn = frame.made.load(kPointerType, address);
+    const signature = this.ir.signature(result, [kPointerType].concat(params));
+
+    return frame.made.indirectCall(signature, fn, [self.value].concat(args));
+  }
+
+  private disposeChain(type: Type): MethodTarget[] {
+    const chain: MethodTarget[] = [];
+    let current: Type | undefined = type;
+
+    while (current != undefined) {
+      const target = this.disposeOf(current);
+      if (target != undefined) {
+        chain.push(target);
+      }
+
+      current = this.classParent(current);
+    }
+
+    return chain;
+  }
+
+  private disposeOf(type: Type): MethodTarget | undefined {
+    const decl = this.values.classDeclOf(type);
+    const fn = decl?.methods.find(
+      (one) => one.name == kDisposeName && one.body != undefined,
+    );
+    if (decl == undefined || fn == undefined) {
+      return undefined;
+    }
+
+    return this.methodTarget(type, decl, fn);
+  }
+
+  private superCall(frame: Frame, call: CallExpr): IrValue | undefined {
+    const self = frame.self;
+    if (self == undefined) {
+      this.notLowered(frame.module, call.loc, "this super call");
+
+      return undefined;
+    }
+
+    const parent = this.classParent(self.tz);
+    const owned = this.parentConstructor(parent);
+    if (parent == undefined) {
+      this.notLowered(frame.module, call.loc, "this super call");
+
+      return undefined;
+    }
+    if (owned == undefined) {
+      return this.nothing();
+    }
+
+    const decl = owned.decl;
+    const ctor = owned.fn;
+    const target = this.methodTarget(owned.owner, decl, ctor);
+    const params = this.shapeTypesOf(target?.shape);
+    if (target == undefined || params == undefined) {
+      this.notLowered(frame.module, call.loc, "this super call");
+
+      return undefined;
+    }
+
+    const kept: IrValue[] = [];
+    const args = this.callArguments(
+      frame,
+      call.args,
+      target.shape,
+      call.loc,
+      ctor,
+      kept,
+    );
+    if (args == undefined) {
+      return undefined;
+    }
+
+    const object = frame.made.load(kPointerType, self.pointer);
+    const all = [kPointerType].concat(params);
+    const callee = this.ir.declare(target.name, kVoidType, all);
+
+    frame.made.call(callee, [object].concat(args));
+    this.droppedAll(frame, kept);
+
+    return this.nothing();
+  }
+
+  private superMethodCall(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const self = frame.self;
+    if (self == undefined) {
+      this.notLowered(frame.module, call.loc, "this super call");
+
+      return undefined;
+    }
+
+    const parent = this.classParent(self.tz);
+    const found = this.parentMethod(parent, member.name);
+    const target = this.targetOfOwned(found);
+    const shape = target?.shape;
+    const result = this.resultType(shape);
+    const params = this.shapeTypesOf(shape);
+    if (target == undefined || found == undefined) {
+      this.notLowered(frame.module, call.loc, "this super call");
+
+      return undefined;
+    }
+    if (shape == undefined || result == undefined || params == undefined) {
+      return undefined;
+    }
+
+    const kept: IrValue[] = [];
+    const args = this.callArguments(
+      frame,
+      call.args,
+      shape,
+      call.loc,
+      found.fn,
+      kept,
+    );
+    if (args == undefined) {
+      return undefined;
+    }
+
+    const object = frame.made.load(kPointerType, self.pointer);
+    const all = [kPointerType].concat(params);
+    const callee = this.ir.declare(target.name, result, all);
+    const value = frame.made.call(callee, [object].concat(args));
+    const answer: IrValue = { type: result, value, tz: shape.result };
+    const returned = this.callResult(frame, answer, found.fn, kept);
+
+    this.droppedAll(frame, kept);
+
+    return returned;
+  }
+
+  private readonly isSuperName(expr: CallExpr): boolean {
+    const callee = expr.callee;
+
+    return callee.kind == ExprKind.Name && callee.name == kSuperWord;
+  }
+
+  private readonly isSuperMember(expr: CallExpr): MemberExpr | undefined {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const object = callee.object;
+    if (object.kind != ExprKind.Name || object.name != kSuperWord) {
+      return undefined;
+    }
+
+    return callee;
+  }
+
+  private readonly ownConstructor(type: Type): OwnedMethod | undefined {
+    let current: Type | undefined = type;
+
+    while (current != undefined) {
+      const decl = this.values.classDeclOf(current);
+      const ctor = decl?.constructors[0];
+      if (decl != undefined && ctor != undefined) {
+        return { owner: current, decl, fn: ctor };
+      }
+
+      current = this.classParent(current);
+    }
+
+    return undefined;
+  }
+
+  private readonly parentConstructor(
+    parent: Type | undefined,
+  ): OwnedMethod | undefined {
+    if (parent == undefined) {
+      return undefined;
+    }
+
+    return this.ownConstructor(parent);
+  }
+
+  private readonly parentMethod(
+    parent: Type | undefined,
+    name: string,
+  ): OwnedMethod | undefined {
+    if (parent == undefined) {
+      return undefined;
+    }
+
+    return this.ownedMethod(parent, name);
+  }
+}

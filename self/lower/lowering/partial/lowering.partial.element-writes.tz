@@ -16,12 +16,13 @@ partial class Lowering {
     target: IndexExpr,
   ): IrValue | undefined {
     const object = this.typeIn(frame, target.object);
-    if (object == undefined || expr.op != undefined) {
+    const isBytes = object != undefined && this.isBytesType(object);
+    if (object == undefined || (expr.op != undefined && isBytes)) {
       this.notLowered(frame.module, expr.loc, "an assignment to this element");
 
       return undefined;
     }
-    if (this.isBytesType(object)) {
+    if (isBytes) {
       return this.byteAssigned(frame, expr, target);
     }
 
@@ -31,6 +32,9 @@ partial class Lowering {
       this.notLowered(frame.module, expr.loc, "an assignment to this element");
 
       return undefined;
+    }
+    if (expr.op != undefined) {
+      return this.elementUpdated(frame, expr, target, item, element);
     }
 
     const array = this.value(frame, target.object);
@@ -52,6 +56,42 @@ partial class Lowering {
     this.dropping(frame, array);
 
     return { type: owned.type, value: owned.value, tz: owned.tz };
+  }
+
+  private elementUpdated(
+    frame: Frame,
+    expr: AssignExpr,
+    target: IndexExpr,
+    item: Type,
+    element: string,
+  ): IrValue | undefined {
+    const isPlain =
+      this.isInteger(item) || this.isDouble(item) || this.isString(item);
+    if (!isPlain) {
+      this.notLowered(frame.module, expr.loc, "an update of this element");
+
+      return undefined;
+    }
+
+    const array = this.value(frame, target.object);
+    const index = this.value(frame, target.index);
+    if (array == undefined || index == undefined) {
+      return undefined;
+    }
+
+    const position = this.toLong(frame, index).value;
+    const data = this.arrayData(frame, array.value);
+    const pointer = frame.made.element(element, data, position);
+    const place: Place = { pointer, type: element, tz: item, owner: frame.id };
+    const updated = this.assignedValue(frame, expr, place);
+    if (updated == undefined) {
+      return undefined;
+    }
+
+    this.stored(frame, place, updated);
+    this.dropping(frame, array);
+
+    return { type: updated.type, value: updated.value, tz: updated.tz };
   }
 
   private elementPlaced(

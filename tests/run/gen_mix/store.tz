@@ -51,7 +51,7 @@ export class Entry<T> {
   pattern: RegExp
   raw: Buffer
   code: int | string
-  constructor(value: T) {
+  constructor(value: Own<T>) {
     this.when = new Date(0)
     this.pattern = /[a-z]+/g
     this.raw = Buffer.from("ok")

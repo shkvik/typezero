@@ -11,7 +11,7 @@ class Subject {
     this.listeners = []
     this.value = 0
   }
-  subscribe(listener: Listener) {
+  subscribe(listener: Own<Listener>) {
     this.listeners.push(listener)
     return () => {
       const at = this.listeners.indexOf(listener)

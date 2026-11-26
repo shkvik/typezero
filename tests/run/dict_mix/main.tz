@@ -109,7 +109,7 @@ const byFirst = Object.groupBy(must(readdirSync(dir, { withFileTypes: true })), 
 console.log(byExt, Object.entries(byFirst).map(([k, es]) => `${k}:${es?.map((e) => e.name)}`).join())
 must(rmSync(dir, { recursive: true }))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

@@ -35,23 +35,27 @@ function textOfJson(data: Json): string {
   return typeof text == "string" ? text : "none";
 }
 
-let changed: Item = "x";
-if (changed == undefined || typeof changed == "string") {
-  changed = 5;
-  console.log("assigned", changed);
-}
-
-console.log(textOrNothing("a"), textOrNothing(1), textOrNothing(undefined));
-console.log(textAfterReturn("b"), textAfterReturn(2), textAfterReturn(undefined));
-console.log(numberOrNothing(3), numberOrNothing("c"), numberOrNothing(undefined));
-console.log(texts(["d", 4, undefined, "e"]));
-console.log(textOfJson({ text: "f" }), textOfJson({}), textOfJson({ text: 5 }), textOfJson([]));
-
 async function twice(n: int): Promise<int> {
   return n * 2;
 }
 
-const [first, second] = await Promise.all([twice(1), twice(2)]);
-console.log(first + second);
-const [only] = await Promise.all([twice(5), twice(6), twice(7)]);
-console.log(only * 10);
+async function main(): Promise<void> {
+  let changed: Item = "x";
+  if (changed == undefined || typeof changed == "string") {
+    changed = 5;
+    console.log("assigned", changed);
+  }
+
+  console.log(textOrNothing("a"), textOrNothing(1), textOrNothing(undefined));
+  console.log(textAfterReturn("b"), textAfterReturn(2), textAfterReturn(undefined));
+  console.log(numberOrNothing(3), numberOrNothing("c"), numberOrNothing(undefined));
+  console.log(texts(["d", 4, undefined, "e"]));
+  console.log(textOfJson({ text: "f" }), textOfJson({}), textOfJson({ text: 5 }), textOfJson([]));
+
+  const [first, second] = await Promise.all([twice(1), twice(2)]);
+  console.log(first + second);
+  const [only] = await Promise.all([twice(5), twice(6), twice(7)]);
+  console.log(only * 10);
+}
+
+await main()

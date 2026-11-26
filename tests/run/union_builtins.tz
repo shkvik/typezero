@@ -38,12 +38,12 @@ console.log(steps.get("up"), steps)
 const moves: Record<Dir, number> = { up: 1, down: -1 }
 moves.down = -2
 console.log(moves.up + moves.down, moves, JSON.stringify(moves), Object.keys(moves))
-function bump(k: Dir): number {
+function bump(moves: Record<Dir, number>, k: Dir): number {
   moves[k] += 10
   moves[k]++
   return moves[k]
 }
-console.log(bump("up"), bump("down"), moves)
+console.log(bump(moves, "up"), bump(moves, "down"), moves)
 const mixed: (Dir | number)[] = ["up", 1, "down"]
 console.log(mixed, JSON.stringify(mixed), mixed.map((x) => `${x}`).join(), String(mixed[0]))
 const byMixed = new Map<Dir | number, string>([["up", "u"], [1, "one"]])
@@ -58,7 +58,7 @@ console.log(contents("./no/such/file.txt"))
 const st = must(statSync("./no/such/dir", { throwIfNoEntry: false }))
 console.log(st == undefined ? "nothing there" : `size ${st.size}`)
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

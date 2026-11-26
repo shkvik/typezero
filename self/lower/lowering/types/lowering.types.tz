@@ -27,6 +27,7 @@ export type Place = {
   readonly tz: Type;
   readonly owner: int;
   readonly flag?: LLVMValue;
+  readonly isCaptured?: boolean;
 };
 
 export type LoopTarget = {
@@ -46,6 +47,8 @@ export type Frame = {
   readonly self?: Place;
   readonly inline?: InlineTarget;
   readonly place?: string;
+  readonly isClosure?: boolean;
+  readonly isLending?: boolean;
 };
 
 export type CallbackStep = {
@@ -53,6 +56,7 @@ export type CallbackStep = {
   readonly index: IrValue;
   readonly array: IrValue;
   readonly done: LLVMBlock;
+  readonly isLent?: boolean;
 };
 
 export type GivenText = {
@@ -120,6 +124,45 @@ export type PendingInstance = {
   readonly self?: Type;
 };
 
+export type ClosureCapture = {
+  readonly key: string;
+  readonly field: string;
+  readonly place: Place;
+  readonly isShared: boolean;
+  readonly index: int;
+};
+
+export type PendingClosure = {
+  readonly module: int;
+  readonly fn: FunctionDecl;
+  readonly name: string;
+  readonly shape: FunctionShape;
+  readonly captures: readonly ClosureCapture[];
+  readonly struct: string;
+  readonly bindingKeys: readonly int[];
+  readonly bindingTypes: readonly Type[];
+  readonly instanceModule: int;
+  readonly instanceStart: int;
+  readonly instanceEnd: int;
+  readonly instanceSuffix: string;
+};
+
+export type RuntimeTarget = {
+  readonly module: string;
+  readonly name: string;
+};
+
+export type OwnedMethod = {
+  readonly owner: Type;
+  readonly decl: ClassDecl;
+  readonly fn: FunctionDecl;
+};
+
+export type MethodCallSite = {
+  readonly module: int;
+  readonly loc: int;
+};
+
 export type MethodTarget = {
   readonly name: string;
   readonly shape: FunctionShape;
@@ -162,6 +205,7 @@ export type ClassLayout = {
   readonly classId: int;
   readonly shape: LayoutShape;
   readonly drop: LLVMValue;
+  readonly slots: readonly LLVMValue[];
 };
 
 export type DictLayout = {

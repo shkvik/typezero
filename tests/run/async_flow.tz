@@ -2,7 +2,7 @@
 // `await` anywhere in the code: in arguments (what they computed before is
 // released when the Result is an Err), conditions, loops with labels,
 // switch, a loop over a generator; deep chains of awaits; many tasks.
-async function value<T>(x: T): Promise<T> {
+async function value<T>(x: Own<T>): Promise<T> {
   await undefined
   return x
 }
@@ -49,20 +49,25 @@ async function main() {
   console.log(strings, strings.length)
   return count
 }
-console.log("result", await main())
-
 async function depth(n: int): Promise<int> {
   if (n == 0) return 0
   return 1 + (await depth(n - 1))
 }
-console.log(await depth(1000))
 
-let done = 0
-const tasks: Promise<void>[] = []
-for (let i = 0; i < 10000; i++)
-  tasks.push((async () => {
-    await value(i)
-    done++
-  })())
-await Promise.all(tasks)
-console.log("done", done)
+async function program(): Promise<void> {
+  console.log("result", await main())
+
+  console.log(await depth(1000))
+
+  let done = 0
+  const tasks: Promise<void>[] = []
+  for (let i = 0; i < 10000; i++)
+    tasks.push((async () => {
+      await value(i)
+      done++
+    })())
+  await Promise.all(tasks)
+  console.log("done", done)
+}
+
+await program()

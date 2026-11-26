@@ -2,7 +2,7 @@
 // `A extends unknown[]`: the types of the parameters of some function, a
 // tuple. In each copy its elements are parameters of their own.
 
-function logged<A extends unknown[], R>(name: string, fn: (...args: A) => R) {
+function logged<A extends unknown[], R>(name: string, fn: Own<(...args: A) => R>) {
   return (...args: A): R => {
     console.log(`→ ${name} with ${args.length}: ${args.join(" ")}`)
     return fn(...args)

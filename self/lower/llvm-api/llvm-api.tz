@@ -51,6 +51,10 @@ export declare function LLVMConstIntOfString(
   radix: uint8,
 ): LLVMValue;
 export declare function LLVMConstReal(type: LLVMType, value: double): LLVMValue;
+export declare function LLVMConstRealOfString(
+  type: LLVMType,
+  text: Read<cstring>,
+): LLVMValue;
 export declare function LLVMConstNull(type: LLVMType): LLVMValue;
 export declare function LLVMSizeOf(type: LLVMType): LLVMValue;
 export declare function LLVMGetUndef(type: LLVMType): LLVMValue;

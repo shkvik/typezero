@@ -226,7 +226,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const owned = this.owning(frame, converted);
+    const isLent = converted.owned != true;
+    const owned = this.chainOwned(frame, converted);
     const valueEnd = frame.made.currentBlock();
 
     frame.made.branch(end);
@@ -237,7 +238,15 @@ partial class Lowering {
     const none = this.ir.zero(type);
     const value = frame.made.phi(type, [owned.value, none], [valueEnd, missing]);
 
-    return { type, value, tz: result, owned: true };
+    return { type, value, tz: result, owned: !isLent };
+  }
+
+  private chainOwned(frame: Read<Frame>, value: IrValue): IrValue {
+    if (value.owned != true) {
+      return value;
+    }
+
+    return this.owning(frame, value);
   }
 
   private chainedObject(frame: Frame, expr: Expr): boolean {

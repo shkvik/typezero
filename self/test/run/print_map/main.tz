@@ -1,0 +1,11 @@
+// console.log of a Map and a Set prints them as node does, through mapPrint
+// of tz:map.
+const empty = new Map<string, int>();
+const counts = new Map<string, int>();
+const seen = new Set<int>([3, 1]);
+
+counts.set("a", 1);
+counts.set("b", 2);
+console.log(empty);
+console.log(counts);
+console.log("set:", seen);

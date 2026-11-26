@@ -34,7 +34,7 @@ const cost: decimal = 19.99
 console.log(price(cost), price("free"))
 
 // Generics: a copy for each union, and T found from a union.
-function orElse<T>(x: T | string, fallback: T): T {
+function orElse<T>(x: Own<T | string>, fallback: Own<T>): T {
   if (typeof x == "string") return fallback
   return x
 }
@@ -75,7 +75,7 @@ function area(s: Shape) {
 }
 console.log(area({ kind: "circle", r: 1 }), area({ kind: "square", side: 2 }))
 
-function must<T>(r: Result<T, JsonError>): T {
+function must<T>(r: Own<Result<T, JsonError>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

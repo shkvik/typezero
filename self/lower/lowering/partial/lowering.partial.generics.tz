@@ -14,8 +14,12 @@ import {
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
-import { kArrayModule } from "../const/lowering.const.tz";
-import { Frame, IrValue, PendingInstance } from "../types/lowering.types.tz";
+import {
+  Frame,
+  IrValue,
+  PendingInstance,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private readonly bound(type: Type): Type {
@@ -113,30 +117,33 @@ partial class Lowering {
 
     const made = this.ir.declare(name, result, types);
     const value = frame.made.call(made, given);
+    const answer: IrValue = { type: result, value, tz: shape.result };
+    const returned = this.callResult(frame, answer, fn, kept);
 
     this.droppedAll(frame, kept);
 
-    return { type: result, value, tz: shape.result, owned: true };
+    return returned;
   }
 
   private runtimeFunctionCall(
     frame: Read<Frame>,
-    name: string,
+    target: RuntimeTarget,
     items: Read<Type[]>,
     given: Read<IrValue[]>,
     loc: int,
   ): IrValue | undefined {
-    const home = this.program.modules.find((one) => one.name == kArrayModule);
+    const { module, name } = target;
+    const home = this.program.modules.find((one) => one.name == module);
     const fn = this.functionNamed(home, name);
     if (home == undefined || fn == undefined) {
-      this.notLowered(frame.module, loc, `${kArrayModule} ${name}`);
+      this.notLowered(frame.module, loc, `${module} ${name}`);
 
       return undefined;
     }
 
     const declared = this.values.functionOf(home.id, fn.loc);
     if (declared.kind != TypeKind.Function) {
-      this.notLowered(frame.module, loc, `${kArrayModule} ${name}`);
+      this.notLowered(frame.module, loc, `${module} ${name}`);
 
       return undefined;
     }
@@ -149,7 +156,7 @@ partial class Lowering {
     const result = this.irType(shape.result);
     const types = this.shapeTypes(shape);
     if (result == undefined || types == undefined) {
-      this.notLowered(frame.module, loc, `${kArrayModule} ${name}`);
+      this.notLowered(frame.module, loc, `${module} ${name}`);
 
       return undefined;
     }
@@ -168,8 +175,9 @@ partial class Lowering {
     const values = given.map((one) => one.value);
     const made = this.ir.declare(instance, result, types);
     const value = frame.made.call(made, values);
+    const answer: IrValue = { type: result, value, tz: shape.result };
 
-    return { type: result, value, tz: shape.result, owned: true };
+    return this.callResult(frame, answer, fn, given);
   }
 
   private readonly functionNamed(

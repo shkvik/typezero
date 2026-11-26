@@ -16,6 +16,7 @@ import { kProgramName } from "../../const/cli.const.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 import {
+  kAuditOption,
   kEmitIrOption,
   kExecutableExtension,
   kIrExtension,
@@ -73,14 +74,25 @@ export class BuildCommand {
       return;
     }
 
-    this.checkOwnership(program, checked.values);
+    const ownership = this.checkOwnership(program, checked.values);
 
     if (this.report.hasFailed()) {
       return;
     }
 
-    const lowering = new Lowering(this.store, program, checked);
+    const moves = ownership.takeMoves();
+    const borrows = ownership.takeBorrows();
+    const lowering = new Lowering(this.store, program, checked, moves, borrows);
+
+    if (options.isAuditing) {
+      lowering.audit();
+    }
+
     const lowered = lowering.run();
+
+    if (options.isAuditing) {
+      this.auditPrinted(lowering.auditedCounts());
+    }
     if (lowered.unlowered.length > 0) {
       return this.unloweredReport(program, lowered.unlowered);
     }
@@ -106,6 +118,7 @@ export class BuildCommand {
     let output: string | undefined = undefined;
     const libraries: string[] = [];
     let isEmittingIr = false;
+    let isAuditing = false;
     let isWrong = false;
 
     for (let index = 3; index < this.args.length; index++) {
@@ -123,6 +136,8 @@ export class BuildCommand {
         libraries.push(library ?? "");
       } else if (arg == kEmitIrOption) {
         isEmittingIr = true;
+      } else if (arg == kAuditOption) {
+        isAuditing = true;
       } else if (entry == undefined) {
         entry = arg;
       } else {
@@ -130,7 +145,25 @@ export class BuildCommand {
       }
     }
 
-    return { entry, output, libraries, isEmittingIr, isWrong };
+    return { entry, output, libraries, isEmittingIr, isAuditing, isWrong };
+  }
+
+  private readonly auditPrinted(sites: Own<string[]>): void {
+    sites.sort();
+
+    let index = 0;
+
+    while (index < sites.length) {
+      const site = sites[index] ?? "";
+      let end = index + 1;
+
+      while (end < sites.length && sites[end] == site) {
+        end += 1;
+      }
+
+      console.error(`${end - index} ${site}`);
+      index = end;
+    }
   }
 
   private readonly outputOf(options: Read<BuildOptions>, entry: string): string {
@@ -148,7 +181,10 @@ export class BuildCommand {
     return `${stem}${kExecutableExtension}`;
   }
 
-  private checkOwnership(program: Program, values: Own<ExpressionTypes>): void {
+  private checkOwnership(
+    program: Program,
+    values: Own<ExpressionTypes>,
+  ): OwnershipCheck {
     const ownership = new OwnershipCheck(this.store, values, program);
 
     ownership.run();
@@ -162,6 +198,8 @@ export class BuildCommand {
         this.report.sourceErrors(module.source, sorted);
       }
     }
+
+    return ownership;
   }
 
   private unloweredReport(program: Program, unlowered: Read<Unlowered[]>): void {

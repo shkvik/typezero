@@ -69,7 +69,7 @@ for (const kind of kinds) {
   console.log(made.summary(), made instanceof Savings, kind.name)
 }
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

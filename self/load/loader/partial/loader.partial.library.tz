@@ -19,7 +19,7 @@ import {
 } from "../../../program/module/types/module.types.tz";
 import { Token } from "../../token/types/token.types.tz";
 import { ModuleState, OpenModule } from "../types/loader.types.tz";
-import { kLineBreak } from "../const/loader.const.tz";
+import { kLineBreak, kMapLibrary } from "../const/loader.const.tz";
 
 partial class Loader {
   private linkedImplicit(from: ModulePath): ModuleLink {
@@ -77,7 +77,14 @@ partial class Loader {
   }
 
   private loadRuntime(): void {
-    for (const library of kLibrary.runtimeModules()) {
+    const map = kLibrary.named(kMapLibrary);
+    const all = kLibrary.runtimeModules();
+
+    if (map != undefined) {
+      all.push(map);
+    }
+
+    for (const library of all) {
       const id = this.libraryId(library);
       const module = this.opened[id ?? -1];
       if (module != undefined && module.state == ModuleState.New) {

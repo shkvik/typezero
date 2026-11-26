@@ -75,15 +75,18 @@ class Tree {
     this.children = []
   }
 
-  add(child: Tree) {
+  add(child: Own<Tree>) {
     this.children.push(child)
-    return this
   }
   size(): int {
     return 1 + this.children.reduce((sum, child) => sum + child.size(), 0)
   }
 }
-const tree = new Tree().add(new Tree()).add(new Tree().add(new Tree()))
+const tree = new Tree()
+const branch = new Tree()
+branch.add(new Tree())
+tree.add(new Tree())
+tree.add(branch)
 console.log(tree.size(), tree)
 
 class Config {

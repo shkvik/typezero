@@ -315,6 +315,7 @@ partial class ExpressionTypes {
     const key = `${module} ${decl.loc}`;
 
     this.literalLength(key, init);
+    this.arrayMadeLength(key, init, module);
     this.declaredLength(key, init, module);
     this.embeddedLength(key, init, module);
 

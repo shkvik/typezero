@@ -3,7 +3,7 @@
 // types. The body may give a value of either branch; the copy checks the one
 // its types choose, and drops the code after an `if` they decide.
 type Boxed<T> = T extends string ? { text: T } : { value: T }
-function box<T>(x: T): Boxed<T> {
+function box<T>(x: Own<T>): Boxed<T> {
   if (typeof x == "string") return { text: x }
   return { value: x }
 }
@@ -37,7 +37,7 @@ console.log(l)
 
 // ReturnType and Parameters of a generic function: its type parameters are
 // their constraints, or unknown; of a method with several variants, the last.
-function wrap<T>(x: T): T[] { return [x] }
+function wrap<T>(x: Own<T>): T[] { return [x] }
 function measure<T extends string>(x: T): int { return x.length }
 type Wrapped = ReturnType<typeof wrap>
 type MeasureArgs = Parameters<typeof measure>

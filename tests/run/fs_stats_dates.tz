@@ -21,7 +21,7 @@ const sorted = [st.birthtime, st.mtime].sort((a, b) => a.getTime() - b.getTime()
 console.log(sorted.length, (sorted[0]?.getTime() ?? 0) <= (sorted[1]?.getTime() ?? 0))
 must(rmSync(dir, { recursive: true }))
 
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)

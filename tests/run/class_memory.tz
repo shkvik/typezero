@@ -128,7 +128,7 @@ head = undefined
 class Cache {
   static last: Item = new Item("cached")
   static items: Item[] = []
-  static remember(item: Item) {
+  static remember(item: Own<Item>) {
     Cache.items.push(item)
     Cache.last = item
   }

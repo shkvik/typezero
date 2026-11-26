@@ -79,15 +79,20 @@ function codes(s: string): int {
   for (let i = s.length - 1; i >= 0; i--) if (s[i] == "a") n++
   return n
 }
-const a = [1, 2, 3, 4]
-console.log(sum(a), rev(a), pairs(a), strided([1, 2, 3, 4, 5, 6, 7]), guarded(a, 2), guarded(a, 9), lastPlusFirst(a), whileLoop(a))
-console.log(powers(10), squares(5), drain([1, 2, 3]), constLength(), nested([[1, 2], [3]]), codes("banana"))
-
 // Not proven: the result may be undefined.
 function at(xs: string[], i: int): string {
   return xs[i] ?? "-"
 }
-const word = "hi"
-let k = 5
-console.log(at(["x", "y"], 1), at(["x", "y"], 2), at(["x"], -1), word[k], word.charCodeAt(k), word.at(-1), word.at(-3))
-console.log(a.at(-1), a.at(-5), [7, 8][k] == undefined)
+
+function main(): void {
+  const a = [1, 2, 3, 4]
+  console.log(sum(a), rev(a), pairs(a), strided([1, 2, 3, 4, 5, 6, 7]), guarded(a, 2), guarded(a, 9), lastPlusFirst(a), whileLoop(a))
+  console.log(powers(10), squares(5), drain([1, 2, 3]), constLength(), nested([[1, 2], [3]]), codes("banana"))
+
+  const word = "hi"
+  let k = 5
+  console.log(at(["x", "y"], 1), at(["x", "y"], 2), at(["x"], -1), word[k], word.charCodeAt(k), word.at(-1), word.at(-3))
+  console.log(a.at(-1), a.at(-5), [7, 8][k] == undefined)
+}
+
+main()

@@ -484,7 +484,7 @@ partial class OwnershipCheck {
       }
 
       const operand = this.evaluateFor(element.expr, CallbackMode.Kept);
-      if (element.spread && this.isArrayOfCopiesExpr(element.expr)) {
+      if (element.spread && this.isSpreadOfCopies(element.expr)) {
         continue;
       }
 
@@ -494,10 +494,11 @@ partial class OwnershipCheck {
     return this.freshOperand(expr.loc);
   }
 
-  private isArrayOfCopiesExpr(expr: Expr): boolean {
+  private isSpreadOfCopies(expr: Expr): boolean {
     const type = this.values.answers.typeOf(expr);
+    const item = type == undefined ? undefined : this.values.iteratedItem(type);
 
-    return type != undefined && type.kind == TypeKind.Array && this.traits.isCopy(type.item);
+    return item != undefined && this.traits.isCopy(item);
   }
 
   private evaluateObject(expr: ObjectLitExpr): Operand {

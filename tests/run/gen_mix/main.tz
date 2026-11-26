@@ -50,7 +50,7 @@ console.log(await walk(new Range(1, 4)), lengths.loads)
 // 5. Instances of one generic class in a union.
 class Box<T> {
   value: T
-  constructor(value: T) {
+  constructor(value: Own<T>) {
     this.value = value
   }
 }

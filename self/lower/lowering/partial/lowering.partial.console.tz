@@ -1,5 +1,6 @@
 import {
   CallExpr,
+  NameExpr,
   Expr,
   ExprKind,
 } from "../../../program/ast/types/ast.types.expressions.tz";
@@ -7,19 +8,24 @@ import { TypeKind } from "../../../program/type/types/type.types.tz";
 import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kBooleanType,
   kCharType,
   kConsoleName,
   kErrorBegin,
   kErrorEnd,
+  kMapModule,
+  kMapPrintName,
   kNewlineCode,
+  kPointerType,
   kPrintBoolean,
   kPrintChar,
   kPrintDouble,
   kPrintInt,
+  kPrintNestedName,
   kPrintString,
-  kPointerType,
   kPrintUnsigned,
   kPrintValue,
+  kQuoteCode,
   kSpaceCode,
   kStderrPrints,
   kStdoutPrints,
@@ -118,6 +124,9 @@ partial class Lowering {
 
   private printOne(frame: Read<Frame>, value: IrValue): void {
     const tz = this.store.integer(64, false);
+    if (this.isTzMap(value.tz)) {
+      return this.mapPrinted(frame, value);
+    }
     if (this.isString(value.tz)) {
       const parts = this.stringParts(frame, value);
 
@@ -149,6 +158,53 @@ partial class Lowering {
     const long = this.toLong(frame, value);
 
     this.runtimeCall(frame.made, kPrintInt, [long]);
+  }
+
+  private mapPrinted(frame: Read<Frame>, value: IrValue): void {
+    const type = value.tz;
+    if (type.kind != TypeKind.Dict) {
+      return;
+    }
+
+    const isSet = this.isTzSet(type);
+    const target = { module: kMapModule, name: kMapPrintName };
+    const items = [type.key, this.mapValueType(type)];
+    const boolean = this.store.plain(TypeKind.Boolean);
+    const flag = this.ir.integer(kBooleanType, `${this.choose(isSet, 1, 0)}`);
+    const kind: IrValue = { type: kBooleanType, value: flag, tz: boolean };
+
+    this.runtimeFunctionCall(frame, target, items, [value, kind], 0);
+  }
+
+  private inspectCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+  ): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const value = this.value(frame, argument.expr);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const isQuoted = callee.name == kPrintNestedName && this.isString(value.tz);
+    if (isQuoted) {
+      this.printCode(frame, kQuoteCode);
+    }
+
+    this.printOne(frame, value);
+
+    if (isQuoted) {
+      this.printCode(frame, kQuoteCode);
+    }
+
+    this.dropping(frame, value);
+
+    return this.nothing();
   }
 
   private printedWhole(frame: Read<Frame>, value: IrValue): void {

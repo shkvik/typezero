@@ -1,0 +1,535 @@
+import { replace } from "tz:mem";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  FunctionExpr,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+import { InstanceField } from "../../../program/expression-answers/types/expression-answers.types.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { ExpressionCollector } from "../../../semantic/code/expression-collector/expression-collector.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kDescriptorWithSlots,
+  kImmortalCount,
+  kIntType,
+  kObjectHeader,
+  kPointerType,
+  kThisName,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  ClassLayout,
+  ClosureCapture,
+  Frame,
+  IrValue,
+  PendingClosure,
+  Place,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private closureMade(frame: Frame, expr: FunctionExpr): IrValue | undefined {
+    const fn = expr.fn;
+    const type = this.typeOf(expr);
+    const shape = this.callbackShape(frame, expr);
+    const body = fn.body;
+    const isPlain =
+      !fn.isAsync &&
+      !fn.isGenerator &&
+      fn.typeParams.length == 0 &&
+      fn.params.every((param) => this.isPlainParameter(param));
+    if (!isPlain || body == undefined || shape == undefined || shape.rest) {
+      this.notLowered(frame.module, expr.loc, "this kind of function");
+
+      return undefined;
+    }
+
+    const result = this.irType(shape.result);
+    const params = this.parameterTypes(frame.module, fn, shape);
+    if (result == undefined || params == undefined || type == undefined) {
+      const kind = this.shapeProblem(shape);
+
+      this.notLowered(frame.module, expr.loc, `a function of type ${kind}`);
+
+      return undefined;
+    }
+
+    const captures = this.capturesOf(frame, fn);
+    const name = this.ir.uniqueName(`tz.c${frame.module}.${fn.loc}.`);
+    const code = this.ir.declare(name, result, [kPointerType, ...params]);
+    const layout = this.closureLayout(name, captures, code.fn);
+    const object = this.allocated(frame, layout);
+
+    for (const capture of captures) {
+      this.captureStored(frame, layout, object, capture);
+    }
+
+    this.pendingClosures.push({
+      module: frame.module,
+      fn,
+      name,
+      shape,
+      captures: captures.map((one) => this.placedCapture(layout, one)),
+      struct: layout.struct,
+      bindingKeys: this.bindingKeys(),
+      bindingTypes: this.bindingTypes(),
+      instanceModule: this.instanceModule,
+      instanceStart: this.instanceStart,
+      instanceEnd: this.instanceEnd,
+      instanceSuffix: this.instanceSuffix,
+    });
+
+    return { type: kPointerType, value: object, tz: type, owned: true };
+  }
+
+  private capturesOf(frame: Read<Frame>, fn: FunctionDecl): ClosureCapture[] {
+    const collector = new ExpressionCollector();
+    const exprs = collector.functionExprs(fn, true);
+    const found: ClosureCapture[] = [];
+    const seen = new Set<string>();
+
+    for (const expr of exprs) {
+      if (expr.kind != ExprKind.Name) {
+        continue;
+      }
+
+      const capture = this.captureOf(frame, expr, seen, found.length);
+      if (capture != undefined) {
+        found.push(capture);
+      }
+    }
+
+    return found;
+  }
+
+  private captureOf(
+    frame: Read<Frame>,
+    expr: NameExpr,
+    seen: Set<string>,
+    count: int,
+  ): ClosureCapture | undefined {
+    const self = frame.self;
+    if (expr.name == kThisName) {
+      if (self == undefined || seen.has(kThisName)) {
+        return undefined;
+      }
+
+      seen.add(kThisName);
+
+      return {
+        key: kThisName,
+        field: kThisName,
+        place: self,
+        isShared: false,
+        index: 0,
+      };
+    }
+
+    const target = this.values.valueTargetOf(expr, frame.module);
+    const isValue =
+      target != undefined &&
+      (target.kind == SymbolKind.Variable ||
+        target.kind == SymbolKind.Parameter);
+    if (target == undefined || !isValue) {
+      return undefined;
+    }
+
+    const key = this.placeKey(target.module, target.loc);
+    const place = this.places.get(key);
+    if (place == undefined || place.owner != frame.id || seen.has(key)) {
+      return undefined;
+    }
+
+    seen.add(key);
+
+    const isShared = this.letKeys.has(key);
+
+    return { key, field: `c${count}`, place, isShared, index: 0 };
+  }
+
+  private readonly capturedType(capture: Read<ClosureCapture>): Type {
+    if (capture.isShared) {
+      return this.store.integer(64, false);
+    }
+
+    return capture.place.tz;
+  }
+
+  private closureLayout(
+    name: string,
+    captures: Read<ClosureCapture[]>,
+    code: LLVMValue,
+  ): ClassLayout {
+    const fields: InstanceField[] = captures.map((one) => ({
+      name: one.field,
+      loc: 0,
+      type: this.capturedType(one),
+    }));
+    const placed = this.placedFields(fields, 16, 0) ?? [];
+    const irs = placed.map((field) => field.ir);
+    const types = [kIntType, kPointerType].concat(irs);
+    const struct = `{ ${types.join(", ")} }`;
+    const size = this.structSize(placed);
+    const classId = this.nextClassId();
+    const drop = this.dropFunction(name, struct, placed, []);
+    const shape = { name: "", fields, flags: 0 };
+    const descriptor = this.layoutDescriptor(
+      shape,
+      drop,
+      placed,
+      classId,
+      [code],
+    );
+
+    return {
+      struct,
+      size,
+      fields: placed,
+      descriptor,
+      classId,
+      shape,
+      drop,
+      slots: [code],
+    };
+  }
+
+  private readonly placedCapture(
+    layout: Read<ClassLayout>,
+    capture: Read<ClosureCapture>,
+  ): ClosureCapture {
+    const spot = layout.fields.find((field) => field.name == capture.field);
+
+    return {
+      key: capture.key,
+      field: capture.field,
+      place: capture.place,
+      isShared: capture.isShared,
+      index: spot?.index ?? 0,
+    };
+  }
+
+  private captureStored(
+    frame: Read<Frame>,
+    layout: Read<ClassLayout>,
+    object: LLVMValue,
+    capture: Read<ClosureCapture>,
+  ): void {
+    const spot = layout.fields.find((field) => field.name == capture.field);
+    if (spot == undefined) {
+      return;
+    }
+
+    const address = frame.made.field(layout.struct, object, spot.index);
+    const place = capture.place;
+    if (capture.isShared) {
+      frame.made.store(place.pointer, address);
+
+      return;
+    }
+
+    const value = frame.made.load(place.type, place.pointer);
+    const given: IrValue = { type: place.type, value, tz: place.tz };
+    const owned = this.owning(frame, given);
+
+    frame.made.store(owned.value, address);
+  }
+
+  private bindingKeys(): int[] {
+    const keys: int[] = [];
+
+    for (const key of this.binding.keys()) {
+      keys.push(key);
+    }
+
+    return keys;
+  }
+
+  private bindingTypes(): Type[] {
+    const types: Type[] = [];
+
+    for (const type of this.binding.values()) {
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private closuresLowered(): boolean {
+    let next = this.pendingClosures.pop();
+    let isAny = false;
+
+    while (next != undefined) {
+      this.closureLowered(next);
+      isAny = true;
+      next = this.pendingClosures.pop();
+    }
+
+    return isAny;
+  }
+
+  private closureLowered(pending: Read<PendingClosure>): void {
+    const binding = new Map<int, Type>();
+
+    for (let index = 0; index < pending.bindingKeys.length; index++) {
+      const key = pending.bindingKeys[index];
+      const type = pending.bindingTypes[index];
+      if (key != undefined && type != undefined) {
+        binding.set(key, type);
+      }
+    }
+
+    const savedBinding = replace(this.binding, binding);
+    const savedModule = this.instanceModule;
+    const savedStart = this.instanceStart;
+    const savedEnd = this.instanceEnd;
+    const savedSuffix = this.instanceSuffix;
+
+    this.instanceModule = pending.instanceModule;
+    this.instanceStart = pending.instanceStart;
+    this.instanceEnd = pending.instanceEnd;
+    this.instanceSuffix = pending.instanceSuffix;
+    this.forgetExpressions();
+    this.closureBody(pending);
+    replace(this.binding, savedBinding);
+    this.instanceModule = savedModule;
+    this.instanceStart = savedStart;
+    this.instanceEnd = savedEnd;
+    this.instanceSuffix = savedSuffix;
+    this.forgetExpressions();
+  }
+
+  private closureBody(pending: Read<PendingClosure>): void {
+    const fn = pending.fn;
+    const body = fn.body;
+    const shape = pending.shape;
+    const result = this.irType(shape.result);
+    const params = this.parameterTypes(pending.module, fn, shape);
+    if (body == undefined || result == undefined || params == undefined) {
+      return;
+    }
+
+    const made = new IrFunction(
+      this.ir,
+      pending.name,
+      result,
+      [kPointerType, ...params],
+    );
+    const env = made.param(0);
+    const id = this.frameId();
+    let self: Place | undefined = undefined;
+
+    for (const capture of pending.captures) {
+      const address = made.field(pending.struct, env, capture.index);
+      const tz = capture.place.tz;
+      const type = capture.place.type;
+      if (capture.key == kThisName) {
+        self = { pointer: address, type, tz, owner: id, isCaptured: true };
+
+        continue;
+      }
+
+      let pointer = address;
+
+      if (capture.isShared) {
+        pointer = made.load(kPointerType, address);
+      }
+
+      const place: Place = { pointer, type, tz, owner: id, isCaptured: true };
+
+      this.places.set(capture.key, place);
+    }
+
+    const inner: Frame = {
+      made,
+      id,
+      module: pending.module,
+      result: shape.result,
+      loops: [],
+      scopes: [],
+      self,
+      place: fn.name ?? "",
+      isClosure: true,
+    };
+
+    this.openScope(inner);
+    this.parametersStored(inner, fn, shape, params);
+    this.statements(inner, body.body);
+    this.closeScope(inner);
+    this.finished(made, result, shape.result);
+  }
+
+  private closureCall(frame: Frame, call: CallExpr, callee: Expr): IrValue | undefined {
+    const type = this.typeOf(callee);
+    if (type == undefined || type.kind != TypeKind.Function) {
+      this.notLowered(frame.module, call.loc, "a call of this function");
+
+      return undefined;
+    }
+
+    const shape = type.shape;
+    const result = this.irType(shape.result);
+    const params = this.shapeTypes(shape);
+    if (result == undefined || params == undefined || shape.rest) {
+      const kind = this.shapeProblem(shape);
+
+      this.notLowered(frame.module, call.loc, `a call of a function of type ${kind}`);
+
+      return undefined;
+    }
+
+    const closure = this.value(frame, callee);
+    if (closure == undefined) {
+      return undefined;
+    }
+
+    const kept: IrValue[] = [];
+    const args = this.callArguments(frame, call.args, shape, call.loc, undefined, kept);
+    if (args == undefined) {
+      return undefined;
+    }
+
+    const value = this.codeCalled(frame, closure.value, result, params, args);
+
+    this.droppedAll(frame, kept);
+    this.dropping(frame, closure);
+
+    return { type: result, value, tz: shape.result, owned: true };
+  }
+
+  private readonly codeCalled(
+    frame: Read<Frame>,
+    closure: LLVMValue,
+    result: string,
+    params: Read<string[]>,
+    args: Read<LLVMValue[]>,
+  ): LLVMValue {
+    const kind = frame.made.field(kObjectHeader, closure, 1);
+    const layout = frame.made.load(kPointerType, kind);
+    const slots = frame.made.field(kDescriptorWithSlots, layout, 2);
+    const code = frame.made.load(kPointerType, slots);
+    const signature = this.ir.signature(result, [kPointerType, ...params]);
+
+    return frame.made.indirectCall(signature, code, [closure, ...args]);
+  }
+
+  private functionValue(frame: Read<Frame>, expr: NameExpr): IrValue | undefined {
+    const target = this.values.valueTargetOf(expr, frame.module);
+    const type = this.typeOf(expr);
+    if (target == undefined || type == undefined || type.kind != TypeKind.Function) {
+      this.notLowered(frame.module, expr.loc, "this name");
+
+      return undefined;
+    }
+
+    const decl = this.values.functionDeclAt(target.module, target.loc);
+    const shape = this.shapeOf(target.module, target.loc);
+    const opened = this.program.modules[target.module];
+    const isOwn =
+      decl != undefined &&
+      decl.typeParams.length == 0 &&
+      opened != undefined &&
+      !opened.source.isLibrary;
+    if (!isOwn || decl == undefined || shape == undefined || shape.rest) {
+      this.notLowered(frame.module, expr.loc, "this function as a value");
+
+      return undefined;
+    }
+
+    const name = this.functionName(target.module, target.loc);
+    const known = this.functionObjects.get(name);
+    if (known != undefined) {
+      return { type: kPointerType, value: known, tz: type };
+    }
+
+    const thunk = this.thunkOf(name, decl, shape);
+    if (thunk == undefined) {
+      this.notLowered(frame.module, expr.loc, "this function as a value");
+
+      return undefined;
+    }
+
+    const layout = this.closureLayout(`${name}.value`, [], thunk);
+    const count = this.ir.integer(kIntType, kImmortalCount);
+    const header = this.ir.constStruct([count, layout.descriptor]);
+    const objectName = this.ir.uniqueName(`${name}.value.`);
+    const object = this.ir.global(objectName, kObjectHeader, header, false);
+
+    this.functionObjects.set(name, object);
+
+    return { type: kPointerType, value: object, tz: type };
+  }
+
+  private thunkOf(
+    name: string,
+    decl: FunctionDecl,
+    shape: Read<FunctionShape>,
+  ): LLVMValue | undefined {
+    const result = this.irType(shape.result);
+    const params = this.shapeTypes(shape);
+    if (result == undefined || params == undefined) {
+      return undefined;
+    }
+
+    const made = new IrFunction(
+      this.ir,
+      `${name}.thunk`,
+      result,
+      [kPointerType, ...params],
+    );
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+    const args: LLVMValue[] = [];
+    const lent: IrValue[] = [];
+
+    for (let index = 0; index < params.length; index++) {
+      const type = params[index] ?? kPointerType;
+      const passed = shape.params[index];
+      const value = made.param(index + 1);
+      const declared = decl.params[index];
+
+      args.push(value);
+
+      if (passed == undefined || declared == undefined) {
+        continue;
+      }
+
+      const tz = this.passedType(passed);
+      const isLent = this.isBorrowedParam(declared) && this.isManaged(tz);
+      if (isLent) {
+        lent.push({ type, value, tz, owned: true });
+      }
+    }
+
+    const callee = this.ir.declare(name, result, params);
+    const value = made.call(callee, args);
+    const answer: IrValue = { type: result, value, tz: shape.result };
+    const returned = this.callResult(frame, answer, decl, lent);
+    const owned = this.owning(frame, returned);
+
+    for (const one of lent) {
+      this.dropping(frame, one);
+    }
+
+    if (result == kVoidType) {
+      made.finishVoid();
+    } else {
+      made.finishValue(owned.value);
+    }
+
+    return made.callee.fn;
+  }
+}

@@ -53,8 +53,19 @@ function reals(): void {
   console.log(items.indexOf(2.5), items.includes(3.5));
 }
 
+function pieces(): void {
+  const items = [1, 2, 3, 4, 5];
+  const names = ["a", "b"];
+  const joined = names.concat(["c"], ["d", "e"]);
+
+  console.log(items.slice(1, 3).join(","), items.slice(-2).join(","));
+  console.log(items.slice(3, 99).join(","), items.slice(4, 2).length);
+  console.log(joined.join(""), names.length, items.slice().length);
+}
+
 numbers();
 words();
+pieces();
 points();
 flags();
 reals();

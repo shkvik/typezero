@@ -6,7 +6,7 @@
 
 class Point {
   constructor(public x: int, public y: int) {}
-  move(dx: int, dy?: int) {
+  move(dx: int, dy?: int): Mut<Point> {
     this.x += dx
     this.y += dy ?? 0
     return this

@@ -19,7 +19,7 @@ class CsvLines extends Readable<string, CsvError> {
   private next: int
   private lines: string[]
 
-  constructor(lines: string[]) {
+  constructor(lines: Own<string[]>) {
     super()
     this.next = 0
     this.lines = lines

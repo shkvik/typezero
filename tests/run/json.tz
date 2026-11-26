@@ -87,8 +87,8 @@ console.log(numbers)
 const patch: Json = { phone: null, name: "Bob", age: 31, tags: ["x", 1, false, null], nested: {} }
 console.log(patch)
 const values: Json[] = [1, "a"]
-const array: Json = values
-values.push(null) // the same array
+values.push(null)
+const array: Json = values // an array of Json values is a Json
 console.log(array)
 
 // JSON.stringify of a Json.

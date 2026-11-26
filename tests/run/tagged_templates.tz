@@ -28,13 +28,16 @@ const upper = (texts: string[], word: string) => texts.join(word.toUpperCase())
 const lower = (texts: string[], word: string) => texts.join(word.toLowerCase())
 console.log(upper`<${"mid"}>`)
 for (const tag of [upper, lower]) console.log(tag`(${"Xy"})`)
-let made = 0
-function counted(texts: string[], value: int): int {
-  made++
-  return texts.length + value
+class Tally {
+  made: int = 0
+  counted(texts: string[], value: int): int {
+    this.made++
+    return texts.length + value
+  }
 }
-for (let i = 0; i < 3; i++) counted`x${i}y`
-console.log(made, counted`${made}`)
+const tally = new Tally()
+for (let i = 0; i < 3; i++) tally.counted`x${i}y`
+console.log(tally.made, tally.counted`${tally.made}`)
 
 // String.raw: escapes stay as written, values are converted as in a template.
 console.log(String.raw`C:\dir\new\t${n}\u0041`, String.raw`a\`b`, String.raw`\${n}`)

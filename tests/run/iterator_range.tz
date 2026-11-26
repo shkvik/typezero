@@ -4,7 +4,12 @@ function* naturals() {
   let n = 0
   while (true) yield n++
 }
-console.log(naturals().take(0).toArray(), naturals().drop(0).take(1).toArray())
-let count = -2
-if (count >= 0) console.log(naturals().take(count).toArray())
-else console.log("negative count", count)
+
+function main(): void {
+  console.log(naturals().take(0).toArray(), naturals().drop(0).take(1).toArray())
+  let count = -2
+  if (count >= 0) console.log(naturals().take(count).toArray())
+  else console.log("negative count", count)
+}
+
+main()

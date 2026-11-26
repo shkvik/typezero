@@ -7,7 +7,7 @@ class TreeNode {
   constructor(public name: string) {
     this.children = []
   }
-  add(child: TreeNode) {
+  add(child: Own<TreeNode>) {
     child.parent = this
     this.children.push(child)
     return child
@@ -39,37 +39,41 @@ function deepest(node: TreeNode): TreeNode {
   return at
 }
 
-// Trees made and dropped, many times.
-let total = 0
-for (let round = 0; round < 50; round++) {
-  const root = build(4, "r")
-  total += root.size()
-}
-console.log(total)
+function main(): void {
+  // Trees made and dropped, many times.
+  let total = 0
+  for (let round = 0; round < 50; round++) {
+    const root = build(4, "r")
+    total += root.size()
+  }
+  console.log(total)
 
-// A node kept alone keeps the whole tree, as in JavaScript.
-let kept: TreeNode | undefined = deepest(build(3, "t"))
-console.log(kept.path())
-const up = kept.parent
-console.log(up?.name, up?.children.length)
-kept = undefined
+  // A node kept alone keeps the whole tree, as in JavaScript.
+  let kept: TreeNode | undefined = deepest(build(3, "t"))
+  console.log(kept.path())
+  const up = kept.parent
+  console.log(up?.name, up?.children.length)
+  kept = undefined
 
-// A subtree moved to another tree, and one cut off.
-const a = build(2, "a")
-const b = build(2, "b")
-const moved = a.children[1]
-if (moved != undefined) {
-  a.remove(moved)
-  b.add(moved)
-  console.log(moved.path(), a.size(), b.size())
-}
-const cut = b.children[0]
-if (cut != undefined) {
-  b.remove(cut)
-  console.log(cut.path(), cut.size(), b.size())
+  // A subtree moved to another tree, and one cut off.
+  const a = build(2, "a")
+  const b = build(2, "b")
+  const moved = a.children[1]
+  if (moved != undefined) {
+    a.remove(moved)
+    b.add(moved)
+    console.log(moved.path(), a.size(), b.size())
+  }
+  const cut = b.children[0]
+  if (cut != undefined) {
+    b.remove(cut)
+    console.log(cut.path(), cut.size(), b.size())
+  }
+
+  // A node that is its own child, and a parent of itself.
+  const odd = new TreeNode("odd")
+  odd.add(odd)
+  console.log(odd.children.length, odd.parent == odd)
 }
 
-// A node that is its own child, and a parent of itself.
-const odd = new TreeNode("odd")
-odd.add(odd)
-console.log(odd.children.length, odd.parent == odd)
+main()

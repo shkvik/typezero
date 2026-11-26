@@ -9,61 +9,65 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { Jobs, collect } from "./jobs.tz"
 
-const log = (s: string) => console.log(s)
-const dir = must(await mkdtemp(join(tmpdir(), "tz-events-mix-")))
-const files = ["a", "bb", "ccc"]
-for (const name of files) must(await writeFile(join(dir, name + ".txt"), name.repeat(4)))
-
-const jobs = new Jobs()
-// An async listener: emit does not wait for it.
-jobs.on("done", async (done) => {
-  await undefined
-  log(`saved ${done.name}: ${done.size}`)
-})
-jobs.on("failed", (failed) => log(`failed ${failed.name}: ${failed.why}`))
-
-// 1. on() until "finished".
-const done = on(jobs, "done", { close: ["finished"] })
-for (const name of files) await jobs.read(name, join(dir, name + ".txt"))
-jobs.finish()
-let total = 0
-for await (const [job] of done) {
-  const weight: int = parseInt(String(job.size)).unwrapOr(0)
-  if (weight >= 0 && weight < 1000000) total += weight
-  log(`done ${job.name} ${job.size}`)
-}
-log(`total ${total}, started ${jobs.started}, listening ${jobs.listenerCount("done")}`)
-
-// 2. A read that fails is an event too.
-await jobs.read("missing", join(dir, "missing.txt"))
-
-// 3. on() given to a generic function, ended by an event, and by `break`.
-setTimeout(() => {
-  jobs.emit("start", "x")
-  jobs.emit("start", "y")
-  jobs.finish()
-}, 1)
-const collected = await collect(on(jobs, "start", { close: ["finished"] }))
-log(`${collected.length} ${collected.map(([name]) => name).join(",")}`)
-setTimeout(() => jobs.emit("start", "z"), 1)
-for await (const [name] of on(jobs, "start")) {
-  log(`first start ${name}`)
-  break
-}
-log(`start listeners ${jobs.listenerCount("start")}`)
-
-// 4. once(): the arguments of the next event.
-setTimeout(() => jobs.finish(), 1)
-const finished = await once(jobs, "finished")
-log(`once: ${finished.length}`)
-
-must(await rm(dir, { recursive: true }))
-log("end")
-
-function must<T, E>(r: Result<T, E>): T {
+function must<T, E>(r: Own<Result<T, E>>): T {
   if (r.isErr()) {
     console.log(r.error)
     process.exit(1)
   }
   return r.value
 }
+
+async function main(): Promise<void> {
+  const log = (s: string) => console.log(s)
+  const dir = must(await mkdtemp(join(tmpdir(), "tz-events-mix-")))
+  const files = ["a", "bb", "ccc"]
+  for (const name of files) must(await writeFile(join(dir, name + ".txt"), name.repeat(4)))
+
+  const jobs = new Jobs()
+  // An async listener: emit does not wait for it.
+  jobs.on("done", async (done) => {
+    await undefined
+    log(`saved ${done.name}: ${done.size}`)
+  })
+  jobs.on("failed", (failed) => log(`failed ${failed.name}: ${failed.why}`))
+
+  // 1. on() until "finished".
+  const done = on(jobs, "done", { close: ["finished"] })
+  for (const name of files) await jobs.read(name, join(dir, name + ".txt"))
+  jobs.finish()
+  let total = 0
+  for await (const [job] of done) {
+    const weight: int = parseInt(String(job.size)).unwrapOr(0)
+    if (weight >= 0 && weight < 1000000) total += weight
+    log(`done ${job.name} ${job.size}`)
+  }
+  log(`total ${total}, started ${jobs.started}, listening ${jobs.listenerCount("done")}`)
+
+  // 2. A read that fails is an event too.
+  await jobs.read("missing", join(dir, "missing.txt"))
+
+  // 3. on() given to a generic function, ended by an event, and by `break`.
+  setTimeout(() => {
+    jobs.emit("start", "x")
+    jobs.emit("start", "y")
+    jobs.finish()
+  }, 1)
+  const collected = await collect(on(jobs, "start", { close: ["finished"] }))
+  log(`${collected.length} ${collected.map(([name]) => name).join(",")}`)
+  setTimeout(() => jobs.emit("start", "z"), 1)
+  for await (const [name] of on(jobs, "start")) {
+    log(`first start ${name}`)
+    break
+  }
+  log(`start listeners ${jobs.listenerCount("start")}`)
+
+  // 4. once(): the arguments of the next event.
+  setTimeout(() => jobs.finish(), 1)
+  const finished = await once(jobs, "finished")
+  log(`once: ${finished.length}`)
+
+  must(await rm(dir, { recursive: true }))
+  log("end")
+}
+
+await main()

@@ -30,7 +30,7 @@ function counter() {
 const next = counter()
 console.log(await next(2), await next(3))
 
-async function identity<T>(x: T): Promise<T> {
+async function identity<T>(x: Own<T>): Promise<T> {
   await undefined
   return x
 }
