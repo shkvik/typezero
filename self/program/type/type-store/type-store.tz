@@ -625,7 +625,9 @@ export class TypeStore {
 
   private readonly fieldKey(field: ObjectField): string {
     const name = `${field.name.length}:${field.name}`;
-    const kinds = `${field.method ?? false}`;
+    const method = field.method ?? false;
+    const reads = field.isReadonlyMethod ?? false;
+    const kinds = `${method}:${reads}`;
     const flags = `${field.optional}:${field.readonly}:${kinds}`;
 
     return `${name}:${field.type.id}:${flags}`;

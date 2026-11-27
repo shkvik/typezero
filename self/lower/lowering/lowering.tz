@@ -60,6 +60,7 @@ import "./partial/lowering.partial.closures.tz";
 import "./partial/lowering.partial.field-inits.tz";
 import "./partial/lowering.partial.arena.tz";
 import "./partial/lowering.partial.map-loops.tz";
+import "./partial/lowering.partial.class-statics.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";

@@ -209,6 +209,11 @@ partial class Lowering {
       return undefined;
     }
 
+    const fixed = this.values.staticFieldOf(target, frame.module);
+    if (fixed != undefined) {
+      return this.staticPlace(frame, target, fixed);
+    }
+
     const object = tree.exprOf(target.objectId);
     const holder = this.value(frame, object);
     if (holder == undefined) {

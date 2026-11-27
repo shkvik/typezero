@@ -123,6 +123,7 @@ export type ObjectField = {
   readonly optional: boolean;
   readonly readonly: boolean;
   readonly method?: boolean;
+  readonly isReadonlyMethod?: boolean;
 };
 
 export type ObjectType = {

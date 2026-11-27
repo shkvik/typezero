@@ -1,0 +1,69 @@
+// Static fields: their values live in globals, are filled from functions and
+// static methods, replaced at the top level, and freed when the program ends.
+// A static method is called without an object. A class from another module
+// keeps its static fields there.
+import { Registry } from "./registry.tz";
+
+class Item {
+  public value: int;
+
+  public constructor(value: int) {
+    this.value = value;
+  }
+}
+
+class Store {
+  public static cache: Map<string, Item> = new Map<string, Item>();
+  public static items: Item[] = [];
+  public static count: int = 0;
+  public static last: Item | undefined = undefined;
+  public static label = "store";
+
+  public static remember(item: Own<Item>): void {
+    Store.items.push(item);
+    Store.count++;
+  }
+}
+
+class Config {
+  public static readonly history: Config[] = [new Config("default")];
+  public static first: int = Config.history.length;
+  public readonly name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public static use(name: string): string {
+    Config.history.push(new Config(name));
+
+    return name;
+  }
+}
+
+function filled(): void {
+  Store.cache.set("a", new Item(1));
+  Store.cache.set("b", new Item(2));
+  Store.cache.set("a", new Item(3));
+  Store.cache.delete("b");
+}
+
+function count(): int {
+  return Registry.add("a") + Registry.add("b");
+}
+
+filled();
+Store.remember(new Item(10));
+Store.remember(new Item(20));
+Store.last = new Item(5);
+Store.last = new Item(6);
+console.log(Store.cache.size, Store.cache.get("a")?.value);
+console.log(Store.items.length, Store.items[1]?.value, Store.count);
+console.log(Store.last?.value, Store.label);
+Store.count += 5;
+console.log(Store.count);
+
+const used = Config.use("test");
+
+console.log(count(), Registry.made, Registry.last, Registry.names.join(","));
+console.log(Config.history[0]?.name, used, Config.history.length, Config.first);

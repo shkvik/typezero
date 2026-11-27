@@ -84,6 +84,7 @@ partial class FileParser {
       optional: node.optional,
       readonly: node.readonly,
       method: node.method,
+      isReadonlyMethod: node.isReadonlyMethod,
       call: node.call,
       typeParams,
       type,

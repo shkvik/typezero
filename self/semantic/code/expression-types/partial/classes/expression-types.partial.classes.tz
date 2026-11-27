@@ -3,6 +3,7 @@ import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   ClassDecl,
+  ClassField,
   FieldKind,
   FieldPresence,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
@@ -29,7 +30,11 @@ import {
   kPrototypeName,
   kThisName,
 } from "../../const/expression-types.const.tz";
-import { CallKind, StaticOwner } from "../../types/expression-types.types.tz";
+import {
+  CallKind,
+  StaticField,
+  StaticOwner,
+} from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private walkClass(decl: ClassDecl, module: int): void {
@@ -156,6 +161,102 @@ partial class ExpressionTypes {
     return chain.some(
       (one) => one.kind == TypeKind.Instance && one.loc == owner.loc,
     );
+  }
+
+  public staticFieldOf(
+    expr: MemberExpr,
+    module: int,
+  ): StaticField | undefined {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const owner = this.classOfName(object, module);
+    if (owner == undefined) {
+      return undefined;
+    }
+
+    const decl = owner.decl;
+    const name = expr.name;
+    const field = tree
+      .fieldsOf(decl.fieldsList)
+      .find((one) => one.name == name && one.form == FieldKind.Static);
+    if (field == undefined) {
+      return undefined;
+    }
+
+    const className = decl.name ?? "";
+    const word = `${className}.${name}`;
+    const type = this.staticTypeOf(field, owner);
+
+    return { module: owner.module, loc: field.loc, word, type };
+  }
+
+  public readonly classOfName(
+    expr: Expr,
+    module: int,
+  ): StaticOwner | undefined {
+    if (expr.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Class) {
+      return undefined;
+    }
+    if (this.isDeclaredLibrary(target.module, target.loc)) {
+      return undefined;
+    }
+
+    const decl = this.record(target.module)?.classes.get(target.loc);
+    if (decl == undefined) {
+      return undefined;
+    }
+
+    return { decl, module: target.module };
+  }
+
+  public staticFieldsOf(module: int, decl: ClassDecl): StaticField[] {
+    const tree = this.types.program.tree;
+
+    const owner: StaticOwner = { decl, module };
+    const className = decl.name ?? "";
+    const fields: StaticField[] = [];
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      if (field.form != FieldKind.Static) {
+        continue;
+      }
+
+      const word = `${className}.${field.name}`;
+      const type = this.staticTypeOf(field, owner);
+
+      fields.push({ module, loc: field.loc, word, type });
+    }
+
+    return fields;
+  }
+
+  private staticTypeOf(field: ClassField, owner: StaticOwner): Type {
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(field.typeId);
+    const init = tree.exprAt(field.initId);
+    if (written != undefined || init == undefined) {
+      return this.staticFieldType(written, field.presence, owner);
+    }
+    if (field.readonly && this.types.isFieldLiteral(init)) {
+      return this.peekType(init, owner.module);
+    }
+    if (init.kind == ExprKind.Template) {
+      return this.types.store.plain(TypeKind.String);
+    }
+
+    const shown = this.literalShapeOf(init);
+    if (shown != undefined) {
+      return shown;
+    }
+
+    return this.staticFieldType(written, field.presence, owner);
   }
 
   private staticOwner(object: Expr, module: int): StaticOwner | undefined {
@@ -317,11 +418,7 @@ partial class ExpressionTypes {
     if (field != undefined) {
       this.reportAccess(decl, field.access, name, expr.loc, module);
 
-      return this.staticFieldType(
-        tree.typeRefAt(field.typeId),
-        field.presence,
-        owner,
-      );
+      return this.staticTypeOf(field, owner);
     }
 
     const method = methods[0];

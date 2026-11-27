@@ -1,7 +1,9 @@
 import { ExpressionTypes } from "../../expression-types.tz";
+import { FieldKind } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
   Expr,
   ExprKind,
+  MemberExpr,
   UnaryExpr,
   UnaryOp,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
@@ -75,10 +77,49 @@ partial class ExpressionTypes {
       case ExprKind.Binary:
         return this.answers.foldedOf(expr);
       case ExprKind.Member:
-        return this.enumConstant(expr, module);
+        return this.memberConstant(expr, module);
       default:
         return undefined;
     }
+  }
+
+  private memberConstant(expr: MemberExpr, module: int): decimal | undefined {
+    const known = this.enumConstant(expr, module);
+    if (known != undefined) {
+      return known;
+    }
+
+    return this.staticConstant(expr, module);
+  }
+
+  private readonly staticConstant(
+    expr: MemberExpr,
+    module: int,
+  ): decimal | undefined {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const owner = this.classOfName(object, module);
+    if (owner == undefined) {
+      return undefined;
+    }
+
+    const name = expr.name;
+    const field = tree
+      .fieldsOf(owner.decl.fieldsList)
+      .find((one) => one.name == name && one.form == FieldKind.Static);
+    const init = tree.exprAt(field?.initId);
+    if (field == undefined || !field.readonly || init == undefined) {
+      return undefined;
+    }
+    if (init.kind == ExprKind.IntLit) {
+      return init.value.toDecimal();
+    }
+    if (init.kind == ExprKind.Unary) {
+      return this.unaryConstant(init);
+    }
+
+    return undefined;
   }
 
   private readonly unaryConstant(expr: UnaryExpr): decimal | undefined {
@@ -110,7 +151,7 @@ partial class ExpressionTypes {
       case ExprKind.Name:
         return this.doorOfName(expr, module)?.isWhole == true;
       case ExprKind.Member:
-        return this.enumConstant(expr, module) != undefined;
+        return this.memberConstant(expr, module) != undefined;
       case ExprKind.Unary:
         return (
           this.types.isSign(expr.op) &&

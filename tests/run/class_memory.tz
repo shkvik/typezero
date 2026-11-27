@@ -126,13 +126,11 @@ head = undefined
 
 // Static fields hold their objects until the program ends.
 class Cache {
-  static last: Item = new Item("cached")
-  static items: Item[] = []
+  static readonly items: Item[] = []
   static remember(item: Own<Item>) {
     Cache.items.push(item)
-    Cache.last = item
   }
 }
 Cache.remember(new Item("one"))
 Cache.remember(new Item("two"))
-console.log(Cache.last.label(), Cache.items.length)
+console.log(Cache.items[Cache.items.length - 1]?.label(), Cache.items.length)

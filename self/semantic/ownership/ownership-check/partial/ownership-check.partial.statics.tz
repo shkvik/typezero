@@ -1,0 +1,82 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { StaticField } from "../../../code/expression-types/types/expression-types.types.tz";
+import { Holding, Operand } from "../types/ownership-check.types.tz";
+import {
+  kForeignKeyBase,
+  kForeignModuleSpan,
+} from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private staticOperand(
+    expr: MemberExpr,
+    isChecked: boolean,
+  ): Operand | undefined {
+    const field = this.values.staticFieldOf(expr, this.module);
+    if (field == undefined) {
+      return undefined;
+    }
+
+    const key = this.staticKey(field);
+
+    this.addStatic(key, field.word);
+
+    if (isChecked && this.isCopyExpr(expr)) {
+      return this.copyOperand(expr.loc);
+    }
+
+    const place = this.wholePlace(key);
+
+    return this.placeOperand(place, expr.loc);
+  }
+
+  private readonly staticKey(field: StaticField): int {
+    const shift = field.module * kForeignModuleSpan;
+
+    return kForeignKeyBase - shift - field.loc;
+  }
+
+  private addStatic(key: int, word: string): void {
+    const frame = this.currentFrame();
+    if (frame == undefined || frame.variables.has(key)) {
+      return;
+    }
+
+    frame.variables.set(key, {
+      key,
+      name: word,
+      holding: Holding.Static,
+      loans: [],
+      isReadOnly: false,
+      isConst: true,
+      isUsing: false,
+      declared: -1,
+      lastUse: -1,
+      isChanged: false,
+    });
+  }
+
+  private checkStaticReplaced(target: Expr, loc: int): void {
+    if (target.kind != ExprKind.Member) {
+      return;
+    }
+
+    const field = this.values.staticFieldOf(target, this.module);
+    const frame = this.frame();
+    if (field == undefined || frame == undefined || frame.fn == undefined) {
+      return;
+    }
+    if (this.values.isCopy(field.type)) {
+      return;
+    }
+
+    const word = field.word;
+
+    this.errors.write(this.home, loc, Code.OwnStaticReplaced, { word });
+  }
+}

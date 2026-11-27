@@ -389,6 +389,11 @@ partial class Lowering {
 
     const callee = tree.exprOf(call.calleeId);
     if (callee.kind == ExprKind.Member) {
+      const fixed = this.staticMethodOf(frame, callee);
+      if (fixed != undefined) {
+        return this.staticMethodCall(frame, call, callee, fixed);
+      }
+
       const calleeObject = tree.exprOf(callee.objectId);
       if (this.isBufferName(calleeObject)) {
         return this.bufferStatic(frame, call, callee);

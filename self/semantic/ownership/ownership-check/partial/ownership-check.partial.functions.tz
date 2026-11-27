@@ -261,6 +261,9 @@ partial class OwnershipCheck {
     if (variable.holding == Holding.Copy) {
       return Holding.Copy;
     }
+    if (variable.holding == Holding.Static) {
+      return Holding.Static;
+    }
     if (
       variable.holding == Holding.Own &&
       frame.callback == CallbackMode.Once

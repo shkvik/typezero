@@ -28,6 +28,7 @@ export type ObjectTypeField = {
   readonly optional: boolean;
   readonly readonly: boolean;
   readonly method: boolean;
+  readonly isReadonlyMethod?: boolean;
   readonly call: boolean;
   readonly typeParams: readonly TypeParamDecl[];
   readonly type: TypeRef;

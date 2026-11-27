@@ -57,6 +57,8 @@ partial class OwnershipCheck {
         return this.builtinCallee(kArrayMethods, callee.name, call);
       case TypeKind.Dict:
         return this.builtinCallee(kMapMethods, callee.name, call);
+      case TypeKind.Class:
+        return this.staticCallee(callee, call);
       case TypeKind.Instance:
         return this.instanceCallee(type, callee.name, call);
       case TypeKind.Object:
@@ -324,6 +326,8 @@ partial class OwnershipCheck {
 
         return found != undefined && found.role?.isReadonly != true;
       }
+      case TypeKind.Object:
+        return this.isChangingInterfaceMethod(type, method);
       default:
         return false;
     }

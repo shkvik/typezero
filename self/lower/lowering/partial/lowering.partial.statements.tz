@@ -61,7 +61,8 @@ partial class Lowering {
       case StmtKind.Function:
         return this.functionDeclared(frame, statement);
       case StmtKind.Class:
-        return this.classDeclared(frame, statement);
+        this.classDeclared(frame, statement);
+        return this.staticsInitialized(frame, statement);
       case StmtKind.Debugger:
         return this.runtimeCall(frame.made, kDebugger, []);
       case StmtKind.Empty:
@@ -98,6 +99,9 @@ partial class Lowering {
     const items = this.values.types.program.modules[module]?.file.itemsList;
 
     for (const statement of tree.stmtsOf(items)) {
+      if (statement.kind == StmtKind.Class) {
+        this.staticGlobals(module, statement);
+      }
       if (statement.kind != StmtKind.VarDecl) {
         continue;
       }

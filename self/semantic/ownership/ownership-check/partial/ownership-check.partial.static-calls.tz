@@ -1,0 +1,409 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallArgument,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  Callee,
+  Holding,
+  StaticCheck,
+} from "../types/ownership-check.types.tz";
+
+partial class OwnershipCheck {
+  private staticCallee(callee: MemberExpr, call: Expr): Callee {
+    const method = this.staticMethodOf(callee);
+    if (method == undefined) {
+      return this.libraryCallee(call);
+    }
+
+    return this.declCallee(method, false);
+  }
+
+  private readonly staticMethodOf(
+    callee: MemberExpr,
+  ): FunctionDecl | undefined {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    if (object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.values.valueTargetOf(object, this.module);
+    if (target == undefined || target.kind != SymbolKind.Class) {
+      return undefined;
+    }
+
+    const key = this.keyOf(target.module, target.loc);
+    const decl = this.classes.get(key);
+    if (decl == undefined) {
+      return undefined;
+    }
+
+    const name = callee.name;
+    const methods = this.values.types.classMethodsNamed(decl, name);
+
+    return methods.find((one) => this.values.types.isStaticMethod(one));
+  }
+
+  private noteStaticWrite(key: int): void {
+    const callers = this.frameFunctions();
+
+    for (const caller of callers) {
+      this.addWrite(caller, key);
+    }
+  }
+
+  private readonly frameFunctions(): int[] {
+    const ids: int[] = [];
+
+    for (const frame of this.frames) {
+      const fn = frame.fn;
+      if (fn != undefined) {
+        ids.push(fn.id);
+      }
+    }
+
+    return ids;
+  }
+
+  private addWrite(id: int, key: int): boolean {
+    const known = this.staticWrites.get(id);
+    if (known == undefined) {
+      const made = new Set<int>();
+
+      made.add(key);
+      this.staticWrites.set(id, made);
+
+      return true;
+    }
+    if (known.has(key)) {
+      return false;
+    }
+
+    known.add(key);
+
+    return true;
+  }
+
+  private addCall(caller: int, callee: int): void {
+    const known = this.staticCalls.get(caller);
+    if (known == undefined) {
+      const made = new Set<int>();
+
+      made.add(callee);
+      this.staticCalls.set(caller, made);
+
+      return;
+    }
+
+    known.add(callee);
+  }
+
+  private noteCall(
+    expr: Expr,
+    callee: Expr,
+    info: Read<Callee>,
+    isOpen: boolean,
+  ): void {
+    if (!this.hasStatics) {
+      return;
+    }
+
+    const args = this.callArguments(expr);
+    const callees = this.calleeIds(info, args);
+    const isOpenCall = isOpen || this.hasOpenArgument(args);
+    const callers = this.frameFunctions();
+
+    for (const caller of callers) {
+      if (isOpenCall) {
+        this.openCallers.add(caller);
+      }
+
+      for (const one of callees) {
+        this.addCall(caller, one);
+      }
+    }
+
+    this.noteStaticLoans(expr.loc, callee, callees, isOpenCall);
+  }
+
+  private readonly callArguments(expr: Expr): CallArgument[] {
+    const tree = this.values.types.program.tree;
+
+    if (expr.kind == ExprKind.Call || expr.kind == ExprKind.New) {
+      return tree.argumentsOf(expr.argsList).slice();
+    }
+
+    return [];
+  }
+
+  private readonly calleeIds(
+    info: Read<Callee>,
+    args: Read<CallArgument[]>,
+  ): int[] {
+    const tree = this.values.types.program.tree;
+
+    const ids: int[] = [];
+    const decl = info.decl;
+
+    if (decl != undefined) {
+      ids.push(decl.id);
+    }
+
+    for (const arg of args) {
+      const value = tree.exprOf(arg.exprId);
+      const id = this.argumentFunction(value);
+      if (id != undefined) {
+        ids.push(id);
+      }
+    }
+
+    return ids;
+  }
+
+  private readonly argumentFunction(value: Expr): int | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (value.kind == ExprKind.Function) {
+      const fn = tree.functionOf(value.fnId);
+
+      return fn.id;
+    }
+    if (value.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.values.valueTargetOf(value, this.module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return undefined;
+    }
+
+    const key = this.keyOf(target.module, target.loc);
+    const decl = this.functions.get(key);
+    if (decl == undefined) {
+      return undefined;
+    }
+
+    return decl.id;
+  }
+
+  private readonly hasOpenArgument(args: Read<CallArgument[]>): boolean {
+    const tree = this.values.types.program.tree;
+
+    for (const arg of args) {
+      const value = tree.exprOf(arg.exprId);
+      const type = this.values.answers.typeOf(value);
+      const isFunction = type != undefined && type.kind == TypeKind.Function;
+      if (isFunction && this.argumentFunction(value) == undefined) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private readonly isOpenCallee(callee: Expr): boolean {
+    if (callee.kind != ExprKind.Name) {
+      return true;
+    }
+
+    const target = this.values.valueTargetOf(callee, this.module);
+    if (target == undefined) {
+      return false;
+    }
+
+    return target.kind == SymbolKind.Variable;
+  }
+
+  private isOpenMethod(callee: MemberExpr): boolean {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    const type = this.values.answers.typeOf(object);
+    if (type == undefined) {
+      return false;
+    }
+
+    const name = callee.name;
+
+    switch (type.kind) {
+      case TypeKind.Object:
+        return this.interfaceCallee(type, name) != undefined;
+      case TypeKind.Function:
+        return true;
+      case TypeKind.Instance:
+        return this.isFieldFunction(type, name);
+      default:
+        return false;
+    }
+  }
+
+  private readonly isFieldFunction(type: Type, name: string): boolean {
+    const method = this.methodNamed(type, name, 0);
+    const declared = this.declaredMethod(type, name);
+
+    return method == undefined && declared == undefined;
+  }
+
+  private noteStaticLoans(
+    loc: int,
+    callee: Expr,
+    callees: Read<int[]>,
+    isOpen: boolean,
+  ): void {
+    const keys = this.staticKeys();
+
+    for (const key of keys) {
+      const place = this.wholePlace(key);
+      const borrower = this.conflictOn(place, loc, [key], false);
+      if (borrower == undefined) {
+        continue;
+      }
+
+      const looking = this.variableOf(borrower);
+      const field = this.variableOf(key);
+      if (looking == undefined || field == undefined) {
+        continue;
+      }
+
+      const word = this.exprText(callee);
+      const other = field.name;
+      const first = looking.name;
+      const lastUse = looking.lastUse;
+      const second = this.lineOf(lastUse);
+
+      this.staticChecks.push({
+        home: this.home,
+        loc,
+        callees: callees.slice(),
+        isOpen,
+        key,
+        word,
+        other,
+        first,
+        second,
+      });
+    }
+  }
+
+  private readonly staticKeys(): int[] {
+    const keys: int[] = [];
+    const frame = this.frame();
+    if (frame == undefined) {
+      return keys;
+    }
+
+    for (const variable of frame.variables.values()) {
+      if (variable.holding == Holding.Static) {
+        keys.push(variable.key);
+      }
+    }
+
+    return keys;
+  }
+
+  private reportStaticCalls(): void {
+    if (this.staticChecks.length == 0) {
+      return;
+    }
+
+    this.spreadStaticWrites();
+
+    const checks = this.staticChecks.splice(0, this.staticChecks.length);
+
+    for (const check of checks) {
+      if (!this.isChangedBy(check)) {
+        continue;
+      }
+
+      this.errors.write(check.home, check.loc, Code.OwnStaticCallChanges, {
+        word: check.word,
+        other: check.other,
+        first: check.first,
+        second: check.second,
+      });
+    }
+  }
+
+  private readonly isChangedBy(check: Read<StaticCheck>): boolean {
+    if (check.isOpen) {
+      return true;
+    }
+
+    for (const callee of check.callees) {
+      if (this.openCallers.has(callee)) {
+        return true;
+      }
+
+      const writes = this.staticWrites.get(callee);
+      if (writes != undefined && writes.has(check.key)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private spreadStaticWrites(): void {
+    const callers = Array.from(this.staticCalls.keys());
+    let isGrowing: boolean = true;
+
+    while (isGrowing) {
+      isGrowing = false;
+
+      for (const caller of callers) {
+        if (this.spreadInto(caller)) {
+          isGrowing = true;
+        }
+      }
+    }
+  }
+
+  private spreadInto(caller: int): boolean {
+    const callees = this.calleesOf(caller);
+    let isGrown: boolean = false;
+
+    for (const callee of callees) {
+      const isOpenCallee = this.openCallers.has(callee);
+      if (isOpenCallee && !this.openCallers.has(caller)) {
+        this.openCallers.add(caller);
+        isGrown = true;
+      }
+
+      const keys = this.writesOf(callee);
+
+      for (const key of keys) {
+        if (this.addWrite(caller, key)) {
+          isGrown = true;
+        }
+      }
+    }
+
+    return isGrown;
+  }
+
+  private readonly calleesOf(caller: int): int[] {
+    const known = this.staticCalls.get(caller);
+    if (known == undefined) {
+      return [];
+    }
+
+    return Array.from(known);
+  }
+
+  private readonly writesOf(id: int): int[] {
+    const known = this.staticWrites.get(id);
+    if (known == undefined) {
+      return [];
+    }
+
+    return Array.from(known);
+  }
+}

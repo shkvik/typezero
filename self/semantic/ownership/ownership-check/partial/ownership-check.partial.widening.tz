@@ -44,6 +44,9 @@ partial class OwnershipCheck {
     if (given == undefined) {
       return;
     }
+
+    this.checkPromises(expr, given, wanted);
+
     if (this.isWidenedCopy(given, wanted)) {
       return this.markWidened(expr);
     }

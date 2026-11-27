@@ -90,11 +90,12 @@ tree.add(branch)
 console.log(tree.size(), tree)
 
 class Config {
-  static current: Config = new Config("default")
+  static readonly history: Config[] = [new Config("default")]
   constructor(public name: string) {}
   static use(name: string) {
-    Config.current = new Config(name)
-    return Config.current
+    Config.history.push(new Config(name))
+    return name
   }
 }
-console.log(Config.current, Config.use("test").name, Config.current)
+const used = Config.use("test")
+console.log(Config.history[0], used, Config.history[1])

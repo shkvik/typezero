@@ -59,6 +59,7 @@ export type ObjectTypeField = {
   readonly optional: boolean;
   readonly readonly: boolean;
   readonly method: boolean;
+  readonly isReadonlyMethod?: boolean;
   readonly call: boolean;
   readonly typeParamsList: AstList;
   readonly typeId: int;

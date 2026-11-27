@@ -278,6 +278,11 @@ partial class Lowering {
   private memberValue(frame: Frame, expr: MemberExpr): IrValue | undefined {
     const tree = this.values.types.program.tree;
 
+    const fixed = this.values.staticFieldOf(expr, frame.module);
+    if (fixed != undefined) {
+      return this.staticFieldValue(frame, expr, fixed);
+    }
+
     const exprObject = tree.exprOf(expr.objectId);
     if (this.isProcessName(frame, exprObject)) {
       return this.processMember(frame, expr);

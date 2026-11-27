@@ -1,0 +1,13 @@
+export class Registry {
+  public static readonly names: string[] = [];
+  public static made: int = 0;
+  public static last: string = "none";
+
+  public static add(name: string): int {
+    Registry.names.push(name);
+    Registry.made++;
+    Registry.last = name;
+
+    return Registry.names.length;
+  }
+}

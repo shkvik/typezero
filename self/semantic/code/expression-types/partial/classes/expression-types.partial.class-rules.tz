@@ -338,11 +338,7 @@ partial class ExpressionTypes {
         this.errors.write(module, target.loc, Code.ReadOnlyStatic, { word });
       }
 
-      return this.staticFieldType(
-        tree.typeRefAt(field.typeId),
-        field.presence,
-        owner,
-      );
+      return this.staticTypeOf(field, owner);
     }
     if (isMethod) {
       this.errors.write(module, target.loc, Code.StaticMethodReplaced, {

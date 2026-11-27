@@ -1506,4 +1506,10 @@ export enum Code {
   OwnCloneField = "TZ4044",
   OwnCopyShared = "TZ4047",
   OwnCopyWidened = "TZ4048",
+  OwnStaticReplaced = "TZ4049",
+  OwnStaticGiven = "TZ4050",
+  OwnStaticLent = "TZ4051",
+  OwnOverrideReadonly = "TZ4052",
+  OwnReadonlyPromise = "TZ4053",
+  OwnStaticCallChanges = "TZ4054",
 }

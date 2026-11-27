@@ -14,6 +14,9 @@ import "./partial/ownership-check.partial.widening.tz";
 import "./partial/ownership-check.partial.closures.tz";
 import "./partial/ownership-check.partial.rules.tz";
 import "./partial/ownership-check.partial.variables.tz";
+import "./partial/ownership-check.partial.statics.tz";
+import "./partial/ownership-check.partial.promises.tz";
+import "./partial/ownership-check.partial.static-calls.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
 import {
@@ -34,7 +37,12 @@ import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { Type } from "../../../program/type/types/type.types.tz";
 import { ExpressionTypes } from "../../code/expression-types/expression-types.tz";
 import { kCheckedLibraries } from "../../declaration/module-questions/const/module-questions.const.tz";
-import { FlowState, FunctionFrame } from "./types/ownership-check.types.tz";
+import { FieldKind } from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  FlowState,
+  FunctionFrame,
+  StaticCheck,
+} from "./types/ownership-check.types.tz";
 
 export class OwnershipCheck {
   public readonly values: ExpressionTypes;
@@ -55,6 +63,13 @@ export class OwnershipCheck {
   private readonly widened: Set<int>;
   private readonly literalWanted: Map<int, Type>;
   private readonly ownCode: Set<int>;
+  private readonly staticWrites: Map<int, Set<int>>;
+  private readonly staticCalls: Map<int, Set<int>>;
+  private readonly openCallers: Set<int>;
+  private readonly staticChecks: StaticCheck[];
+  private hasStatics: boolean;
+  private hasPromises: boolean;
+  private readonly keptPromises: Set<string>;
 
   public constructor(values: Own<ExpressionTypes>) {
     this.values = values;
@@ -75,6 +90,13 @@ export class OwnershipCheck {
     this.widened = new Set<int>();
     this.literalWanted = new Map<int, Type>();
     this.ownCode = new Set<int>();
+    this.staticWrites = new Map<int, Set<int>>();
+    this.staticCalls = new Map<int, Set<int>>();
+    this.openCallers = new Set<int>();
+    this.staticChecks = [];
+    this.hasStatics = false;
+    this.hasPromises = false;
+    this.keptPromises = new Set<string>();
   }
 
   public takeMoves(): Set<int> {
@@ -101,6 +123,8 @@ export class OwnershipCheck {
         this.checkModule(module);
       }
     }
+
+    this.reportStaticCalls();
   }
 
   public readonly problems(module: int): SourceError[] {
@@ -158,6 +182,9 @@ export class OwnershipCheck {
       case StmtKind.Class:
         this.indexClass(module, stmt);
         break;
+      case StmtKind.TypeAlias:
+        this.notePromises(stmt);
+        break;
       default:
         break;
     }
@@ -168,6 +195,11 @@ export class OwnershipCheck {
 
     this.classes.set(this.keyOf(module, decl.loc), decl);
 
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      if (field.form == FieldKind.Static) {
+        this.hasStatics = true;
+      }
+    }
     for (const method of tree.functionsOf(decl.methodsList)) {
       this.functions.set(this.keyOf(module, method.loc), method);
     }

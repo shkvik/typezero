@@ -275,7 +275,32 @@ partial class ExpressionTypes {
       });
     }
 
+    this.readonlyPromiseCheck(entry, iface, field, first, module);
     this.contractMethods(entry, iface, field, first, module);
+  }
+
+  private readonlyPromiseCheck(
+    entry: Read<ClassMemberEntry>,
+    iface: string,
+    field: ObjectField,
+    second: string,
+    module: int,
+  ): void {
+    if (field.isReadonlyMethod != true) {
+      return;
+    }
+
+    const word = field.name;
+
+    for (const method of entry.methods) {
+      if (method.role?.isReadonly != true) {
+        this.errors.write(module, method.loc, Code.OwnReadonlyPromise, {
+          word,
+          first: iface,
+          second,
+        });
+      }
+    }
   }
 
   private contractField(

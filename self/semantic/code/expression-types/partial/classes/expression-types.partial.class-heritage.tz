@@ -287,6 +287,11 @@ partial class ExpressionTypes {
 
       return;
     }
+
+    const overridden = entry?.methods[0];
+    if (overridden != undefined) {
+      this.overrideReadonlyCheck(method, overridden, parent, module);
+    }
     if (isOpen) {
       return;
     }
@@ -336,6 +341,23 @@ partial class ExpressionTypes {
     );
 
     this.errors.writeFound(module, overrideAccessError);
+  }
+
+  private overrideReadonlyCheck(
+    method: FunctionDecl,
+    theirs: FunctionDecl,
+    parent: InstanceType,
+    module: int,
+  ): void {
+    const isTheirsReadonly = theirs.role?.isReadonly == true;
+    if (!isTheirsReadonly || method.role?.isReadonly == true) {
+      return;
+    }
+
+    this.errors.write(module, method.loc, Code.OwnOverrideReadonly, {
+      word: method.name,
+      first: parent.name,
+    });
   }
 
   private ownMethodType(

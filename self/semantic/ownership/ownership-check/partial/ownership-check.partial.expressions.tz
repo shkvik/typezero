@@ -183,6 +183,11 @@ partial class OwnershipCheck {
   private evaluateMember(expr: MemberExpr, isChecked: boolean): Operand {
     const tree = this.values.types.program.tree;
 
+    const fromStatic = this.staticOperand(expr, isChecked);
+    if (fromStatic != undefined) {
+      return fromStatic;
+    }
+
     const objectExpr = tree.exprOf(expr.objectId);
     const object = this.evaluateBase(objectExpr);
     const inner = this.stepInto(object, expr.name, expr.loc, isChecked);

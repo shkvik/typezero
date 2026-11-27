@@ -28,6 +28,7 @@ import {
   TypeParamDecl,
   TypeRef,
 } from "../../../../program/syntax/types/syntax.types.types.tz";
+import { MethodShape } from "../types/file-parser.types.function-types.tz";
 
 partial class FileParser {
   private readonly mappedTypeAhead(): boolean {
@@ -303,8 +304,9 @@ partial class FileParser {
     const typeParams = this.optionalTypeParams();
     const optional = false;
     const call = true;
+    const shape: MethodShape = { optional, call, isReadonly: false };
 
-    return this.objectTypeMethod("", loc, optional, call, typeParams);
+    return this.objectTypeMethod("", loc, shape, typeParams);
   }
 
   private acceptReadonlyWord(): boolean {
@@ -357,11 +359,11 @@ partial class FileParser {
 
     switch (token.kind) {
       case TokenKind.LParen:
-        return this.plainTypeMethod(name, loc, optional);
+        return this.plainTypeMethod(name, loc, optional, readonly);
       case TokenKind.Colon:
         return this.objectTypeField(name, loc, optional, readonly);
       case TokenKind.Less:
-        return this.genericTypeMethod(name, loc, optional);
+        return this.genericTypeMethod(name, loc, optional, readonly);
       default:
         this.skipBraced(token.start, Code.FieldNeedsType, { word: name });
         return undefined;
@@ -393,17 +395,20 @@ partial class FileParser {
     name: string,
     loc: int,
     optional: boolean,
+    isReadonly: boolean,
   ): ObjectTypeField | undefined {
     const typeParams: TypeParamDecl[] = [];
     const call = false;
+    const shape: MethodShape = { optional, call, isReadonly };
 
-    return this.objectTypeMethod(name, loc, optional, call, typeParams);
+    return this.objectTypeMethod(name, loc, shape, typeParams);
   }
 
   private genericTypeMethod(
     name: string,
     loc: int,
     optional: boolean,
+    isReadonly: boolean,
   ): ObjectTypeField | undefined {
     if (!this.library) {
       const token = this.cursor.peek();
@@ -415,15 +420,15 @@ partial class FileParser {
 
     const typeParams = this.typeParams();
     const call = false;
+    const shape: MethodShape = { optional, call, isReadonly };
 
-    return this.objectTypeMethod(name, loc, optional, call, typeParams);
+    return this.objectTypeMethod(name, loc, shape, typeParams);
   }
 
   private objectTypeMethod(
     name: string,
     loc: int,
-    optional: boolean,
-    call: boolean,
+    shape: MethodShape,
     typeParams: Own<TypeParamDecl[]>,
   ): ObjectTypeField | undefined {
     const parsed = this.signatureParams();
@@ -447,10 +452,11 @@ partial class FileParser {
     return {
       name,
       loc,
-      optional,
+      optional: shape.optional,
       readonly: true,
       method: true,
-      call,
+      isReadonlyMethod: shape.isReadonly,
+      call: shape.call,
       typeParams,
       type,
     };

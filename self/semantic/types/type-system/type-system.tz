@@ -96,6 +96,7 @@ import { LiteralRanges } from "../literal-ranges/literal-ranges.tz";
 import { InferHole } from "../type-relation/types/type-relation.types.tz";
 import {
   AliasDoor,
+  AliasHome,
   AliasOrigin,
   EnumStep,
   ModuleRecord,
@@ -126,6 +127,7 @@ export class TypeSystem {
   private prefixes: Map<int, string>;
   private libraryShapes: Set<int>;
   private aliasOrigins: Map<int, AliasOrigin>;
+  private readonly aliasHomes: Map<int, AliasHome>;
   private extending: TypeAliasDecl[];
   private enumCache: Map<string, readonly EnumStep[]>;
   private enumWholes: Map<string, Type>;
@@ -160,6 +162,7 @@ export class TypeSystem {
     this.prefixes = new Map<int, string>();
     this.libraryShapes = new Set<int>();
     this.aliasOrigins = new Map<int, AliasOrigin>();
+    this.aliasHomes = new Map<int, AliasHome>();
     this.extending = [];
     this.enumCache = new Map<string, readonly EnumStep[]>();
     this.enumWholes = new Map<string, Type>();

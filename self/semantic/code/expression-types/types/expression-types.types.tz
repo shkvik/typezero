@@ -220,6 +220,13 @@ export type StaticOwner = {
   readonly module: int;
 };
 
+export type StaticField = {
+  readonly module: int;
+  readonly loc: int;
+  readonly word: string;
+  readonly type: Type;
+};
+
 export type ClassMemberEntry = {
   readonly owner: ClassDecl;
   readonly instance: InstanceType;

@@ -398,6 +398,7 @@ partial class TypeSystem {
       type,
       optional: field.optional,
       readonly: field.readonly,
+      isReadonlyMethod: field.isReadonlyMethod,
     };
   }
 

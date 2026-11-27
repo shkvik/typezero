@@ -218,6 +218,11 @@ export type AliasOrigin = {
   readonly args: readonly Type[];
 };
 
+export type AliasHome = {
+  readonly module: int;
+  readonly decl: TypeAliasDecl;
+};
+
 export type SubstitutionWalk = {
   readonly bound: Map<int, Type>;
   readonly ids: Set<int>;

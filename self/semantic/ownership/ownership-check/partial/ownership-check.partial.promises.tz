@@ -1,0 +1,170 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TypeAliasDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { BrokenPromise } from "../types/ownership-check.types.tz";
+
+partial class OwnershipCheck {
+  private notePromises(decl: TypeAliasDecl): void {
+    const tree = this.values.types.program.tree;
+
+    const form = tree.typeRefAt(decl.typeId)?.form;
+    if (form == undefined || form.kind != TypeRefKind.Object) {
+      return;
+    }
+
+    const fields = tree.objectFieldsOf(form.fieldsList);
+    if (fields.some((field) => field.isReadonlyMethod == true)) {
+      this.hasPromises = true;
+    }
+  }
+
+  private promiseFor(expr: Expr, wanted: Type | undefined): void {
+    const given = this.values.answers.typeOf(expr);
+    if (wanted == undefined || given == undefined) {
+      return;
+    }
+
+    this.checkPromises(expr, given, wanted);
+  }
+
+  private checkPromises(expr: Expr, given: Type, wanted: Type): void {
+    if (!this.hasPromises || given.id == wanted.id) {
+      return;
+    }
+
+    const key = `${given.id} ${wanted.id}`;
+    if (this.keptPromises.has(key)) {
+      return;
+    }
+
+    const broken = this.brokenPromise(given, wanted, 0);
+    if (broken == undefined) {
+      this.keptPromises.add(key);
+
+      return;
+    }
+
+    const word = broken.name;
+    const first = this.values.types.typeText(broken.wanted);
+    const second = this.values.types.typeText(broken.given);
+
+    this.errors.write(this.home, expr.loc, Code.OwnReadonlyPromise, {
+      word,
+      first,
+      second,
+    });
+  }
+
+  private brokenPromise(
+    given: Type,
+    wanted: Type,
+    depth: int,
+  ): BrokenPromise | undefined {
+    if (depth > 8 || given.id == wanted.id) {
+      return undefined;
+    }
+
+    const source = this.values.types.definedType(given);
+    const target = this.values.types.definedType(wanted);
+    if (source.kind == TypeKind.Union) {
+      return this.brokenInGiven(source, target, depth);
+    }
+    if (target.kind == TypeKind.Union) {
+      return this.brokenInWanted(source, target, depth);
+    }
+    if (target.kind == TypeKind.Object) {
+      const direct = this.directPromise(source, target);
+      if (direct != undefined) {
+        return direct;
+      }
+    }
+
+    return this.brokenInside(source, target, depth);
+  }
+
+  private brokenInGiven(
+    given: Type,
+    wanted: Type,
+    depth: int,
+  ): BrokenPromise | undefined {
+    const parts = this.values.types.store.partsOf(given).slice();
+
+    for (const part of parts) {
+      const found = this.brokenPromise(part, wanted, depth + 1);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private brokenInWanted(
+    given: Type,
+    wanted: Type,
+    depth: int,
+  ): BrokenPromise | undefined {
+    const parts = this.values.types.store.partsOf(wanted).slice();
+
+    for (const part of parts) {
+      const found = this.brokenPromise(given, part, depth + 1);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private brokenInside(
+    given: Type,
+    wanted: Type,
+    depth: int,
+  ): BrokenPromise | undefined {
+    const pairs = this.innerPairs(given, wanted);
+
+    for (const pair of pairs) {
+      const found = this.brokenPromise(pair.given, pair.wanted, depth + 1);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private directPromise(
+    given: Type,
+    wanted: Type,
+  ): BrokenPromise | undefined {
+    const fields = this.values.types.store.fieldsOf(wanted).slice();
+
+    for (const field of fields) {
+      if (field.isReadonlyMethod != true) {
+        continue;
+      }
+      if (!this.keepsPromise(given, field.name)) {
+        return { name: field.name, given, wanted };
+      }
+    }
+
+    return undefined;
+  }
+
+  private readonly keepsPromise(given: Type, name: string): boolean {
+    if (given.kind != TypeKind.Object) {
+      return true;
+    }
+
+    const fields = this.values.types.store.fieldsOf(given).slice();
+    const field = fields.find((one) => one.name == name);
+    if (field == undefined || field.type.kind != TypeKind.Function) {
+      return true;
+    }
+
+    return field.isReadonlyMethod == true || !field.readonly;
+  }
+}

@@ -9,6 +9,7 @@ export enum Holding {
   Borrow,
   Lent,
   Global,
+  Static,
 }
 
 export enum LoanKind {
@@ -155,6 +156,24 @@ export type ArgumentTypes = {
 };
 
 export type TypePair = {
+  readonly given: Type;
+  readonly wanted: Type;
+};
+
+export type StaticCheck = {
+  readonly home: int;
+  readonly loc: int;
+  readonly callees: readonly int[];
+  readonly isOpen: boolean;
+  readonly key: int;
+  readonly word: string;
+  readonly other: string;
+  readonly first: string;
+  readonly second: string;
+};
+
+export type BrokenPromise = {
+  readonly name: string;
   readonly given: Type;
   readonly wanted: Type;
 };

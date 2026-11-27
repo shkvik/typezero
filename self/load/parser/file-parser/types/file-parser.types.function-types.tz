@@ -8,3 +8,9 @@ export type Signature = {
   readonly rest: boolean;
   readonly complete: boolean;
 };
+
+export type MethodShape = {
+  readonly optional: boolean;
+  readonly call: boolean;
+  readonly isReadonly: boolean;
+};

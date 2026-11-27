@@ -65,6 +65,7 @@ partial class AstFlattener {
       optional: node.optional,
       readonly: node.readonly,
       method: node.method,
+      isReadonlyMethod: node.isReadonlyMethod,
       call: node.call,
       typeParamsList,
       typeId,

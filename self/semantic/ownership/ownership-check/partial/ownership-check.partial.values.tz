@@ -70,6 +70,9 @@ partial class OwnershipCheck {
       case Holding.Global:
         this.errors.write(this.home, expr.loc, Code.OwnGiveGlobal, { word });
         return;
+      case Holding.Static:
+        this.errors.write(this.home, expr.loc, Code.OwnStaticGiven, { word });
+        return;
       default:
         return;
     }
@@ -193,6 +196,9 @@ partial class OwnershipCheck {
       this.reportGlobalChange(hasFunction, word, loc);
 
       return;
+    }
+    if (holding == Holding.Static) {
+      this.noteStaticWrite(place.root);
     }
     if (holding == Holding.Borrow && isShared) {
       this.errors.write(this.home, loc, Code.OwnReadChanged, { word });

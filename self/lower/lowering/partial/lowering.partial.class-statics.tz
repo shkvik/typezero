@@ -1,0 +1,199 @@
+import {
+  ClassDecl,
+  FieldKind,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  StaticField,
+  StaticOwner,
+} from "../../../semantic/code/expression-types/types/expression-types.types.tz";
+import { Lowering } from "../lowering.tz";
+import { kNoOwner, kPointerType } from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private staticGlobals(module: int, decl: ClassDecl): void {
+    const fields = this.values.staticFieldsOf(module, decl);
+
+    for (const field of fields) {
+      const type = this.irType(field.type);
+      if (type == undefined) {
+        const kind = this.kindName(field.type);
+
+        this.notLowered(module, field.loc, `a static field of type ${kind}`);
+
+        continue;
+      }
+
+      const name = `tz.s${module}.${field.loc}`;
+      const zero = this.ir.zero(type);
+      const pointer = this.ir.global(name, type, zero, false);
+      const key = this.placeKey(module, field.loc);
+      const place: Place = { pointer, type, tz: field.type, owner: kNoOwner };
+
+      this.places.set(key, place);
+
+      if (this.isManaged(field.type)) {
+        this.managedGlobals.push(place);
+      }
+    }
+  }
+
+  private staticsInitialized(frame: Frame, decl: ClassDecl): void {
+    const tree = this.values.types.program.tree;
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      const init = tree.exprAt(field.initId);
+      if (field.form != FieldKind.Static || init == undefined) {
+        continue;
+      }
+
+      const key = this.placeKey(frame.module, field.loc);
+      const known = this.places.get(key);
+      const place = this.globalOrNone(known);
+      if (place == undefined) {
+        this.notLowered(frame.module, field.loc, "a static field here");
+
+        continue;
+      }
+
+      const given = this.wantedValue(frame, init, place.tz);
+      if (given == undefined) {
+        continue;
+      }
+
+      const value = this.converted(frame, given, place.tz, init.loc);
+      if (value != undefined) {
+        this.initialized(frame, place, value);
+      }
+    }
+  }
+
+  private staticPlace(
+    frame: Read<Frame>,
+    expr: MemberExpr,
+    field: StaticField,
+  ): Place | undefined {
+    const key = this.placeKey(field.module, field.loc);
+    const known = this.places.get(key);
+    const place = this.globalOrNone(known);
+    if (place == undefined) {
+      this.notLowered(frame.module, expr.loc, "a static field here");
+    }
+
+    return place;
+  }
+
+  private staticFieldValue(
+    frame: Frame,
+    expr: MemberExpr,
+    field: StaticField,
+  ): IrValue | undefined {
+    const place = this.staticPlace(frame, expr, field);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const loaded = this.loaded(frame, place);
+    const seen = this.typeOf(expr);
+    if (seen == undefined || seen.kind == TypeKind.Error) {
+      return loaded;
+    }
+
+    const seenType = this.irType(seen);
+    if (seenType == undefined) {
+      return loaded;
+    }
+    if (seenType == place.type) {
+      return this.retyped(loaded, loaded.type, seen);
+    }
+
+    return this.converted(frame, loaded, seen, expr.loc);
+  }
+
+  private staticMethodOf(
+    frame: Read<Frame>,
+    callee: MemberExpr,
+  ): FunctionDecl | undefined {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    const owner = this.values.classOfName(object, frame.module);
+    if (owner == undefined) {
+      return undefined;
+    }
+
+    const name = callee.name;
+    const methods = this.values.types.classMethodsNamed(owner.decl, name);
+
+    return methods.find((one) => this.values.types.isStaticMethod(one));
+  }
+
+  private staticMethodCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: MemberExpr,
+    fn: FunctionDecl,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    const owner = this.values.classOfName(object, frame.module);
+    const isGeneric = tree.typeParamsOf(fn.typeParamsList).length > 0;
+    if (owner == undefined || isGeneric) {
+      this.notLowered(frame.module, call.loc, "a call of this static method");
+
+      return undefined;
+    }
+
+    return this.ownerStaticCall(frame, call, owner, fn);
+  }
+
+  private ownerStaticCall(
+    frame: Frame,
+    call: CallExpr,
+    owner: StaticOwner,
+    fn: FunctionDecl,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const shape = this.methodShape(owner.module, owner.decl, fn);
+    if (shape == undefined) {
+      this.notLowered(frame.module, call.loc, "this call");
+
+      return undefined;
+    }
+
+    const kept: IrValue[] = [];
+    const args = this.callArguments(
+      frame,
+      tree.argumentsOf(call.argsList),
+      shape,
+      call.loc,
+      fn,
+      kept,
+    );
+    const result = this.irType(shape.result);
+    const params = this.shapeTypes(shape);
+    if (args == undefined || result == undefined || params == undefined) {
+      return undefined;
+    }
+
+    const name = this.methodName(owner.module, owner.decl, fn);
+    const all = [kPointerType].concat(params);
+    const declared = this.ir.declare(name, result, all);
+    const none = this.ir.zero(kPointerType);
+    const value = frame.made.call(declared, [none].concat(args));
+    const answer: IrValue = { type: result, value, tz: shape.result };
+    const made = this.callResult(frame, answer, fn, kept);
+
+    this.droppedAll(frame, kept);
+
+    return made;
+  }
+}

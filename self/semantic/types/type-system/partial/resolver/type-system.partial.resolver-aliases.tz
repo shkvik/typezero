@@ -20,6 +20,7 @@ import {
 } from "../../../type-resolver/const/type-resolver.const.tables.tz";
 import {
   AliasDoor,
+  AliasHome,
   DoorState,
   TypeContext,
   TypePlace,
@@ -102,12 +103,23 @@ partial class TypeSystem {
     this.labelAlias(decl, result, label);
     this.labelLibraryUnion(module, decl, result, label);
     this.keepOrigin(module, decl, written, result);
+    this.keepHome(module, decl, result);
 
     if (this.record(module)?.library == true) {
       this.libraryShapes.add(result.id);
     }
 
     return result;
+  }
+
+  public readonly aliasHomeOf(type: Type): AliasHome | undefined {
+    return this.aliasHomes.get(type.id);
+  }
+
+  private keepHome(module: int, decl: TypeAliasDecl, result: Type): void {
+    if (!this.aliasHomes.has(result.id)) {
+      this.aliasHomes.set(result.id, { module, decl });
+    }
   }
 
   private keepOrigin(

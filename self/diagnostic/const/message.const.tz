@@ -4525,4 +4525,22 @@ export const kMessages: Record<Code, Message> = {
   [Code.OwnGiveGlobal]: {
     text: "'{word}' is a module constant, so it cannot be given away; give a copy (structuredClone)",
   },
+  [Code.OwnStaticReplaced]: {
+    text: "'{word}' is a static field, so a function cannot put another value in its place; change what it holds, or give it its value where it is declared",
+  },
+  [Code.OwnStaticGiven]: {
+    text: "'{word}' belongs to a static field, so it cannot be given away; give a copy (structuredClone)",
+  },
+  [Code.OwnStaticLent]: {
+    text: "the result is lent from the static field '{other}', which any function can change while the caller still looks at it; return a copy (structuredClone)",
+  },
+  [Code.OwnOverrideReadonly]: {
+    text: "'{word}' overrides a readonly method of '{first}', so it must be readonly too: a call through '{first}' lends 'this' only for reading",
+  },
+  [Code.OwnReadonlyPromise]: {
+    text: "'{word}' is readonly in '{first}', but in '{second}' it may change 'this'; write 'readonly' before '{word}' in '{second}'",
+  },
+  [Code.OwnStaticCallChanges]: {
+    text: "'{word}' may change '{other}', but '{first}' still looks into it until line {second}; read '{other}' again after the call, or copy the value with structuredClone",
+  },
 };

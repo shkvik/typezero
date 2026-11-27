@@ -52,6 +52,7 @@ partial class OwnershipCheck {
 
       const exprValue = tree.exprOf(expr.valueId);
 
+      this.checkStaticReplaced(target, expr.loc);
       this.liveFrom = this.lastLocIn(exprValue);
       this.changePlaceOf(target, expr.loc);
       this.liveFrom = -1;
@@ -185,6 +186,7 @@ partial class OwnershipCheck {
     const isTaken =
       holding == Holding.Own ||
       holding == Holding.Global ||
+      holding == Holding.Static ||
       holding == Holding.Copy;
     if (isTaken) {
       this.take(operand, value);
@@ -259,6 +261,11 @@ partial class OwnershipCheck {
       const variable = this.variableOf(root);
       if (variable == undefined || variable.holding == Holding.Global) {
         continue;
+      }
+      if (variable.holding == Holding.Static) {
+        const details = { other: variable.name };
+
+        return { code: Code.OwnStaticLent, loc: value.loc, details };
       }
       if (variable.holding == Holding.Own && !frame.outer.has(root)) {
         return fresh;

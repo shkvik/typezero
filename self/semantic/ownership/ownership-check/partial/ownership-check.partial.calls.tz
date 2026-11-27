@@ -68,6 +68,10 @@ partial class OwnershipCheck {
     this.checkVariance(expr, uses);
     this.checkCopyShares(expr, uses);
 
+    const isOpen = this.isOpenCallee(callee);
+
+    this.noteCall(expr, callee, info, isOpen);
+
     return this.resultOf(info, expr, undefined, uses);
   }
 
@@ -236,6 +240,10 @@ partial class OwnershipCheck {
     );
     this.takeJoinedReceiver(receiver, callee);
 
+    const isOpen = this.isOpenMethod(callee);
+
+    this.noteCall(expr, callee, info, isOpen);
+
     return this.resultOf(info, expr, receiver, uses);
   }
 
@@ -258,6 +266,7 @@ partial class OwnershipCheck {
     this.applyArguments(uses);
     this.checkTwice(undefined, undefined, LoanKind.Shared, uses);
     this.checkMadeKeys(expr);
+    this.noteCall(expr, expr, info, false);
 
     return this.freshOperand(expr.loc);
   }
@@ -385,11 +394,15 @@ partial class OwnershipCheck {
       const isTaken =
         param.mode == ParamMode.Own || param.mode == ParamMode.Once;
       const wanted = this.wantedAt(types, index);
-      if (isMoving && isTaken && arg.spread) {
+      const isWidening = isMoving && isTaken;
+      if (isWidening && arg.spread) {
         this.widenSpread(exprExpr, wanted);
       }
-      if (isMoving && isTaken && !arg.spread) {
+      if (isWidening && !arg.spread) {
         this.widenFor(exprExpr, wanted);
+      }
+      if (!isWidening && !arg.spread) {
+        this.promiseFor(exprExpr, wanted);
       }
 
       const operand = this.evaluateFor(exprExpr, callback);

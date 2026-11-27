@@ -11,6 +11,7 @@ import { TypeAliasDecl } from "../../../../program/ast/types/ast.types.classes.t
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   FunctionTypeParam,
+  ObjectTypeField,
   TypeRefKind,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { InstanceField } from "../../../../program/expression-answers/types/expression-answers.types.tz";
@@ -346,20 +347,7 @@ partial class OwnershipCheck {
   private interfaceCallee(type: Type, name: string): Callee | undefined {
     const tree = this.values.types.program.tree;
 
-    const label = this.values.types.store.labelOf(type);
-    if (label == undefined) {
-      return undefined;
-    }
-
-    const decl = this.aliasNamed(label);
-    const form = tree.typeRefAt(decl?.typeId)?.form;
-    if (form == undefined || form.kind != TypeRefKind.Object) {
-      return undefined;
-    }
-
-    const field = tree
-      .objectFieldsOf(form.fieldsList)
-      .find((one) => one.name == name);
+    const field = this.interfaceMethod(type, name, 0);
     const method = tree.typeRefAt(field?.typeId)?.form;
     if (method == undefined || method.kind != TypeRefKind.Function) {
       return undefined;
@@ -375,7 +363,19 @@ partial class OwnershipCheck {
       mode = this.resultModeOfRef(result);
     }
 
-    return { params, receiver: LoanKind.Shared, result: mode };
+    const receiver = this.interfaceReceiver(field);
+
+    return { params, receiver, result: mode };
+  }
+
+  private readonly interfaceReceiver(
+    field: ObjectTypeField | undefined,
+  ): LoanKind {
+    if (field != undefined && field.isReadonlyMethod == true) {
+      return LoanKind.Shared;
+    }
+
+    return LoanKind.Exclusive;
   }
 
   private readonly interfaceParam(param: Read<FunctionTypeParam>): CalleeParam {
@@ -392,6 +392,78 @@ partial class OwnershipCheck {
     }
 
     return { mode: this.modeOfRef(ref), isRest: false, isCallback };
+  }
+
+  private readonly isChangingInterfaceMethod(
+    type: Type,
+    name: string,
+  ): boolean {
+    const field = this.interfaceMethod(type, name, 0);
+
+    return field != undefined && field.isReadonlyMethod != true;
+  }
+
+  private readonly interfaceMethod(
+    type: Type,
+    name: string,
+    depth: int,
+  ): ObjectTypeField | undefined {
+    const own = this.ownInterfaceMethod(type, name);
+    if (own != undefined || depth > 8) {
+      return own;
+    }
+
+    for (const parent of this.values.types.store.parentsOf(type)) {
+      const found = this.interfaceMethod(parent, name, depth + 1);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readonly ownInterfaceMethod(
+    type: Type,
+    name: string,
+  ): ObjectTypeField | undefined {
+    const tree = this.values.types.program.tree;
+
+    const decl = this.interfaceDecl(type);
+    const form = tree.typeRefAt(decl?.typeId)?.form;
+    if (form == undefined || form.kind != TypeRefKind.Object) {
+      return undefined;
+    }
+
+    const field = tree
+      .objectFieldsOf(form.fieldsList)
+      .find((one) => one.name == name);
+    const method = tree.typeRefAt(field?.typeId)?.form;
+    if (method == undefined || method.kind != TypeRefKind.Function) {
+      return undefined;
+    }
+
+    return field;
+  }
+
+  private readonly interfaceDecl(type: Type): TypeAliasDecl | undefined {
+    const home = this.values.types.aliasHomeOf(type);
+    if (home != undefined) {
+      const opened = this.values.types.program.modules[home.module];
+      const isLibrary = opened == undefined || opened.source.isLibrary;
+      if (isLibrary) {
+        return undefined;
+      }
+
+      return home.decl;
+    }
+
+    const label = this.values.types.store.labelOf(type);
+    if (label == undefined) {
+      return undefined;
+    }
+
+    return this.aliasNamed(label);
   }
 
   private readonly aliasNamed(name: string): TypeAliasDecl | undefined {
