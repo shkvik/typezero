@@ -1,0 +1,185 @@
+@InPlace()
+class Point {
+  public readonly x: int;
+  public readonly y: int;
+
+  public constructor(x: int, y: int) {
+    this.x = x;
+    this.y = y;
+  }
+
+  public readonly moved(by: int): Point {
+    return new Point(this.x + by, this.y + by);
+  }
+
+  public readonly sum(): int {
+    return this.x + this.y;
+  }
+
+  public readonly same(): Point {
+    return this;
+  }
+
+  public readonly [Symbol.equals](other: Point): boolean {
+    return this.x == other.x && this.y == other.y;
+  }
+}
+
+@InPlace()
+class Named {
+  public readonly name: string;
+  public readonly at: Point;
+
+  public constructor(name: string, at: Point) {
+    this.name = name;
+    this.at = at;
+  }
+
+  public readonly title(): string {
+    return `${this.name}@${this.at.x}`;
+  }
+
+  public readonly [Symbol.equals](other: Named): boolean {
+    return this.name == other.name && this.at == other.at;
+  }
+}
+
+@InPlace()
+class Labeled {
+  public readonly label: string;
+  public readonly note?: string;
+
+  public constructor(label: string, note?: string) {
+    this.label = label;
+    this.note = note;
+  }
+}
+
+class Holder {
+  public points: Point[];
+  public last?: Point;
+
+  public constructor() {
+    this.points = [];
+  }
+
+  public kept(point: Point): void {
+    this.points.push(point);
+    this.last = point;
+  }
+}
+
+type Shelf = {
+  name: string;
+  first: Named;
+};
+
+const origin = new Point(0, 0);
+
+const shelf: Shelf = {
+  name: "main",
+  first: new Named("zero", origin),
+};
+
+function firstNamed(items: Read<Named[]>, name: string): Named | undefined {
+  for (const item of items) {
+    if (item.name == name) {
+      return item;
+    }
+  }
+
+  return undefined;
+}
+
+function total(points: Read<Point[]>): int {
+  let sum = 0;
+
+  for (const point of points) {
+    sum += point.sum();
+  }
+
+  return sum;
+}
+
+function main(): void {
+  const a = new Point(1, 2);
+  const b = a;
+  const c = a.moved(10);
+
+  console.log(a.x, a.y, b.x, c.y, c.sum(), c.same().x);
+  console.log(a);
+  console.log(origin);
+  console.log(a == b, a == c, a != c, a.moved(10) == c);
+
+  const named = new Named("start", c);
+  const copy = named;
+
+  console.log(named.name, named.at.x, copy.at.y, named.title());
+  console.log(named);
+  console.log(named == copy, named == new Named("start", a));
+
+  const points: Point[] = [a, c, new Point(5, 6)];
+
+  points.push(origin.moved(3));
+  console.log(points.length, total(points));
+  console.log(points);
+
+  const sorted = points.slice();
+
+  sorted.sort((left, right) => right.x - left.x);
+  console.log(sorted.map((point) => point.x).join(","));
+
+  const big = points.filter((point) => point.x > 2);
+
+  console.log(big.length, big[0]?.x);
+
+  const found = points.find((point) => point.y == 6);
+  if (found != undefined) {
+    console.log("found", found.x, found.sum());
+  }
+
+  const items: Named[] = [named, new Named("end", origin)];
+  const hit = firstNamed(items, "end");
+
+  console.log(hit?.at.x, hit?.title(), firstNamed(items, "none") == undefined);
+
+  const labels: Labeled[] = [new Labeled("a"), new Labeled("b", "two")];
+
+  for (const item of labels) {
+    console.log(item.label, item.note ?? "-");
+  }
+  console.log(labels);
+
+  const byName = new Map<string, Point>();
+
+  byName.set("a", a);
+  byName.set("c", c);
+  console.log(byName.get("c")?.y, byName.has("b"));
+  console.log(byName);
+
+  const shifted = points.map((point) => point.moved(1));
+
+  console.log(shifted[3]?.x);
+
+  const holder = new Holder();
+
+  holder.kept(a);
+  holder.kept(c);
+  console.log(holder.points.length, holder.last?.y);
+  console.log(holder);
+
+  let maybe: Point | undefined = undefined;
+
+  console.log(maybe == undefined);
+  maybe = c;
+  console.log(maybe?.x, maybe?.sum());
+
+  const show = (): string => `${named.name}:${named.at.sum()}`;
+
+  console.log(show());
+  console.log(shelf.first.title(), shelf.first.at.sum());
+  console.log(shelf);
+  console.log(structuredClone(named).title());
+}
+
+main();

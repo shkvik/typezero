@@ -38,10 +38,16 @@ partial class Lowering {
 
       return this.converted(frame, inside, target, loc);
     }
+    if (inner != undefined && sourceInner != undefined && type != value.type) {
+      return this.optionalShifted(frame, value, target, loc);
+    }
     const isResults =
       value.tz.kind == TypeKind.Result && target.kind == TypeKind.Result;
     if (isResults && value.tz.id != target.id) {
       return this.resultConverted(frame, value, target);
+    }
+    if (this.isRecordShift(value, target, type)) {
+      return this.recordShifted(frame, value, target, loc);
     }
     if (this.isReshaped(value.tz, target)) {
       return this.reshaped(frame, value, target, loc);

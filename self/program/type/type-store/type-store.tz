@@ -79,6 +79,10 @@ export class TypeStore {
     return type;
   }
 
+  public readonly typeCount(): int {
+    return this.all.length;
+  }
+
   public definedOf(type: Type): Type {
     const known = this.defined.get(type.id);
     if (known != undefined) {

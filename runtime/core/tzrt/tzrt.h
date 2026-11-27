@@ -53,6 +53,7 @@ enum {
   TZ_T_UINT32 = 22,
   TZ_T_UINT64 = 23,
   TZ_T_HANDLE = 24,
+  TZ_T_RECORD = 25,
 };
 
 enum {
@@ -289,6 +290,14 @@ typedef struct TzInstance {
   int64_t rc;
   const TzLayout *layout;
 } TzInstance;
+
+static inline const TzLayout *tz_record_fields(const TzType *type) {
+  return (const TzLayout *)(const void *)type->inner;
+}
+
+static inline int tz_record_holds(const TzField *field) {
+  return field->offset != TZ_FIELD_METHOD && field->offset != TZ_FIELD_GETTER;
+}
 
 typedef struct TzGetterType {
   TzType base;

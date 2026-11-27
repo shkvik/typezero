@@ -1,0 +1,62 @@
+type Draft = {
+  name: string;
+  isOpen: boolean;
+  readonly items: int[];
+  readonly words: string[];
+};
+
+type Full = {
+  readonly name: string;
+  readonly isOpen: boolean;
+  readonly isMarked?: boolean;
+  readonly items: readonly int[];
+  readonly words: readonly string[];
+};
+
+class Money {
+  public readonly amount: int;
+  public readonly code: string;
+
+  public constructor(amount: int, code: string) {
+    this.amount = amount;
+    this.code = code;
+  }
+
+  public readonly [Symbol.equals](other: Money): boolean {
+    return this.amount == other.amount && this.code == other.code;
+  }
+}
+
+function counted(full: Read<Full>): int {
+  return full.items.length + full.words.length;
+}
+
+function shown(full: Read<Full>): string {
+  return `${full.name} ${full.isOpen} ${full.isMarked ?? false}`;
+}
+
+function taken(full: Own<Full>): int {
+  return full.items.length * 10 + full.words.length;
+}
+
+function main(): void {
+  const draft: Draft = { name: "a", isOpen: true, items: [1, 2], words: ["x"] };
+
+  console.log(counted(draft), shown(draft));
+  draft.name = "b";
+  draft.items.push(3);
+  console.log(counted(draft), shown(draft));
+  console.log(draft.items.join(","), draft.words.join(","));
+
+  const given: Draft = { name: "c", isOpen: false, items: [5], words: ["y", "z"] };
+
+  console.log(taken(given));
+
+  const one = new Money(5, "EUR");
+  const two = new Money(5, "EUR");
+  const three = new Money(6, "EUR");
+
+  console.log(one == two, one == three, one != three, one == one);
+}
+
+main();

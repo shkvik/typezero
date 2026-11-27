@@ -215,14 +215,20 @@ partial class Lowering {
     }
 
     const object = tree.exprOf(target.objectId);
+    const direct = this.recordFieldPlace(frame, target, object);
+    if (direct != undefined) {
+      return direct;
+    }
+
     const holder = this.value(frame, object);
     if (holder == undefined) {
       return undefined;
     }
 
+    const address = this.recordAddress(frame, holder);
     const place = this.fieldAt(
       frame,
-      holder.value,
+      address,
       holder.tz,
       target.name,
       target.loc,

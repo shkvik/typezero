@@ -54,7 +54,8 @@ partial class Lowering {
     const finder = this.keyedFinder(layout, names);
     const text = frame.made.extract(key.value, 0);
     const meta = frame.made.extract(key.value, 1);
-    const pointer = frame.made.call(finder, [holder.value, text, meta]);
+    const address = this.recordAddress(frame, holder);
+    const pointer = frame.made.call(finder, [address, text, meta]);
     const loaded: IrValue = {
       type: first.ir,
       value: frame.made.load(first.ir, pointer),

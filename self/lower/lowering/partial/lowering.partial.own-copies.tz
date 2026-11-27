@@ -159,6 +159,9 @@ partial class Lowering {
     if (this.optionalInner(type) != undefined) {
       return undefined;
     }
+    if (this.isRecordValue(given)) {
+      return this.owning(frame, given);
+    }
 
     const base = this.sharedCopyType(type);
     if (base == undefined) {

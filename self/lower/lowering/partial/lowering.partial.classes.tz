@@ -395,8 +395,8 @@ partial class Lowering {
     const all = [kPointerType].concat(params);
     const callee = this.ir.declare(target.name, result, all);
     const dispatched = this.virtualCall(frame, object, fn, self, args, target);
-    const made =
-      dispatched ?? frame.made.call(callee, [self.value].concat(args));
+    const receiver = this.recordAddress(frame, self);
+    const made = dispatched ?? frame.made.call(callee, [receiver].concat(args));
     const answer: IrValue = { type: result, value: made, tz: shape.result };
     const temporaries = kept.concat([self]);
     const given = this.receiverResult(frame, answer, fn, temporaries, self);

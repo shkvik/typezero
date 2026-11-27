@@ -50,6 +50,7 @@ export type ClassDeclDraft = {
   name?: string;
   isAbstract: boolean;
   isPartial: boolean;
+  readonly isInPlace: boolean;
   readonly base?: TypeRef;
   readonly baseExpr?: Expr;
   readonly baseArgs: TypeRef[];

@@ -1513,4 +1513,6 @@ export enum Code {
   OwnReadonlyPromise = "TZ4053",
   OwnStaticCallChanges = "TZ4054",
   OwnConstantLent = "TZ4055",
+  OwnInPlaceHeritage = "TZ4056",
+  OwnInPlaceItself = "TZ4057",
 }

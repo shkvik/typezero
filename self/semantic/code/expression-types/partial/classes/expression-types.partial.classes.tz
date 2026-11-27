@@ -43,6 +43,7 @@ partial class ExpressionTypes {
     this.redeclareChecks(decl, module);
     this.decoratorChecks(decl, module);
     this.extendsCycleCheck(decl, module);
+    this.inPlaceChecks(decl, module);
     this.checkFields(decl, module);
     this.parentMethodChecks(decl, module);
     this.fieldStartChecks(decl, module);

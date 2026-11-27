@@ -60,6 +60,7 @@ export const kMissingClassDecl: ClassDecl = {
   loc: -1,
   isAbstract: false,
   isPartial: false,
+  isInPlace: false,
   baseArgsList: kEmptyList,
   interfacesList: kEmptyList,
   fieldsList: kEmptyList,

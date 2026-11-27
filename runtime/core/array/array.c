@@ -56,6 +56,16 @@ int tz_is_managed(const TzType *type) {
     return tz_is_managed(type->inner);
   case TZ_T_RESULT:
     return tz_is_managed(type->inner) || tz_is_managed(((const TzResultType *)type)->error);
+  case TZ_T_RECORD: {
+    const TzLayout *layout = tz_record_fields(type);
+    for (uint32_t i = 0; i < layout->count; ++i) {
+      const TzField *field = &layout->fields[i];
+      if (tz_record_holds(field) && tz_is_managed(field->type)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
   default:
     return 0;
   }
@@ -155,6 +165,16 @@ static void release_value(const TzType *type, void *value, DeadArrays *dead, voi
     release_value(result->error, (char *)value + result->error_offset, dead, owner);
     break;
   }
+  case TZ_T_RECORD: {
+    const TzLayout *layout = tz_record_fields(type);
+    for (uint32_t i = 0; i < layout->count; ++i) {
+      const TzField *field = &layout->fields[i];
+      if (tz_record_holds(field)) {
+        release_value(field->type, (char *)value + field->offset, dead, owner);
+      }
+    }
+    break;
+  }
   default:
     break;
   }
@@ -209,6 +229,16 @@ void tz_value_retain(const TzType *type, void *value) {
     const TzResultType *result = (const TzResultType *)type;
     tz_value_retain(type->inner, (char *)value + result->value_offset);
     tz_value_retain(result->error, (char *)value + result->error_offset);
+    break;
+  }
+  case TZ_T_RECORD: {
+    const TzLayout *layout = tz_record_fields(type);
+    for (uint32_t i = 0; i < layout->count; ++i) {
+      const TzField *field = &layout->fields[i];
+      if (tz_record_holds(field)) {
+        tz_value_retain(field->type, (char *)value + field->offset);
+      }
+    }
     break;
   }
   default:
@@ -710,6 +740,21 @@ static int values_equal(const TzType *type, const void *a, const void *b, int sa
       return has_a == has_b;
     }
     return values_equal(type->inner, a, b, same_value_zero);
+  }
+  case TZ_T_RECORD: {
+    const TzLayout *layout = tz_record_fields(type);
+    for (uint32_t i = 0; i < layout->count; ++i) {
+      const TzField *field = &layout->fields[i];
+      if (!tz_record_holds(field)) {
+        continue;
+      }
+      const char *x = (const char *)a + field->offset;
+      const char *y = (const char *)b + field->offset;
+      if (!values_equal(field->type, x, y, same_value_zero)) {
+        return 0;
+      }
+    }
+    return 1;
   }
   default:
     return 0;

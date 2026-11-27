@@ -5,7 +5,13 @@ import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
-import { kFlagType, kPointerType } from "../const/lowering.const.tz";
+import {
+  kFlagType,
+  kImmortalCount,
+  kIntType,
+  kObjectHeader,
+  kPointerType,
+} from "../const/lowering.const.tz";
 import {
   ClassLayout,
   Frame,
@@ -21,7 +27,7 @@ partial class Lowering {
     }
 
     for (const part of this.values.types.store.partsOf(type)) {
-      const partLayout = this.layoutOf(part);
+      const partLayout = this.partLayoutOf(part);
       const spot = this.layoutField(partLayout, name);
       if (spot != undefined) {
         spots.push(spot);
@@ -65,7 +71,7 @@ partial class Lowering {
     const isStatic = this.isStaticUnionField(object, result, expr);
 
     for (const part of this.values.types.store.partsOf(type)) {
-      const layout = this.layoutOf(part);
+      const layout = this.partLayoutOf(part);
       const spot = this.layoutField(layout, expr.name);
       if (layout == undefined || spot == undefined) {
         continue;
@@ -155,7 +161,14 @@ partial class Lowering {
       return undefined;
     }
 
+    const isLooking = value.owned != true && !this.values.isCopy(target);
+    if (isLooking) {
+      return this.viewed(frame, value, target, loc);
+    }
+
+    const isGiven = value.owned == true && value.isStatic != true;
     const object = this.allocated(frame, to);
+    const source = this.recordAddress(frame, value);
 
     for (const field of this.fieldsOf(to)) {
       const spot = this.layoutField(from, field.name);
@@ -163,7 +176,7 @@ partial class Lowering {
         continue;
       }
 
-      const pointer = frame.made.field(from.struct, value.value, spot.index);
+      const pointer = frame.made.field(from.struct, source, spot.index);
       const loaded: IrValue = {
         type: spot.ir,
         value: frame.made.load(spot.ir, pointer),
@@ -177,10 +190,73 @@ partial class Lowering {
       const place = this.fieldPlaceOf(frame, object, to, field);
 
       this.stored(frame, place, converted);
+
+      if (isGiven && this.isMovedPart(spot.type)) {
+        frame.made.store(this.ir.zero(spot.ir), pointer);
+      }
     }
 
     this.dropping(frame, value);
 
     return { type: kPointerType, value: object, tz: target, owned: true };
+  }
+
+  private isMovedPart(type: Type): boolean {
+    return this.isManaged(type) && !this.values.isCopy(type);
+  }
+
+  private viewed(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const from = this.layoutOf(value.tz);
+    const to = this.layoutOf(target);
+    if (from == undefined || to == undefined) {
+      return undefined;
+    }
+
+    const isFixed = this.values.types.store
+      .fieldsOf(target)
+      .every((field) => field.readonly);
+    if (!isFixed) {
+      this.notLowered(frame.module, loc, "a view of an object that can change");
+
+      return undefined;
+    }
+
+    const view = frame.made.slot(to.struct, "view");
+    const count = frame.made.field(kObjectHeader, view, 0);
+    const kind = frame.made.field(kObjectHeader, view, 1);
+    const source = this.recordAddress(frame, value);
+
+    frame.made.store(this.ir.zero(to.struct), view);
+    frame.made.store(this.ir.integer(kIntType, kImmortalCount), count);
+    frame.made.store(to.descriptor, kind);
+
+    for (const field of this.fieldsOf(to)) {
+      const spot = this.layoutField(from, field.name);
+      if (spot == undefined) {
+        continue;
+      }
+
+      const pointer = frame.made.field(from.struct, source, spot.index);
+      const loaded: IrValue = {
+        type: spot.ir,
+        value: frame.made.load(spot.ir, pointer),
+        tz: spot.type,
+      };
+      const converted = this.converted(frame, loaded, field.type, loc);
+      if (converted == undefined) {
+        return undefined;
+      }
+
+      const place = frame.made.field(to.struct, view, field.index);
+
+      frame.made.store(converted.value, place);
+    }
+
+    return { type: kPointerType, value: view, tz: target };
   }
 }

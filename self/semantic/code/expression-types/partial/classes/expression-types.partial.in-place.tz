@@ -1,0 +1,78 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { ClassDecl } from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+
+const kExtendsWord = "extends";
+const kImplementsWord = "implements";
+
+partial class ExpressionTypes {
+  private inPlaceChecks(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
+    const self = this.declaredInstance(decl, module);
+    if (self == undefined) {
+      return;
+    }
+
+    const word = self.name;
+    const parent = this.types.parentOf(self, decl);
+    const isMarked = decl.isInPlace;
+    const isParentMarked = parent != undefined && this.isInPlaceClass(parent);
+    if (parent != undefined && (isMarked || isParentMarked)) {
+      this.errors.write(module, decl.loc, Code.OwnInPlaceHeritage, {
+        word,
+        other: kExtendsWord,
+      });
+    }
+    if (!isMarked) {
+      return;
+    }
+    if (tree.typeRefsOf(decl.interfacesList).length > 0) {
+      this.errors.write(module, decl.loc, Code.OwnInPlaceHeritage, {
+        word,
+        other: kImplementsWord,
+      });
+    }
+
+    for (const field of this.instanceFields(self) ?? []) {
+      if (this.holdsInPlace(field.type, self, [])) {
+        this.errors.write(module, field.loc, Code.OwnInPlaceItself, {
+          word: field.name,
+          first: word,
+        });
+      }
+    }
+  }
+
+  public readonly isInPlaceClass(type: Type): boolean {
+    return this.classDeclOf(type)?.isInPlace == true;
+  }
+
+  private holdsInPlace(type: Type, wanted: InstanceType, seen: int[]): boolean {
+    if (type.kind == TypeKind.Union) {
+      return this.types.store
+        .partsOf(type)
+        .some((part) => this.holdsInPlace(part, wanted, seen));
+    }
+    if (type.kind != TypeKind.Instance || !this.isInPlaceClass(type)) {
+      return false;
+    }
+    if (type.id == wanted.id) {
+      return true;
+    }
+    if (seen.includes(type.id)) {
+      return false;
+    }
+
+    seen.push(type.id);
+
+    const fields = this.instanceFields(type) ?? [];
+
+    return fields.some((field) => this.holdsInPlace(field.type, wanted, seen));
+  }
+}

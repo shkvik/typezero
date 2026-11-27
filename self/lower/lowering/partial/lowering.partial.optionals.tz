@@ -43,6 +43,10 @@ partial class Lowering {
   }
 
   private isReferenceLike(type: Type): boolean {
+    if (this.isInPlace(type)) {
+      return false;
+    }
+
     return (
       this.isArray(type) || this.isCounted(type) || this.isHandleType(type)
     );

@@ -149,6 +149,7 @@ partial class Lowering {
     }
     const isWhole =
       this.isReferenceLike(value.tz) ||
+      this.isInPlace(value.tz) ||
       this.isDecimal(value.tz) ||
       value.tz.kind == TypeKind.Result ||
       this.optionalInner(value.tz) != undefined;

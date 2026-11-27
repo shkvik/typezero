@@ -53,19 +53,14 @@ partial class Lowering {
       return undefined;
     }
 
-    const object = this.allocated(frame, layout);
+    const isPlaced = this.isInPlace(type);
+    const object = this.newStorage(frame, layout, isPlaced);
 
     this.fieldsInitialized(frame, type, object);
 
-    const value: IrValue = {
-      type: kPointerType,
-      value: object,
-      tz: type,
-      owned: true,
-    };
     const owned = this.ownConstructor(type);
     if (owned == undefined) {
-      return value;
+      return this.newMade(frame, object, layout, type);
     }
 
     const ctor = owned.fn;
@@ -96,7 +91,32 @@ partial class Lowering {
     frame.made.call(callee, [object].concat(args));
     this.droppedAll(frame, kept);
 
-    return value;
+    return this.newMade(frame, object, layout, type);
+  }
+
+  private newStorage(
+    frame: Read<Frame>,
+    layout: Read<ClassLayout>,
+    isPlaced: boolean,
+  ): LLVMValue {
+    if (isPlaced) {
+      return this.recordSlot(frame, layout);
+    }
+
+    return this.allocated(frame, layout);
+  }
+
+  private newMade(
+    frame: Read<Frame>,
+    object: LLVMValue,
+    layout: Read<ClassLayout>,
+    type: Type,
+  ): IrValue {
+    if (this.isInPlace(type)) {
+      return this.recordMade(frame, object, layout, type);
+    }
+
+    return { type: kPointerType, value: object, tz: type, owned: true };
   }
 
   private orderedDescriptor(
@@ -181,6 +201,10 @@ partial class Lowering {
     name: string,
     loc: int,
   ): Place | undefined {
+    if (object.type != kPointerType && this.isInPlace(object.tz)) {
+      return this.fieldAt(frame, object.pointer, object.tz, name, loc);
+    }
+
     const pointer = frame.made.load(kPointerType, object.pointer);
 
     return this.fieldAt(frame, pointer, object.tz, name, loc);
@@ -224,6 +248,11 @@ partial class Lowering {
     const tree = this.values.types.program.tree;
 
     const objectExpr = tree.exprOf(expr.objectId);
+    const direct = this.recordFieldValue(frame, expr, objectExpr);
+    if (direct != undefined) {
+      return direct;
+    }
+
     const object = this.value(frame, objectExpr);
     if (object == undefined) {
       return undefined;
@@ -232,13 +261,8 @@ partial class Lowering {
       return this.mixedFieldValue(frame, object, expr);
     }
 
-    const place = this.fieldAt(
-      frame,
-      object.value,
-      object.tz,
-      expr.name,
-      expr.loc,
-    );
+    const address = this.recordAddress(frame, object);
+    const place = this.fieldAt(frame, address, object.tz, expr.name, expr.loc);
     if (place == undefined) {
       return undefined;
     }

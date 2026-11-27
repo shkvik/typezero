@@ -62,6 +62,7 @@ import "./partial/lowering.partial.arena.tz";
 import "./partial/lowering.partial.map-loops.tz";
 import "./partial/lowering.partial.class-statics.tz";
 import "./partial/lowering.partial.immortal-unions.tz";
+import "./partial/lowering.partial.records.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
@@ -145,6 +146,10 @@ export class Lowering {
   private readonly functionObjects: Map<string, LLVMValue>;
   private readonly initFunctions: Map<int, IrCallee>;
   private readonly noInits: Set<int>;
+  private readonly inPlaceTypes: Map<int, boolean>;
+  private readonly unionParts: Set<int>;
+  private readonly recordBoxes: Map<int, ClassLayout>;
+  private areUnionsScanned: boolean;
 
   public constructor(
     values: Own<ExpressionTypes>,
@@ -202,6 +207,10 @@ export class Lowering {
     this.functionObjects = new Map<string, LLVMValue>();
     this.initFunctions = new Map<int, IrCallee>();
     this.noInits = new Set<int>();
+    this.inPlaceTypes = new Map<int, boolean>();
+    this.unionParts = new Set<int>();
+    this.recordBoxes = new Map<int, ClassLayout>();
+    this.areUnionsScanned = false;
   }
 
   public audit(): void {

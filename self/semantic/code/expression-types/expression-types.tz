@@ -133,6 +133,7 @@ import "./partial/functions/expression-types.partial.awaits.tz";
 import "../../library/expression-types/partial/expression-types.partial.promises.tz";
 import "./partial/classes/expression-types.partial.class-init.tz";
 import "./partial/classes/expression-types.partial.class-redeclare.tz";
+import "./partial/classes/expression-types.partial.in-place.tz";
 import "./partial/calls/expression-types.partial.callbacks.tz";
 import "./partial/statements/expression-types.partial.use-order.tz";
 import "./partial/objects/expression-types.partial.object-fit.tz";

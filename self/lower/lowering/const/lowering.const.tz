@@ -434,6 +434,9 @@ export const kSpawnParts =
   "{ ptr, i64 }, { ptr, i64 }, { ptr, i64 }, { ptr, i64 }, i64, double }";
 export const kOsTexts = ["homedir", "tmpdir"];
 export const kHandleKind = 24;
+export const kRecordKind = 25;
+export const kHeaderSize = 16;
+export const kEqualsMethod = "[Symbol.equals]";
 export const kHandleLayout = "{ { i32, i32, ptr }, ptr, i32 }";
 export const kHexPrefix = "0x";
 export const kZeroCode = 48;

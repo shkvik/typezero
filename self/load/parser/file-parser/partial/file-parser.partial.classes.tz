@@ -23,7 +23,10 @@ import {
   MemberName,
   Modifiers,
 } from "../types/file-parser.types.classes.tz";
-import { kUnsafeDecorator } from "../const/file-parser.const.classes.tz";
+import {
+  kInPlaceDecorator,
+  kUnsafeDecorator,
+} from "../const/file-parser.const.classes.tz";
 import {
   ClassDecl,
   Decorator,
@@ -61,6 +64,7 @@ partial class FileParser {
       name: draft.name,
       isAbstract: draft.isAbstract,
       isPartial: draft.isPartial,
+      isInPlace: draft.isInPlace,
       base: draft.base,
       baseExpr: draft.baseExpr,
       baseArgs: draft.baseArgs,
@@ -85,6 +89,7 @@ partial class FileParser {
       name,
       isAbstract: decl.isAbstract,
       isPartial: decl.isPartial,
+      isInPlace: decl.isInPlace,
       base: decl.base,
       baseExpr: decl.baseExpr,
       baseArgs: decl.baseArgs,
@@ -104,6 +109,21 @@ partial class FileParser {
     decorators: Own<Decorator[]>,
   ): ClassDecl {
     const all = decorators.concat(decl.decorators);
+    const kept: Decorator[] = [];
+    let isMarked = decl.isInPlace;
+    let next = all.pop();
+
+    while (next != undefined) {
+      if (this.isInPlaceMark(next.expr)) {
+        isMarked = true;
+      } else {
+        kept.push(next);
+      }
+
+      next = all.pop();
+    }
+
+    kept.reverse();
 
     return {
       kind: StmtKind.Class,
@@ -111,6 +131,7 @@ partial class FileParser {
       name: decl.name,
       isAbstract: decl.isAbstract,
       isPartial: decl.isPartial,
+      isInPlace: isMarked,
       base: decl.base,
       baseExpr: decl.baseExpr,
       baseArgs: decl.baseArgs,
@@ -119,7 +140,7 @@ partial class FileParser {
       methods: decl.methods,
       constructors: decl.constructors,
       expression: decl.expression,
-      decorators: all,
+      decorators: kept,
       typeParams: decl.typeParams,
       source: decl.source,
     };
@@ -170,6 +191,7 @@ partial class FileParser {
       name: word?.text,
       isAbstract: false,
       isPartial: false,
+      isInPlace: false,
       base: extended.base,
       baseExpr: extended.baseExpr,
       baseArgs: extended.baseArgs,
@@ -370,6 +392,16 @@ partial class FileParser {
     }
 
     return expr;
+  }
+
+  private readonly isInPlaceMark(expr: Read<Expr>): boolean {
+    if (expr.kind != ExprKind.Call || expr.args.length > 0) {
+      return false;
+    }
+
+    const callee = expr.callee;
+
+    return callee.kind == ExprKind.Name && callee.name == kInPlaceDecorator;
   }
 
   private readonly isUnsafeDecorator(expr: Expr): boolean {

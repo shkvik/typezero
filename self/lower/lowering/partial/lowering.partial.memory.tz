@@ -143,6 +143,9 @@ partial class Lowering {
 
       return this.countCall(frame, isRetain, inside);
     }
+    if (this.isRecordValue(value)) {
+      return this.recordCount(frame, isRetain, value);
+    }
 
     if (this.isSingleOwner(value)) {
       return this.ownCount(frame, isRetain, value);

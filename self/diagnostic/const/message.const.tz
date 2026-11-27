@@ -4543,6 +4543,12 @@ export const kMessages: Record<Code, Message> = {
   [Code.OwnConstantLent]: {
     text: "the result is lent from the module constant '{other}', which is changed elsewhere while the caller may still look at it; return a copy (structuredClone)",
   },
+  [Code.OwnInPlaceHeritage]: {
+    text: "'{word}' lies in place (@InPlace()), so it cannot have '{other}': a value in place carries no description of its class",
+  },
+  [Code.OwnInPlaceItself]: {
+    text: "field '{word}' would put a '{first}' inside a '{first}', and a value in place would have no size; keep that part in an ordinary class",
+  },
   [Code.OwnStaticCallChanges]: {
     text: "'{word}' may change '{other}', but '{first}' still looks into it until line {second}; read '{other}' again after the call, or copy the value with structuredClone",
   },

@@ -188,7 +188,7 @@ partial class Lowering {
   private nameValue(frame: Frame, expr: NameExpr): IrValue | undefined {
     const self = frame.self;
     if (expr.name == kThisName && self != undefined) {
-      return this.loaded(frame, self);
+      return this.selfValue(frame, self);
     }
     if (this.moves.has(expr.id) && frame.inline == undefined) {
       const moved = this.movedLocal(frame, expr);
@@ -480,7 +480,10 @@ partial class Lowering {
     }
 
     const inner = this.optionalInner(value.tz);
-    if (inner != undefined && this.isReferenceLike(inner)) {
+    const isMarked =
+      inner != undefined &&
+      (this.isReferenceLike(inner) || this.isInPlace(inner));
+    if (isMarked) {
       const has = this.hasValue(frame, value);
 
       this.dropping(frame, value);
@@ -530,7 +533,7 @@ partial class Lowering {
         zero,
       );
     }
-    if (this.isReferenceLike(value.tz)) {
+    if (this.isReferenceLike(value.tz) || this.isInPlace(value.tz)) {
       this.dropping(frame, value);
 
       return this.ir.integer(kBooleanType, "1");

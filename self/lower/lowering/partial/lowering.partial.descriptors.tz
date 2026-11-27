@@ -25,6 +25,9 @@ partial class Lowering {
     if (this.isHandleType(plain)) {
       return this.handleDescriptor(plain);
     }
+    if (this.isInPlace(plain)) {
+      return this.recordDescriptor(plain);
+    }
 
     const shape = this.descriptorShape(plain);
     if (shape == undefined) {
@@ -146,7 +149,7 @@ partial class Lowering {
       case TypeKind.Decimal:
         return 24;
       case TypeKind.Instance:
-        return 8;
+        return this.optionalRecordSize(inner);
       default:
         return 16;
     }

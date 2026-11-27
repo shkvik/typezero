@@ -173,6 +173,7 @@ partial class AstFlattener {
       name: node.name,
       isAbstract: node.isAbstract,
       isPartial: node.isPartial,
+      isInPlace: node.isInPlace,
       baseId,
       baseExprId,
       baseArgsList,

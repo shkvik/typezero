@@ -649,6 +649,8 @@ static void format_match(Ctx *ctx, TzBuf *out, const TzInstance *match, int recu
 }
 
 static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int recurse_times);
+static void format_fields(Ctx *ctx, TzBuf *out, const void *object, const TzLayout *layout,
+                          const char *fields, int is_class, int recurse_times);
 
 static void format_json_key(TzBuf *entry, TzStr key);
 
@@ -1134,6 +1136,11 @@ static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int re
       layout = &titled;
     }
   }
+  format_fields(ctx, out, object, layout, fields, is_class, recurse_times);
+}
+
+static void format_fields(Ctx *ctx, TzBuf *out, const void *object, const TzLayout *layout,
+                          const char *fields, int is_class, int recurse_times) {
   int groups = (layout->flags & TZ_LAYOUT_GROUPS) != 0;
   const char *open = groups ? "[Object: null prototype] {" : "{";
   uint32_t shown = 0;
@@ -1401,6 +1408,10 @@ static void format_value(Ctx *ctx, TzBuf *out, const TzType *type, const void *v
     if (!format_circular(ctx, out, *(void *const *)value)) {
       format_object(ctx, out, *(TzInstance *const *)value, recurse_times);
     }
+    return;
+  case TZ_T_RECORD:
+    format_fields(ctx, out, value, tz_record_fields(type), (const char *)value, 0,
+                  recurse_times);
     return;
   case TZ_T_UNKNOWN:
     if (!*(void *const *)value) {

@@ -142,6 +142,7 @@ partial class FileParser {
       name: node.name,
       isAbstract: node.isAbstract,
       isPartial: node.isPartial,
+      isInPlace: node.isInPlace,
       base,
       baseExpr,
       baseArgs,

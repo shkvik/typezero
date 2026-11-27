@@ -79,6 +79,10 @@ partial class Lowering {
       return this.stringsCompared(frame, expr.op, left, right);
     }
 
+    if (isEquality && this.hasEquals(left, right)) {
+      return this.recordsEqual(frame, expr, left, right);
+    }
+
     const isReference = left.type == kPointerType && right.type == kPointerType;
     if (isEquality && isReference) {
       const predicate = this.integerPredicate(expr.op, false);

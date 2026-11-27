@@ -65,6 +65,14 @@ partial class Lowering {
   }
 
   private madeLayout(type: Type): ClassLayout | undefined {
+    if (this.isInPlace(type)) {
+      return this.inlineLayout(type);
+    }
+
+    return this.heapLayout(type);
+  }
+
+  private heapLayout(type: Type): ClassLayout | undefined {
     const shape = this.layoutShape(type);
     if (shape == undefined) {
       return undefined;
@@ -113,6 +121,39 @@ partial class Lowering {
     this.layoutFields.set(classId, placed);
     this.layoutShapes.set(classId, fullShape);
     this.layoutSlots.set(classId, slots);
+
+    return layout;
+  }
+
+  private inlineLayout(type: Type): ClassLayout | undefined {
+    const shape = this.layoutShape(type);
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    const placed = this.placedFields(shape.fields, 0, -2);
+    if (placed == undefined || placed.length == 0) {
+      return undefined;
+    }
+
+    const types = placed.map((field) => field.ir);
+    const struct = `{ ${types.join(", ")} }`;
+    const last = placed[placed.length - 1];
+    let end: int = 0;
+
+    if (last != undefined) {
+      end = last.offset + this.sizeOf(last.type);
+    }
+
+    const size = this.aligned(end, 8);
+    const classId = this.nextClassId();
+    const drop = this.ir.zero(kPointerType);
+    const descriptor = this.layoutDescriptor(shape, drop, placed, classId, []);
+    const layout: ClassLayout = { struct, size, descriptor, classId, drop };
+
+    this.layoutFields.set(classId, placed);
+    this.layoutShapes.set(classId, shape);
+    this.layoutSlots.set(classId, []);
 
     return layout;
   }

@@ -304,7 +304,7 @@ partial class OwnershipCheck {
   }
 
   public copiedName(type: Type): string | undefined {
-    if (!this.values.isCopy(type)) {
+    if (!this.values.isCopy(type) && !this.values.isInPlaceClass(type)) {
       return undefined;
     }
     if (type.kind == TypeKind.Object || this.isRecordUnion(type)) {

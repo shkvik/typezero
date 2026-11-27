@@ -35,6 +35,9 @@ partial class Lowering {
     if (this.isString(inner) || !this.isManaged(inner)) {
       return false;
     }
+    if (this.isInPlace(inner)) {
+      return false;
+    }
     if (this.isArray(inner)) {
       return true;
     }
@@ -277,7 +280,7 @@ partial class Lowering {
   ): void {
     const isPointer = field.ir == kPointerType;
     if (!isPointer) {
-      return;
+      return this.immortalRecord(frame, object, struct, field);
     }
 
     const callee = this.deepImmortalCallee(field.type);
@@ -289,6 +292,29 @@ partial class Lowering {
     const value = frame.made.load(kPointerType, address);
 
     frame.made.call(callee, [value]);
+  }
+
+  private immortalRecord(
+    frame: Frame,
+    object: LLVMValue,
+    struct: string,
+    field: Read<LayoutField>,
+  ): void {
+    const record = this.optionalInner(field.type) ?? field.type;
+    if (!this.isInPlace(record)) {
+      return;
+    }
+
+    const layout = this.layoutOf(record);
+    if (layout == undefined) {
+      return;
+    }
+
+    const address = frame.made.field(struct, object, field.index);
+
+    for (const inner of this.fieldsOf(layout)) {
+      this.immortalField(frame, address, record, layout.struct, inner);
+    }
   }
 
   private immortalItems(frame: Frame, array: LLVMValue, item: Type): void {
