@@ -13,6 +13,7 @@ import "./partial/lowering.partial.console.tz";
 import "./partial/lowering.partial.types.tz";
 import "./partial/lowering.partial.memory.tz";
 import "./partial/lowering.partial.own-drops.tz";
+import "./partial/lowering.partial.own-copies.tz";
 import "./partial/lowering.partial.texts.tz";
 import "./partial/lowering.partial.arrays.tz";
 import "./partial/lowering.partial.descriptors.tz";

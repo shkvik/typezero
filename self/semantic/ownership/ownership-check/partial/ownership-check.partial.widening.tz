@@ -1,0 +1,528 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  BinaryOp,
+  Expr,
+  ExprKind,
+  NewExpr,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  ArgumentTypes,
+  Operand,
+  OperandKind,
+  ParamMode,
+  Place,
+  TypePair,
+} from "../types/ownership-check.types.tz";
+import {
+  kAddName,
+  kFillName,
+  kPushName,
+  kSetName,
+  kSpliceName,
+  kThisKey,
+  kUnshiftName,
+} from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private widenFor(expr: Expr, wanted: Type | undefined): void {
+    if (wanted == undefined) {
+      return;
+    }
+
+    const isLiteral =
+      expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
+    if (isLiteral) {
+      this.literalWanted.set(expr.id, wanted);
+
+      return;
+    }
+
+    const given = this.values.answers.typeOf(expr);
+    if (given == undefined) {
+      return;
+    }
+    if (this.isWidenedCopy(given, wanted)) {
+      return this.markWidened(expr);
+    }
+    if (this.hasWidenedItems(given, wanted, 0)) {
+      this.reportWidened(expr, given, wanted);
+    }
+  }
+
+  private widenSpread(expr: Expr, wanted: Type | undefined): void {
+    const given = this.values.answers.typeOf(expr);
+    if (wanted == undefined || given == undefined) {
+      return;
+    }
+
+    const item = this.values.iteratedItem(given);
+    if (item != undefined && this.isWidenedCopy(item, wanted)) {
+      this.reportWidened(expr, given, wanted);
+    }
+  }
+
+  private reportWidened(expr: Expr, given: Type, wanted: Type): void {
+    const word = this.exprText(expr);
+    const first = this.values.types.typeText(given);
+    const other = this.values.types.typeText(wanted);
+
+    this.errors.write(this.home, expr.loc, Code.OwnCopyWidened, {
+      word,
+      first,
+      other,
+    });
+  }
+
+  private isWidenedCopy(given: Type, wanted: Type): boolean {
+    if (given.id == wanted.id || !this.values.isCopy(given)) {
+      return false;
+    }
+    if (this.values.isCopy(wanted)) {
+      return false;
+    }
+    if (this.values.types.mentionsParameter(wanted)) {
+      return false;
+    }
+
+    return this.isObjectCopy(given);
+  }
+
+  private isObjectCopy(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Instance:
+      case TypeKind.Object:
+      case TypeKind.Tuple:
+        return true;
+      case TypeKind.Union:
+        return this.hasObjectPart(type);
+      default:
+        return false;
+    }
+  }
+
+  private hasObjectPart(type: Type): boolean {
+    const parts = this.values.types.store.partsOf(type).slice();
+
+    for (const part of parts) {
+      if (this.isObjectCopy(part)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private hasWidenedItems(given: Type, wanted: Type, depth: int): boolean {
+    if (depth > 8 || given.id == wanted.id) {
+      return false;
+    }
+    if (depth > 0 && this.isWidenedCopy(given, wanted)) {
+      return true;
+    }
+
+    const pairs = this.innerPairs(given, wanted);
+
+    for (const pair of pairs) {
+      if (this.hasWidenedItems(pair.given, pair.wanted, depth + 1)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private innerPairs(given: Type, wanted: Type): TypePair[] {
+    const source = this.values.types.definedType(given);
+    const target = this.values.types.definedType(wanted);
+
+    if (source.kind == TypeKind.Array && target.kind == TypeKind.Array) {
+      const sourceItem = this.values.types.store.itemOf(source);
+      const targetItem = this.values.types.store.itemOf(target);
+
+      return [{ given: sourceItem, wanted: targetItem }];
+    }
+    if (source.kind == TypeKind.Dict && target.kind == TypeKind.Dict) {
+      return this.entryPairs(source, target);
+    }
+    if (source.kind == TypeKind.Tuple && target.kind == TypeKind.Tuple) {
+      const sourceItems = this.values.types.store.itemsOf(source);
+      const targetItems = this.values.types.store.itemsOf(target);
+
+      return this.zippedTypes(sourceItems, targetItems);
+    }
+    if (source.kind == TypeKind.Object && target.kind == TypeKind.Object) {
+      return this.fieldPairs(source, target);
+    }
+
+    return this.argumentPairs(source, target);
+  }
+
+  private entryPairs(source: Type, target: Type): TypePair[] {
+    const sourceKey = this.values.types.store.keyOf(source);
+    const targetKey = this.values.types.store.keyOf(target);
+    const sourceValue = this.values.types.store.valueOf(source);
+    const targetValue = this.values.types.store.valueOf(target);
+    const keys: TypePair = { given: sourceKey, wanted: targetKey };
+    const values: TypePair = { given: sourceValue, wanted: targetValue };
+
+    return [keys, values];
+  }
+
+  private fieldPairs(source: Type, target: Type): TypePair[] {
+    const sourceFields = this.values.types.store.fieldsOf(source).slice();
+    const targetFields = this.values.types.store.fieldsOf(target).slice();
+    const pairs: TypePair[] = [];
+
+    for (const field of targetFields) {
+      const own = sourceFields.find((one) => one.name == field.name);
+      if (own != undefined) {
+        pairs.push({ given: own.type, wanted: field.type });
+      }
+    }
+
+    return pairs;
+  }
+
+  private argumentPairs(source: Type, target: Type): TypePair[] {
+    const isSameClass =
+      source.kind == TypeKind.Instance &&
+      target.kind == TypeKind.Instance &&
+      source.module == target.module &&
+      source.loc == target.loc;
+    if (!isSameClass) {
+      return [];
+    }
+
+    const sourceArgs = this.values.types.store.argsOf(source);
+    const targetArgs = this.values.types.store.argsOf(target);
+
+    return this.zippedTypes(sourceArgs, targetArgs);
+  }
+
+  private readonly zippedTypes(
+    sources: Read<Type[]>,
+    targets: Read<Type[]>,
+  ): TypePair[] {
+    const pairs: TypePair[] = [];
+
+    for (let index: int = 0; index < sources.length; index++) {
+      const given = sources[index];
+      const wanted = targets[index];
+      if (given != undefined && wanted != undefined) {
+        pairs.push({ given, wanted });
+      }
+    }
+
+    return pairs;
+  }
+
+  private markWidened(expr: Expr): void {
+    const tree = this.values.types.program.tree;
+
+    this.widened.add(expr.id);
+
+    switch (expr.kind) {
+      case ExprKind.Conditional:
+        const thenExpr = tree.exprOf(expr.thenExprId);
+        const elseExpr = tree.exprOf(expr.elseExprId);
+
+        this.markWidened(thenExpr);
+        return this.markWidened(elseExpr);
+      case ExprKind.Binary:
+        const lhs = tree.exprOf(expr.lhsId);
+        const rhs = tree.exprOf(expr.rhsId);
+        if (!this.isChoiceOp(expr.op)) {
+          return;
+        }
+
+        this.markWidened(lhs);
+        return this.markWidened(rhs);
+      case ExprKind.Cast:
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.markWidened(operand);
+      case ExprKind.Unary:
+        const inner = tree.exprOf(expr.operandId);
+        if (expr.op != UnaryOp.NonNull) {
+          return;
+        }
+
+        return this.markWidened(inner);
+      default:
+        return;
+    }
+  }
+
+  private readonly isChoiceOp(op: BinaryOp): boolean {
+    return (
+      op == BinaryOp.LogOr || op == BinaryOp.LogAnd || op == BinaryOp.Nullish
+    );
+  }
+
+  private readonly isWidened(expr: Expr): boolean {
+    return this.widened.has(expr.id);
+  }
+
+  private checkWidenedPart(operand: Read<Operand>, expr: Expr): void {
+    const isPart = expr.kind == ExprKind.Member || expr.kind == ExprKind.Index;
+    if (operand.kind != OperandKind.Copy || !isPart || !this.isWidened(expr)) {
+      return;
+    }
+
+    const word = this.exprText(expr);
+
+    this.errors.write(this.home, expr.loc, Code.OwnTakeBorrowed, { word });
+  }
+
+  private copyTaken(place: Place, expr: Expr): void {
+    if (this.isOwnedCopyRoot(place.root)) {
+      return this.ownedTaken(place, expr);
+    }
+    if (this.isLoopBinding(place.root)) {
+      const word = this.placeText(place);
+
+      this.errors.write(this.home, expr.loc, Code.OwnTakeElement, { word });
+
+      return;
+    }
+
+    this.reportLentTaken(place.root, place, expr.loc);
+  }
+
+  private readonly isOwnedCopyRoot(key: int): boolean {
+    const tree = this.values.types.program.tree;
+
+    const frame = this.frame();
+    const variable = this.variableOf(key);
+    if (frame == undefined || variable == undefined || key == kThisKey) {
+      return false;
+    }
+    if (frame.outer.has(key) || this.isLoopBinding(key)) {
+      return false;
+    }
+    if (variable.loans.length > 0) {
+      return false;
+    }
+
+    const fn = frame.fn;
+    if (fn == undefined) {
+      return true;
+    }
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      if (param.loc == key) {
+        const mode = this.paramMode(param);
+
+        return mode == ParamMode.Own || mode == ParamMode.Once;
+      }
+    }
+
+    return true;
+  }
+
+  private argumentTypes(expr: Expr): ArgumentTypes {
+    const builtin = this.builtinArgumentTypes(expr);
+    if (builtin != undefined) {
+      return builtin;
+    }
+
+    const callee = this.wantedCallee(expr);
+    if (callee == undefined || callee.kind != TypeKind.Function) {
+      return { params: [] };
+    }
+
+    const shape = this.values.types.store.functionShapeOf(callee);
+    const params: Type[] = [];
+
+    for (const param of shape.params) {
+      params.push(param.type);
+    }
+
+    const last = params[params.length - 1];
+    if (!shape.rest || last == undefined || last.kind != TypeKind.Array) {
+      return { params };
+    }
+
+    const rest = this.values.types.store.itemOf(last);
+
+    params.pop();
+
+    return { params, rest };
+  }
+
+  private builtinArgumentTypes(expr: Expr): ArgumentTypes | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (expr.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const objectExpr = tree.exprOf(callee.objectId);
+    const object = this.values.answers.typeOf(objectExpr);
+    if (object == undefined) {
+      return undefined;
+    }
+    if (object.kind == TypeKind.Array) {
+      return this.arrayArgumentTypes(object, callee.name);
+    }
+    if (object.kind == TypeKind.Dict) {
+      return this.dictArgumentTypes(object, callee.name);
+    }
+
+    return undefined;
+  }
+
+  private arrayArgumentTypes(array: Type, name: string): ArgumentTypes {
+    const item = this.values.types.store.itemOf(array);
+    const count = this.values.types.store.integer(64, false);
+
+    switch (name) {
+      case kPushName:
+      case kUnshiftName:
+        return { params: [], rest: item };
+      case kSpliceName:
+        return { params: [count, count], rest: item };
+      case kFillName:
+        return { params: [item] };
+      default:
+        return { params: [] };
+    }
+  }
+
+  private dictArgumentTypes(dict: Type, name: string): ArgumentTypes {
+    const key = this.values.types.store.keyOf(dict);
+    const value = this.values.types.store.valueOf(dict);
+
+    switch (name) {
+      case kSetName:
+        return { params: [key, value] };
+      case kAddName:
+        return { params: [key] };
+      default:
+        return { params: [] };
+    }
+  }
+
+  private readonly wantedAt(
+    types: Read<ArgumentTypes>,
+    index: int,
+  ): Type | undefined {
+    const exact = types.params[index];
+    if (exact != undefined) {
+      return exact;
+    }
+
+    return types.rest;
+  }
+
+  private wantedCallee(expr: Expr): Type | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (expr.kind == ExprKind.New) {
+      return this.initializerTypeOf(expr);
+    }
+    if (expr.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = tree.exprOf(expr.calleeId);
+    const typed = this.values.answers.typeOf(callee);
+    if (typed != undefined && typed.kind == TypeKind.Function) {
+      return typed;
+    }
+
+    return this.calleeTypeOf(expr);
+  }
+
+  private initializerTypeOf(expr: NewExpr): Type | undefined {
+    const tree = this.values.types.program.tree;
+
+    const made = this.values.answers.typeOf(expr);
+    if (made == undefined || made.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(made);
+    const initializer = tree.functionsOf(decl?.constructorsList)[0];
+    if (initializer == undefined) {
+      return undefined;
+    }
+
+    return this.values.functionOf(made.module, initializer.loc);
+  }
+
+  private wantedResult(): Type | undefined {
+    const fn = this.frame()?.fn;
+    if (fn == undefined) {
+      return undefined;
+    }
+
+    const type = this.functionTypeOf(fn);
+    if (type == undefined || type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return this.values.types.store.returnTypeOf(type);
+  }
+
+  private literalType(expr: Expr): Type | undefined {
+    const wanted = this.literalWanted.get(expr.id);
+    if (wanted != undefined) {
+      return wanted;
+    }
+
+    return this.values.answers.typeOf(expr);
+  }
+
+  private elementWanted(
+    literal: Expr,
+    index: int,
+    isSpread: boolean,
+  ): Type | undefined {
+    const type = this.literalType(literal);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    const defined = this.values.types.definedType(type);
+    if (defined.kind == TypeKind.Array && isSpread) {
+      return defined;
+    }
+    if (defined.kind == TypeKind.Array) {
+      return this.values.types.store.itemOf(defined);
+    }
+    if (defined.kind == TypeKind.Tuple && !isSpread) {
+      return this.values.types.store.itemsOf(defined)[index];
+    }
+
+    return undefined;
+  }
+
+  private propertyWanted(literal: Expr, name: string): Type | undefined {
+    const type = this.literalType(literal);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    const defined = this.values.types.definedType(type);
+    if (defined.kind == TypeKind.Dict) {
+      return this.values.types.store.valueOf(defined);
+    }
+    if (defined.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const fields = this.values.types.store.fieldsOf(defined).slice();
+    const field = fields.find((one) => one.name == name);
+
+    return field?.type;
+  }
+}

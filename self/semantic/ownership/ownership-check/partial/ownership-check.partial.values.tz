@@ -24,6 +24,8 @@ partial class OwnershipCheck {
   private take(operand: Read<Operand>, expr: Expr): void {
     const place = operand.place;
 
+    this.checkWidenedPart(operand, expr);
+
     switch (operand.kind) {
       case OperandKind.Borrowed: {
         const word = this.exprText(expr);
@@ -58,6 +60,8 @@ partial class OwnershipCheck {
     switch (holding) {
       case Holding.Own:
         return this.ownedTaken(place, expr);
+      case Holding.Copy:
+        return this.copyTaken(place, expr);
       case Holding.Borrow:
         this.errors.write(this.home, expr.loc, Code.OwnStoreBorrow, { word });
         return;
@@ -287,6 +291,8 @@ partial class OwnershipCheck {
     if (operand.kind == OperandKind.Copy || this.isCopyExpr(init)) {
       const holding = this.copiedHolding(key);
 
+      this.checkWidenedPart(operand, init);
+
       this.setHeld(key, holding, []);
 
       return;
@@ -346,7 +352,10 @@ partial class OwnershipCheck {
     }
 
     const isWhole = place.depth == 0 && !isPattern;
-    const isMove = root.holding == Holding.Own && isWhole;
+    const isOwnedCopy =
+      root.holding == Holding.Copy && this.isOwnedCopyRoot(place.root);
+    const isOwned = root.holding == Holding.Own || isOwnedCopy;
+    const isMove = isOwned && isWhole;
     if (isMove) {
       const isMoved = this.moveOwned(place, init.loc);
 

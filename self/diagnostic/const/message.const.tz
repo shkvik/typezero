@@ -4501,6 +4501,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.OwnCopyShared]: {
     text: "'{word}' has a changeable type and is passed as the copy type '{first}', so both would share one value; give '{word}' the type '{first}' where it is made",
   },
+  [Code.OwnCopyWidened]: {
+    text: "'{word}' holds copied values, and as '{other}' each of them would have one owner, while other copies of '{first}' may still share them; build it as '{other}' from the start, or copy the items with structuredClone",
+  },
   [Code.OwnMutVariance]: {
     text: "'{word}' is passed to be changed as a wider type, so the function may put another kind of value into it; take Read<...> if it only reads, or pass a copy",
   },

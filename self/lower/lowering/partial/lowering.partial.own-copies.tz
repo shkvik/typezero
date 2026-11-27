@@ -1,0 +1,179 @@
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrCallee,
+  IrIntPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kIntType,
+  kOwnClone,
+  kOwnUnique,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private uniqueOwned(
+    frame: Read<Frame>,
+    source: Read<IrValue>,
+    value: IrValue,
+  ): IrValue {
+    if (source.owned != true || source.isStatic == true) {
+      return value;
+    }
+    if (value.type != kPointerType || this.values.isCopy(value.tz)) {
+      return value;
+    }
+
+    const helper = this.uniqueHelper(source.tz);
+    if (helper == undefined) {
+      return value;
+    }
+
+    const made = frame.made.call(helper, [value.value]);
+
+    return { type: value.type, value: made, tz: value.tz, owned: true };
+  }
+
+  private sharedCopyType(type: Type): Type | undefined {
+    if (!this.values.isCopy(type)) {
+      return undefined;
+    }
+
+    const inner = this.optionalInner(type);
+    if (inner != undefined) {
+      return this.sharedCopyType(inner);
+    }
+
+    const isObject =
+      type.kind == TypeKind.Instance ||
+      type.kind == TypeKind.Object ||
+      type.kind == TypeKind.Tuple;
+    if (!isObject) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  private uniqueHelper(type: Type): IrCallee | undefined {
+    const base = this.sharedCopyType(type);
+    if (base == undefined) {
+      return undefined;
+    }
+
+    const name = `${kOwnUnique}.${base.id}`;
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const cloning = this.cloneHelper(base);
+    if (cloning == undefined) {
+      return undefined;
+    }
+
+    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
+    const frame = this.makerFrame(made);
+    const object = made.param(0);
+    const counted = made.block("counted");
+    const copied = made.block("copied");
+    const kept = made.block("kept");
+    const none = this.ir.zero(kPointerType);
+    const isObject = made.integerCompare(IrIntPredicate.NotEqual, object, none);
+
+    made.conditionalBranch(isObject, counted, kept);
+    made.open(counted);
+
+    const count = made.load(kIntType, object);
+    const one = this.ir.integer(kIntType, "1");
+    const isAlone = made.integerCompare(IrIntPredicate.Equal, count, one);
+
+    made.conditionalBranch(isAlone, kept, copied);
+    made.open(copied);
+
+    const fresh = made.call(cloning, [object]);
+    const old: IrValue = { type: kPointerType, value: object, tz: base };
+
+    this.countCall(frame, false, old);
+    made.returned(fresh);
+    made.open(kept);
+    made.finishValue(object);
+
+    return made.callee;
+  }
+
+  private cloneHelper(type: Type): IrCallee | undefined {
+    const name = `${kOwnClone}.${type.id}`;
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const layout = this.layoutOf(type);
+    if (layout == undefined) {
+      return undefined;
+    }
+
+    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
+    const frame = this.makerFrame(made);
+    const source = made.param(0);
+    const object = this.allocated(frame, layout);
+
+    for (const field of this.fieldsOf(layout)) {
+      const from = made.field(layout.struct, source, field.index);
+      const value = made.load(field.ir, from);
+      const to = made.field(layout.struct, object, field.index);
+
+      made.store(value, to);
+      this.fieldShared(frame, value, field.ir, field.type);
+    }
+
+    made.finishValue(object);
+
+    return made.callee;
+  }
+
+  private fieldShared(
+    frame: Read<Frame>,
+    value: LLVMValue,
+    ir: string,
+    type: Type,
+  ): void {
+    if (!this.isManaged(type)) {
+      return;
+    }
+
+    const shared: IrValue = { type: ir, value, tz: type };
+
+    this.countCall(frame, true, shared);
+  }
+
+  private objectCloneOf(
+    frame: Frame,
+    given: IrValue,
+    type: Type,
+  ): IrValue | undefined {
+    if (this.optionalInner(type) != undefined) {
+      return undefined;
+    }
+
+    const base = this.sharedCopyType(type);
+    if (base == undefined) {
+      return undefined;
+    }
+
+    const cloning = this.cloneHelper(base);
+    if (cloning == undefined) {
+      return undefined;
+    }
+
+    const value = frame.made.call(cloning, [given.value]);
+
+    this.dropping(frame, given);
+
+    return { type: kPointerType, value, tz: type, owned: true };
+  }
+}

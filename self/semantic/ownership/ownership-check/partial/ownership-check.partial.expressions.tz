@@ -154,10 +154,10 @@ partial class OwnershipCheck {
     const holding = this.holdingOf(key);
     const place = this.wholePlace(key);
 
-    if (isChecked) {
+    if (isChecked || holding == Holding.Copy) {
       this.checkUsable(place, expr.loc);
     }
-    if (holding == Holding.Copy) {
+    if (holding == Holding.Copy && !this.isWidened(expr)) {
       return this.copyOperand(expr.loc);
     }
     if (isChecked && this.isCopyExpr(expr)) {
@@ -434,15 +434,20 @@ partial class OwnershipCheck {
   private evaluateArray(expr: ArrayLitExpr): Operand {
     const tree = this.values.types.program.tree;
 
-    for (const element of tree.elementsOf(expr.elementsList)) {
-      if (element.hole) {
+    const elements = tree.elementsOf(expr.elementsList);
+
+    for (let index: int = 0; index < elements.length; index++) {
+      const element = elements[index];
+      if (element == undefined || element.hole) {
         continue;
       }
 
-      const operand = this.evaluateFor(
-        tree.exprOf(element.exprId),
-        CallbackMode.Kept,
-      );
+      const item = tree.exprOf(element.exprId);
+      const wanted = this.elementWanted(expr, index, element.spread);
+
+      this.widenFor(item, wanted);
+
+      const operand = this.evaluateFor(item, CallbackMode.Kept);
       if (
         element.spread &&
         this.isSpreadOfCopies(tree.exprOf(element.exprId))
@@ -477,6 +482,12 @@ partial class OwnershipCheck {
       }
       if (form.kind == PropertyKind.Method) {
         continue;
+      }
+      if (form.kind != PropertyKind.Spread) {
+        const valueExpr = tree.exprOf(property.valueId);
+        const wanted = this.propertyWanted(expr, property.name);
+
+        this.widenFor(valueExpr, wanted);
       }
 
       const operand = this.evaluateFor(
@@ -589,6 +600,9 @@ partial class OwnershipCheck {
     const type = this.values.answers.typeOf(expr);
     if (type == undefined) {
       return true;
+    }
+    if (this.isWidened(expr)) {
+      return false;
     }
     if (!this.values.isCopy(type)) {
       return false;

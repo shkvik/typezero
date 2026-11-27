@@ -215,6 +215,11 @@ partial class Lowering {
     if (type == undefined || given == undefined) {
       return undefined;
     }
+
+    const objectClone = this.objectCloneOf(frame, given, type);
+    if (objectClone != undefined) {
+      return objectClone;
+    }
     if (
       !this.isManaged(type) ||
       this.isString(type) ||

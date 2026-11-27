@@ -177,6 +177,10 @@ partial class OwnershipCheck {
       return this.fieldsLooked(key, init);
     }
 
+    const wanted = this.values.variableOf(this.module, key);
+
+    this.widenFor(init, wanted);
+
     const operand = this.evaluateFor(init, CallbackMode.Local);
 
     this.bind(key, operand, init);

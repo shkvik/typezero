@@ -121,12 +121,20 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const decl = this.classDeclOf(type);
-    const fields = this.instanceFields(type);
-    if (decl == undefined || fields == undefined) {
+    if (this.types.store.isBase(type)) {
       return false;
     }
-    if (this.types.store.isBase(type) || this.hasDispose(decl)) {
+
+    return this.hasCopyFields(type, 0);
+  }
+
+  private hasCopyFields(type: Type, depth: int): boolean {
+    const decl = this.classDeclOf(type);
+    const fields = this.instanceFields(type);
+    if (decl == undefined || fields == undefined || depth > 20) {
+      return false;
+    }
+    if (this.hasDispose(decl)) {
       return false;
     }
 
@@ -136,6 +144,19 @@ partial class ExpressionTypes {
         return false;
       }
       if (!this.isCopy(field.type)) {
+        return false;
+      }
+    }
+
+    return this.hasCopyParents(type, depth);
+  }
+
+  private hasCopyParents(type: Type, depth: int): boolean {
+    const parents = this.types.store.parentsOf(type).slice();
+
+    for (const parent of parents) {
+      const isClass = this.classDeclOf(parent) != undefined;
+      if (isClass && !this.hasCopyFields(parent, depth + 1)) {
         return false;
       }
     }

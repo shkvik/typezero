@@ -149,6 +149,16 @@ export type ArgumentUse = {
   readonly expr: Expr;
 };
 
+export type ArgumentTypes = {
+  readonly params: readonly Type[];
+  readonly rest?: Type;
+};
+
+export type TypePair = {
+  readonly given: Type;
+  readonly wanted: Type;
+};
+
 export type Derived = {
   readonly key: int;
   readonly source: Expr;

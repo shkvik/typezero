@@ -48,8 +48,9 @@ partial class Lowering {
     }
     if (type == value.type) {
       const kept = this.keptLent(value.tz, target);
+      const retyped = this.retyped(value, type, kept);
 
-      return this.retyped(value, type, kept);
+      return this.uniqueOwned(frame, value, retyped);
     }
     if (this.isInteger(value.tz) && this.isInteger(target)) {
       return this.integerConverted(frame, value, target, type);

@@ -17,6 +17,7 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import {
+  ArgumentTypes,
   ArgumentUse,
   Callee,
   CalleeParam,
@@ -59,7 +60,8 @@ partial class OwnershipCheck {
     }
 
     const args = tree.argumentsOf(expr.argsList);
-    const uses = this.argumentsOf(args, info, true);
+    const types = this.argumentTypes(expr);
+    const uses = this.argumentsOf(args, info, true, types);
 
     this.applyArguments(uses);
     this.checkTwice(undefined, undefined, LoanKind.Shared, uses);
@@ -213,7 +215,9 @@ partial class OwnershipCheck {
 
     const keeper = this.borrowKeeper(receiver, callee);
     const args = tree.argumentsOf(expr.argsList);
-    const uses = this.argumentsOf(args, info, keeper == undefined);
+    const types = this.argumentTypes(expr);
+    const isMoving = keeper == undefined;
+    const uses = this.argumentsOf(args, info, isMoving, types);
 
     this.checkVariance(expr, uses);
     this.checkCopyShares(expr, uses);
@@ -248,7 +252,8 @@ partial class OwnershipCheck {
     const info = this.constructorCallee(expr);
 
     const args = tree.argumentsOf(expr.argsList);
-    const uses = this.argumentsOf(args, info, true);
+    const types = this.argumentTypes(expr);
+    const uses = this.argumentsOf(args, info, true, types);
 
     this.applyArguments(uses);
     this.checkTwice(undefined, undefined, LoanKind.Shared, uses);
@@ -362,6 +367,7 @@ partial class OwnershipCheck {
     args: Read<CallArgument[]>,
     info: Read<Callee>,
     isMoving: boolean,
+    types: Read<ArgumentTypes>,
   ): ArgumentUse[] {
     const tree = this.values.types.program.tree;
 
@@ -376,6 +382,16 @@ partial class OwnershipCheck {
       const param = this.paramAt(info, index);
       const callback = this.callbackModeOf(param.mode);
       const exprExpr = tree.exprOf(arg.exprId);
+      const isTaken =
+        param.mode == ParamMode.Own || param.mode == ParamMode.Once;
+      const wanted = this.wantedAt(types, index);
+      if (isMoving && isTaken && arg.spread) {
+        this.widenSpread(exprExpr, wanted);
+      }
+      if (isMoving && isTaken && !arg.spread) {
+        this.widenFor(exprExpr, wanted);
+      }
+
       const operand = this.evaluateFor(exprExpr, callback);
       if (arg.spread && this.isSpreadOfCopies(tree.exprOf(arg.exprId))) {
         const argExpr = tree.exprOf(arg.exprId);
@@ -391,8 +407,6 @@ partial class OwnershipCheck {
       }
 
       const expr = tree.exprOf(arg.exprId);
-      const isTaken =
-        param.mode == ParamMode.Own || param.mode == ParamMode.Once;
       if (isMoving && isTaken) {
         this.take(operand, expr);
       }

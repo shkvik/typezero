@@ -40,6 +40,11 @@ partial class OwnershipCheck {
       return this.copyOperand(expr.loc);
     }
     if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
+      const valueItem = tree.exprOf(expr.valueId);
+      const wanted = this.values.answers.typeOf(target);
+
+      this.widenFor(valueItem, wanted);
+
       const value = this.evaluateFor(
         tree.exprOf(expr.valueId),
         CallbackMode.Kept,
@@ -80,6 +85,10 @@ partial class OwnershipCheck {
 
     const target = tree.exprOf(expr.targetId);
     const valueExpr = tree.exprOf(expr.valueId);
+    const wanted = this.values.answers.typeOf(target);
+
+    this.widenFor(valueExpr, wanted);
+
     const value = this.evaluate(valueExpr);
     if (target.kind != ExprKind.Name) {
       return;
@@ -129,9 +138,16 @@ partial class OwnershipCheck {
       return;
     }
 
+    const isLending = result == ResultMode.Read || result == ResultMode.Mut;
+    if (!isLending) {
+      const wanted = this.wantedResult();
+
+      this.widenFor(value, wanted);
+    }
+
     const operand = this.evaluateFor(value, CallbackMode.Kept);
 
-    if (result == ResultMode.Read || result == ResultMode.Mut) {
+    if (isLending) {
       this.returnBorrow(operand, value);
     } else {
       this.returnOwn(operand, value);
@@ -166,7 +182,11 @@ partial class OwnershipCheck {
 
       return;
     }
-    if (holding == Holding.Own || holding == Holding.Global) {
+    const isTaken =
+      holding == Holding.Own ||
+      holding == Holding.Global ||
+      holding == Holding.Copy;
+    if (isTaken) {
       this.take(operand, value);
 
       return;

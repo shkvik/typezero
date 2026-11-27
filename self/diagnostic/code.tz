@@ -1505,4 +1505,5 @@ export enum Code {
   OwnUnsafeRequires = "TZ4043",
   OwnCloneField = "TZ4044",
   OwnCopyShared = "TZ4047",
+  OwnCopyWidened = "TZ4048",
 }
