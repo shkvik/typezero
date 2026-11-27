@@ -222,6 +222,7 @@ partial class OwnershipCheck {
       loops: [],
       outer: new Set<int>(),
       bindings: new Set<int>(),
+      globals: new Set<int>(),
     };
   }
 
@@ -237,6 +238,12 @@ partial class OwnershipCheck {
       }
 
       const holding = this.capturedHolding(frame, variable);
+      const isGlobal =
+        holding == Holding.Global || holding == Holding.Static;
+
+      if (isGlobal) {
+        frame.globals.add(variable.key);
+      }
 
       frame.variables.set(variable.key, {
         key: variable.key,
@@ -263,6 +270,9 @@ partial class OwnershipCheck {
     }
     if (variable.holding == Holding.Static) {
       return Holding.Static;
+    }
+    if (variable.holding == Holding.Global) {
+      return Holding.Global;
     }
     if (
       variable.holding == Holding.Own &&

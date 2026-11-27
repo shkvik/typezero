@@ -17,6 +17,7 @@ import {
   kEmptyType,
   kFlagType,
   kFsCompose,
+  kFsCopyFile,
   kFsErrorOrders,
   kFsExists,
   kFsMakeTemporary,
@@ -63,6 +64,8 @@ partial class Lowering {
         return this.directoryRead(frame, call);
       case "rmSync":
         return this.fileRemoved(frame, call);
+      case "copyFileSync":
+        return this.fileCopied(frame, call);
       default:
         this.notLowered(frame.module, call.loc, "a call of this function");
 
@@ -71,9 +74,17 @@ partial class Lowering {
   }
 
   private pathArgument(frame: Frame, call: CallExpr): IrValue | undefined {
+    return this.pathArgumentAt(frame, call, 0);
+  }
+
+  private pathArgumentAt(
+    frame: Frame,
+    call: CallExpr,
+    index: int,
+  ): IrValue | undefined {
     const tree = this.values.types.program.tree;
 
-    const first = tree.argumentsOf(call.argsList)[0];
+    const first = tree.argumentsOf(call.argsList)[index];
     if (first == undefined) {
       return undefined;
     }
@@ -337,6 +348,39 @@ partial class Lowering {
 
     frame.made.call(callee, args);
     this.dropping(frame, path);
+
+    const done: IrValue = {
+      type: kEmptyType,
+      value: this.ir.zero(kEmptyType),
+      tz: this.values.types.store.plain(TypeKind.Void),
+    };
+
+    return this.caughtResult(frame, done, parts.type, call.loc);
+  }
+
+  private fileCopied(frame: Frame, call: CallExpr): IrValue | undefined {
+    const parts = this.fileResultParts(frame, call);
+    const from = this.pathArgumentAt(frame, call, 0);
+    const to = this.pathArgumentAt(frame, call, 1);
+    if (parts == undefined || from == undefined || to == undefined) {
+      return undefined;
+    }
+
+    const params = [
+      kPointerType,
+      kIntType,
+      kPointerType,
+      kIntType,
+      kPointerType,
+    ];
+    const callee = this.ir.declare(kFsCopyFile, kVoidType, params);
+    const fromParts = this.textParts(frame, from);
+    const toParts = this.textParts(frame, to);
+    const args = fromParts.concat(toParts, [parts.maker]);
+
+    frame.made.call(callee, args);
+    this.dropping(frame, from);
+    this.dropping(frame, to);
 
     const done: IrValue = {
       type: kEmptyType,

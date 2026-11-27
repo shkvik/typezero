@@ -1,0 +1,102 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Holding, Operand } from "../types/ownership-check.types.tz";
+import {
+  kForeignKeyBase,
+  kForeignModuleSpan,
+} from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private noteStaticWrite(key: int, holding: Holding): void {
+    const shared = this.universalKey(key);
+    const callers = this.frameFunctions();
+
+    this.writtenAnywhere.add(shared);
+
+    const place = this.constantPlaces.get(shared);
+    if (holding == Holding.Global && place != undefined) {
+      this.changedConstants.add(place);
+    }
+    if (callers.length > 0) {
+      this.writtenInFunctions.add(shared);
+    }
+
+    for (const caller of callers) {
+      this.addWrite(caller, shared);
+    }
+  }
+
+  private noteTopWrite(key: int): void {
+    const shared = this.universalKey(key);
+
+    this.writtenAnywhere.add(shared);
+    this.changedConstants.add(`${this.module} ${key}`);
+  }
+
+  private readonly universalKey(key: int): int {
+    if (key < 0) {
+      return key;
+    }
+
+    const shift = this.module * kForeignModuleSpan;
+
+    return kForeignKeyBase - shift - key;
+  }
+
+  private noteConstantPlace(key: int, module: int, loc: int): void {
+    const shared = this.universalKey(key);
+
+    this.constantPlaces.set(shared, `${module} ${loc}`);
+  }
+
+  private noteLentGlobals(operand: Read<Operand>, value: Expr): void {
+    const loans = this.heldLoans(operand);
+
+    for (const loan of loans) {
+      const root = loan.place.root;
+      const variable = this.variableOf(root);
+      if (variable == undefined) {
+        continue;
+      }
+
+      const holding = variable.holding;
+      const other = variable.name;
+      const isStatic = holding == Holding.Static;
+      if (!isStatic && holding != Holding.Global) {
+        continue;
+      }
+
+      const key = this.universalKey(root);
+      const home = this.home;
+      const loc = value.loc;
+
+      this.lentGlobals.push({ home, loc, key, other, isStatic });
+    }
+  }
+
+  private reportLentGlobals(): void {
+    const lent = this.lentGlobals.splice(0, this.lentGlobals.length);
+    const reported = new Set<string>();
+
+    for (const one of lent) {
+      const site = `${one.home} ${one.loc}`;
+      if (!this.writtenAnywhere.has(one.key) || reported.has(site)) {
+        continue;
+      }
+
+      const code = this.lentCode(one.isStatic);
+
+      reported.add(site);
+      this.errors.write(one.home, one.loc, code, { other: one.other });
+    }
+  }
+
+  private readonly lentCode(isStatic: boolean): Code {
+    if (isStatic) {
+      return Code.OwnStaticLent;
+    }
+
+    return Code.OwnConstantLent;
+  }
+}

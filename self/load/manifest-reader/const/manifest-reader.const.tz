@@ -6,6 +6,18 @@ export const kMainField = "main";
 export const kScriptsField = "scripts";
 export const kExportsField = "exports";
 export const kDependenciesField = "dependencies";
+export const kNativeField = "native";
+export const kNativeNameField = "name";
+export const kNativeLicenseField = "license";
+export const kNativeLicenseFileField = "licenseFile";
+export const kNativeLibrariesField = "libraries";
+export const kNativeSourcesField = "sources";
+export const kNativeDllsField = "dlls";
+export const kNativeSystemField = "systemLibraries";
+export const kNativeOsField = "os";
+export const kNativeCpuField = "cpu";
+export const kNativeSystems = ["win32", "linux"];
+export const kNativeProcessors = ["x64", "arm64"];
 export const kTextFields = ["name", "version", "main"];
 export const kRootExport = ".";
 export const kHerePrefix = "./";
@@ -52,3 +64,13 @@ export const kDependenciesObjectText =
   '\'dependencies\' is an object: { "zod": "jsr:@tz/zod@^4" }';
 export const kDependencyStringText =
   'a dependency is a string that says where the package comes from, e.g. "jsr:@std/path@^1"';
+export const kNativeListText =
+  '\'native\' is a list of entries: [{ "name": "llvm", "license": "...", "licenseFile": "...", "libraries": ["LLVM-C.lib"] }]';
+export const kNativeEntryText =
+  "an entry of 'native' is an object with the strings 'name', 'license' and 'licenseFile'";
+export const kNativeCodeText =
+  "an entry of 'native' gives either 'libraries' (ready .lib files) or 'sources' (.c files)";
+export const kNativeSystemText =
+  '\'os\' of an entry of \'native\' lists "win32" or "linux"';
+export const kNativeProcessorText =
+  '\'cpu\' of an entry of \'native\' lists "x64" or "arm64"';

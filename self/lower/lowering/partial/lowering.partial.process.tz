@@ -65,14 +65,9 @@ partial class Lowering {
     const tz = this.values.types.store.arrayOf(string);
     const copying = this.ir.declare(kArrayCopy, kPointerType, [kPointerType]);
     const value = frame.made.call(copying, [cached]);
-    const shared: IrValue = {
-      type: kPointerType,
-      value: cached,
-      tz,
-      owned: true,
-    };
+    const release = this.countHelperOf(tz, false);
 
-    this.countCall(frame, false, shared);
+    frame.made.call(release, [cached]);
 
     return { type: kPointerType, value, tz, owned: true };
   }

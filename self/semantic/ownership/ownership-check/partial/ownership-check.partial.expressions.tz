@@ -177,6 +177,8 @@ partial class OwnershipCheck {
       return false;
     }
 
+    this.noteConstantPlace(key, target.module, target.loc);
+
     return this.addGlobal(key, expr.name);
   }
 

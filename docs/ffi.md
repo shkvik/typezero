@@ -276,6 +276,14 @@ type NativeProcessor = "x64" | "arm64"
 - **Не будет:** произвольных флагов clang и линковщика (`-ffast-math`, `/MD` ломают то, что
   обещает tz), скриптов сборки (`configure`, `build.rs`, install-скрипты: tz ничего из пакета
   при сборке не запускает; `config.h` кладут в `vendor` готовым), `.asm` (MASM, NASM).
+- **В self (`tzparse build`, 27.11):** записи с `libraries` — в линковку вместе с
+  `systemLibraries`, `dlls` — рядом с exe (если там такого файла ещё нет), фильтр `os` / `cpu`
+  по цели сборки (win32-x64), две подходящие записи с одним именем и запись без файла
+  лицензии или библиотеки — ошибка. Записи берутся из `package.json` над модулями, где есть
+  `declare function`. Пока нет: `sources` (clang в self нет — ошибка «tzparse does not build C
+  sources yet»), `debug`, лицензии в exe, ошибка «нет функции» на строке `declare function`.
+  Флага `--library` нет; карту линковки пишет `--map <файл>`. Сам self берёт LLVM-C так же:
+  `self/package.json`, `third_party/llvm/win32-x64/LLVM-C.lib`.
 - **Потом, когда понадобится:** `standard` (`"c89"`, `"c23"`; без поля — `gnu17`, как у
   clang), `cpuFeatures` (`"avx2"`; для части файлов — элемент `sources` объектом), `.S`, C++,
   `warnings` (без поля предупреждения C не показываются, ошибки — всегда), `uses` (взять

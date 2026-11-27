@@ -4451,10 +4451,7 @@ export const kMessages: Record<Code, Message> = {
     text: "a callback that is kept cannot use '{word}': it is only lent here",
   },
   [Code.OwnGlobalLet]: {
-    text: "a module cannot have 'let {word}' at its top level: use 'const' with Mutex or Atomic",
-  },
-  [Code.OwnGlobalChanged]: {
-    text: "'{word}' is a module constant, so a function cannot change it; keep it in Mutex or Atomic",
+    text: "a module cannot have 'let {word}' at its top level: use 'const' (an array, Map or object in it can still be filled from functions) or a static field",
   },
   [Code.OwnReadChanged]: {
     text: "'{word}' is only lent for reading here, so it cannot be changed",
@@ -4532,13 +4529,16 @@ export const kMessages: Record<Code, Message> = {
     text: "'{word}' belongs to a static field, so it cannot be given away; give a copy (structuredClone)",
   },
   [Code.OwnStaticLent]: {
-    text: "the result is lent from the static field '{other}', which any function can change while the caller still looks at it; return a copy (structuredClone)",
+    text: "the result is lent from the static field '{other}', which is changed elsewhere while the caller may still look at it; return a copy (structuredClone)",
   },
   [Code.OwnOverrideReadonly]: {
     text: "'{word}' overrides a readonly method of '{first}', so it must be readonly too: a call through '{first}' lends 'this' only for reading",
   },
   [Code.OwnReadonlyPromise]: {
     text: "'{word}' is readonly in '{first}', but in '{second}' it may change 'this'; write 'readonly' before '{word}' in '{second}'",
+  },
+  [Code.OwnConstantLent]: {
+    text: "the result is lent from the module constant '{other}', which is changed elsewhere while the caller may still look at it; return a copy (structuredClone)",
   },
   [Code.OwnStaticCallChanges]: {
     text: "'{word}' may change '{other}', but '{first}' still looks into it until line {second}; read '{other}' again after the call, or copy the value with structuredClone",

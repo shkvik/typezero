@@ -1,7 +1,7 @@
 export type BuildOptions = {
   readonly entry?: string;
   readonly output?: string;
-  readonly libraries: string[];
+  readonly map?: string;
   readonly isEmittingIr: boolean;
   readonly isAuditing: boolean;
   readonly isCheckingCounts: boolean;

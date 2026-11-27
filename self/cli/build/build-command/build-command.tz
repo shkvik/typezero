@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
@@ -20,8 +20,8 @@ import {
   kEmitIrOption,
   kExecutableExtension,
   kIrExtension,
-  kLibraryOption,
   kLinkerArguments,
+  kMapOption,
   kLinkerTool,
   kObjectFile,
   kOutputOption,
@@ -30,6 +30,8 @@ import {
   kTemporaryPrefix,
 } from "./const/build-command.const.tz";
 import { BuildOptions } from "./types/build-command.types.tz";
+import { NativeLibraries } from "../native-libraries/native-libraries.tz";
+import { NativeLinks } from "../native-libraries/types/native-libraries.types.tz";
 import {
   ModuleProblems,
 } from "../../../pipeline/front-end/types/front-end.types.tz";
@@ -82,7 +84,10 @@ export class BuildCommand {
     const moves = ownership.takeMoves();
     const borrows = ownership.takeBorrows();
     const closures = ownership.takeLentClosures();
+    const changed = ownership.takeChangedConstants();
     const lowering = new Lowering(ownership.values, moves, borrows, closures);
+
+    lowering.keepChangedConstants(changed);
 
     if (options.isAuditing) {
       lowering.audit();
@@ -114,13 +119,26 @@ export class BuildCommand {
       return this.irWritten(ir, output);
     }
 
-    this.executableMade(ir, output, options.libraries);
+    const natives = new NativeLibraries();
+    const program = lowering.sourceProgram();
+    const links = natives.linksOf(program);
+    if (links == undefined) {
+      return this.nativeFailed(natives.errors);
+    }
+
+    this.executableMade(ir, output, links, options.map);
+  }
+
+  private nativeFailed(errors: Read<string[]>): void {
+    for (const error of errors) {
+      this.report.failure(`${error}`);
+    }
   }
 
   private readonly optionsOf(): BuildOptions {
     let entry: string | undefined = undefined;
     let output: string | undefined = undefined;
-    const libraries: string[] = [];
+    let map: string | undefined = undefined;
     let isEmittingIr = false;
     let isAuditing = false;
     let isCheckingCounts = false;
@@ -132,13 +150,10 @@ export class BuildCommand {
         index += 1;
         output = this.args[index];
         isWrong = isWrong || output == undefined;
-      } else if (arg == kLibraryOption) {
+      } else if (arg == kMapOption) {
         index += 1;
-
-        const library = this.args[index];
-
-        isWrong = isWrong || library == undefined;
-        libraries.push(library ?? "");
+        map = this.args[index];
+        isWrong = isWrong || map == undefined;
       } else if (arg == kEmitIrOption) {
         isEmittingIr = true;
       } else if (arg == kAuditOption) {
@@ -155,7 +170,7 @@ export class BuildCommand {
     return {
       entry,
       output,
-      libraries,
+      map,
       isEmittingIr,
       isAuditing,
       isCheckingCounts,
@@ -260,7 +275,8 @@ export class BuildCommand {
   private executableMade(
     ir: IrModule,
     output: string,
-    libraries: Own<string[]>,
+    links: Read<NativeLinks>,
+    map: string | undefined,
   ): void {
     const prefix = join(tmpdir(), kTemporaryPrefix);
     const folder = mkdtempSync(prefix);
@@ -275,9 +291,11 @@ export class BuildCommand {
     }
 
     const objectPath = join(folder.value, kObjectFile);
+    const inputs = this.linkInputs(links.inputs, map);
     const isMade =
       this.objectMade(ir, objectPath) &&
-      this.linked(objectPath, output, libraries);
+      this.linked(objectPath, output, inputs) &&
+      this.dllsCopied(links.dlls, output);
     const removed = rmSync(folder.value, { force: true, recursive: true });
     if (isMade && removed.isErr()) {
       const reason = removed.error.message;
@@ -296,6 +314,50 @@ export class BuildCommand {
     this.report.failure(`${kProgramName}: cannot write '${objectPath}'`);
 
     return false;
+  }
+
+  private readonly linkInputs(
+    libraries: Read<string[]>,
+    map: string | undefined,
+  ): string[] {
+    const inputs = libraries.slice();
+
+    if (map != undefined) {
+      inputs.push(`/map:${map}`);
+    }
+
+    return inputs;
+  }
+
+  private dllsCopied(dlls: Read<string[]>, output: string): boolean {
+    const folder = dirname(output);
+
+    for (const dll of dlls) {
+      const target = join(folder, basename(dll));
+      if (this.isFile(target)) {
+        continue;
+      }
+
+      const copied = copyFileSync(dll, target);
+      if (copied.isErr()) {
+        const reason = copied.error.message;
+
+        this.report.failure(`${kProgramName}: cannot copy '${dll}': ${reason}`);
+
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly isFile(path: string): boolean {
+    const stat = statSync(path);
+    if (stat.isErr()) {
+      return false;
+    }
+
+    return stat.value.isFile();
   }
 
   private linked(

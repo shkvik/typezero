@@ -1482,7 +1482,6 @@ export enum Code {
   OwnKeptThis = "TZ4017",
   OwnKeptBorrow = "TZ4018",
   OwnGlobalLet = "TZ4019",
-  OwnGlobalChanged = "TZ4020",
   OwnReadChanged = "TZ4021",
   OwnLoopChanged = "TZ4022",
   OwnReadonlyArray = "TZ4023",
@@ -1512,4 +1511,5 @@ export enum Code {
   OwnOverrideReadonly = "TZ4052",
   OwnReadonlyPromise = "TZ4053",
   OwnStaticCallChanges = "TZ4054",
+  OwnConstantLent = "TZ4055",
 }

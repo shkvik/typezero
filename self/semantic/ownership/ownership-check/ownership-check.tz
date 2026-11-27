@@ -17,6 +17,7 @@ import "./partial/ownership-check.partial.variables.tz";
 import "./partial/ownership-check.partial.statics.tz";
 import "./partial/ownership-check.partial.promises.tz";
 import "./partial/ownership-check.partial.static-calls.tz";
+import "./partial/ownership-check.partial.static-writes.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
 import {
@@ -37,10 +38,10 @@ import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { Type } from "../../../program/type/types/type.types.tz";
 import { ExpressionTypes } from "../../code/expression-types/expression-types.tz";
 import { kCheckedLibraries } from "../../declaration/module-questions/const/module-questions.const.tz";
-import { FieldKind } from "../../../program/ast/types/ast.types.classes.tz";
 import {
   FlowState,
   FunctionFrame,
+  LentGlobal,
   StaticCheck,
 } from "./types/ownership-check.types.tz";
 
@@ -67,7 +68,11 @@ export class OwnershipCheck {
   private readonly staticCalls: Map<int, Set<int>>;
   private readonly openCallers: Set<int>;
   private readonly staticChecks: StaticCheck[];
-  private hasStatics: boolean;
+  private readonly writtenAnywhere: Set<int>;
+  private readonly writtenInFunctions: Set<int>;
+  private readonly lentGlobals: LentGlobal[];
+  private changedConstants: Set<string>;
+  private readonly constantPlaces: Map<int, string>;
   private hasPromises: boolean;
   private readonly keptPromises: Set<string>;
 
@@ -94,7 +99,11 @@ export class OwnershipCheck {
     this.staticCalls = new Map<int, Set<int>>();
     this.openCallers = new Set<int>();
     this.staticChecks = [];
-    this.hasStatics = false;
+    this.writtenAnywhere = new Set<int>();
+    this.writtenInFunctions = new Set<int>();
+    this.lentGlobals = [];
+    this.changedConstants = new Set<string>();
+    this.constantPlaces = new Map<int, string>();
     this.hasPromises = false;
     this.keptPromises = new Set<string>();
   }
@@ -109,6 +118,10 @@ export class OwnershipCheck {
 
   public takeLentClosures(): Set<int> {
     return replace(this.lentClosures, new Set<int>());
+  }
+
+  public takeChangedConstants(): Set<string> {
+    return replace(this.changedConstants, new Set<string>());
   }
 
   public run(): void {
@@ -194,12 +207,6 @@ export class OwnershipCheck {
     const tree = this.values.types.program.tree;
 
     this.classes.set(this.keyOf(module, decl.loc), decl);
-
-    for (const field of tree.fieldsOf(decl.fieldsList)) {
-      if (field.form == FieldKind.Static) {
-        this.hasStatics = true;
-      }
-    }
     for (const method of tree.functionsOf(decl.methodsList)) {
       this.functions.set(this.keyOf(module, method.loc), method);
     }

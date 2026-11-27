@@ -1,0 +1,151 @@
+import { statSync } from "node:fs";
+import { dirname } from "node:path";
+import { ManifestReader } from "../../../load/manifest-reader/manifest-reader.tz";
+import { NativeEntry } from "../../../load/manifest-reader/types/manifest-reader.types.tz";
+import { BodySource } from "../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  Module,
+  Program,
+} from "../../../program/module/types/module.types.tz";
+import {
+  kSourcesNotBuilt,
+  kTargetProcessor,
+  kTargetSystem,
+} from "./const/native-libraries.const.tz";
+import { NativeLinks } from "./types/native-libraries.types.tz";
+
+export class NativeLibraries {
+  public readonly errors: string[];
+  private readonly reader: ManifestReader;
+
+  public constructor() {
+    this.errors = [];
+    this.reader = new ManifestReader();
+  }
+
+  public linksOf(program: Read<Program>): NativeLinks | undefined {
+    const manifests = this.manifestsOf(program);
+    const inputs: string[] = [];
+    const dlls: string[] = [];
+
+    for (const manifest of manifests) {
+      const entries = this.reader.readNative(manifest);
+      if (entries == undefined) {
+        const found = this.reader.errors.slice();
+
+        this.errors.push(...found);
+
+        return undefined;
+      }
+      if (!this.added(manifest, entries, inputs, dlls)) {
+        return undefined;
+      }
+    }
+
+    return { inputs, dlls };
+  }
+
+  private readonly manifestsOf(program: Read<Program>): string[] {
+    const found: string[] = [];
+
+    for (const module of program.modules) {
+      if (module.source.isLibrary || !this.hasForeign(program, module)) {
+        continue;
+      }
+
+      const folder = dirname(module.source.path);
+      const manifest = this.reader.findAbove(folder);
+      if (manifest != undefined && !found.includes(manifest)) {
+        found.push(manifest);
+      }
+    }
+
+    return found;
+  }
+
+  private readonly hasForeign(
+    program: Read<Program>,
+    module: Read<Module>,
+  ): boolean {
+    const tree = program.tree;
+
+    return tree
+      .stmtsOf(module.file.itemsList)
+      .some(
+        (item) =>
+          item.kind == StmtKind.Function &&
+          item.bodySource == BodySource.Foreign,
+      );
+  }
+
+  private added(
+    manifest: string,
+    entries: Read<NativeEntry[]>,
+    inputs: string[],
+    dlls: string[],
+  ): boolean {
+    const names: string[] = [];
+
+    for (const entry of entries) {
+      if (!this.fits(entry)) {
+        continue;
+      }
+
+      const where = `${manifest}: ${entry.name}`;
+      if (names.includes(entry.name)) {
+        const target = `${kTargetSystem}-${kTargetProcessor}`;
+
+        return this.failed(`${where}: two entries fit ${target}`);
+      }
+      if (entry.sources.length > 0) {
+        return this.failed(`${where}: ${kSourcesNotBuilt}`);
+      }
+      if (!this.isFile(entry.licenseFile)) {
+        return this.failed(`${where}: no license file '${entry.licenseFile}'`);
+      }
+
+      names.push(entry.name);
+
+      for (const library of entry.libraries) {
+        if (!this.isFile(library)) {
+          return this.failed(`${where}: no library '${library}'`);
+        }
+
+        inputs.push(library);
+      }
+
+      for (const library of entry.systemLibraries) {
+        inputs.push(library);
+      }
+      for (const dll of entry.dlls) {
+        dlls.push(dll);
+      }
+    }
+
+    return true;
+  }
+
+  private readonly fits(entry: Read<NativeEntry>): boolean {
+    const isSystem = entry.os.length == 0 || entry.os.includes(kTargetSystem);
+    const isProcessor =
+      entry.cpu.length == 0 || entry.cpu.includes(kTargetProcessor);
+
+    return isSystem && isProcessor;
+  }
+
+  private readonly isFile(path: string): boolean {
+    const stat = statSync(path);
+    if (stat.isErr()) {
+      return false;
+    }
+
+    return stat.value.isFile();
+  }
+
+  private failed(message: string): boolean {
+    this.errors.push(message);
+
+    return false;
+  }
+}

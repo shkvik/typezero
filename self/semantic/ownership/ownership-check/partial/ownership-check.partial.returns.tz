@@ -106,15 +106,11 @@ partial class OwnershipCheck {
 
     const holding = this.holdingOf(key);
     const declared = this.declaredOf(key);
-    if (holding == undefined || holding == Holding.Copy) {
-      return;
-    }
-    if (holding == Holding.Global) {
-      const frame = this.frame();
-      const hasFunction = frame != undefined && frame.fn != undefined;
-
-      this.reportGlobalChange(hasFunction, name, expr.loc);
-
+    const isOwnPlace =
+      holding != undefined &&
+      holding != Holding.Copy &&
+      holding != Holding.Global;
+    if (!isOwnPlace) {
       return;
     }
 
@@ -234,6 +230,7 @@ partial class OwnershipCheck {
     const problem = this.returnBorrowProblem(operand, value);
 
     this.errors.writeFound(this.home, problem);
+    this.noteLentGlobals(operand, value);
   }
 
   private readonly returnBorrowProblem(
@@ -259,13 +256,12 @@ partial class OwnershipCheck {
     for (const loan of loans) {
       const root = loan.place.root;
       const variable = this.variableOf(root);
-      if (variable == undefined || variable.holding == Holding.Global) {
+      const isGlobal =
+        variable != undefined &&
+        (variable.holding == Holding.Global ||
+          variable.holding == Holding.Static);
+      if (variable == undefined || isGlobal) {
         continue;
-      }
-      if (variable.holding == Holding.Static) {
-        const details = { other: variable.name };
-
-        return { code: Code.OwnStaticLent, loc: value.loc, details };
       }
       if (variable.holding == Holding.Own && !frame.outer.has(root)) {
         return fresh;

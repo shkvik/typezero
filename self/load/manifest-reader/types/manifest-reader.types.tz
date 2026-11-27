@@ -1,0 +1,11 @@
+export type NativeEntry = {
+  readonly name: string;
+  readonly license: string;
+  readonly licenseFile: string;
+  readonly libraries: readonly string[];
+  readonly sources: readonly string[];
+  readonly dlls: readonly string[];
+  readonly systemLibraries: readonly string[];
+  readonly os: readonly string[];
+  readonly cpu: readonly string[];
+};

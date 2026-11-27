@@ -52,14 +52,6 @@ partial class OwnershipCheck {
     return methods.find((one) => this.values.types.isStaticMethod(one));
   }
 
-  private noteStaticWrite(key: int): void {
-    const callers = this.frameFunctions();
-
-    for (const caller of callers) {
-      this.addWrite(caller, key);
-    }
-  }
-
   private readonly frameFunctions(): int[] {
     const ids: int[] = [];
 
@@ -112,10 +104,6 @@ partial class OwnershipCheck {
     info: Read<Callee>,
     isOpen: boolean,
   ): void {
-    if (!this.hasStatics) {
-      return;
-    }
-
     const args = this.callArguments(expr);
     const callees = this.calleeIds(info, args);
     const isOpenCall = isOpen || this.hasOpenArgument(args);
@@ -263,6 +251,7 @@ partial class OwnershipCheck {
     for (const key of keys) {
       const place = this.wholePlace(key);
       const borrower = this.conflictOn(place, loc, [key], false);
+      const shared = this.universalKey(key);
       if (borrower == undefined) {
         continue;
       }
@@ -284,7 +273,7 @@ partial class OwnershipCheck {
         loc,
         callees: callees.slice(),
         isOpen,
-        key,
+        key: shared,
         word,
         other,
         first,
@@ -294,14 +283,18 @@ partial class OwnershipCheck {
   }
 
   private readonly staticKeys(): int[] {
-    const keys: int[] = [];
     const frame = this.frame();
     if (frame == undefined) {
+      return [];
+    }
+
+    const keys = Array.from(frame.globals);
+    if (frame.fn != undefined) {
       return keys;
     }
 
     for (const variable of frame.variables.values()) {
-      if (variable.holding == Holding.Static) {
+      if (variable.holding == Holding.Own) {
         keys.push(variable.key);
       }
     }
@@ -310,6 +303,8 @@ partial class OwnershipCheck {
   }
 
   private reportStaticCalls(): void {
+    this.reportLentGlobals();
+
     if (this.staticChecks.length == 0) {
       return;
     }
@@ -333,12 +328,13 @@ partial class OwnershipCheck {
   }
 
   private readonly isChangedBy(check: Read<StaticCheck>): boolean {
+    const isWritten = this.writtenInFunctions.has(check.key);
     if (check.isOpen) {
-      return true;
+      return isWritten;
     }
 
     for (const callee of check.callees) {
-      if (this.openCallers.has(callee)) {
+      if (this.openCallers.has(callee) && isWritten) {
         return true;
       }
 

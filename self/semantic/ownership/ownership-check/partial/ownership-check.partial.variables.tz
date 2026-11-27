@@ -137,6 +137,7 @@ partial class OwnershipCheck {
       return false;
     }
 
+    frame.globals.add(key);
     frame.variables.set(key, {
       key,
       name,

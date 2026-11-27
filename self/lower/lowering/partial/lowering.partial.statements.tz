@@ -134,7 +134,8 @@ partial class Lowering {
     if (this.isManaged(tz)) {
       this.managedGlobals.push(place);
     }
-    if (isConst && this.isImmortalKind(tz)) {
+    const isChanged = this.changedGlobals.has(key);
+    if (isConst && !isChanged && this.isImmortalKind(tz)) {
       this.immortalGlobals.add(key);
     }
   }

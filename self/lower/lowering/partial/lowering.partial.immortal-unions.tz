@@ -1,0 +1,93 @@
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrCallee,
+  IrIntPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kImmortalName,
+  kObjectHeader,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+
+partial class Lowering {
+  private unionImmortalCallee(type: Type): IrCallee | undefined {
+    if (type.kind != TypeKind.Union || !this.isObjectUnion(type)) {
+      return undefined;
+    }
+
+    const name = `${kImmortalName}.u${type.id}`;
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, name, kVoidType, [kPointerType]);
+    const object = made.param(0);
+    const check = made.block("check");
+    const done = made.block("done");
+    const none = this.ir.zero(kPointerType);
+    const isObject = made.integerCompare(IrIntPredicate.NotEqual, object, none);
+
+    made.conditionalBranch(isObject, check, done);
+    made.open(check);
+
+    const header = made.field(kObjectHeader, object, 1);
+    const kind = made.load(kPointerType, header);
+    const parts = this.objectParts(type);
+
+    for (const part of parts) {
+      this.variantImmortal(made, object, kind, part, done);
+    }
+
+    made.branch(done);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
+  }
+
+  private variantImmortal(
+    made: IrFunction,
+    object: LLVMValue,
+    kind: LLVMValue,
+    part: Type,
+    done: LLVMBlock,
+  ): void {
+    const layout = this.layoutOf(part);
+    const callee = this.deepImmortalCallee(part);
+    if (layout == undefined || callee == undefined) {
+      return;
+    }
+
+    const isThis = made.integerCompare(
+      IrIntPredicate.Equal,
+      kind,
+      layout.descriptor,
+    );
+    const thisBlock = made.block("variant.immortal");
+    const nextBlock = made.block("variant.next");
+
+    made.conditionalBranch(isThis, thisBlock, nextBlock);
+    made.open(thisBlock);
+    made.call(callee, [object]);
+    made.branch(done);
+    made.open(nextBlock);
+  }
+
+  private isObjectUnion(type: Type): boolean {
+    const parts = this.objectParts(type);
+
+    for (const part of parts) {
+      const isEmpty = part.kind == TypeKind.Undefined;
+      if (!isEmpty && this.layoutOf(part) == undefined) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+}

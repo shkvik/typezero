@@ -47,6 +47,7 @@ partial class OwnershipCheck {
       return;
     }
 
+    frame.globals.add(key);
     frame.variables.set(key, {
       key,
       name: word,

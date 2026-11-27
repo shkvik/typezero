@@ -186,19 +186,17 @@ partial class OwnershipCheck {
     const holding = variable.holding;
     const isReadOnly = variable.isReadOnly;
     const isShared = this.isSharedOnly(variable);
-    const hasFunction = frame.fn != undefined;
+    const isTop = frame.fn == undefined;
     if (holding == Holding.Lent && isReadOnly) {
       this.errors.write(this.home, loc, Code.OwnReadChanged, { word });
 
       return;
     }
-    if (holding == Holding.Global) {
-      this.reportGlobalChange(hasFunction, word, loc);
-
-      return;
+    if (holding == Holding.Global || holding == Holding.Static) {
+      this.noteStaticWrite(place.root, holding);
     }
-    if (holding == Holding.Static) {
-      this.noteStaticWrite(place.root);
+    if (isTop && holding == Holding.Own) {
+      this.noteTopWrite(place.root);
     }
     if (holding == Holding.Borrow && isShared) {
       this.errors.write(this.home, loc, Code.OwnReadChanged, { word });
@@ -210,18 +208,6 @@ partial class OwnershipCheck {
     }
 
     this.checkWriteExcept(place, loc, false, except);
-  }
-
-  private reportGlobalChange(
-    hasFunction: boolean,
-    word: string,
-    loc: int,
-  ): void {
-    if (!hasFunction) {
-      return;
-    }
-
-    this.errors.write(this.home, loc, Code.OwnGlobalChanged, { word });
   }
 
   private readonly isSharedOnly(variable: Read<Variable>): boolean {

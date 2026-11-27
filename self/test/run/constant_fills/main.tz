@@ -1,0 +1,41 @@
+// Module constants filled from functions: their arrays and maps are changed in
+// place, values that leave them are freed, and the rest is freed when the
+// program ends, so nothing is made immortal and nothing leaks.
+class Item {
+  public value: int;
+
+  public constructor(value: int) {
+    this.value = value;
+  }
+}
+
+const marks: string[] = [];
+const cache = new Map<string, Item>();
+const kSizes: int[] = [1, 2, 3];
+
+function mark(label: string): void {
+  marks.push(label);
+  cache.set(label, new Item(label.length));
+}
+
+function forget(label: string): void {
+  cache.delete(label);
+}
+
+function total(): int {
+  let sum = 0;
+
+  for (const size of kSizes) {
+    mark(`${size}`);
+    sum += size;
+  }
+
+  return sum;
+}
+
+mark("a");
+mark("bb");
+mark("a");
+forget("bb");
+console.log(marks.join(","), cache.size, cache.get("a")?.value);
+console.log(total(), marks.length, cache.size);

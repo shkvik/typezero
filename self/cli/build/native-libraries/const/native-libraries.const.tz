@@ -1,0 +1,4 @@
+export const kTargetSystem = "win32";
+export const kTargetProcessor = "x64";
+export const kSourcesNotBuilt =
+  "tzparse does not build C sources yet; give a ready library in 'libraries'";

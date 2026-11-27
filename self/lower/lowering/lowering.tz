@@ -61,6 +61,7 @@ import "./partial/lowering.partial.field-inits.tz";
 import "./partial/lowering.partial.arena.tz";
 import "./partial/lowering.partial.map-loops.tz";
 import "./partial/lowering.partial.class-statics.tz";
+import "./partial/lowering.partial.immortal-unions.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
@@ -139,6 +140,7 @@ export class Lowering {
   private statementLoc: int;
   private readonly pendingClosures: PendingClosure[];
   private readonly letKeys: Set<string>;
+  private changedGlobals: Set<string>;
   private readonly immortalGlobals: Set<string>;
   private readonly functionObjects: Map<string, LLVMValue>;
   private readonly initFunctions: Map<int, IrCallee>;
@@ -195,6 +197,7 @@ export class Lowering {
     this.statementLoc = 0;
     this.pendingClosures = [];
     this.letKeys = new Set<string>();
+    this.changedGlobals = new Set<string>();
     this.immortalGlobals = new Set<string>();
     this.functionObjects = new Map<string, LLVMValue>();
     this.initFunctions = new Map<int, IrCallee>();
@@ -203,6 +206,10 @@ export class Lowering {
 
   public audit(): void {
     this.isAuditing = true;
+  }
+
+  public keepChangedConstants(keys: Own<Set<string>>): void {
+    this.changedGlobals = keys;
   }
 
   public checkCounts(): void {

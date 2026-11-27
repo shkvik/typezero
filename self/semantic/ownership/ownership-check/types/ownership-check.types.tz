@@ -129,6 +129,7 @@ export type FunctionFrame = {
   readonly loops: LoopSpan[];
   readonly outer: Set<int>;
   readonly bindings: Set<int>;
+  readonly globals: Set<int>;
 };
 
 export type LoopSpan = {
@@ -170,6 +171,14 @@ export type StaticCheck = {
   readonly other: string;
   readonly first: string;
   readonly second: string;
+};
+
+export type LentGlobal = {
+  readonly home: int;
+  readonly loc: int;
+  readonly key: int;
+  readonly other: string;
+  readonly isStatic: boolean;
 };
 
 export type BrokenPromise = {

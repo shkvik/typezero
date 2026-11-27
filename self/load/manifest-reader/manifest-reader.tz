@@ -1,3 +1,4 @@
+import "./partial/manifest-reader.partial.native.tz";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { kBuiltinModules } from "../../program/library/builtin-modules/const/builtin-modules.const.tz";

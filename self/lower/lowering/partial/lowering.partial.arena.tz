@@ -165,9 +165,10 @@ partial class Lowering {
   }
 
   private deepImmortalCallee(type: Type): IrCallee | undefined {
-    const inner = this.optionalInner(type) ?? type;
+    const given = this.optionalInner(type) ?? type;
+    const inner = this.immortalShape(given);
     if (!this.isImmortalKind(inner)) {
-      return undefined;
+      return this.unionImmortalCallee(inner);
     }
 
     const name = `${kImmortalName}.${inner.id}`;
@@ -214,6 +215,14 @@ partial class Lowering {
     return made.callee;
   }
 
+  private immortalShape(type: Type): Type {
+    if (!this.isTzMap(type)) {
+      return type;
+    }
+
+    return this.mapInstance(type) ?? type;
+  }
+
   private forgetCallee(type: Type): IrCallee {
     if (this.isArray(type)) {
       return this.ir.declare(kArrayForget, kVoidType, []);
@@ -224,8 +233,9 @@ partial class Lowering {
 
   private isImmortalGlobal(place: Read<Place>, key: string): boolean {
     const isGlobal = place.owner == kNoOwner && !this.letKeys.has(key);
+    const isChanged = this.changedGlobals.has(key);
 
-    return isGlobal && this.isImmortalKind(place.tz);
+    return isGlobal && !isChanged && this.isImmortalKind(place.tz);
   }
 
   private immortalGlobal(frame: Read<Frame>, place: Place, key: string): void {

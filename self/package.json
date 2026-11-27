@@ -1,0 +1,15 @@
+{
+  "name": "tzparse",
+  "version": "0.1.0",
+  "main": "main.tz",
+  "native": [
+    {
+      "name": "llvm",
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "licenseFile": "../third_party/llvm/LICENSE.TXT",
+      "os": ["win32"],
+      "cpu": ["x64"],
+      "libraries": ["../third_party/llvm/win32-x64/LLVM-C.lib"]
+    }
+  ]
+}

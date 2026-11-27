@@ -270,6 +270,7 @@ export const kFsMakeTemporary = "tz_fs_mkdtemp";
 export const kFsStat = "tz_fs_stat";
 export const kFsReadDirectory = "tz_fs_readdir";
 export const kFsRemove = "tz_fs_rm";
+export const kFsCopyFile = "tz_fs_copy_file";
 export const kFsErrorOrders = [
   ["message", "errno", "code", "syscall", "path", "dest"],
   ["code", "message", "syscall", "path"],
@@ -303,6 +304,7 @@ export const kFsVerbs = new Map<string, string>([
   ["MakeTemporaryDirectoryError", "create a temporary folder at"],
   ["RemoveError", "remove"],
   ["ForceRemoveError", "remove"],
+  ["CopyFileError", "copy"],
 ]);
 export const kReadFlag = "r";
 export const kProcessName = "process";

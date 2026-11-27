@@ -1,0 +1,176 @@
+import { dirname, resolve } from "node:path";
+import { ManifestReader } from "../manifest-reader.tz";
+import {
+  JsonNode,
+  JsonNodeKind,
+} from "../../json-module/types/json-module.types.tz";
+import { NativeEntry } from "../types/manifest-reader.types.tz";
+import {
+  kNativeCodeText,
+  kNativeCpuField,
+  kNativeDllsField,
+  kNativeEntryText,
+  kNativeField,
+  kNativeLibrariesField,
+  kNativeLicenseField,
+  kNativeLicenseFileField,
+  kNativeListText,
+  kNativeNameField,
+  kNativeOsField,
+  kNativeProcessorText,
+  kNativeProcessors,
+  kNativeSourcesField,
+  kNativeSystemField,
+  kNativeSystemText,
+  kNativeSystems,
+  kRootObjectText,
+} from "../const/manifest-reader.const.tz";
+
+partial class ManifestReader {
+  public readNative(path: string): NativeEntry[] | undefined {
+    const root = this.rootOf(path);
+    if (root == undefined) {
+      return undefined;
+    }
+    if (root.kind != JsonNodeKind.Object) {
+      return this.nativeFailed(path, kRootObjectText);
+    }
+
+    const field = this.fieldOf(root, kNativeField);
+    if (field == undefined) {
+      return [];
+    }
+    if (field.kind != JsonNodeKind.Array) {
+      return this.nativeFailed(path, kNativeListText);
+    }
+
+    const entries: NativeEntry[] = [];
+
+    for (const item of field.items) {
+      const entry = this.nativeEntry(path, item);
+      if (entry == undefined) {
+        return undefined;
+      }
+
+      entries.push(entry);
+    }
+
+    return entries;
+  }
+
+  private nativeEntry(
+    path: string,
+    item: Read<JsonNode>,
+  ): NativeEntry | undefined {
+    if (item.kind != JsonNodeKind.Object) {
+      return this.entryFailed(path, kNativeEntryText);
+    }
+
+    const name = this.entryText(item, kNativeNameField);
+    const license = this.entryText(item, kNativeLicenseField);
+    const licenseFile = this.entryText(item, kNativeLicenseFileField);
+    if (name == undefined || license == undefined || licenseFile == undefined) {
+      return this.entryFailed(path, kNativeEntryText);
+    }
+
+    const libraries = this.nativeList(path, item, kNativeLibrariesField);
+    const sources = this.nativeList(path, item, kNativeSourcesField);
+    const dlls = this.nativeList(path, item, kNativeDllsField);
+    const systemLibraries = this.nativeList(path, item, kNativeSystemField);
+    const os = this.nativeList(path, item, kNativeOsField);
+    const cpu = this.nativeList(path, item, kNativeCpuField);
+    if (
+      libraries == undefined ||
+      sources == undefined ||
+      dlls == undefined ||
+      systemLibraries == undefined ||
+      os == undefined ||
+      cpu == undefined
+    ) {
+      return undefined;
+    }
+
+    const hasLibraries = libraries.length > 0;
+    const hasSources = sources.length > 0;
+    if (hasLibraries == hasSources) {
+      return this.entryFailed(path, `${name}: ${kNativeCodeText}`);
+    }
+    if (!os.every((one) => kNativeSystems.includes(one))) {
+      return this.entryFailed(path, `${name}: ${kNativeSystemText}`);
+    }
+    if (!cpu.every((one) => kNativeProcessors.includes(one))) {
+      return this.entryFailed(path, `${name}: ${kNativeProcessorText}`);
+    }
+
+    const home = dirname(path);
+
+    return {
+      name,
+      license,
+      licenseFile: resolve(home, licenseFile),
+      libraries: libraries.map((one) => resolve(home, one)),
+      sources,
+      dlls: dlls.map((one) => resolve(home, one)),
+      systemLibraries,
+      os,
+      cpu,
+    };
+  }
+
+  private readonly entryText(
+    item: Read<JsonNode>,
+    name: string,
+  ): string | undefined {
+    const field = this.fieldOf(item, name);
+
+    return this.textOf(field);
+  }
+
+  private nativeList(
+    path: string,
+    item: Read<JsonNode>,
+    name: string,
+  ): string[] | undefined {
+    const field = this.fieldOf(item, name);
+    if (field == undefined) {
+      return [];
+    }
+
+    const problem = `'${name}' of an entry of 'native' is a list of strings`;
+    if (field.kind != JsonNodeKind.Array) {
+      this.failedField(path, problem);
+
+      return undefined;
+    }
+
+    const texts: string[] = [];
+
+    for (const one of field.items) {
+      const text = this.textOf(one);
+      if (text == undefined) {
+        this.failedField(path, problem);
+
+        return undefined;
+      }
+
+      texts.push(text);
+    }
+
+    return texts;
+  }
+
+  private nativeFailed(
+    path: string,
+    message: string,
+  ): NativeEntry[] | undefined {
+    this.failedField(path, message);
+
+    return undefined;
+  }
+
+  private entryFailed(path: string, message: string): NativeEntry | undefined {
+    this.failedField(path, message);
+
+    return undefined;
+  }
+}

@@ -1,0 +1,4 @@
+export type NativeLinks = {
+  readonly inputs: readonly string[];
+  readonly dlls: readonly string[];
+};
