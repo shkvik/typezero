@@ -1,0 +1,73 @@
+function shown(text: string, pattern: string, replacement: string): void {
+  const changed = text.replaceAll(pattern, replacement);
+
+  console.log(`[${changed}]`, changed.length);
+}
+
+function main(): void {
+  const short = "abcabc";
+  const long = "the quick brown fox jumps over the lazy dog";
+  const wide = "привет, мир: hello, world";
+  const glued = long + " and " + wide;
+  const part = long.substring(4, 19);
+  const tail = wide.substring(8);
+
+  shown(short, "b", "x");
+  shown(short, "abc", "");
+  shown(short, "", "-");
+  shown(short, "c", "long enough to leave the short form");
+  shown(short, "x", "y");
+  shown(short, "abcabc", "");
+  shown(short, "b", "й");
+  shown(long, "the", "a");
+  shown(long, "o", "0");
+  shown(long, " ", "");
+  shown(long, "lazy dog", "кот");
+  shown(long, "", ".");
+  shown(wide, "мир", "world");
+  shown(wide, "hello", "привет");
+  shown(wide, ", ", "; ");
+  shown(wide, "привет, мир: ", "");
+  shown(wide, "о", "o");
+  shown(glued, "dog and привет", "!");
+  shown(glued, "the", "THE");
+  shown(part, "quick", "slow");
+  shown(part, "o", "оо");
+  shown(tail, "мир", "мир и труд");
+  shown(tail, "l", "L");
+  shown(long, "fox", "[$&]");
+  shown(long, "fox", "$$");
+  shown(long, "fox", "<$`>");
+  shown(long, "fox", "<$'>");
+  shown(long, "o", "$&$&");
+  shown(long, "fox", "$1 $x $");
+  shown(wide, "мир", "($&)");
+  shown(wide, "hello", "$`");
+  shown(short, "b", "$'$`$$$&");
+  shown("abcdefgh", "a", "b");
+  shown("abcdefghi", "a", "b");
+  shown("abcdefghi", "i", "");
+  shown("привет!!", "!", "?");
+  shown("привет!!!", "!", "?");
+  shown("привет hello world", "привет", "");
+  shown("привет hello world", "привет ", "");
+  shown("hello world", "o", "ё");
+  shown(glued, long, "");
+  shown(glued, wide, "$$$$");
+
+  const many = "ab,".repeat(40);
+  const manyWide = "дa,".repeat(40);
+
+  shown(many, ",", ";");
+  shown(many, "b,", "[$&]");
+  shown(manyWide, ",", "; ");
+  shown(manyWide, "д", "d");
+  shown(many, "ab,ab", "-");
+
+  const same = long.replaceAll("cat", "dog");
+  const again = same.replaceAll("the", "one");
+
+  console.log(same, again, same.length, again.length);
+}
+
+main();

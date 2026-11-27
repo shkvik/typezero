@@ -11,6 +11,7 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kAllBits,
   kBooleanType,
   kByteCell,
   kByteType,
@@ -22,16 +23,23 @@ import {
   kMemoryMove,
   kPointerType,
   kStringType,
+  kTextAsciiBit,
   kTextBufferHead,
   kTextCells,
+  kTextClosed,
+  kTextHighBits,
   kTextFormBits,
   kTextOffsetShift,
+  kTextRoom,
+  kTextShortAscii,
+  kTextShortCount,
   kTextShortBits,
   kTextTreeBits,
   kTextWideBit,
+  kVoidType,
   kWideCell,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { CellPair, Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private textCellsOf(
@@ -127,7 +135,11 @@ partial class Lowering {
     const skip = made.binary(IrOpcode.Add, scaled, head);
     const buffer = made.load(kPointerType, address);
     const body = made.element(kByteType, buffer, skip);
-    const hasBuffer = made.integerCompare(IrIntPredicate.NotEqual, buffer, none);
+    const hasBuffer = made.integerCompare(
+      IrIntPredicate.NotEqual,
+      buffer,
+      none,
+    );
     const held = made.select(hasBuffer, body, address);
     const cells = made.select(isShort, address, held);
 
@@ -235,12 +247,26 @@ partial class Lowering {
     frame: Frame,
     call: CallExpr,
     cell: string,
+    targetCell: string,
   ): IrValue | undefined {
     const source = this.cellAddress(frame, call, cell, 0);
-    const target = this.cellAddress(frame, call, cell, 2);
+    const target = this.cellAddress(frame, call, targetCell, 2);
     const count = this.intArgument(frame, call, 4);
     if (source == undefined || target == undefined || count == undefined) {
       return undefined;
+    }
+    if (cell != targetCell) {
+      const isWidening = cell == kByteCell && targetCell == kWideCell;
+      const isNarrowing = cell == kWideCell && targetCell == kByteCell;
+      if (!isWidening && !isNarrowing) {
+        this.notLowered(frame.module, call.loc, "a copy between these cells");
+
+        return undefined;
+      }
+
+      const cells: CellPair = { from: cell, into: targetCell };
+
+      return this.cellsSpread(frame, source, target, count, cells);
     }
 
     const bytes = this.cellBytes(frame, cell, count);
@@ -250,6 +276,280 @@ partial class Lowering {
     frame.made.call(moving, [target, source, bytes]);
 
     return this.nothing();
+  }
+
+  private cellsSpread(
+    frame: Read<Frame>,
+    source: LLVMValue,
+    target: LLVMValue,
+    count: LLVMValue,
+    cells: CellPair,
+  ): IrValue {
+    const made = frame.made;
+    const at = made.slot(kIntType, "spread.at");
+    const test = made.block("spread.test");
+    const body = made.block("spread.body");
+    const end = made.block("spread.end");
+    let fitting = IrOpcode.ZExt;
+
+    if (cells.from == kWideCell) {
+      fitting = IrOpcode.Trunc;
+    }
+
+    made.store(this.ir.zero(kIntType), at);
+    made.branch(test);
+    made.open(test);
+
+    const index = made.load(kIntType, at);
+    const isInside = made.integerCompare(
+      IrIntPredicate.SignedLess,
+      index,
+      count,
+    );
+
+    made.conditionalBranch(isInside, body, end);
+    made.open(body);
+
+    const read = made.element(cells.from, source, index);
+    const unit = made.load(cells.from, read);
+    const fitted = made.cast(fitting, unit, cells.into);
+    const written = made.element(cells.into, target, index);
+    const one = this.ir.integer(kIntType, "1");
+    const next = made.binary(IrOpcode.Add, index, one);
+
+    made.store(fitted, written);
+    made.store(next, at);
+    made.branch(test);
+    made.open(end);
+
+    return this.nothing();
+  }
+
+  private unitWritten(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+  ): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const index = this.intArgument(frame, call, 1);
+    const unit = this.intArgument(frame, call, 2);
+    if (raw == undefined || index == undefined || unit == undefined) {
+      return undefined;
+    }
+
+    const address = frame.made.element(cell, raw, index);
+    if (cell == kIntType) {
+      frame.made.store(unit, address);
+
+      return this.nothing();
+    }
+
+    const fitted = frame.made.cast(IrOpcode.Trunc, unit, cell);
+
+    frame.made.store(fitted, address);
+
+    return this.nothing();
+  }
+
+  private textMade(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+  ): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const count = this.intArgument(frame, call, 1);
+    const isByte = cell == kByteCell;
+    if (!isByte && cell != kWideCell) {
+      this.notLowered(frame.module, call.loc, "a string of cells of this size");
+
+      return undefined;
+    }
+    if (raw == undefined || count == undefined) {
+      return undefined;
+    }
+
+    const tree = this.values.types.program.tree;
+
+    const hint = tree.argumentsOf(call.argsList)[2];
+    if (hint == undefined) {
+      return undefined;
+    }
+
+    const known = this.value(frame, tree.exprOf(hint.exprId));
+    if (known == undefined || known.type != kBooleanType) {
+      return undefined;
+    }
+
+    const width = this.pick(isByte, "0", "1");
+    const flag = this.ir.integer(kFlagType, width);
+    const ascii = frame.made.cast(IrOpcode.ZExt, known.value, kFlagType);
+    const params = [kPointerType, kFlagType, kIntType, kFlagType];
+    const args = [raw, flag, count, ascii];
+    if (!isByte) {
+      return this.textOut(frame, kTextClosed, params, args);
+    }
+
+    const made = frame.made;
+    const out = made.slot(kStringType, "text.out");
+    const limit = this.ir.integer(kIntType, kTextShortCount);
+    const isLong = made.integerCompare(
+      IrIntPredicate.SignedGreater,
+      count,
+      limit,
+    );
+    const long = made.block("close.long");
+    const short = made.block("close.short");
+    const end = made.block("close.end");
+    const all = [kPointerType].concat(params);
+    const closing = this.ir.declare(kTextClosed, kVoidType, all);
+
+    made.conditionalBranch(isLong, long, short);
+    made.open(long);
+    made.call(closing, [out].concat(args));
+    made.branch(end);
+    made.open(short);
+    made.store(this.shortText(frame, raw, count), out);
+    made.branch(end);
+    made.open(end);
+
+    const value = made.load(kStringType, out);
+    const tz = this.values.types.store.plain(TypeKind.String);
+
+    return { type: kStringType, value, tz, owned: true };
+  }
+
+  private shortText(
+    frame: Read<Frame>,
+    room: LLVMValue,
+    count: LLVMValue,
+  ): LLVMValue {
+    const made = frame.made;
+    const zero = this.ir.zero(kIntType);
+    const eight = this.ir.integer(kIntType, kTextShortCount);
+    const isEmpty = made.integerCompare(IrIntPredicate.Equal, count, zero);
+    const spare = made.binary(IrOpcode.Sub, eight, count);
+    const shift = made.binary(IrOpcode.Mul, spare, eight);
+    const safe = made.select(isEmpty, zero, shift);
+    const ones = this.ir.hexInteger(kIntType, kAllBits);
+    const mask = made.binary(IrOpcode.LShr, ones, safe);
+    const read = made.load(kIntType, room);
+    const kept = made.binary(IrOpcode.And, read, mask);
+    const bits = made.select(isEmpty, zero, kept);
+    const highBits = this.ir.hexInteger(kIntType, kTextHighBits);
+    const high = made.binary(IrOpcode.And, bits, highBits);
+    const isPlain = made.integerCompare(IrIntPredicate.Equal, high, zero);
+    const plain = this.ir.hexInteger(kIntType, kTextShortAscii);
+    const other = this.ir.hexInteger(kIntType, kTextShortBits);
+    const form = made.select(isPlain, plain, other);
+    const none = this.ir.hexInteger(kIntType, kTextAsciiBit);
+    const flags = made.select(isEmpty, none, form);
+    const meta = made.binary(IrOpcode.Or, count, flags);
+    const object = made.cast(IrOpcode.IntToPtr, bits, kPointerType);
+    const half = made.insert(this.ir.zero(kStringType), object, 0);
+
+    return made.insert(half, meta, 1);
+  }
+
+  private frameCellsOf(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const expr = tree.exprOf(argument.exprId);
+    if (expr.kind != ExprKind.IntLit) {
+      const form = "cells in the frame without a number literal";
+
+      this.notLowered(frame.module, call.loc, form);
+
+      return undefined;
+    }
+
+    const room = frame.made.slot(`[${expr.value} x ${cell}]`, "frame.cells");
+
+    return this.rawMade(call, room);
+  }
+
+  private textIsAscii(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const text = this.value(frame, tree.exprOf(argument.exprId));
+    if (text == undefined || text.type != kStringType) {
+      return undefined;
+    }
+
+    const meta = frame.made.extract(text.value, 1);
+    const bit = this.ir.hexInteger(kIntType, kTextAsciiBit);
+    const kept = frame.made.binary(IrOpcode.And, meta, bit);
+    const zero = this.ir.zero(kIntType);
+    const value = frame.made.integerCompare(
+      IrIntPredicate.NotEqual,
+      kept,
+      zero,
+    );
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
+
+    this.dropping(frame, text);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private textRoomOf(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+  ): IrValue | undefined {
+    const count = this.intArgument(frame, call, 0);
+    const isByte = cell == kByteCell;
+    if (!isByte && cell != kWideCell) {
+      this.notLowered(frame.module, call.loc, "a string of cells of this size");
+
+      return undefined;
+    }
+    if (count == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const short = made.slot(kStringType, "text.room");
+    const limit = this.ir.integer(kIntType, kTextShortCount);
+    const isLong = made.integerCompare(
+      IrIntPredicate.SignedGreater,
+      count,
+      limit,
+    );
+    const before = made.currentBlock();
+    const long = made.block("room.long");
+    const end = made.block("room.end");
+
+    made.conditionalBranch(isLong, long, end);
+    made.open(long);
+
+    const width = this.pick(isByte, "0", "1");
+    const flag = this.ir.integer(kFlagType, width);
+    const making = this.ir.declare(kTextRoom, kPointerType, [
+      kFlagType,
+      kIntType,
+    ]);
+    const held = made.call(making, [flag, count]);
+
+    made.branch(end);
+    made.open(end);
+
+    const value = made.phi(kPointerType, [short, held], [before, long]);
+
+    return this.rawMade(call, value);
   }
 
   private cellAddress(

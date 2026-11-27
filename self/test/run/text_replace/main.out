@@ -1,0 +1,48 @@
+[axcaxc] 6
+[] 0
+[-a-b-c-a-b-c-] 13
+[ablong enough to leave the short formablong enough to leave the short form] 74
+[abcabc] 6
+[] 0
+[aйcaйc] 6
+[a quick brown fox jumps over a lazy dog] 39
+[the quick br0wn f0x jumps 0ver the lazy d0g] 43
+[thequickbrownfoxjumpsoverthelazydog] 35
+[the quick brown fox jumps over the кот] 38
+[.t.h.e. .q.u.i.c.k. .b.r.o.w.n. .f.o.x. .j.u.m.p.s. .o.v.e.r. .t.h.e. .l.a.z.y. .d.o.g.] 87
+[привет, world: hello, world] 27
+[привет, мир: привет, world] 26
+[привет; мир: hello; world] 25
+[hello, world] 12
+[привет, мир: hello, world] 25
+[the quick brown fox jumps over the lazy !, мир: hello, world] 60
+[THE quick brown fox jumps over THE lazy dog and привет, мир: hello, world] 73
+[slow brown fox] 14
+[quick brооwn fооx] 17
+[мир и труд: hello, world] 24
+[мир: heLLo, worLd] 17
+[the quick brown [fox] jumps over the lazy dog] 45
+[the quick brown $ jumps over the lazy dog] 41
+[the quick brown <the quick brown > jumps over the lazy dog] 58
+[the quick brown < jumps over the lazy dog> jumps over the lazy dog] 66
+[the quick broown foox jumps oover the lazy doog] 47
+[the quick brown $1 $x $ jumps over the lazy dog] 47
+[привет, (мир): hello, world] 27
+[привет, мир: привет, мир: , world] 33
+[acabca$bcacabca$bc] 18
+[bbcdefgh] 8
+[bbcdefghi] 9
+[abcdefgh] 8
+[привет??] 8
+[привет???] 9
+[ hello world] 12
+[hello world] 11
+[hellё wёrld] 11
+[ and привет, мир: hello, world] 30
+[the quick brown fox jumps over the lazy dog and $$] 50
+[ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;ab;] 120
+[a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]a[b,]] 200
+[дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; дa; ] 160
+[da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,da,] 120
+[-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,] 40
+the quick brown fox jumps over the lazy dog one quick brown fox jumps over one lazy dog 43 43

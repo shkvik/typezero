@@ -227,3 +227,8 @@ export type LayoutShape = {
   readonly fields: readonly InstanceField[];
   readonly flags: int;
 };
+
+export type CellPair = {
+  readonly from: string;
+  readonly into: string;
+};

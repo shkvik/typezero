@@ -28,11 +28,18 @@ partial class Lowering {
     call: CallExpr,
     callee: NameExpr,
   ): IrValue | undefined {
+    if (callee.name == "isAscii") {
+      return this.textIsAscii(frame, call);
+    }
+
     const written = this.values.typeArgumentsOf(frame.module, callee.loc);
     const first = written?.[0];
+    const other = written?.[1];
     const item = this.boundOrNone(first);
     const cell = this.typeOrNone(item);
-    if (item == undefined || cell == undefined) {
+    const second = this.boundOrNone(other);
+    const targetCell = this.typeOrNone(second) ?? cell;
+    if (item == undefined || cell == undefined || targetCell == undefined) {
       this.notLowered(frame.module, call.loc, "a call of this unsafe function");
 
       return undefined;
@@ -70,7 +77,15 @@ partial class Lowering {
       case "sameCells":
         return this.cellsCompared(frame, call, cell);
       case "copyCells":
-        return this.cellsCopied(frame, call, cell);
+        return this.cellsCopied(frame, call, cell, targetCell);
+      case "putUnit":
+        return this.unitWritten(frame, call, cell);
+      case "frameCells":
+        return this.frameCellsOf(frame, call, cell);
+      case "textRoom":
+        return this.textRoomOf(frame, call, cell);
+      case "textClosed":
+        return this.textMade(frame, call, cell);
       default:
         this.notLowered(
           frame.module,

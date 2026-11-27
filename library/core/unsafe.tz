@@ -31,10 +31,19 @@ export declare function sameCells<T>(
   secondAt: int,
   count: int,
 ): boolean;
-export declare function copyCells<T>(
-  from: Raw<T>,
+export declare function copyCells<S, T>(
+  from: Raw<S>,
   start: int,
   into: Raw<T>,
   at: int,
   count: int,
 ): void;
+export declare function putUnit<C>(raw: Raw<C>, index: int, unit: int): void;
+export declare function textRoom<C>(count: int): Raw<C>;
+export declare function textClosed<C>(
+  room: Raw<C>,
+  count: int,
+  isAscii: boolean,
+): string;
+export declare function isAscii(text: Read<string>): boolean;
+export declare function frameCells<T>(count: int): Raw<T>;

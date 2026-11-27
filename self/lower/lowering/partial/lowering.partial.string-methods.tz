@@ -26,7 +26,6 @@ import {
   kTextModule,
   kTextPad,
   kTextRepeat,
-  kTextReplace,
   kTextSlice,
   kTextSplit,
   kTextStartsWith,
@@ -491,28 +490,17 @@ partial class Lowering {
   ): IrValue | undefined {
     const pattern = given.texts[0];
     const replacement = given.texts[1];
-    if (pattern == undefined || replacement == undefined) {
+    const isAll = name == "replaceAll";
+    if (pattern == undefined || replacement == undefined || !isAll) {
       this.notLowered(frame.module, call.loc, "a replacement of this kind");
 
       return undefined;
     }
 
-    const isAll = this.flagIf(name == "replaceAll", 1);
-    const args = this.textParts(frame, receiver)
-      .concat(this.textParts(frame, pattern))
-      .concat(this.textParts(frame, replacement))
-      .concat([this.ir.integer(kFlagType, `${isAll}`)]);
-    const params = [
-      kPointerType,
-      kIntType,
-      kPointerType,
-      kIntType,
-      kPointerType,
-      kIntType,
-      kFlagType,
-    ];
+    const target: RuntimeTarget = { module: kTextModule, name };
+    const args = [receiver, pattern, replacement];
 
-    return this.textOut(frame, kTextReplace, params, args);
+    return this.runtimeFunctionCall(frame, target, [], args, call.loc);
   }
 
   private textRepeat(

@@ -14,7 +14,10 @@ import {
 import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
-import { kPointerType } from "../const/lowering.const.tz";
+import {
+  kPointerType,
+  kRuntimeModules,
+} from "../const/lowering.const.tz";
 import {
   Frame,
   IrValue,
@@ -91,6 +94,8 @@ partial class Lowering {
       tree.typeParamsOf(decl.typeParamsList).length == 0 &&
       tree.typeParamsOf(fn.typeParamsList).length == 0
     ) {
+      this.runtimeMethodWanted(object, decl, fn, name);
+
       return { name, shape };
     }
 
@@ -126,6 +131,32 @@ partial class Lowering {
     });
 
     return { name: instance, shape: bound };
+  }
+
+  private runtimeMethodWanted(
+    object: Type,
+    decl: ClassDecl,
+    fn: FunctionDecl,
+    name: string,
+  ): void {
+    if (object.kind != TypeKind.Instance) {
+      return;
+    }
+
+    const opened = this.values.types.program.modules[object.module];
+    if (opened == undefined || !kRuntimeModules.includes(opened.name)) {
+      return;
+    }
+
+    this.instanceWanted({
+      module: object.module,
+      fn,
+      name,
+      params: [],
+      args: [],
+      owner: decl,
+      self: object,
+    });
   }
 
   private methodTypeArguments(

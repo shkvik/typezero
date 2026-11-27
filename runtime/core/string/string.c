@@ -1150,6 +1150,56 @@ const void *tz_str_cells(TzStr *text, int32_t two) {
   return cells ? cells : (const void *)&text->obj;
 }
 
+void *tz_str_room(int32_t two, int64_t count) {
+  if (count < 0 || (uint64_t)count > MAX_LENGTH) {
+    tz_panicf("string length %lld exceeds the maximum of %llu", (long long)count,
+              (unsigned long long)MAX_LENGTH);
+  }
+
+  return buffer_units(buffer_new((uint32_t)count, two != 0));
+}
+
+static uint32_t cells_seen(const void *cells, int two, int64_t count, uint32_t stop) {
+  uint32_t seen = 0;
+  for (int64_t from = 0; from < count && seen < stop; from += 1024) {
+    int64_t end = from + 1024 < count ? from + 1024 : count;
+    if (two) {
+      uint16_t wide = 0;
+      for (int64_t i = from; i < end; ++i) {
+        wide |= ((const uint16_t *)cells)[i];
+      }
+      seen |= wide;
+    } else {
+      uint8_t narrow = 0;
+      for (int64_t i = from; i < end; ++i) {
+        narrow |= ((const uint8_t *)cells)[i];
+      }
+      seen |= narrow;
+    }
+  }
+
+  return seen;
+}
+
+void tz_str_closed(TzStr *out, void *cells, int32_t two, int64_t count, int32_t ascii) {
+  if (count <= INLINE_MAX) {
+    *out = string_from_units(cells, (uint32_t)count, two != 0);
+    return;
+  }
+  Buffer *b = (Buffer *)((char *)cells - sizeof(Buffer));
+  uint32_t seen = 0;
+  if (two || !ascii) {
+    seen = cells_seen(cells, two != 0, count, two ? 0x100 : 0x80);
+  }
+  if (two && seen <= 0xFF) {
+    *out = string_from_units(cells, (uint32_t)count, 1);
+    tz_str_free(b);
+    return;
+  }
+  b->used = (uint32_t)count;
+  *out = make_str(b, make_meta((uint32_t)count, 0, two != 0, seen < 0x80, F_HEAP));
+}
+
 int32_t tz_str_includes(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta, int64_t from,
                         int32_t has_from) {
   return tz_str_index_of(s_obj, s_meta, t_obj, t_meta, from, has_from) >= 0;
