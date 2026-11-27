@@ -15,7 +15,7 @@ export declare class Date {
    */
   public constructor();
   public constructor(milliseconds: int);
-  public constructor(date: Date);
+  public constructor(date: Read<Date>);
   public constructor(text: string);
   public constructor(
     year: int,
@@ -28,31 +28,31 @@ export declare class Date {
   );
 
   /** The milliseconds since the start of 1970 in UTC. */
-  public getTime(): int;
+  public readonly getTime(): int;
   /** The same as `getTime`. */
-  public valueOf(): int;
+  public readonly valueOf(): int;
 
-  public getFullYear(): int;
-  public getMonth(): int;
+  public readonly getFullYear(): int;
+  public readonly getMonth(): int;
   /** The day of the month, from 1. */
-  public getDate(): int;
+  public readonly getDate(): int;
   /** The day of the week, Sunday is 0. */
-  public getDay(): int;
-  public getHours(): int;
-  public getMinutes(): int;
-  public getSeconds(): int;
-  public getMilliseconds(): int;
+  public readonly getDay(): int;
+  public readonly getHours(): int;
+  public readonly getMinutes(): int;
+  public readonly getSeconds(): int;
+  public readonly getMilliseconds(): int;
   /** The minutes from the local time to UTC: -180 for UTC+3. */
-  public getTimezoneOffset(): int;
+  public readonly getTimezoneOffset(): int;
 
-  public getUTCFullYear(): int;
-  public getUTCMonth(): int;
-  public getUTCDate(): int;
-  public getUTCDay(): int;
-  public getUTCHours(): int;
-  public getUTCMinutes(): int;
-  public getUTCSeconds(): int;
-  public getUTCMilliseconds(): int;
+  public readonly getUTCFullYear(): int;
+  public readonly getUTCMonth(): int;
+  public readonly getUTCDate(): int;
+  public readonly getUTCDay(): int;
+  public readonly getUTCHours(): int;
+  public readonly getUTCMinutes(): int;
+  public readonly getUTCSeconds(): int;
+  public readonly getUTCMilliseconds(): int;
 
   public setTime(time: int): int;
   public setMilliseconds(milliseconds: int): int;
@@ -82,25 +82,25 @@ export declare class Date {
   public setUTCFullYear(year: int, month?: int, day?: int): int;
 
   /** The date in UTC as `2026-11-19T10:00:00.000Z`. */
-  public toISOString(): string;
+  public readonly toISOString(): string;
   /** The same as `toISOString`. */
-  public toJSON(): string;
-  public toUTCString(): string;
-  public toString(): string;
-  public toDateString(): string;
-  public toTimeString(): string;
+  public readonly toJSON(): string;
+  public readonly toUTCString(): string;
+  public readonly toString(): string;
+  public readonly toDateString(): string;
+  public readonly toTimeString(): string;
   /** The date and time as the language writes them. */
-  public toLocaleString(
-    locale?: string | Intl.Locale,
-    options?: object,
+  public readonly toLocaleString(
+    locale?: Read<string | Intl.Locale>,
+    options?: Read<object>,
   ): string;
-  public toLocaleDateString(
-    locale?: string | Intl.Locale,
-    options?: object,
+  public readonly toLocaleDateString(
+    locale?: Read<string | Intl.Locale>,
+    options?: Read<object>,
   ): string;
-  public toLocaleTimeString(
-    locale?: string | Intl.Locale,
-    options?: object,
+  public readonly toLocaleTimeString(
+    locale?: Read<string | Intl.Locale>,
+    options?: Read<object>,
   ): string;
 
   /** The milliseconds of this moment. */

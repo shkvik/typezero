@@ -50,14 +50,14 @@ export interface Process {
    */
   exit(code?: int): void;
   /** The directory the program was started in. */
-  cwd(): string;
+  readonly cwd(): string;
   /** The seconds since the program started, with a fraction. */
-  uptime(): double;
+  readonly uptime(): double;
   /**
    * Calls the function as soon as the code that runs now is over, before
    * `queueMicrotask`.
    */
-  nextTick(callback: () => void): void;
+  nextTick(callback: Own<() => void>): void;
 
   /**
    * Calls the listener when the signal comes; the program then does not end
@@ -65,11 +65,11 @@ export interface Process {
    * events of node, such as "exit", are not there.
    * @example process.on("SIGINT", () => process.exit(0))
    */
-  on(signal: ProcessSignal, listener: SignalListener): void;
+  on(signal: ProcessSignal, listener: Own<SignalListener>): void;
   /** As `on`, for the first time the signal comes only. */
-  once(signal: ProcessSignal, listener: SignalListener): void;
+  once(signal: ProcessSignal, listener: Own<SignalListener>): void;
   /** Takes the listener away. */
-  off(signal: ProcessSignal, listener: SignalListener): void;
+  off(signal: ProcessSignal, listener: Read<SignalListener>): void;
 }
 
 export declare const process: Process;

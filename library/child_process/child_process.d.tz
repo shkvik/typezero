@@ -111,19 +111,19 @@ export interface ExecBytesFreeOptions extends ChildOptions {
  */
 export declare function execSync(
   command: string,
-  options: ExecTextOptions,
+  options: Read<ExecTextOptions>,
 ): Result<string, ExecTextError>;
 export declare function execSync(
   command: string,
-  options?: ExecBytesOptions,
+  options?: Read<ExecBytesOptions>,
 ): Result<Buffer, ExecBytesError>;
 export declare function execSync(
   command: string,
-  options: ExecTextFreeOptions,
+  options: Read<ExecTextFreeOptions>,
 ): Result<string | undefined, ExecTextError>;
 export declare function execSync(
   command: string,
-  options: ExecBytesFreeOptions,
+  options: Read<ExecBytesFreeOptions>,
 ): Result<Buffer | undefined, ExecBytesError>;
 
 export interface ExecFileShellTextOptions extends ChildOptions {
@@ -183,74 +183,74 @@ export interface ExecFileBytesFreeOptions extends ChildOptions {
  */
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options: ExecFileShellTextOptions,
+  args: Read<string[]>,
+  options: Read<ExecFileShellTextOptions>,
 ): Result<string, ExecFileShellTextError>;
 export declare function execFileSync(
   file: string,
-  options: ExecFileShellTextOptions,
+  options: Read<ExecFileShellTextOptions>,
 ): Result<string, ExecFileShellTextError>;
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options: ExecFileShellBytesOptions,
+  args: Read<string[]>,
+  options: Read<ExecFileShellBytesOptions>,
 ): Result<Buffer, ExecFileShellBytesError>;
 export declare function execFileSync(
   file: string,
-  options: ExecFileShellBytesOptions,
+  options: Read<ExecFileShellBytesOptions>,
 ): Result<Buffer, ExecFileShellBytesError>;
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options: ExecFileTextOptions,
+  args: Read<string[]>,
+  options: Read<ExecFileTextOptions>,
 ): Result<string, ExecFileTextError>;
 export declare function execFileSync(
   file: string,
-  options: ExecFileTextOptions,
+  options: Read<ExecFileTextOptions>,
 ): Result<string, ExecFileTextError>;
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options?: ExecFileBytesOptions,
+  args: Read<string[]>,
+  options?: Read<ExecFileBytesOptions>,
 ): Result<Buffer, ExecFileBytesError>;
 export declare function execFileSync(
   file: string,
 ): Result<Buffer, ExecFileBytesError>;
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options: ExecFileShellTextFreeOptions,
+  args: Read<string[]>,
+  options: Read<ExecFileShellTextFreeOptions>,
 ): Result<string | undefined, ExecFileShellTextError>;
 export declare function execFileSync(
   file: string,
-  options: ExecFileShellTextFreeOptions,
+  options: Read<ExecFileShellTextFreeOptions>,
 ): Result<string | undefined, ExecFileShellTextError>;
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options: ExecFileShellBytesFreeOptions,
+  args: Read<string[]>,
+  options: Read<ExecFileShellBytesFreeOptions>,
 ): Result<Buffer | undefined, ExecFileShellBytesError>;
 export declare function execFileSync(
   file: string,
-  options: ExecFileShellBytesFreeOptions,
+  options: Read<ExecFileShellBytesFreeOptions>,
 ): Result<Buffer | undefined, ExecFileShellBytesError>;
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options: ExecFileTextFreeOptions,
+  args: Read<string[]>,
+  options: Read<ExecFileTextFreeOptions>,
 ): Result<string | undefined, ExecFileTextError>;
 export declare function execFileSync(
   file: string,
-  options: ExecFileTextFreeOptions,
+  options: Read<ExecFileTextFreeOptions>,
 ): Result<string | undefined, ExecFileTextError>;
 export declare function execFileSync(
   file: string,
-  args: string[],
-  options: ExecFileBytesFreeOptions,
+  args: Read<string[]>,
+  options: Read<ExecFileBytesFreeOptions>,
 ): Result<Buffer | undefined, ExecFileBytesError>;
 export declare function execFileSync(
   file: string,
-  options: ExecFileBytesFreeOptions,
+  options: Read<ExecFileBytesFreeOptions>,
 ): Result<Buffer | undefined, ExecFileBytesError>;
 
 export interface SpawnShellTextOptions extends ChildOptions {
@@ -285,33 +285,33 @@ export interface SpawnBytesOptions extends ChildOptions {
  */
 export declare function spawnSync(
   command: string,
-  args: string[],
-  options: SpawnShellTextOptions,
+  args: Read<string[]>,
+  options: Read<SpawnShellTextOptions>,
 ): Result<SpawnTextResult, SpawnShellTextError>;
 export declare function spawnSync(
   command: string,
-  options: SpawnShellTextOptions,
+  options: Read<SpawnShellTextOptions>,
 ): Result<SpawnTextResult, SpawnShellTextError>;
 export declare function spawnSync(
   command: string,
-  args: string[],
-  options: SpawnShellBytesOptions,
+  args: Read<string[]>,
+  options: Read<SpawnShellBytesOptions>,
 ): Result<SpawnBytesResult, SpawnShellBytesError>;
 export declare function spawnSync(
   command: string,
-  options: SpawnShellBytesOptions,
+  options: Read<SpawnShellBytesOptions>,
 ): Result<SpawnBytesResult, SpawnShellBytesError>;
 export declare function spawnSync(
   command: string,
-  args: string[],
-  options: SpawnTextOptions,
+  args: Read<string[]>,
+  options: Read<SpawnTextOptions>,
 ): Result<SpawnTextResult, SpawnTextError>;
 export declare function spawnSync(
   command: string,
-  options: SpawnTextOptions,
+  options: Read<SpawnTextOptions>,
 ): Result<SpawnTextResult, SpawnTextError>;
 export declare function spawnSync(
   command: string,
-  args?: string[],
-  options?: SpawnBytesOptions,
+  args?: Read<string[]>,
+  options?: Read<SpawnBytesOptions>,
 ): Result<SpawnBytesResult, SpawnBytesError>;

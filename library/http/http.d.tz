@@ -287,7 +287,7 @@ export type ListenErrorCode =
  */
 export declare class Server {
   /** A server without a socket; `listen` opens one. */
-  public constructor(options: ServeOptions, handler: Handler);
+  public constructor(options: Read<ServeOptions>, handler: Own<Handler>);
 
   /**
    * Opens a socket and starts answering on it; gives the `Listening` that
@@ -353,7 +353,7 @@ export declare class Listening {
    *   process.exit(0);
    * });
    */
-  public stop(options?: StopOptions): Promise<void>;
+  public stop(options?: Read<StopOptions>): Promise<void>;
 }
 
 /** What `upgradeWebSocket` may set for the WebSocket it makes. */
@@ -393,7 +393,7 @@ export declare class Upgraded {
   /** The 101 response the handler returns. */
   public readonly response: Response;
 
-  public constructor(socket: WebSocket, response: Response);
+  public constructor(socket: Read<WebSocket>, response: Read<Response>);
 }
 
 /**
@@ -416,6 +416,6 @@ export declare class Upgraded {
  * });
  */
 export declare function upgradeWebSocket(
-  request: Request,
-  options?: UpgradeOptions,
+  request: Read<Request>,
+  options?: Read<UpgradeOptions>,
 ): Result<Upgraded, UpgradeError>;

@@ -22,41 +22,41 @@ export interface decimal {
    * Divides, keeping the places after the point and rounding as told.
    * @example decimal(1).div(decimal(3), 2) // 0.33
    */
-  div(divisor: decimal, places?: int, mode?: RoundingMode): decimal;
+  readonly div(divisor: decimal, places?: int, mode?: RoundingMode): decimal;
   /**
    * Rounds to the places after the point, to an integer by default.
    * @example decimal("2.5").round(0, "half-even") // 2
    */
-  round(places?: int, mode?: RoundingMode): decimal;
+  readonly round(places?: int, mode?: RoundingMode): decimal;
 
   /** The number as text with that many places after the point. */
-  toFixed(places?: int, mode?: RoundingMode): string;
+  readonly toFixed(places?: int, mode?: RoundingMode): string;
   /**
    * As `toFixed`, with the thousands set apart.
    * @example decimal("1234567.891").toFormat(2) // "1,234,567.89"
    */
-  toFormat(places?: int, mode?: RoundingMode): string;
+  readonly toFormat(places?: int, mode?: RoundingMode): string;
   /** The number as text with a power of ten. */
-  toExponential(places?: int, mode?: RoundingMode): string;
+  readonly toExponential(places?: int, mode?: RoundingMode): string;
   /** The number as text of that many significant digits. */
-  toPrecision(digits?: int, mode?: RoundingMode): string;
+  readonly toPrecision(digits?: int, mode?: RoundingMode): string;
   /** The number as text in the base, 10 by default. */
-  toString(base?: int): string;
+  readonly toString(base?: int): string;
 
   /** The square root; the number must be proven not to be negative. */
-  sqrt(): decimal;
-  abs(): decimal;
+  readonly sqrt(): decimal;
+  readonly abs(): decimal;
   /** Whether the number has no fraction. */
-  isInteger(): boolean;
+  readonly isInteger(): boolean;
   /** How many places after the point the number has. */
-  decimalPlaces(): int;
+  readonly decimalPlaces(): int;
   /** The number times that power of ten. */
-  shiftedBy(power: int): decimal;
+  readonly shiftedBy(power: int): decimal;
   /**
    * The number as a fraction, its numerator and its denominator, the
    * denominator not above the limit when there is one.
    */
-  toFraction(maxDenominator?: decimal): decimal[];
+  readonly toFraction(maxDenominator?: decimal): decimal[];
 }
 
 /**
@@ -78,9 +78,9 @@ export interface DecimalConstructor {
    */
   (value: string): Result<decimal, DecimalError>;
 
-  max(...values: decimal[]): decimal;
-  min(...values: decimal[]): decimal;
-  sum(...values: decimal[]): decimal;
+  readonly max(...values: decimal[]): decimal;
+  readonly min(...values: decimal[]): decimal;
+  readonly sum(...values: decimal[]): decimal;
 }
 
 export declare const decimal: DecimalConstructor;

@@ -28,7 +28,7 @@ export declare class Interface {
    * Prints the query and calls the function with the line the user types.
    * @example rl.question("Name? ", (name) => console.log(name))
    */
-  public question(query: string, callback: (answer: string) => void): void;
+  public question(query: string, callback: Own<(answer: string) => void>): void;
   /** Stops reading; the lines read so far still come. */
   public close(): void;
   /** The lines as they come: what `for await` goes through. */
@@ -39,4 +39,6 @@ export declare class Interface {
  * Starts reading the standard input by lines.
  * @example const rl = createInterface({ input: process.stdin })
  */
-export declare function createInterface(options: InterfaceOptions): Interface;
+export declare function createInterface(
+  options: Read<InterfaceOptions>,
+): Interface;

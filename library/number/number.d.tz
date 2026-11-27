@@ -4,24 +4,24 @@
  * methods; a narrower type needs a proof that the value fits it.
  */
 export interface IntegerMethods {
-  toInt(): int;
-  toInt8(): int8;
-  toInt16(): int16;
-  toInt32(): int32;
-  toUint8(): uint8;
-  toUint16(): uint16;
-  toUint32(): uint32;
-  toUint64(): uint64;
-  toDouble(): double;
+  readonly toInt(): int;
+  readonly toInt8(): int8;
+  readonly toInt16(): int16;
+  readonly toInt32(): int32;
+  readonly toUint8(): uint8;
+  readonly toUint16(): uint16;
+  readonly toUint32(): uint32;
+  readonly toUint64(): uint64;
+  readonly toDouble(): double;
   /** The same number as an exact decimal. */
-  toDecimal(): decimal;
+  readonly toDecimal(): decimal;
   /**
    * The number as text in the base, 10 by default.
    * @example (255).toString(16) // "ff"
    */
-  toString(radix?: int): string;
+  readonly toString(radix?: int): string;
   /** The number as text with that many digits after the point. */
-  toFixed(digits?: int): string;
+  readonly toFixed(digits?: int): string;
 }
 
 export interface int extends IntegerMethods {}
@@ -39,22 +39,22 @@ export interface uint64 extends IntegerMethods {}
  * become a decimal: a double is inexact already.
  */
 export interface double {
-  toInt(): int;
-  toInt8(): int8;
-  toInt16(): int16;
-  toInt32(): int32;
-  toUint8(): uint8;
-  toUint16(): uint16;
-  toUint32(): uint32;
-  toUint64(): uint64;
-  toDouble(): double;
+  readonly toInt(): int;
+  readonly toInt8(): int8;
+  readonly toInt16(): int16;
+  readonly toInt32(): int32;
+  readonly toUint8(): uint8;
+  readonly toUint16(): uint16;
+  readonly toUint32(): uint32;
+  readonly toUint64(): uint64;
+  readonly toDouble(): double;
   /** The number as text in the base, 10 by default. */
-  toString(radix?: int): string;
+  readonly toString(radix?: int): string;
   /**
    * The number as text with that many digits after the point.
    * @example (1.005).toFixed(2) // "1.00"
    */
-  toFixed(digits?: int): string;
+  readonly toFixed(digits?: int): string;
 }
 
 /**
@@ -89,13 +89,13 @@ export interface NumberConstructor {
   readonly MIN_VALUE: double;
 
   /** The same as the global `parseInt`. */
-  parseInt(text: string, radix?: int): Result<int, NumberError>;
+  readonly parseInt(text: string, radix?: int): Result<int, NumberError>;
   /** The same as the global `parseFloat`. */
-  parseFloat(text: string): Result<double, NumberError>;
+  readonly parseFloat(text: string): Result<double, NumberError>;
   /** Whether the number has no fraction. */
-  isInteger(value: int | double): boolean;
+  readonly isInteger(value: int | double): boolean;
   /** Whether the number is an integer a double holds exactly. */
-  isSafeInteger(value: int | double): boolean;
+  readonly isSafeInteger(value: int | double): boolean;
 }
 
 export declare const Number: NumberConstructor;

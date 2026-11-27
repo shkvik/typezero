@@ -25,63 +25,63 @@ export interface Math {
   readonly SQRT2: double;
 
   /** The largest whole number not above the value. */
-  floor(value: double): double;
+  readonly floor(value: double): double;
   /** The smallest whole number not below the value. */
-  ceil(value: double): double;
+  readonly ceil(value: double): double;
   /** The nearest whole number; a half goes up. */
-  round(value: double): double;
+  readonly round(value: double): double;
   /** The value without its fraction. */
-  trunc(value: double): double;
+  readonly trunc(value: double): double;
 
   /** The value without its sign. */
-  abs<N extends MathNumber>(value: N): N;
+  readonly abs<N extends MathNumber>(value: N): N;
   /** -1, 0 or 1 by the sign of the value. */
-  sign<N extends MathNumber>(value: N): N;
+  readonly sign<N extends MathNumber>(value: N): N;
   /** The smallest of the values; there must be at least one. */
-  min<N extends MathNumber>(...values: N[]): N;
+  readonly min<N extends MathNumber>(...values: N[]): N;
   /** The largest of the values; there must be at least one. */
-  max<N extends MathNumber>(...values: N[]): N;
+  readonly max<N extends MathNumber>(...values: N[]): N;
   /** The value, or the bound it is beyond. */
-  clamp<N extends MathNumber>(value: N, low: N, high: N): N;
+  readonly clamp<N extends MathNumber>(value: N, low: N, high: N): N;
   /** `base ** exponent`. */
-  pow<N extends MathNumber>(base: N, exponent: N): N;
+  readonly pow<N extends MathNumber>(base: N, exponent: N): N;
 
-  sqrt(value: double): double;
-  cbrt(value: double): double;
-  exp(value: double): double;
-  expm1(value: double): double;
-  log(value: double): double;
-  log1p(value: double): double;
-  log2(value: double): double;
-  log10(value: double): double;
-  sin(value: double): double;
-  cos(value: double): double;
-  tan(value: double): double;
+  readonly sqrt(value: double): double;
+  readonly cbrt(value: double): double;
+  readonly exp(value: double): double;
+  readonly expm1(value: double): double;
+  readonly log(value: double): double;
+  readonly log1p(value: double): double;
+  readonly log2(value: double): double;
+  readonly log10(value: double): double;
+  readonly sin(value: double): double;
+  readonly cos(value: double): double;
+  readonly tan(value: double): double;
   /** The value must be proven to be from -1 to 1. */
-  asin(value: double): double;
+  readonly asin(value: double): double;
   /** The value must be proven to be from -1 to 1. */
-  acos(value: double): double;
-  atan(value: double): double;
-  atan2(y: double, x: double): double;
-  sinh(value: double): double;
-  cosh(value: double): double;
-  tanh(value: double): double;
-  asinh(value: double): double;
-  acosh(value: double): double;
+  readonly acos(value: double): double;
+  readonly atan(value: double): double;
+  readonly atan2(y: double, x: double): double;
+  readonly sinh(value: double): double;
+  readonly cosh(value: double): double;
+  readonly tanh(value: double): double;
+  readonly asinh(value: double): double;
+  readonly acosh(value: double): double;
   /** The value must be proven to be between -1 and 1. */
-  atanh(value: double): double;
+  readonly atanh(value: double): double;
   /** The square root of the sum of the squares. */
-  hypot(...values: double[]): double;
+  readonly hypot(...values: double[]): double;
   /** The nearest 32-bit float. */
-  fround(value: double): double;
+  readonly fround(value: double): double;
 
   /** How many zero bits a 32-bit integer starts with. */
-  clz32(value: MathBits32): int;
+  readonly clz32(value: Read<MathBits32>): int;
   /** The low 32 bits of the product. */
-  imul(left: MathBits32, right: MathBits32): int32;
+  readonly imul(left: Read<MathBits32>, right: Read<MathBits32>): int32;
 
   /** A number from 0 up to, but not including, 1. */
-  random(): double;
+  readonly random(): double;
 }
 
 /**

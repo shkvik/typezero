@@ -87,9 +87,7 @@ partial class OwnershipCheck {
     const params: CalleeParam[] = [];
 
     for (const param of tree.paramsOf(form.paramsList)) {
-      const written = this.paramMode(param);
-      const isMarked = tree.typeRefAt(param.typeId)?.name == kMutName;
-      const mode = this.calleeMode(written, !isMarked);
+      const mode = this.paramMode(param);
       const isRest = param.form.kind == ParamKind.Rest;
       const isCallback =
         tree.typeRefAt(param.typeId)?.form.kind == TypeRefKind.Function;
@@ -107,7 +105,9 @@ partial class OwnershipCheck {
       result = ResultMode.Copy;
     }
 
-    return { params, receiver: LoanKind.Shared, result };
+    const receiver = this.declaredReceiver(member);
+
+    return { params, receiver, result };
   }
 
   private readonly declaredMethod(
@@ -228,9 +228,7 @@ partial class OwnershipCheck {
     const params: CalleeParam[] = [];
 
     for (const param of tree.paramsOf(fn.paramsList)) {
-      const written = this.paramMode(param);
-      const isMarked = tree.typeRefAt(param.typeId)?.name == kMutName;
-      const mode = this.calleeMode(written, isLibrary && !isMarked);
+      const mode = this.paramMode(param);
       const isRest = param.form.kind == ParamKind.Rest;
       const isCallback =
         tree.typeRefAt(param.typeId)?.form.kind == TypeRefKind.Function;
@@ -244,12 +242,14 @@ partial class OwnershipCheck {
     return { params, receiver, result, decl: fn };
   }
 
-  private readonly calleeMode(mode: ParamMode, isLibrary: boolean): ParamMode {
-    if (isLibrary && mode == ParamMode.Mut) {
-      return ParamMode.Read;
+  private readonly declaredReceiver(
+    member: DeclaredMember | undefined,
+  ): LoanKind {
+    if (member != undefined && member.isReadonly == true) {
+      return LoanKind.Shared;
     }
 
-    return mode;
+    return LoanKind.Exclusive;
   }
 
   private readonly receiverOf(fn: FunctionDecl): LoanKind {
@@ -323,8 +323,13 @@ partial class OwnershipCheck {
         return this.isChangingDictMethod(method);
       case TypeKind.Instance: {
         const found = this.methodNamed(type, method, 0);
+        if (found != undefined) {
+          return found.role?.isReadonly != true;
+        }
 
-        return found != undefined && found.role?.isReadonly != true;
+        const declared = this.declaredMethod(type, method);
+
+        return declared != undefined && declared.isReadonly != true;
       }
       case TypeKind.Object:
         return this.isChangingInterfaceMethod(type, method);

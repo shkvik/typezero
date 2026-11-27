@@ -9,12 +9,12 @@ export declare class TextEncoder {
    * The text as bytes of UTF-8.
    * @example new TextEncoder().encode("Hi") // Uint8Array(2) [ 72, 105 ]
    */
-  public encode(text?: string): Uint8Array;
+  public readonly encode(text?: string): Uint8Array;
   /**
    * Writes the text into the bytes given, as much of it as fits: `read` is
    * how many UTF-16 units of the text were taken, `written` how many bytes.
    */
-  public encodeInto(
+  public readonly encodeInto(
     text: string,
     target: Uint8Array,
   ): { read: int; written: int };
@@ -43,7 +43,7 @@ export declare class TextDecoder {
    * A decoder of the encoding the label names, "utf-8" by default. With
    * `fatal: true` what comes is a `FatalTextDecoder`.
    */
-  public constructor(label?: string, options?: TextDecoderOptions);
+  public constructor(label?: string, options?: Read<TextDecoderOptions>);
 
   /** The name of the encoding. */
   public readonly encoding: string;
@@ -54,7 +54,10 @@ export declare class TextDecoder {
    * The bytes as text; broken bytes become "�".
    * @example new TextDecoder().decode(bytes)
    */
-  public decode(bytes?: AnyBytes, options?: TextDecodeOptions): string;
+  public decode(
+    bytes?: Read<AnyBytes>,
+    options?: Read<TextDecodeOptions>,
+  ): string;
 
   /**
    * Makes a decoder of a label known only when the program runs; an error
@@ -62,11 +65,11 @@ export declare class TextDecoder {
    */
   public static parse(
     label: string,
-    options: { fatal: true; ignoreBOM?: boolean },
+    options: Read<{ fatal: true; ignoreBOM?: boolean }>,
   ): Result<FatalTextDecoder, EncodingError>;
   public static parse(
     label: string,
-    options?: TextDecoderOptions,
+    options?: Read<TextDecoderOptions>,
   ): Result<TextDecoder, EncodingError>;
 }
 
@@ -84,7 +87,7 @@ export declare class FatalTextDecoder {
   public readonly ignoreBOM: boolean;
 
   public decode(
-    bytes?: AnyBytes,
-    options?: TextDecodeOptions,
+    bytes?: Read<AnyBytes>,
+    options?: Read<TextDecodeOptions>,
   ): Result<string, DecodeError>;
 }

@@ -10,13 +10,13 @@
 export interface Wrap32 {
   /** The same bits as a plain number. */
   readonly value: uint32;
-  toString(): string;
+  readonly toString(): string;
 }
 
 /** What `Bit.Wrap32` has. */
 export interface Wrap32Constructor {
   /** The lowest 32 bits of an integer. */
-  from(
+  readonly from(
     value: int | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64,
   ): Wrap32;
 }
@@ -27,13 +27,13 @@ export declare const Wrap32: Wrap32Constructor;
 export interface Wrap64 {
   /** The same bits as a plain number. */
   readonly value: uint64;
-  toString(): string;
+  readonly toString(): string;
 }
 
 /** What `Bit.Wrap64` has. */
 export interface Wrap64Constructor {
   /** The lowest 64 bits of an integer. */
-  from(
+  readonly from(
     value: int | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64,
   ): Wrap64;
 }
@@ -51,8 +51,14 @@ export type Bits64 = int | uint64 | Wrap64;
  * end come back at the other.
  * @example state = Bit.rotateLeft32(state ^ key, 16)
  */
-export declare function rotateLeft32<N extends Bits32>(value: N, count: int): N;
-export declare function rotateLeft64<N extends Bits64>(value: N, count: int): N;
+export declare function rotateLeft32<N extends Bits32>(
+  value: N,
+  count: int,
+): N;
+export declare function rotateLeft64<N extends Bits64>(
+  value: N,
+  count: int,
+): N;
 
 /** Turns the bits to the right by `count` places. */
 export declare function rotateRight32<N extends Bits32>(
@@ -65,16 +71,16 @@ export declare function rotateRight64<N extends Bits64>(
 ): N;
 
 /** How many zero bits there are before the highest one bit. */
-export declare function leadingZeros32(value: Bits32): int;
-export declare function leadingZeros64(value: Bits64): int;
+export declare function leadingZeros32(value: Read<Bits32>): int;
+export declare function leadingZeros64(value: Read<Bits64>): int;
 
 /** How many zero bits there are after the lowest one bit. */
-export declare function trailingZeros32(value: Bits32): int;
-export declare function trailingZeros64(value: Bits64): int;
+export declare function trailingZeros32(value: Read<Bits32>): int;
+export declare function trailingZeros64(value: Read<Bits64>): int;
 
 /** How many one bits there are. */
-export declare function onesCount32(value: Bits32): int;
-export declare function onesCount64(value: Bits64): int;
+export declare function onesCount32(value: Read<Bits32>): int;
+export declare function onesCount64(value: Read<Bits64>): int;
 
 /** The bytes in the opposite order. */
 export declare function reverseBytes32<N extends Bits32>(value: N): N;
@@ -85,20 +91,20 @@ export declare function reverseBytes64<N extends Bits64>(value: N): N;
  * @example const { hi, lo } = Bit.mul64(a, b)
  */
 export declare function mul64(
-  first: uint64 | Wrap64,
-  second: uint64 | Wrap64,
+  first: Read<uint64 | Wrap64>,
+  second: Read<uint64 | Wrap64>,
 ): { hi: uint64; lo: uint64 };
 
 /** The sum with the carry in and the carry out, each 0 or 1. */
 export declare function add64(
-  first: uint64 | Wrap64,
-  second: uint64 | Wrap64,
-  carry: uint64 | Wrap64,
+  first: Read<uint64 | Wrap64>,
+  second: Read<uint64 | Wrap64>,
+  carry: Read<uint64 | Wrap64>,
 ): { sum: uint64; carry: uint64 };
 
 /** The difference with the borrow in and the borrow out, each 0 or 1. */
 export declare function sub64(
-  first: uint64 | Wrap64,
-  second: uint64 | Wrap64,
-  borrow: uint64 | Wrap64,
+  first: Read<uint64 | Wrap64>,
+  second: Read<uint64 | Wrap64>,
+  borrow: Read<uint64 | Wrap64>,
 ): { diff: uint64; borrow: uint64 };

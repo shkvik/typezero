@@ -333,16 +333,22 @@ export declare class Http2IncomingRequest {
    * const written = await responded.value.write(new TextEncoder().encode("hi"));
    * const ended = await responded.value.end({ "grpc-status": "0" });
    */
-  public respond(init: Http2ResponseInit): Result<Http2OutgoingResponse, Http2RespondError>;
+  public respond(
+    init: Read<Http2ResponseInit>,
+  ): Result<Http2OutgoingResponse, Http2RespondError>;
 }
 
 /** The body and the trailers of a response being sent. */
 export declare class Http2OutgoingResponse {
   /** Sends a chunk; waits while the client does not take more. */
-  public write(chunk: Uint8Array): Promise<Result<void, Http2ResponseWriteError>>;
+  public write(
+    chunk: Read<Uint8Array>,
+  ): Promise<Result<void, Http2ResponseWriteError>>;
 
   /** Ends the response, with trailers after the body if given. */
-  public end(trailers?: HeadersInit): Promise<Result<void, Http2ResponseEndError>>;
+  public end(
+    trailers?: Read<HeadersInit>,
+  ): Promise<Result<void, Http2ResponseEndError>>;
 }
 
 /**
@@ -395,7 +401,10 @@ export type Http2ServeOptions = {
  * const listening = server.listen();
  */
 export declare class Http2Server {
-  public constructor(options: Http2ServeOptions, handler: Http2Handler);
+  public constructor(
+    options: Read<Http2ServeOptions>,
+    handler: Own<Http2Handler>,
+  );
 
   /** Opens a socket and starts answering on it. */
   public listen(): Result<Http2Listening, ListenError>;
@@ -409,7 +418,7 @@ export declare class Http2Listening {
   public readonly port: int;
 
   /** Says GOAWAY to every client and waits for the streams being handled. */
-  public stop(options?: StopOptions): Promise<void>;
+  public stop(options?: Read<StopOptions>): Promise<void>;
 }
 
 /** Where an `Http2Client` connects. */
@@ -437,7 +446,7 @@ export type Http2ClientOptions = {
  * const started = await connected.value.request({ method: "POST", path: "/echo" });
  */
 export declare class Http2Client {
-  public constructor(options: Http2ClientOptions);
+  public constructor(options: Read<Http2ClientOptions>);
 
   /** Connects; an Err if the server does not speak HTTP/2. */
   public connect(): Promise<Result<Http2Connection, Http2ConnectError>>;
@@ -460,7 +469,9 @@ export declare class Http2Connection {
    * follow with the request it gives. When the server takes no more streams
    * at once, the request waits for a free one.
    */
-  public request(init: Http2RequestInit): Promise<Result<Http2OutgoingRequest, Http2RequestError>>;
+  public request(
+    init: Read<Http2RequestInit>,
+  ): Promise<Result<Http2OutgoingRequest, Http2RequestError>>;
 
   /** Says GOAWAY and closes; requests still going end with an Err. */
   public close(): Promise<void>;
@@ -469,10 +480,14 @@ export declare class Http2Connection {
 /** A request being sent: its body, its trailers, and the response. */
 export declare class Http2OutgoingRequest {
   /** Sends a chunk; waits while the server does not take more. */
-  public write(chunk: Uint8Array): Promise<Result<void, Http2RequestWriteError>>;
+  public write(
+    chunk: Read<Uint8Array>,
+  ): Promise<Result<void, Http2RequestWriteError>>;
 
   /** Ends the request, with trailers after the body if given. */
-  public end(trailers?: HeadersInit): Promise<Result<void, Http2RequestEndError>>;
+  public end(
+    trailers?: Read<HeadersInit>,
+  ): Promise<Result<void, Http2RequestEndError>>;
 
   /** Resets the stream with `code`, "CANCEL" by default: both ways stop. */
   public cancel(code?: Http2ErrorCode): void;

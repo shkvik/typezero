@@ -22,6 +22,7 @@ export type DeclaredMember = {
   readonly access: Access;
   readonly accessWritten: boolean;
   readonly isStatic: boolean;
+  readonly isReadonly?: boolean;
   readonly form: DeclaredMemberForm;
   readonly type?: TypeRef;
 };

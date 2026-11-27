@@ -12,6 +12,7 @@ import {
   StaticOwner,
   SuperFrame,
   ThisPlace,
+  UnknownType,
   ValueRecord,
   ValueTarget,
   VariableDoor,
@@ -235,6 +236,7 @@ export class ExpressionTypes {
   private overloadedGlobals: Set<string>;
   private facts: Map<string, Type>;
   private isFinished: boolean;
+  private readonly unknownTypes: UnknownType[];
   private lateWork: string[];
   private arrowFields: Map<string, Type>;
   private shortCircuits: int;
@@ -331,6 +333,7 @@ export class ExpressionTypes {
     this.overloadedGlobals = new Set<string>();
     this.facts = new Map<string, Type>();
     this.isFinished = false;
+    this.unknownTypes = [];
     this.lateWork = [];
     this.arrowFields = new Map<string, Type>();
     this.shortCircuits = 0;
@@ -411,6 +414,7 @@ export class ExpressionTypes {
       this.moduleChecksDone(module.id);
     }
 
+    this.reportUnknownTypes();
     this.isFinished = true;
   }
 

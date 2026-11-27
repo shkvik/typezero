@@ -12,6 +12,7 @@ import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz"
 import {
   FunctionTypeParam,
   ObjectTypeField,
+  TypeRef,
   TypeRefKind,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { InstanceField } from "../../../../program/expression-answers/types/expression-answers.types.tz";
@@ -353,9 +354,19 @@ partial class OwnershipCheck {
       return undefined;
     }
 
-    const params = tree
-      .functionTypeParamsOf(method.paramsList)
-      .map((param) => this.interfaceParam(param));
+    const written = tree.functionTypeParamsOf(method.paramsList);
+    const last = written.length - 1;
+    const params: CalleeParam[] = [];
+
+    for (let index: int = 0; index < written.length; index++) {
+      const param = written[index];
+      if (param != undefined) {
+        const isRest = method.rest && index == last;
+
+        params.push(this.interfaceParam(param, isRest));
+      }
+    }
+
     const result = tree.typeRefAt(method.resultId);
     let mode: ResultMode = ResultMode.Own;
 
@@ -378,10 +389,14 @@ partial class OwnershipCheck {
     return LoanKind.Exclusive;
   }
 
-  private readonly interfaceParam(param: Read<FunctionTypeParam>): CalleeParam {
+  private readonly interfaceParam(
+    param: Read<FunctionTypeParam>,
+    isRest: boolean,
+  ): CalleeParam {
     const tree = this.values.types.program.tree;
 
-    const ref = tree.typeRefOf(param.typeId);
+    const written = tree.typeRefOf(param.typeId);
+    const ref = this.restItemRef(written, isRest);
     const inner = tree.typeRefsOf(ref.argsList)[0];
     const isWrapped =
       tree.typeRefsOf(ref.argsList).length == 1 && inner != undefined;
@@ -391,7 +406,18 @@ partial class OwnershipCheck {
       isCallback = inner.form.kind == TypeRefKind.Function;
     }
 
-    return { mode: this.modeOfRef(ref), isRest: false, isCallback };
+    return { mode: this.modeOfRef(ref), isRest, isCallback };
+  }
+
+  private readonly restItemRef(ref: TypeRef, isRest: boolean): TypeRef {
+    const tree = this.values.types.program.tree;
+
+    const item = tree.typeRefsOf(ref.argsList)[0];
+    if (!isRest || ref.form.kind != TypeRefKind.Array || item == undefined) {
+      return ref;
+    }
+
+    return item;
   }
 
   private readonly isChangingInterfaceMethod(
@@ -449,12 +475,6 @@ partial class OwnershipCheck {
   private readonly interfaceDecl(type: Type): TypeAliasDecl | undefined {
     const home = this.values.types.aliasHomeOf(type);
     if (home != undefined) {
-      const opened = this.values.types.program.modules[home.module];
-      const isLibrary = opened == undefined || opened.source.isLibrary;
-      if (isLibrary) {
-        return undefined;
-      }
-
       return home.decl;
     }
 

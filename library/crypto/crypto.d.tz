@@ -116,14 +116,14 @@ export declare class Hash {
   private constructor();
 
   /** Adds data; gives the hash itself. */
-  public update(data: CryptoData): Hash;
+  public update(data: Read<CryptoData>): Hash;
   public update(text: string, encoding: BufferEncoding): Hash;
   /** The hash: bytes, or a text in the encoding. */
   public digest(): Buffer;
   public digest(encoding: "buffer"): Buffer;
   public digest(encoding: DigestEncoding): string;
   /** A hash of the same data so far, to go on in two ways. */
-  public copy(options?: { outputLength?: int }): Hash;
+  public readonly copy(options?: Read<{ outputLength?: int }>): Hash;
 }
 
 /** As `Hash`, with a secret key: made by `createHmac`. */
@@ -131,7 +131,7 @@ export declare class Hmac {
   /** There is no `new Hmac()`: `createHmac` makes one. */
   private constructor();
 
-  public update(data: CryptoData): Hmac;
+  public update(data: Read<CryptoData>): Hmac;
   public update(text: string, encoding: BufferEncoding): Hmac;
   public digest(): Buffer;
   public digest(encoding: "buffer"): Buffer;
@@ -144,10 +144,10 @@ export declare class Cipheriv {
   private constructor();
 
   /** Encrypts a piece: bytes, or a text when an output encoding is given. */
-  public update(data: AnyTypedArray | DataView): Buffer;
+  public update(data: Read<AnyTypedArray | DataView>): Buffer;
   public update(text: string, inputEncoding?: BufferEncoding): Buffer;
   public update(
-    data: CryptoData,
+    data: Read<CryptoData>,
     inputEncoding: BufferEncoding | undefined,
     outputEncoding: DigestEncoding,
   ): string;
@@ -158,11 +158,11 @@ export declare class Cipheriv {
   ): Result<string, CipherFinalError>;
   /** Data that is not encrypted but is covered by the tag. */
   public setAAD(
-    data: CryptoBytes,
-    options?: { plaintextLength?: int },
+    data: Read<CryptoBytes>,
+    options?: Read<{ plaintextLength?: int }>,
   ): Cipheriv;
   /** The tag of an authenticated mode such as GCM, after `final`. */
-  public getAuthTag(): Result<Buffer, GetAuthTagError>;
+  public readonly getAuthTag(): Result<Buffer, GetAuthTagError>;
   public setAutoPadding(autoPadding?: boolean): Cipheriv;
 }
 
@@ -171,10 +171,10 @@ export declare class Decipheriv {
   /** There is no `new Decipheriv()`: `createDecipheriv` makes one. */
   private constructor();
 
-  public update(data: AnyTypedArray | DataView): Buffer;
+  public update(data: Read<AnyTypedArray | DataView>): Buffer;
   public update(text: string, inputEncoding?: BufferEncoding): Buffer;
   public update(
-    data: CryptoData,
+    data: Read<CryptoData>,
     inputEncoding: BufferEncoding | undefined,
     outputEncoding: BufferEncoding,
   ): string;
@@ -184,11 +184,11 @@ export declare class Decipheriv {
     outputEncoding: BufferEncoding,
   ): Result<string, DecipherFinalError>;
   public setAAD(
-    data: CryptoBytes,
-    options?: { plaintextLength?: int },
+    data: Read<CryptoBytes>,
+    options?: Read<{ plaintextLength?: int }>,
   ): Decipheriv;
   /** The tag the data was encrypted with, before `final`. */
-  public setAuthTag(tag: CryptoBytes): Decipheriv;
+  public setAuthTag(tag: Read<CryptoBytes>): Decipheriv;
   public setAutoPadding(autoPadding?: boolean): Decipheriv;
 }
 
@@ -217,21 +217,23 @@ export declare class KeyObject {
    * The key written out: a secret key as bytes, "pem" as a text, "der" as
    * bytes, "jwk" as a `Json`.
    */
-  public export(): Result<Buffer, KeyExportError>;
-  public export(options: {
+  public readonly export(): Result<Buffer, KeyExportError>;
+  public readonly export(options: Read<{
     format: "pem";
     type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
     cipher?: string;
     passphrase?: string | CryptoBytes;
-  }): Result<string, KeyExportError>;
-  public export(options: {
+  }>): Result<string, KeyExportError>;
+  public readonly export(options: Read<{
     format: "der";
     type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
     cipher?: string;
     passphrase?: string | CryptoBytes;
-  }): Result<Buffer, KeyExportError>;
-  public export(options: { format: "jwk" }): Result<Json, KeyExportError>;
-  public equals(other: KeyObject): boolean;
+  }>): Result<Buffer, KeyExportError>;
+  public readonly export(
+    options: Read<{ format: "jwk" }>,
+  ): Result<Json, KeyExportError>;
+  public readonly equals(other: Read<KeyObject>): boolean;
 }
 
 /** A key with how it signs. */
@@ -248,14 +250,14 @@ export declare class Sign {
   /** There is no `new Sign()`: `createSign` makes one. */
   private constructor();
 
-  public update(data: CryptoData): Sign;
+  public update(data: Read<CryptoData>): Sign;
   public update(text: string, encoding: BufferEncoding): Sign;
   /** The signature: bytes, or a text in the encoding. */
   public sign(
-    key: KeyObject | string | CryptoBytes | SignKey,
+    key: Read<KeyObject | string | CryptoBytes | SignKey>,
   ): Result<Buffer, SignerSignError>;
   public sign(
-    key: KeyObject | string | CryptoBytes | SignKey,
+    key: Read<KeyObject | string | CryptoBytes | SignKey>,
     outputEncoding: DigestEncoding,
   ): Result<string, SignerSignError>;
 }
@@ -265,15 +267,15 @@ export declare class Verify {
   /** There is no `new Verify()`: `createVerify` makes one. */
   private constructor();
 
-  public update(data: CryptoData): Verify;
+  public update(data: Read<CryptoData>): Verify;
   public update(text: string, encoding: BufferEncoding): Verify;
   /** Whether the signature is of this data by this key. */
   public verify(
-    key: KeyObject | string | CryptoBytes | SignKey,
-    signature: AnyTypedArray | DataView,
+    key: Read<KeyObject | string | CryptoBytes | SignKey>,
+    signature: Read<AnyTypedArray | DataView>,
   ): Result<boolean, VerifierVerifyError>;
   public verify(
-    key: KeyObject | string | CryptoBytes | SignKey,
+    key: Read<KeyObject | string | CryptoBytes | SignKey>,
     signature: string,
     signatureEncoding: DigestEncoding,
   ): Result<boolean, VerifierVerifyError>;
@@ -290,30 +292,32 @@ export declare class ECDH {
   /** Makes the pair of keys and gives the public one. */
   public generateKeys(): Buffer;
   public generateKeys(encoding: DigestEncoding, format?: PointFormat): string;
-  public getPublicKey(): Result<Buffer, EcdhGetPublicKeyError>;
-  public getPublicKey(
+  public readonly getPublicKey(): Result<Buffer, EcdhGetPublicKeyError>;
+  public readonly getPublicKey(
     encoding: DigestEncoding,
     format?: PointFormat,
   ): Result<string, EcdhGetPublicKeyError>;
-  public getPrivateKey(): Result<Buffer, EcdhGetPrivateKeyError>;
-  public getPrivateKey(
+  public readonly getPrivateKey(): Result<Buffer, EcdhGetPrivateKeyError>;
+  public readonly getPrivateKey(
     encoding: DigestEncoding,
   ): Result<string, EcdhGetPrivateKeyError>;
-  public setPrivateKey(key: CryptoBytes): Result<void, EcdhSetPrivateKeyError>;
+  public setPrivateKey(
+    key: Read<CryptoBytes>,
+  ): Result<void, EcdhSetPrivateKeyError>;
   public setPrivateKey(
     key: string,
     encoding: DigestEncoding,
   ): Result<void, EcdhSetPrivateKeyError>;
   /** The secret both sides get: of one's own key and the other's public one. */
-  public computeSecret(
-    otherPublicKey: CryptoBytes,
+  public readonly computeSecret(
+    otherPublicKey: Read<CryptoBytes>,
   ): Result<Buffer, EcdhComputeSecretError>;
-  public computeSecret(
+  public readonly computeSecret(
     otherPublicKey: string,
     inputEncoding: DigestEncoding,
   ): Result<Buffer, EcdhComputeSecretError>;
-  public computeSecret(
-    otherPublicKey: string | CryptoBytes,
+  public readonly computeSecret(
+    otherPublicKey: Read<string | CryptoBytes>,
     inputEncoding: DigestEncoding | undefined,
     outputEncoding: DigestEncoding,
   ): Result<string, EcdhComputeSecretError>;
@@ -356,29 +360,31 @@ export declare class X509Certificate {
   public readonly publicKey: KeyObject;
 
   /** The certificate as PEM. */
-  public toString(): string;
-  public toJSON(): string;
+  public readonly toString(): string;
+  public readonly toJSON(): string;
   /** The name of the certificate the host fits, if any. */
-  public checkHost(
+  public readonly checkHost(
     name: string,
-    options?: CheckHostOptions,
+    options?: Read<CheckHostOptions>,
   ): string | undefined;
-  public checkEmail(
+  public readonly checkEmail(
     email: string,
-    options?: { subject?: "default" | "always" | "never" },
+    options?: Read<{ subject?: "default" | "always" | "never" }>,
   ): string | undefined;
-  public checkIP(ip: string): string | undefined;
+  public readonly checkIP(ip: string): string | undefined;
   /** Whether the other certificate issued this one. */
-  public checkIssued(other: X509Certificate): boolean;
-  public checkPrivateKey(
-    privateKey: KeyObject,
+  public readonly checkIssued(other: Read<X509Certificate>): boolean;
+  public readonly checkPrivateKey(
+    privateKey: Read<KeyObject>,
   ): Result<boolean, CertificateCheckPrivateKeyError>;
   /** Whether the certificate is signed by the key. */
-  public verify(publicKey: KeyObject): Result<boolean, CertificateVerifyError>;
+  public readonly verify(
+    publicKey: Read<KeyObject>,
+  ): Result<boolean, CertificateVerifyError>;
 
   /** Reads a certificate of PEM or DER. */
   public static parse(
-    data: string | CryptoBytes,
+    data: Read<string | CryptoBytes>,
   ): Result<X509Certificate, ParseCertificateError>;
 }
 
@@ -388,13 +394,13 @@ export declare class X509Certificate {
  */
 export declare function createHash(
   algorithm: string,
-  options?: { outputLength?: int },
+  options?: Read<{ outputLength?: int }>,
 ): Result<Hash, CreateHashError>;
 
 /** As `createHash`, with a secret key. */
 export declare function createHmac(
   algorithm: string,
-  key: CryptoSecret,
+  key: Read<CryptoSecret>,
 ): Result<Hmac, CreateHmacError>;
 
 /**
@@ -404,12 +410,12 @@ export declare function createHmac(
  */
 export declare function hash(
   algorithm: string,
-  data: CryptoData,
+  data: Read<CryptoData>,
   outputEncoding?: DigestEncoding,
 ): Result<string, HashError>;
 export declare function hash(
   algorithm: string,
-  data: CryptoData,
+  data: Read<CryptoData>,
   outputEncoding: "buffer",
 ): Result<Buffer, HashError>;
 
@@ -440,14 +446,14 @@ export declare function getRandomValues<A extends IntegerTypedArray>(
  * where they differ: for comparing secrets.
  */
 export declare function timingSafeEqual(
-  first: CryptoBytes,
-  second: CryptoBytes,
+  first: Read<CryptoBytes>,
+  second: Read<CryptoBytes>,
 ): boolean;
 
 /** A key of a password by PBKDF2. */
 export declare function pbkdf2Sync(
-  password: CryptoSecret,
-  salt: string | CryptoBytes,
+  password: Read<CryptoSecret>,
+  salt: Read<string | CryptoBytes>,
   iterations: int,
   keyLength: int,
   digest: string,
@@ -456,9 +462,9 @@ export declare function pbkdf2Sync(
 /** A key of a key by HKDF. */
 export declare function hkdfSync(
   digest: string,
-  inputKey: CryptoSecret,
-  salt: string | CryptoBytes,
-  info: string | CryptoBytes,
+  inputKey: Read<CryptoSecret>,
+  salt: Read<string | CryptoBytes>,
+  info: Read<string | CryptoBytes>,
   keyLength: int,
 ): Result<ArrayBuffer, HkdfError>;
 
@@ -478,10 +484,10 @@ export type ScryptOptions = {
  * @example scryptSync(password, salt, 64)
  */
 export declare function scryptSync(
-  password: CryptoSecret,
-  salt: string | CryptoBytes,
+  password: Read<CryptoSecret>,
+  salt: Read<string | CryptoBytes>,
   keyLength: int,
-  options?: ScryptOptions,
+  options?: Read<ScryptOptions>,
 ): Result<Buffer, ScryptError>;
 
 /** What Argon2 hashes and how hard it works. */
@@ -500,7 +506,7 @@ export type Argon2Parameters = {
 /** A key of a password by Argon2. */
 export declare function argon2Sync(
   algorithm: "argon2d" | "argon2i" | "argon2id",
-  parameters: Argon2Parameters,
+  parameters: Read<Argon2Parameters>,
 ): Result<Buffer, Argon2Error>;
 
 /**
@@ -509,17 +515,17 @@ export declare function argon2Sync(
  */
 export declare function createCipheriv(
   algorithm: string,
-  key: CryptoSecret,
-  iv: string | CryptoBytes,
-  options?: { authTagLength?: int },
+  key: Read<CryptoSecret>,
+  iv: Read<string | CryptoBytes>,
+  options?: Read<{ authTagLength?: int }>,
 ): Result<Cipheriv, CreateCipherError>;
 
 /** Something that decrypts by pieces with the key and the start value. */
 export declare function createDecipheriv(
   algorithm: string,
-  key: CryptoSecret,
-  iv: string | CryptoBytes,
-  options?: { authTagLength?: int },
+  key: Read<CryptoSecret>,
+  iv: Read<string | CryptoBytes>,
+  options?: Read<{ authTagLength?: int }>,
 ): Result<Decipheriv, CreateDecipherError>;
 
 /** The names of the hashes there are. */
@@ -532,7 +538,7 @@ export declare function getCiphers(): string[];
 export declare function getCurves(): string[];
 
 /** A secret key of bytes, or of a text in the encoding. */
-export declare function createSecretKey(key: CryptoBytes): KeyObject;
+export declare function createSecretKey(key: Read<CryptoBytes>): KeyObject;
 export declare function createSecretKey(
   key: string,
   encoding: BufferEncoding,
@@ -549,12 +555,12 @@ export type KeyInput = {
 
 /** Reads a public key: of PEM, of DER, or the public part of a private key. */
 export declare function createPublicKey(
-  key: string | CryptoBytes | KeyObject | KeyInput,
+  key: Read<string | CryptoBytes | KeyObject | KeyInput>,
 ): Result<KeyObject, CreatePublicKeyError>;
 
 /** Reads a private key of PEM or of DER. */
 export declare function createPrivateKey(
-  key: string | CryptoBytes | KeyInput,
+  key: Read<string | CryptoBytes | KeyInput>,
 ): Result<KeyObject, CreatePrivateKeyError>;
 
 /** The kinds of key pairs. */
@@ -618,25 +624,25 @@ export declare function generateKeyPairSync<
   Q extends KeyFormat,
 >(
   type: KeyPairType,
-  options: BothWrittenOptions<P, Q>,
+  options: Read<BothWrittenOptions<P, Q>>,
 ): Result<KeyPair<WrittenKey<P>, WrittenKey<Q>>, GenerateKeyPairError>;
 export declare function generateKeyPairSync<P extends KeyFormat>(
   type: KeyPairType,
-  options: PublicWrittenOptions<P>,
+  options: Read<PublicWrittenOptions<P>>,
 ): Result<KeyPair<WrittenKey<P>, KeyObject>, GenerateKeyPairError>;
 export declare function generateKeyPairSync<Q extends KeyFormat>(
   type: KeyPairType,
-  options: PrivateWrittenOptions<Q>,
+  options: Read<PrivateWrittenOptions<Q>>,
 ): Result<KeyPair<KeyObject, WrittenKey<Q>>, GenerateKeyPairError>;
 export declare function generateKeyPairSync(
   type: KeyPairType,
-  options?: KeyPairOptions,
+  options?: Read<KeyPairOptions>,
 ): Result<KeyPair<KeyObject, KeyObject>, GenerateKeyPairError>;
 
 /** Makes a random secret key of that many bits. */
 export declare function generateKeySync(
   type: "hmac" | "aes",
-  options: { length: int },
+  options: Read<{ length: int }>,
 ): KeyObject;
 
 /**
@@ -645,16 +651,16 @@ export declare function generateKeySync(
  */
 export declare function sign(
   algorithm: string | undefined,
-  data: AnyTypedArray | DataView,
-  key: KeyObject | string | CryptoBytes | SignKey,
+  data: Read<AnyTypedArray | DataView>,
+  key: Read<KeyObject | string | CryptoBytes | SignKey>,
 ): Result<Buffer, SignError>;
 
 /** Whether the signature is of this data by this key. */
 export declare function verify(
   algorithm: string | undefined,
-  data: AnyTypedArray | DataView,
-  key: KeyObject | string | CryptoBytes | SignKey,
-  signature: AnyTypedArray | DataView,
+  data: Read<AnyTypedArray | DataView>,
+  key: Read<KeyObject | string | CryptoBytes | SignKey>,
+  signature: Read<AnyTypedArray | DataView>,
 ): Result<boolean, VerifyError>;
 
 /** Something that signs data added by pieces. */
@@ -673,10 +679,10 @@ export declare function createECDH(
 ): Result<ECDH, CreateEcdhError>;
 
 /** The secret of one's private key and the other's public key. */
-export declare function diffieHellman(options: {
+export declare function diffieHellman(options: Read<{
   privateKey: KeyObject;
   publicKey: KeyObject;
-}): Result<Buffer, DiffieHellmanError>;
+}>): Result<Buffer, DiffieHellmanError>;
 
 /** What a prime is like; there is no `bigint`, the prime comes as bytes. */
 export type PrimeOptions = {
@@ -688,19 +694,19 @@ export type PrimeOptions = {
 /** A random prime of that many bits, as bytes. */
 export declare function generatePrimeSync(
   size: int,
-  options?: PrimeOptions,
+  options?: Read<PrimeOptions>,
 ): Result<ArrayBuffer, GeneratePrimeError>;
 
 /** Whether the number written as bytes is a prime. */
 export declare function checkPrimeSync(
-  candidate: CryptoBytes,
-  options?: { checks?: int },
+  candidate: Read<CryptoBytes>,
+  options?: Read<{ checks?: int }>,
 ): Result<boolean, CheckPrimeError>;
 
 /** As `pbkdf2Sync`, without stopping the program while it is counted. */
 export declare function pbkdf2(
-  password: CryptoSecret,
-  salt: string | CryptoBytes,
+  password: Read<CryptoSecret>,
+  salt: Read<string | CryptoBytes>,
   iterations: int,
   keyLength: int,
   digest: string,
@@ -708,24 +714,24 @@ export declare function pbkdf2(
 
 /** As `scryptSync`, without stopping the program. */
 export declare function scrypt(
-  password: CryptoSecret,
-  salt: string | CryptoBytes,
+  password: Read<CryptoSecret>,
+  salt: Read<string | CryptoBytes>,
   keyLength: int,
-  options?: ScryptOptions,
+  options?: Read<ScryptOptions>,
 ): Promise<Result<Buffer, ScryptError>>;
 
 /** As `argon2Sync`, without stopping the program. */
 export declare function argon2(
   algorithm: "argon2d" | "argon2i" | "argon2id",
-  parameters: Argon2Parameters,
+  parameters: Read<Argon2Parameters>,
 ): Promise<Result<Buffer, Argon2Error>>;
 
 /** As `hkdfSync`, without stopping the program. */
 export declare function hkdf(
   digest: string,
-  inputKey: CryptoSecret,
-  salt: string | CryptoBytes,
-  info: string | CryptoBytes,
+  inputKey: Read<CryptoSecret>,
+  salt: Read<string | CryptoBytes>,
+  info: Read<string | CryptoBytes>,
   keyLength: int,
 ): Promise<Result<ArrayBuffer, HkdfError>>;
 
@@ -742,35 +748,35 @@ export declare function generateKeyPair<
   Q extends KeyFormat,
 >(
   type: KeyPairType,
-  options: BothWrittenOptions<P, Q>,
+  options: Read<BothWrittenOptions<P, Q>>,
 ): Promise<Result<KeyPair<WrittenKey<P>, WrittenKey<Q>>, GenerateKeyPairError>>;
 export declare function generateKeyPair<P extends KeyFormat>(
   type: KeyPairType,
-  options: PublicWrittenOptions<P>,
+  options: Read<PublicWrittenOptions<P>>,
 ): Promise<Result<KeyPair<WrittenKey<P>, KeyObject>, GenerateKeyPairError>>;
 export declare function generateKeyPair<Q extends KeyFormat>(
   type: KeyPairType,
-  options: PrivateWrittenOptions<Q>,
+  options: Read<PrivateWrittenOptions<Q>>,
 ): Promise<Result<KeyPair<KeyObject, WrittenKey<Q>>, GenerateKeyPairError>>;
 export declare function generateKeyPair(
   type: KeyPairType,
-  options?: KeyPairOptions,
+  options?: Read<KeyPairOptions>,
 ): Promise<Result<KeyPair<KeyObject, KeyObject>, GenerateKeyPairError>>;
 
 /** As `generateKeySync`, without stopping the program. */
 export declare function generateKey(
   type: "hmac" | "aes",
-  options: { length: int },
+  options: Read<{ length: int }>,
 ): Promise<KeyObject>;
 
 /** As `generatePrimeSync`, without stopping the program. */
 export declare function generatePrime(
   size: int,
-  options?: PrimeOptions,
+  options?: Read<PrimeOptions>,
 ): Promise<Result<ArrayBuffer, GeneratePrimeError>>;
 
 /** As `checkPrimeSync`, without stopping the program. */
 export declare function checkPrime(
-  candidate: CryptoBytes,
-  options?: { checks?: int },
+  candidate: Read<CryptoBytes>,
+  options?: Read<{ checks?: int }>,
 ): Promise<Result<boolean, CheckPrimeError>>;

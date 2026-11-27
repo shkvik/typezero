@@ -4,6 +4,9 @@ import { Details, Message } from "../types/message.types.tz";
 export const kNoDetails: Details = {};
 
 export const kMessages: Record<Code, Message> = {
+  [Code.TypeNotWorkedOut]: {
+    text: "tz cannot work out the type of '{word}' from '{other}' yet; write the type, or say it another way",
+  },
   [Code.UnterminatedComment]: {
     text: "unterminated comment",
   },

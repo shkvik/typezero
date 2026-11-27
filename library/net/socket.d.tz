@@ -120,7 +120,7 @@ export declare class Datagram {
   public readonly address: string;
   public readonly port: int;
 
-  public constructor(data: Uint8Array, address: string, port: int);
+  public constructor(data: Read<Uint8Array>, address: string, port: int);
 }
 
 /**
@@ -137,32 +137,45 @@ export declare class Socket {
   public readonly type: SocketKind;
   public readonly protocol: int;
 
-  public constructor(options: SocketOptions);
+  public constructor(options: Read<SocketOptions>);
 
   /** Gives the socket an address of its own; "" is any address. */
-  public bind(address: SocketAddress): Result<void, SocketOperationError>;
+  public bind(address: Read<SocketAddress>): Result<void, SocketOperationError>;
   /** Starts taking connections; `backlog` — how many may wait. */
   public listen(backlog?: int): Result<void, SocketOperationError>;
   /** Waits for the next connection. */
   public accept(): Promise<Result<Socket, SocketOperationError>>;
   /** Connects a stream, or fixes the address of datagrams. */
-  public connect(address: SocketAddress): Promise<Result<void, SocketOperationError>>;
+  public connect(
+    address: Read<SocketAddress>,
+  ): Promise<Result<void, SocketOperationError>>;
   /** Sends to the connected address; gives how many bytes went. */
-  public send(data: Uint8Array, options?: SendOptions): Promise<Result<int, SocketOperationError>>;
+  public send(
+    data: Read<Uint8Array>,
+    options?: Read<SendOptions>,
+  ): Promise<Result<int, SocketOperationError>>;
   /** Sends a datagram to `address`; gives how many bytes went. */
   public sendTo(
-    data: Uint8Array,
-    address: SocketAddress,
-    options?: SendOptions,
+    data: Read<Uint8Array>,
+    address: Read<SocketAddress>,
+    options?: Read<SendOptions>,
   ): Promise<Result<int, SocketOperationError>>;
   /** Reads what came; an empty array — the other side ended the stream. */
-  public receive(options?: ReceiveOptions): Promise<Result<Uint8Array, SocketOperationError>>;
+  public receive(
+    options?: Read<ReceiveOptions>,
+  ): Promise<Result<Uint8Array, SocketOperationError>>;
   /** Reads a datagram with the address of its sender. */
-  public receiveFrom(options?: ReceiveOptions): Promise<Result<Datagram, SocketOperationError>>;
+  public receiveFrom(
+    options?: Read<ReceiveOptions>,
+  ): Promise<Result<Datagram, SocketOperationError>>;
   /** Ends reading, writing or both. */
-  public shutdown(how: "read" | "write" | "both"): Result<void, SocketOperationError>;
+  public shutdown(
+    how: "read" | "write" | "both",
+  ): Result<void, SocketOperationError>;
   /** Gives the system the settings, in order; stops at the first it refuses. */
-  public configure(settings: SocketSettings): Result<void, SocketOperationError>;
+  public configure(
+    settings: Read<SocketSettings>,
+  ): Result<void, SocketOperationError>;
   /** The address of this end. */
   public localAddress(): Endpoint;
   /** The address of the other end of a connection. */

@@ -5,7 +5,7 @@ export interface JSON {
    * before it is used.
    * @example JSON.parse("[1, 2]") // ok([1, 2])
    */
-  parse(text: string): Result<Json, JsonError>;
+  readonly parse(text: string): Result<Json, JsonError>;
 
   /**
    * Writes a value as a text of JSON. There is no replacer: build the value to
@@ -13,7 +13,11 @@ export interface JSON {
    * of spaces or the text of one step.
    * @example JSON.stringify({ a: 1 }, null, 2)
    */
-  stringify(value: unknown, replacer?: null, space?: int | string): string;
+  readonly stringify(
+    value: Read<unknown>,
+    replacer?: null,
+    space?: int | string,
+  ): string;
 }
 
 /** Reading and writing JSON. */
@@ -25,7 +29,7 @@ export interface JsonConstructor {
    * Whether a value of an unknown type is a value of JSON; after the check
    * it is a `Json`.
    */
-  isJson(value: unknown): boolean;
+  readonly isJson(value: Read<unknown>): boolean;
 }
 
 export declare const Json: JsonConstructor;

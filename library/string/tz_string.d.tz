@@ -10,5 +10,5 @@ export declare class cstring {
   private constructor();
 
   /** The same text as a `string`. */
-  public toString(): string;
+  public readonly toString(): string;
 }

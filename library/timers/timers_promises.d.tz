@@ -9,15 +9,15 @@ export type TimerOptions = { ref?: boolean };
 export declare function setTimeout(delay?: int | double): Promise<void>;
 export declare function setTimeout<T>(
   delay: int | double | undefined,
-  value: T,
-  options?: TimerOptions,
+  value: Read<T>,
+  options?: Read<TimerOptions>,
 ): Promise<T>;
 
 /** Waits for the events that have already come and gives the value. */
 export declare function setImmediate(): Promise<void>;
 export declare function setImmediate<T>(
-  value: T,
-  options?: TimerOptions,
+  value: Read<T>,
+  options?: Read<TimerOptions>,
 ): Promise<T>;
 
 /**
@@ -30,14 +30,14 @@ export declare function setInterval(
 ): AsyncGenerator<undefined>;
 export declare function setInterval<T>(
   delay: int | double | undefined,
-  value: T,
-  options?: TimerOptions,
+  value: Read<T>,
+  options?: Read<TimerOptions>,
 ): AsyncGenerator<T>;
 
 /** The functions of `scheduler`. */
 export interface Scheduler {
   /** Waits for the delay in milliseconds. */
-  wait(delay: int | double, options?: TimerOptions): Promise<void>;
+  wait(delay: int | double, options?: Read<TimerOptions>): Promise<void>;
   /** Lets the events that have already come go first. */
   yield(): Promise<void>;
 }

@@ -86,11 +86,11 @@ export type FileWriteNewStreamOptions = {
  */
 export declare function createReadStream(
   path: string,
-  options: BufferEncoding | FileTextStreamOptions,
+  options: Read<BufferEncoding | FileTextStreamOptions>,
 ): ReadStream<string>;
 export declare function createReadStream(
   path: string,
-  options?: FileReadStreamOptions,
+  options?: Read<FileReadStreamOptions>,
 ): ReadStream;
 
 /**
@@ -101,9 +101,9 @@ export declare function createReadStream(
  */
 export declare function createWriteStream(
   path: string,
-  options: FileWriteNewStreamOptions,
+  options: Read<FileWriteNewStreamOptions>,
 ): WriteNewStream;
 export declare function createWriteStream(
   path: string,
-  options?: BufferEncoding | FileWriteStreamOptions,
+  options?: Read<BufferEncoding | FileWriteStreamOptions>,
 ): WriteStream;

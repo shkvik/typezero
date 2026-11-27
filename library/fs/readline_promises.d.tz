@@ -21,4 +21,6 @@ export declare class Interface {
 }
 
 /** Starts reading the standard input by lines. */
-export declare function createInterface(options: InterfaceOptions): Interface;
+export declare function createInterface(
+  options: Read<InterfaceOptions>,
+): Interface;

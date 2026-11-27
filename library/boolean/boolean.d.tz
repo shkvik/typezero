@@ -1,7 +1,7 @@
 /** What a `boolean` has. */
 export interface boolean {
   /** "true" or "false". */
-  toString(): string;
+  readonly toString(): string;
 }
 
 /** `Boolean(value)` is all that `Boolean` has. */

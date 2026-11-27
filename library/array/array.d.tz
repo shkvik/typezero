@@ -9,9 +9,9 @@ export interface Array<T> {
   length: int;
 
   /** Adds the items at the end and gives the new length. */
-  push(...items: T[]): int;
+  push(...items: Own<T>[]): int;
   /** Adds the items at the start and gives the new length. */
-  unshift(...items: T[]): int;
+  unshift(...items: Own<T>[]): int;
   /** Takes the last item out. */
   pop(): T | undefined;
   /** Takes the first item out. */
@@ -20,27 +20,27 @@ export interface Array<T> {
    * Takes `count` items out from `start` (all to the end without a count),
    * puts `items` in their place and gives the items taken out.
    */
-  splice(start: int, count?: int, ...items: T[]): T[];
+  splice(start: int, count?: int, ...items: Own<T>[]): T[];
   /** Sets every item from `start` up to `end` to the value. */
-  fill(value: T, start?: int, end?: int): T[];
+  fill(value: Read<T>, start?: int, end?: int): T[];
   /**
    * Sorts the array itself. The function gives a negative number when the
    * first item goes earlier; only an array of strings is sorted without one.
    * @example xs.sort((a, b) => a - b)
    */
-  sort(compare?: (first: T, second: T) => int | double): T[];
+  sort(compare?: Read<(first: T, second: T) => int | double>): T[];
   /** Reverses the array itself. */
   reverse(): T[];
 
   /** The item at the index; a negative index counts from the end. */
-  at(index: int): T | undefined;
+  readonly at(index: int): T | undefined;
   /** A new array of the items from `start` up to `end`. */
-  slice(start?: int, end?: int): T[];
+  readonly slice(start?: int, end?: int): T[];
   /**
    * A look at the items from start to end, for reading only.
    * @example const head = items.view(0, 3)
    */
-  view(start?: int, end?: int): readonly T[];
+  readonly view(start?: int, end?: int): readonly T[];
   /**
    * Takes every item out, in order, and leaves the array empty.
    * @example for (using file of files.drain()) {}
@@ -50,65 +50,84 @@ export interface Array<T> {
    * Keeps only the items the function says yes to, in place.
    * @example items.retain((item) => item.isLive)
    */
-  retain(keep: (item: T, index: int, all: T[]) => boolean): void;
+  retain(keep: Read<(item: T, index: int, all: T[]) => boolean>): void;
   /** A new array of this one followed by the items and the items of arrays. */
-  concat(...items: (T | T[])[]): T[];
+  readonly concat(...items: Read<T | T[]>[]): T[];
 
   /** The index of the first such item, -1 when there is none. */
-  indexOf(item: T, from?: int): int;
+  readonly indexOf(item: Read<T>, from?: int): int;
   /** The index of the last such item, -1 when there is none. */
-  lastIndexOf(item: T, from?: int): int;
-  includes(item: T, from?: int): boolean;
+  readonly lastIndexOf(item: Read<T>, from?: int): int;
+  readonly includes(item: Read<T>, from?: int): boolean;
 
   /** The items as text with the separator, a comma by default. */
-  join(separator?: string): string;
-  toString(): string;
+  readonly join(separator?: string): string;
+  readonly toString(): string;
 
-  keys(): Generator<int>;
-  values(): Generator<T>;
-  entries(): Generator<[int, T]>;
+  readonly keys(): Generator<int>;
+  readonly values(): Generator<T>;
+  readonly entries(): Generator<[int, T]>;
   /** The items in order: what `for...of` goes through. */
   [Symbol.iterator](): Iterator<T>;
 
-  forEach(action: (item: T, index: int, all: T[]) => void): void;
+  readonly forEach(action: Read<(item: T, index: int, all: T[]) => void>): void;
   /**
    * A new array of what the function gives for each item.
    * @example [1, 2].map((x) => x * 2) // [2, 4]
    */
-  map<U>(change: (item: T, index: int, all: T[]) => U): U[];
+  readonly map<U>(change: Read<(item: T, index: int, all: T[]) => U>): U[];
   /** As `map`, and an array the function gives is put in item by item. */
-  flatMap<U>(change: (item: T, index: int, all: T[]) => U | U[]): U[];
+  readonly flatMap<U>(
+    change: Read<(item: T, index: int, all: T[]) => U | U[]>,
+  ): U[];
   /** A new array of the items the function says yes to. */
-  filter(keep: (item: T, index: int, all: T[]) => boolean): T[];
+  readonly filter(keep: Read<(item: T, index: int, all: T[]) => boolean>): T[];
 
   /**
    * Folds the items into one value from the left. Without a start value the
    * first item is the start, and an empty array gives `undefined`.
    * @example [1, 2, 3].reduce((sum, x) => sum + x, 0) // 6
    */
-  reduce(join: (result: T, item: T, index: int, all: T[]) => T): T | undefined;
-  reduce<U>(join: (result: U, item: T, index: int, all: T[]) => U, start: U): U;
-  /** As `reduce`, from the right. */
-  reduceRight(
-    join: (result: T, item: T, index: int, all: T[]) => T,
+  readonly reduce(
+    join: Read<(result: T, item: T, index: int, all: T[]) => T>,
   ): T | undefined;
-  reduceRight<U>(
-    join: (result: U, item: T, index: int, all: T[]) => U,
-    start: U,
+  readonly reduce<U>(
+    join: Read<(result: U, item: T, index: int, all: T[]) => U>,
+    start: Read<U>,
+  ): U;
+  /** As `reduce`, from the right. */
+  readonly reduceRight(
+    join: Read<(result: T, item: T, index: int, all: T[]) => T>,
+  ): T | undefined;
+  readonly reduceRight<U>(
+    join: Read<(result: U, item: T, index: int, all: T[]) => U>,
+    start: Read<U>,
   ): U;
 
   /** The first item the function says yes to. */
-  find(test: (item: T, index: int, all: T[]) => boolean): T | undefined;
+  readonly find(
+    test: Read<(item: T, index: int, all: T[]) => boolean>,
+  ): T | undefined;
   /** The last item the function says yes to. */
-  findLast(test: (item: T, index: int, all: T[]) => boolean): T | undefined;
+  readonly findLast(
+    test: Read<(item: T, index: int, all: T[]) => boolean>,
+  ): T | undefined;
   /** The index of the first such item, -1 when there is none. */
-  findIndex(test: (item: T, index: int, all: T[]) => boolean): int;
+  readonly findIndex(
+    test: Read<(item: T, index: int, all: T[]) => boolean>,
+  ): int;
   /** The index of the last such item, -1 when there is none. */
-  findLastIndex(test: (item: T, index: int, all: T[]) => boolean): int;
+  readonly findLastIndex(
+    test: Read<(item: T, index: int, all: T[]) => boolean>,
+  ): int;
   /** Whether the function says yes to at least one item. */
-  some(test: (item: T, index: int, all: T[]) => boolean): boolean;
+  readonly some(
+    test: Read<(item: T, index: int, all: T[]) => boolean>,
+  ): boolean;
   /** Whether the function says yes to every item. */
-  every(test: (item: T, index: int, all: T[]) => boolean): boolean;
+  readonly every(
+    test: Read<(item: T, index: int, all: T[]) => boolean>,
+  ): boolean;
 }
 
 /**
@@ -125,15 +144,15 @@ export interface ArrayConstructor {
    */
   <T>(length?: int): T[];
 
-  isArray(value: unknown): boolean;
+  readonly isArray(value: Read<unknown>): boolean;
   /**
    * A new array of the items of an array, a string or an iterator, each
    * changed by the function when there is one.
    */
-  from<T>(items: Iterable<T> | Iterator<T>): T[];
-  from<T, U>(
-    items: Iterable<T> | Iterator<T>,
-    change: (item: T, index: int) => U,
+  readonly from<T>(items: Read<Iterable<T> | Iterator<T>>): T[];
+  readonly from<T, U>(
+    items: Read<Iterable<T> | Iterator<T>>,
+    change: Read<(item: T, index: int) => U>,
   ): U[];
 }
 

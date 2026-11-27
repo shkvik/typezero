@@ -228,6 +228,7 @@ partial class AstFlattener {
       access: node.access,
       accessWritten: node.accessWritten,
       isStatic: node.isStatic,
+      isReadonly: node.isReadonly,
       form: formFlat,
       typeId,
     };

@@ -5,37 +5,39 @@
 export declare class Map<K, V> {
   /** A map of nothing, or of the pairs of an array, an iterator or a map. */
   public constructor();
-  public constructor(entries: Iterable<[K, V]> | Iterator<[K, V]>);
+  public constructor(entries: Read<Iterable<[K, V]> | Iterator<[K, V]>>);
 
   /** How many keys there are. */
   public readonly size: int;
 
   /** The value of the key. */
-  public get(key: K): V | undefined;
+  public readonly get(key: Read<K>): V | undefined;
   /** Sets the value of the key and gives the map itself. */
-  public set(key: K, value: V): Map<K, V>;
-  public has(key: K): boolean;
+  public set(key: Own<K>, value: Own<V>): Map<K, V>;
+  public readonly has(key: Read<K>): boolean;
   /** Removes the key; whether it was there. */
-  public delete(key: K): boolean;
+  public delete(key: Read<K>): boolean;
   public clear(): void;
 
-  public keys(): Generator<K>;
-  public values(): Generator<V>;
-  public entries(): Generator<[K, V]>;
+  public readonly keys(): Generator<K>;
+  public readonly values(): Generator<V>;
+  public readonly entries(): Generator<[K, V]>;
   /**
    * The pairs of a key and its value, in the order the keys were set: what
    * `for...of` goes through.
    */
   public [Symbol.iterator](): Iterator<[K, V]>;
-  public forEach(action: (value: V, key: K, all: Map<K, V>) => void): void;
+  public readonly forEach(
+    action: Read<(value: V, key: K, all: Map<K, V>) => void>,
+  ): void;
 
   /**
    * A map of the items by the key the function gives for each.
    * @example Map.groupBy([1, 2, 3], (x) => x % 2) // 1 => [1, 3], 0 => [2]
    */
   public static groupBy<T, K>(
-    items: Iterable<T>,
-    key: (item: T, index: int) => K,
+    items: Read<Iterable<T>>,
+    key: Read<(item: T, index: int) => K>,
   ): Map<K, T[]>;
 }
 
@@ -48,37 +50,43 @@ export declare class Map<K, V> {
 export declare class Set<T> {
   /** A set of nothing, or of the items of an array, an iterator or a set. */
   public constructor();
-  public constructor(items: Iterable<T> | Iterator<T>);
+  public constructor(items: Read<Iterable<T> | Iterator<T>>);
 
   /** How many values there are. */
   public readonly size: int;
 
   /** Adds the value and gives the set itself. */
-  public add(value: T): Set<T>;
-  public has(value: T): boolean;
+  public add(value: Own<T>): Set<T>;
+  public readonly has(value: Read<T>): boolean;
   /** Removes the value; whether it was there. */
-  public delete(value: T): boolean;
+  public delete(value: Read<T>): boolean;
   public clear(): void;
 
-  public keys(): Generator<T>;
-  public values(): Generator<T>;
-  public entries(): Generator<[T, T]>;
+  public readonly keys(): Generator<T>;
+  public readonly values(): Generator<T>;
+  public readonly entries(): Generator<[T, T]>;
   /** The items in the order they were added: what `for...of` goes through. */
   public [Symbol.iterator](): Iterator<T>;
-  public forEach(action: (value: T, same: T, all: Set<T>) => void): void;
+  public readonly forEach(
+    action: Read<(value: T, same: T, all: Set<T>) => void>,
+  ): void;
 
   /** The values of both sets. */
-  public union(other: Set<T> | Map<T, unknown>): Set<T>;
+  public readonly union(other: Read<Set<T> | Map<T, unknown>>): Set<T>;
   /** The values that are in both sets. */
-  public intersection(other: Set<T> | Map<T, unknown>): Set<T>;
+  public readonly intersection(other: Read<Set<T> | Map<T, unknown>>): Set<T>;
   /** The values of this set that the other does not have. */
-  public difference(other: Set<T> | Map<T, unknown>): Set<T>;
+  public readonly difference(other: Read<Set<T> | Map<T, unknown>>): Set<T>;
   /** The values that are in one of the sets only. */
-  public symmetricDifference(other: Set<T> | Map<T, unknown>): Set<T>;
-  public isSubsetOf(other: Set<T> | Map<T, unknown>): boolean;
-  public isSupersetOf(other: Set<T> | Map<T, unknown>): boolean;
+  public readonly symmetricDifference(
+    other: Read<Set<T> | Map<T, unknown>>,
+  ): Set<T>;
+  public readonly isSubsetOf(other: Read<Set<T> | Map<T, unknown>>): boolean;
+  public readonly isSupersetOf(other: Read<Set<T> | Map<T, unknown>>): boolean;
   /** Whether the sets have no value in common. */
-  public isDisjointFrom(other: Set<T> | Map<T, unknown>): boolean;
+  public readonly isDisjointFrom(
+    other: Read<Set<T> | Map<T, unknown>>,
+  ): boolean;
 }
 
 /** The same as `Map<K, V>`. */

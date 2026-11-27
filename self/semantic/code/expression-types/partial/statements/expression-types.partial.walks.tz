@@ -4,6 +4,7 @@ import {
   ExprKind,
   NewExpr,
   NewKind,
+  SequenceExpr,
   TemplateExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
@@ -36,6 +37,42 @@ partial class ExpressionTypes {
     const type = this.typed(part, undefined, module);
 
     this.textCheck(part, type, module);
+  }
+
+  private sequenceTyped(
+    expr: SequenceExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const exprs = tree.exprsOf(expr.exprsList);
+    let last: Type = this.types.store.plain(TypeKind.Undefined);
+
+    for (let index: int = 0; index < exprs.length; index++) {
+      const part = exprs[index];
+      if (part == undefined) {
+        continue;
+      }
+
+      const isLast = index == exprs.length - 1;
+      const asked = this.lastWanted(isLast, wanted);
+
+      last = this.typed(part, asked, module);
+    }
+
+    return last;
+  }
+
+  private readonly lastWanted(
+    isLast: boolean,
+    wanted: Type | undefined,
+  ): Type | undefined {
+    if (isLast) {
+      return wanted;
+    }
+
+    return undefined;
   }
 
   private childrenTyped(expr: Expr, module: int): Type {

@@ -30,6 +30,66 @@ import {
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
+  private objectOverload(
+    receiver: Type,
+    name: string,
+    count: int,
+  ): FunctionType | undefined {
+    if (receiver.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const fields = this.types.store
+      .fieldsOf(receiver)
+      .filter((field) => field.name == name);
+    if (fields.length < 2) {
+      return undefined;
+    }
+
+    const fitting: FunctionType[] = [];
+
+    for (const field of fields) {
+      const type = this.types.fieldWanted(field);
+      if (type.kind == TypeKind.Function && this.isCountFitting(type, count)) {
+        fitting.push(type);
+      }
+    }
+
+    const only = fitting[0];
+    if (fitting.length != 1 || only == undefined) {
+      return undefined;
+    }
+
+    return only;
+  }
+
+  private readonly isCountFitting(type: FunctionType, count: int): boolean {
+    const shape = this.types.store.functionShapeOf(type);
+    const total = shape.params.length;
+    const required = shape.params.filter((one) => !one.optional).length;
+    if (shape.rest) {
+      return count >= required - 1;
+    }
+
+    return count >= required && count <= total;
+  }
+
+  private overloadCalled(
+    expr: CallExpr,
+    member: MemberExpr,
+    chosen: FunctionType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    if (this.mentionsLibraryParameter(chosen)) {
+      return this.libraryMethodCall(expr, member, chosen, wanted, module);
+    }
+
+    this.positionMethod = member.name;
+
+    return this.calledWith(expr, chosen, member.loc, CallKind.Library, module);
+  }
+
   private declaredVariants(
     instance: InstanceType,
     name: string,

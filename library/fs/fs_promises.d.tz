@@ -77,13 +77,15 @@ export interface FsPromises {
    * Reads a whole file: its bytes, or its text when an encoding is given. The
    * encoding is written in the call, as the type of what comes depends on it.
    */
-  readFile(
+  readonly readFile(
     path: string,
-    options?: { flag?: OpenFlag },
+    options?: Read<{ flag?: OpenFlag }>,
   ): Promise<Result<Buffer, ReadFileError>>;
-  readFile(
+  readonly readFile(
     path: string,
-    encoding: BufferEncoding | { encoding: BufferEncoding; flag?: OpenFlag },
+    encoding: Read<
+      BufferEncoding | { encoding: BufferEncoding; flag?: OpenFlag }
+    >,
   ): Promise<Result<string, ReadFileError>>;
   /**
    * Writes a text or bytes as the whole file, making it or replacing what it
@@ -91,143 +93,150 @@ export interface FsPromises {
    * not touch a file that is there (WriteNewFileError), an "a" flag adds at the
    * end (AppendFileError).
    */
-  writeFile(
+  readonly writeFile(
     path: string,
-    data: FileData,
-    options: WriteFileOptions<ExclusiveWriteFlag>,
+    data: Read<FileData>,
+    options: Read<WriteFileOptions<ExclusiveWriteFlag>>,
   ): Promise<Result<void, WriteNewFileError>>;
-  writeFile(
+  readonly writeFile(
     path: string,
-    data: FileData,
-    options: WriteFileOptions<AppendFlag>,
+    data: Read<FileData>,
+    options: Read<WriteFileOptions<AppendFlag>>,
   ): Promise<Result<void, AppendFileError>>;
-  writeFile(
+  readonly writeFile(
     path: string,
-    data: FileData,
-    options: WriteFileOptions<ExclusiveAppendFlag>,
+    data: Read<FileData>,
+    options: Read<WriteFileOptions<ExclusiveAppendFlag>>,
   ): Promise<Result<void, AppendNewFileError>>;
-  writeFile(
+  readonly writeFile(
     path: string,
-    data: FileData,
-    options?: BufferEncoding | FileOptions,
+    data: Read<FileData>,
+    options?: Read<BufferEncoding | FileOptions>,
   ): Promise<Result<void, WriteFileError>>;
   /**
    * Adds a text or bytes at the end of a file, making it when it is not there.
    * The flag says otherwise, and the error follows it, as in `writeFile`.
    */
-  appendFile(
+  readonly appendFile(
     path: string,
-    data: FileData,
-    options: WriteFileOptions<ExclusiveAppendFlag>,
+    data: Read<FileData>,
+    options: Read<WriteFileOptions<ExclusiveAppendFlag>>,
   ): Promise<Result<void, AppendNewFileError>>;
-  appendFile(
+  readonly appendFile(
     path: string,
-    data: FileData,
-    options: WriteFileOptions<WriteFlag>,
+    data: Read<FileData>,
+    options: Read<WriteFileOptions<WriteFlag>>,
   ): Promise<Result<void, WriteFileError>>;
-  appendFile(
+  readonly appendFile(
     path: string,
-    data: FileData,
-    options: WriteFileOptions<ExclusiveWriteFlag>,
+    data: Read<FileData>,
+    options: Read<WriteFileOptions<ExclusiveWriteFlag>>,
   ): Promise<Result<void, WriteNewFileError>>;
-  appendFile(
+  readonly appendFile(
     path: string,
-    data: FileData,
-    options?: BufferEncoding | FileOptions,
+    data: Read<FileData>,
+    options?: Read<BufferEncoding | FileOptions>,
   ): Promise<Result<void, AppendFileError>>;
   /**
    * Checks that the program may use the path as the mode says, `constants.F_OK`
    * (it is there) by default; an error when it may not.
    */
-  access(path: string, mode?: int): Promise<Result<void, AccessError>>;
+  readonly access(path: string, mode?: int): Promise<Result<void, AccessError>>;
   /** Sets the permissions of a file. */
-  chmod(path: string, mode: int): Promise<Result<void, ChangeModeError>>;
+  readonly chmod(
+    path: string,
+    mode: int,
+  ): Promise<Result<void, ChangeModeError>>;
   /** Cuts a file to the length, 0 by default, or pads it with zeros. */
-  truncate(path: string, length?: int): Promise<Result<void, TruncateError>>;
+  readonly truncate(
+    path: string,
+    length?: int,
+  ): Promise<Result<void, TruncateError>>;
   /** What is at the path: its kind, size and times; a link is followed. */
-  stat(path: string): Promise<Result<Stats, StatusError>>;
+  readonly stat(path: string): Promise<Result<Stats, StatusError>>;
   /** As `stat`, of a link itself. */
-  lstat(path: string): Promise<Result<Stats, LinkStatusError>>;
+  readonly lstat(path: string): Promise<Result<Stats, LinkStatusError>>;
   /**
    * The names of what a folder holds, with `recursive` of what is inside its
    * folders too; with `withFileTypes` what each is.
    */
-  readdir(
+  readonly readdir(
     path: string,
-    options: {
+    options: Read<{
       withFileTypes: true;
       encoding?: BufferEncoding;
       recursive?: boolean;
-    },
+    }>,
   ): Promise<Result<Dirent[], ReadDirectoryError>>;
-  readdir(
+  readonly readdir(
     path: string,
-    options?:
+    options?: Read<
       | BufferEncoding
       | {
           encoding?: BufferEncoding;
           recursive?: boolean;
           withFileTypes?: false;
-        },
+        }
+    >,
   ): Promise<Result<string[], ReadDirectoryError>>;
   /**
    * Makes a folder; with `recursive` the folders above it too, and then a
    * folder that is there is no error. Gives the first folder it made.
    */
-  mkdir(
+  readonly mkdir(
     path: string,
-    options?: int | { recursive?: boolean; mode?: int },
+    options?: Read<int | { recursive?: boolean; mode?: int }>,
   ): Promise<Result<string | undefined, MakeDirectoryError>>;
   /**
    * Makes a folder with a name of its own that starts with the prefix, and
    * gives its path.
    */
-  mkdtemp(
+  readonly mkdtemp(
     prefix: string,
-    options?: BufferEncoding | { encoding?: BufferEncoding },
+    options?: Read<BufferEncoding | { encoding?: BufferEncoding }>,
   ): Promise<Result<string, MakeTemporaryDirectoryError>>;
   /** Removes an empty folder. */
-  rmdir(path: string): Promise<Result<void, RemoveDirectoryError>>;
+  readonly rmdir(path: string): Promise<Result<void, RemoveDirectoryError>>;
   /** Removes a file or a link. */
-  unlink(path: string): Promise<Result<void, UnlinkError>>;
+  readonly unlink(path: string): Promise<Result<void, UnlinkError>>;
   /**
    * Removes a file, or with `recursive` a folder with what it holds. With
    * `force` what is not there is no error.
    */
-  rm(
+  readonly rm(
     path: string,
-    options: {
+    options: Read<{
       force: true;
       recursive?: boolean;
       maxRetries?: int;
       retryDelay?: int;
-    },
+    }>,
   ): Promise<Result<void, ForceRemoveError>>;
-  rm(
+  readonly rm(
     path: string,
-    options?: {
+    options?: Read<{
       force?: false;
       recursive?: boolean;
       maxRetries?: int;
       retryDelay?: int;
-    },
+    }>,
   ): Promise<Result<void, RemoveError>>;
   /**
    * Moves or renames a file or a folder. It does not replace what is at the new
    * path; `replace` of "tz:fs" does.
    */
-  rename(from: string, to: string): Promise<Result<void, RenameError>>;
+  readonly rename(from: string, to: string): Promise<Result<void, RenameError>>;
   /**
    * Copies a file. It never replaces a file that is there, so it takes no mode.
    */
-  copyFile(
+  readonly copyFile(
     source: string,
     destination: string,
   ): Promise<Result<void, CopyFileError>>;
   /** The full path with every link followed. */
-  realpath(
+  readonly realpath(
     path: string,
-    options?: BufferEncoding | { encoding?: BufferEncoding },
+    options?: Read<BufferEncoding | { encoding?: BufferEncoding }>,
   ): Promise<Result<string, RealPathError>>;
 }
 

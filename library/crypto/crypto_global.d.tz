@@ -7,9 +7,9 @@ export interface Crypto {
    * A random identifier of version 4.
    * @example crypto.randomUUID() // "3b241101-e2bb-4255-8caf-4136c566a962"
    */
-  randomUUID(): string;
+  readonly randomUUID(): string;
   /** Fills an array of integers with random bits and gives it back. */
-  getRandomValues<A extends IntegerTypedArray>(array: A): A;
+  readonly getRandomValues<A extends IntegerTypedArray>(array: A): A;
 }
 
 export declare const crypto: Crypto;

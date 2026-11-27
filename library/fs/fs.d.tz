@@ -189,13 +189,13 @@ export declare class Stats {
   public readonly ctime: Date;
   public readonly birthtime: Date;
 
-  public isFile(): boolean;
-  public isDirectory(): boolean;
-  public isSymbolicLink(): boolean;
-  public isFIFO(): boolean;
-  public isSocket(): boolean;
-  public isBlockDevice(): boolean;
-  public isCharacterDevice(): boolean;
+  public readonly isFile(): boolean;
+  public readonly isDirectory(): boolean;
+  public readonly isSymbolicLink(): boolean;
+  public readonly isFIFO(): boolean;
+  public readonly isSocket(): boolean;
+  public readonly isBlockDevice(): boolean;
+  public readonly isCharacterDevice(): boolean;
 }
 
 /** An entry of a folder, as `readdir` with `withFileTypes` gives it. */
@@ -207,13 +207,13 @@ export declare class Dirent {
   /** The folder it is in. */
   public readonly parentPath: string;
 
-  public isFile(): boolean;
-  public isDirectory(): boolean;
-  public isSymbolicLink(): boolean;
-  public isFIFO(): boolean;
-  public isSocket(): boolean;
-  public isBlockDevice(): boolean;
-  public isCharacterDevice(): boolean;
+  public readonly isFile(): boolean;
+  public readonly isDirectory(): boolean;
+  public readonly isSymbolicLink(): boolean;
+  public readonly isFIFO(): boolean;
+  public readonly isSocket(): boolean;
+  public readonly isBlockDevice(): boolean;
+  public readonly isCharacterDevice(): boolean;
 }
 
 /** The numbers of `constants`. */
@@ -242,11 +242,13 @@ export declare const promises: FsPromises;
  */
 export declare function readFileSync(
   path: FilePath,
-  options?: { flag?: OpenFlag },
+  options?: Read<{ flag?: OpenFlag }>,
 ): Result<Buffer, ReadFileError>;
 export declare function readFileSync(
   path: FilePath,
-  encoding: BufferEncoding | { encoding: BufferEncoding; flag?: OpenFlag },
+  encoding: Read<
+    BufferEncoding | { encoding: BufferEncoding; flag?: OpenFlag }
+  >,
 ): Result<string, ReadFileError>;
 
 /**
@@ -257,23 +259,23 @@ export declare function readFileSync(
  */
 export declare function writeFileSync(
   path: FilePath,
-  data: FileData,
-  options: WriteFileOptions<ExclusiveWriteFlag>,
+  data: Read<FileData>,
+  options: Read<WriteFileOptions<ExclusiveWriteFlag>>,
 ): Result<void, WriteNewFileError>;
 export declare function writeFileSync(
   path: FilePath,
-  data: FileData,
-  options: WriteFileOptions<AppendFlag>,
+  data: Read<FileData>,
+  options: Read<WriteFileOptions<AppendFlag>>,
 ): Result<void, AppendFileError>;
 export declare function writeFileSync(
   path: FilePath,
-  data: FileData,
-  options: WriteFileOptions<ExclusiveAppendFlag>,
+  data: Read<FileData>,
+  options: Read<WriteFileOptions<ExclusiveAppendFlag>>,
 ): Result<void, AppendNewFileError>;
 export declare function writeFileSync(
   path: FilePath,
-  data: FileData,
-  options?: BufferEncoding | FileOptions,
+  data: Read<FileData>,
+  options?: Read<BufferEncoding | FileOptions>,
 ): Result<void, WriteFileError>;
 
 /**
@@ -282,23 +284,23 @@ export declare function writeFileSync(
  */
 export declare function appendFileSync(
   path: FilePath,
-  data: FileData,
-  options: WriteFileOptions<ExclusiveAppendFlag>,
+  data: Read<FileData>,
+  options: Read<WriteFileOptions<ExclusiveAppendFlag>>,
 ): Result<void, AppendNewFileError>;
 export declare function appendFileSync(
   path: FilePath,
-  data: FileData,
-  options: WriteFileOptions<WriteFlag>,
+  data: Read<FileData>,
+  options: Read<WriteFileOptions<WriteFlag>>,
 ): Result<void, WriteFileError>;
 export declare function appendFileSync(
   path: FilePath,
-  data: FileData,
-  options: WriteFileOptions<ExclusiveWriteFlag>,
+  data: Read<FileData>,
+  options: Read<WriteFileOptions<ExclusiveWriteFlag>>,
 ): Result<void, WriteNewFileError>;
 export declare function appendFileSync(
   path: FilePath,
-  data: FileData,
-  options?: BufferEncoding | FileOptions,
+  data: Read<FileData>,
+  options?: Read<BufferEncoding | FileOptions>,
 ): Result<void, AppendFileError>;
 
 /** Whether there is something at the path. */
@@ -328,14 +330,14 @@ export declare function truncateSync(
 /** What is at the path: its kind, size and times; a link is followed. */
 export declare function statSync(
   path: string,
-  options: { throwIfNoEntry: false },
+  options: Read<{ throwIfNoEntry: false }>,
 ): Result<Stats | undefined, StatusIfExistsError>;
 export declare function statSync(path: string): Result<Stats, StatusError>;
 
 /** As `stat`, of a link itself. */
 export declare function lstatSync(
   path: string,
-  options: { throwIfNoEntry: false },
+  options: Read<{ throwIfNoEntry: false }>,
 ): Result<Stats | undefined, LinkStatusIfExistsError>;
 export declare function lstatSync(path: string): Result<Stats, LinkStatusError>;
 
@@ -345,17 +347,18 @@ export declare function lstatSync(path: string): Result<Stats, LinkStatusError>;
  */
 export declare function readdirSync(
   path: string,
-  options: {
+  options: Read<{
     withFileTypes: true;
     encoding?: BufferEncoding;
     recursive?: boolean;
-  },
+  }>,
 ): Result<Dirent[], ReadDirectoryError>;
 export declare function readdirSync(
   path: string,
-  options?:
+  options?: Read<
     | BufferEncoding
-    | { encoding?: BufferEncoding; recursive?: boolean; withFileTypes?: false },
+    | { encoding?: BufferEncoding; recursive?: boolean; withFileTypes?: false }
+  >,
 ): Result<string[], ReadDirectoryError>;
 
 /**
@@ -364,7 +367,7 @@ export declare function readdirSync(
  */
 export declare function mkdirSync(
   path: string,
-  options?: int | { recursive?: boolean; mode?: int },
+  options?: Read<int | { recursive?: boolean; mode?: int }>,
 ): Result<string | undefined, MakeDirectoryError>;
 
 /**
@@ -373,7 +376,7 @@ export declare function mkdirSync(
  */
 export declare function mkdtempSync(
   prefix: string,
-  options?: BufferEncoding | { encoding?: BufferEncoding },
+  options?: Read<BufferEncoding | { encoding?: BufferEncoding }>,
 ): Result<string, MakeTemporaryDirectoryError>;
 
 /** Removes an empty folder. */
@@ -390,21 +393,21 @@ export declare function unlinkSync(path: string): Result<void, UnlinkError>;
  */
 export declare function rmSync(
   path: string,
-  options: {
+  options: Read<{
     force: true;
     recursive?: boolean;
     maxRetries?: int;
     retryDelay?: int;
-  },
+  }>,
 ): Result<void, ForceRemoveError>;
 export declare function rmSync(
   path: string,
-  options?: {
+  options?: Read<{
     force?: false;
     recursive?: boolean;
     maxRetries?: int;
     retryDelay?: int;
-  },
+  }>,
 ): Result<void, RemoveError>;
 
 /**
@@ -427,5 +430,5 @@ export declare function copyFileSync(
 /** The full path with every link followed. */
 export declare function realpathSync(
   path: string,
-  options?: BufferEncoding | { encoding?: BufferEncoding },
+  options?: Read<BufferEncoding | { encoding?: BufferEncoding }>,
 ): Result<string, RealPathError>;

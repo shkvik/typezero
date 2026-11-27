@@ -3078,8 +3078,8 @@ function plainInit<E extends StreamError>(init: RequestInit<E> | undefined,
   return plain
 }
 
-export async function fetch<E extends StreamError = never>(input: string | URL | Request,
-                                                          init?: RequestInit<E>):
+export async function fetch<E extends StreamError = never>(input: Read<string | URL | Request>,
+                                                          init?: Read<RequestInit<E>>):
     Promise<Result<Response, FetchError<E>>> {
   const body = init?.body
   if (input instanceof Request && body == undefined && input.bodyUsed()) {

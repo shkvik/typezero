@@ -14,20 +14,20 @@ export declare function randomIntAsync(min: int, max: int): Promise<int>;
 /** As `sign` of "node:crypto", without stopping the program. */
 export declare function signAsync(
   algorithm: string | undefined,
-  data: AnyTypedArray | DataView,
-  key: KeyObject | string | CryptoBytes | SignKey,
+  data: Read<AnyTypedArray | DataView>,
+  key: Read<KeyObject | string | CryptoBytes | SignKey>,
 ): Promise<Result<Buffer, SignError>>;
 
 /** As `verify` of "node:crypto", without stopping the program. */
 export declare function verifyAsync(
   algorithm: string | undefined,
-  data: AnyTypedArray | DataView,
-  key: KeyObject | string | CryptoBytes | SignKey,
-  signature: AnyTypedArray | DataView,
+  data: Read<AnyTypedArray | DataView>,
+  key: Read<KeyObject | string | CryptoBytes | SignKey>,
+  signature: Read<AnyTypedArray | DataView>,
 ): Promise<Result<boolean, VerifyError>>;
 
 /** As `diffieHellman` of "node:crypto", without stopping the program. */
-export declare function diffieHellmanAsync(options: {
+export declare function diffieHellmanAsync(options: Read<{
   privateKey: KeyObject;
   publicKey: KeyObject;
-}): Promise<Result<Buffer, DiffieHellmanError>>;
+}>): Promise<Result<Buffer, DiffieHellmanError>>;

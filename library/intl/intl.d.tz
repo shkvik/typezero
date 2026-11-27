@@ -56,7 +56,7 @@ export declare class Segments {
   private constructor();
 
   /** The piece the position of the text is in. */
-  public containing(index: int): SegmentData | undefined;
+  public readonly containing(index: int): SegmentData | undefined;
   /** The pieces in order: what `for...of` goes through. */
   public [Symbol.iterator](): Iterator<SegmentData>;
 }
@@ -151,18 +151,23 @@ export type ResolvedNumberFormatOptions = {
  * @example new Intl.NumberFormat("de", { style: "percent" }).format(0.5)
  */
 export declare class NumberFormat {
-  public constructor(locale?: string | Locale, options?: NumberFormatOptions);
+  public constructor(
+    locale?: Read<string | Locale>,
+    options?: Read<NumberFormatOptions>,
+  );
 
   /** The number as text. */
-  public format(value: int | double | decimal): string;
+  public readonly format(value: int | double | decimal): string;
   /** The text by parts: digits, separators, the sign of the currency. */
-  public formatToParts(value: int | double | decimal): NumberFormatPart[];
-  public resolvedOptions(): ResolvedNumberFormatOptions;
+  public readonly formatToParts(
+    value: int | double | decimal,
+  ): NumberFormatPart[];
+  public readonly resolvedOptions(): ResolvedNumberFormatOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -204,19 +209,22 @@ export type ResolvedCollatorOptions = {
  * @example names.sort(new Intl.Collator("ru").compare)
  */
 export declare class Collator {
-  public constructor(locale?: string | Locale, options?: CollatorOptions);
+  public constructor(
+    locale?: Read<string | Locale>,
+    options?: Read<CollatorOptions>,
+  );
 
   /**
    * Negative when the first text goes earlier, positive when later, 0 when they
    * are equal. It can be passed as a function: `sort(collator.compare)`.
    */
-  public compare(first: string, second: string): int;
-  public resolvedOptions(): ResolvedCollatorOptions;
+  public readonly compare(first: string, second: string): int;
+  public readonly resolvedOptions(): ResolvedCollatorOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -285,16 +293,19 @@ export type ResolvedPluralRulesOptions = {
  * @example new Intl.PluralRules("ru").select(3) // "few"
  */
 export declare class PluralRules {
-  public constructor(locale?: string | Locale, options?: PluralRulesOptions);
+  public constructor(
+    locale?: Read<string | Locale>,
+    options?: Read<PluralRulesOptions>,
+  );
 
   /** The form for the number. */
-  public select(value: int | double | decimal): LDMLPluralRule;
-  public resolvedOptions(): ResolvedPluralRulesOptions;
+  public readonly select(value: int | double | decimal): LDMLPluralRule;
+  public readonly resolvedOptions(): ResolvedPluralRulesOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -330,8 +341,8 @@ export type ResolvedRelativeTimeFormatOptions = {
  */
 export declare class RelativeTimeFormat {
   public constructor(
-    locale?: string | Locale,
-    options?: RelativeTimeFormatOptions,
+    locale?: Read<string | Locale>,
+    options?: Read<RelativeTimeFormatOptions>,
   );
 
   /**
@@ -339,18 +350,21 @@ export declare class RelativeTimeFormat {
    * "quarter", "month", "week", "day", "hour", "minute" or "second", also in
    * the plural; one known only when the program runs is checked first.
    */
-  public format(value: int | double, unit: RelativeTimeFormatUnit): string;
+  public readonly format(
+    value: int | double,
+    unit: RelativeTimeFormatUnit,
+  ): string;
   /** The text by parts. */
-  public formatToParts(
+  public readonly formatToParts(
     value: int | double,
     unit: RelativeTimeFormatUnit,
   ): RelativeTimeFormatPart[];
-  public resolvedOptions(): ResolvedRelativeTimeFormatOptions;
+  public readonly resolvedOptions(): ResolvedRelativeTimeFormatOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -383,18 +397,21 @@ export type ResolvedListFormatOptions = {
  * @example new Intl.ListFormat("en").format(["a", "b"]) // "a and b"
  */
 export declare class ListFormat {
-  public constructor(locale?: string | Locale, options?: ListFormatOptions);
+  public constructor(
+    locale?: Read<string | Locale>,
+    options?: Read<ListFormatOptions>,
+  );
 
   /** The list as text. */
-  public format(items: string[]): string;
+  public readonly format(items: Read<string[]>): string;
   /** The list by parts: the items and what stands between them. */
-  public formatToParts(items: string[]): DateTimeFormatPart[];
-  public resolvedOptions(): ResolvedListFormatOptions;
+  public readonly formatToParts(items: Read<string[]>): DateTimeFormatPart[];
+  public readonly resolvedOptions(): ResolvedListFormatOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -439,16 +456,19 @@ export type ResolvedDisplayNamesOptions = {
  * @example new Intl.DisplayNames("en", { type: "region" }).of("DE")
  */
 export declare class DisplayNames {
-  public constructor(locale?: string | Locale, options?: DisplayNamesOptions);
+  public constructor(
+    locale?: Read<string | Locale>,
+    options?: Read<DisplayNamesOptions>,
+  );
 
   /** The name for the code. */
-  public of(code: string): string | undefined;
-  public resolvedOptions(): ResolvedDisplayNamesOptions;
+  public readonly of(code: string): string | undefined;
+  public readonly resolvedOptions(): ResolvedDisplayNamesOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -479,16 +499,19 @@ export type ResolvedSegmenterOptions = {
  * @example new Intl.Segmenter("en", { granularity: "word" }).segment(text)
  */
 export declare class Segmenter {
-  public constructor(locale?: string | Locale, options?: SegmenterOptions);
+  public constructor(
+    locale?: Read<string | Locale>,
+    options?: Read<SegmenterOptions>,
+  );
 
   /** The pieces of the text; they are gone through with `for...of`. */
-  public segment(text: string): Segments;
-  public resolvedOptions(): ResolvedSegmenterOptions;
+  public readonly segment(text: string): Segments;
+  public readonly resolvedOptions(): ResolvedSegmenterOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -567,21 +590,24 @@ export type ResolvedDateTimeFormatOptions = {
  * @example new Intl.DateTimeFormat("ru", { dateStyle: "long" }).format()
  */
 export declare class DateTimeFormat {
-  public constructor(locale?: string | Locale, options?: DateTimeFormatOptions);
+  public constructor(
+    locale?: Read<string | Locale>,
+    options?: Read<DateTimeFormatOptions>,
+  );
 
   /**
    * The date as text; this moment when there is none. A number is the
    * milliseconds since the start of 1970.
    */
-  public format(date?: Date | int): string;
+  public readonly format(date?: Read<Date | int>): string;
   /** The text by parts: the day, the month, what stands between them. */
-  public formatToParts(date?: Date | int): DateTimeFormatPart[];
-  public resolvedOptions(): ResolvedDateTimeFormatOptions;
+  public readonly formatToParts(date?: Read<Date | int>): DateTimeFormatPart[];
+  public readonly resolvedOptions(): ResolvedDateTimeFormatOptions;
 
   /** Those of the languages asked for that there is data for. */
   public static supportedLocalesOf(
-    locales: string | string[],
-    options?: SupportedLocalesOptions,
+    locales: Read<string | string[]>,
+    options?: Read<SupportedLocalesOptions>,
   ): string[];
 }
 
@@ -591,5 +617,5 @@ export declare class DateTimeFormat {
  * @example Intl.getCanonicalLocales("EN-us") // ["en-US"]
  */
 export declare function getCanonicalLocales(
-  locales: string | string[],
+  locales: Read<string | string[]>,
 ): string[];

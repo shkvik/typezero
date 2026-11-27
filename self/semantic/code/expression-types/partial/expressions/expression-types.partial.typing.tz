@@ -144,6 +144,8 @@ partial class ExpressionTypes {
         return this.yieldTyped(expr, module);
       case ExprKind.Cast:
         return this.castTyped(expr, module);
+      case ExprKind.Sequence:
+        return this.sequenceTyped(expr, wanted, module);
       default:
         return this.childrenTyped(expr, module);
     }

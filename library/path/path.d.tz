@@ -80,7 +80,7 @@ export declare function relative(from: string, to: string): string;
 export declare function parse(path: string): ParsedPath;
 
 /** Makes a path of its parts, the reverse of `parse`. */
-export declare function format(parts: FormatInputPathObject): string;
+export declare function format(parts: Read<FormatInputPathObject>): string;
 
 /**
  * On Windows the path with the prefix `\\?\`, which lifts the limit on its

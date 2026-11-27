@@ -6,30 +6,33 @@
  */
 export interface Reflect {
   /** The field or the method of an object by its name. */
-  get(target: object, name: string): unknown;
+  readonly get(target: Read<object>, name: string): unknown;
   /**
    * Calls a function with the object as `this` and the arguments of the
    * array; an error when the arguments do not fit its parameters.
    */
-  apply<R>(
-    callee: (...args: never[]) => R,
-    self: unknown,
-    args: unknown[],
+  readonly apply<R>(
+    callee: Read<(...args: never[]) => R>,
+    self: Read<unknown>,
+    args: Read<unknown[]>,
   ): Result<R, ReflectError>;
-  apply(
-    callee: unknown,
-    self: unknown,
-    args: unknown[],
+  readonly apply(
+    callee: Read<unknown>,
+    self: Read<unknown>,
+    args: Read<unknown[]>,
   ): Result<unknown, ReflectError>;
   /** Makes an object of a class known only when the program runs. */
-  construct<T>(cls: Constructor<T>, args: unknown[]): Result<T, ReflectError>;
+  readonly construct<T>(
+    cls: Read<Constructor<T>>,
+    args: Read<unknown[]>,
+  ): Result<T, ReflectError>;
   /**
    * Makes an object of a class without a constructor and gives its fields
    * the values by their names, each checked against the type of the field.
    */
-  fill<T>(
-    cls: Constructor<T>,
-    values: Map<string, unknown>,
+  readonly fill<T>(
+    cls: Read<Constructor<T>>,
+    values: Read<Map<string, unknown>>,
   ): Result<T, ReflectFillError>;
 
   /**
@@ -38,8 +41,8 @@ export interface Reflect {
    * written; or a string, and then they are `unknown`.
    */
   defineMetadata(
-    key: unknown,
-    value: unknown,
+    key: Read<unknown>,
+    value: Own<unknown>,
     target: object,
     member?: string,
   ): void;
@@ -48,21 +51,37 @@ export interface Reflect {
    * "design:type", "design:paramtypes" and "design:returntype" give the
    * types written in the code.
    */
-  getMetadata(key: unknown, target: object, member?: string): unknown;
+  readonly getMetadata(
+    key: Read<unknown>,
+    target: Read<object>,
+    member?: string,
+  ): unknown;
   /** As `getMetadata`, of the class itself only. */
-  getOwnMetadata(key: unknown, target: object, member?: string): unknown;
-  hasMetadata(key: unknown, target: object, member?: string): boolean;
-  hasOwnMetadata(key: unknown, target: object, member?: string): boolean;
+  readonly getOwnMetadata(
+    key: Read<unknown>,
+    target: Read<object>,
+    member?: string,
+  ): unknown;
+  readonly hasMetadata(
+    key: Read<unknown>,
+    target: Read<object>,
+    member?: string,
+  ): boolean;
+  readonly hasOwnMetadata(
+    key: Read<unknown>,
+    target: Read<object>,
+    member?: string,
+  ): boolean;
   /** Removes the record; whether it was there. */
-  deleteMetadata(key: unknown, target: object, member?: string): boolean;
+  deleteMetadata(key: Read<unknown>, target: object, member?: string): boolean;
   /**
    * A decorator that writes the record. It is written only as a decorator,
    * before a class or a member.
    * @example @Reflect.metadata("table", "users")
    */
-  metadata(
-    key: unknown,
-    value: unknown,
+  readonly metadata(
+    key: Read<unknown>,
+    value: Own<unknown>,
   ): (cls: Constructor, member?: string) => void;
 }
 

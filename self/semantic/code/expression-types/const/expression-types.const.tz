@@ -57,6 +57,7 @@ export const kSampleList = "[int]";
 export const kNewWord = "new ";
 export const kResultMakers = ["ok", "err"];
 export const kNoPlace = "";
+export const kShortTextLength = 40;
 export const kValuePlace = " of the value";
 export const kKeyPlace = " of the key";
 export const kNullName = "null";

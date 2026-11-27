@@ -17,41 +17,50 @@ export interface Result<T, E> {
   readonly error: E;
 
   /** Whether it is an Ok; after the check `value` can be read. */
-  isOk(): boolean;
+  readonly isOk(): boolean;
   /** Whether it is an Err; after the check `error` can be read. */
-  isErr(): boolean;
+  readonly isErr(): boolean;
 
   /**
    * Changes the value of an Ok; an Err stays as it is.
    * @example ok(2).map((x) => x * 2) // ok(4)
    */
-  map<U>(change: (value: T) => U): Result<U, E>;
+  readonly map<U>(change: Read<(value: T) => U>): Result<U, E>;
   /** Changes the error of an Err; an Ok stays as it is. */
-  mapErr<F>(change: (error: E) => F): Result<T, F>;
+  readonly mapErr<F>(change: Read<(error: E) => F>): Result<T, F>;
   /**
    * Goes on with the value of an Ok by a function that may fail too; the
    * errors of both add up.
    */
-  andThen<U, F>(next: (value: T) => Result<U, F>): Result<U, E | F>;
+  readonly andThen<U, F>(
+    next: Read<(value: T) => Result<U, F>>,
+  ): Result<U, E | F>;
   /** Tries to recover from an Err by a function that may fail too. */
-  orElse<U, F>(next: (error: E) => Result<U, F>): Result<T | U, F>;
+  readonly orElse<U, F>(
+    next: Read<(error: E) => Result<U, F>>,
+  ): Result<T | U, F>;
   /**
    * What the first function gives for the value of an Ok, or the second for
    * the error of an Err.
    * @example r.match((value) => "got " + value, (error) => error.message)
    */
-  match<A, B>(onOk: (value: T) => A, onErr: (error: E) => B): A | B;
+  readonly match<A, B>(
+    onOk: Read<(value: T) => A>,
+    onErr: Read<(error: E) => B>,
+  ): A | B;
   /** The value of an Ok, or the given one for an Err. */
-  unwrapOr<U>(fallback: U): T | U;
+  readonly unwrapOr<U>(fallback: Read<U>): T | U;
   /** Calls the function with the value of an Ok and gives the same Result. */
-  andTee(action: (value: T) => unknown): Result<T, E>;
+  readonly andTee(action: Read<(value: T) => unknown>): Result<T, E>;
   /** Calls the function with the error of an Err and gives the same Result. */
-  orTee(action: (error: E) => unknown): Result<T, E>;
+  readonly orTee(action: Read<(error: E) => unknown>): Result<T, E>;
   /**
    * Checks the value of an Ok by a function that may fail: its error goes
    * on, its value is dropped and the first value stays.
    */
-  andThrough<F>(check: (value: T) => Result<unknown, F>): Result<T, E | F>;
+  readonly andThrough<F>(
+    check: Read<(value: T) => Result<unknown, F>>,
+  ): Result<T, E | F>;
 }
 
 /**
@@ -71,14 +80,14 @@ export type Err<T, E> = Result<never, E>;
  * @example return ok(n.value)
  */
 export declare function ok(): Result<void, never>;
-export declare function ok<T>(value: T): Result<T, never>;
+export declare function ok<T>(value: Read<T>): Result<T, never>;
 
 /**
  * Makes an Err of the error and remembers the place it was made at.
  * @example return err({ code: "empty" })
  */
 export declare function err(): Result<never, void>;
-export declare function err<E>(error: E): Result<never, E>;
+export declare function err<E>(error: Read<E>): Result<never, E>;
 
 /** What `Result` has. */
 export interface ResultConstructor {
@@ -87,9 +96,11 @@ export interface ResultConstructor {
    * types written in place give a tuple: `Result.combine([a, b])` is a
    * `Result<[A, B], EA | EB>`.
    */
-  combine<T, E>(results: Result<T, E>[]): Result<T[], E>;
+  readonly combine<T, E>(results: Read<Result<T, E>[]>): Result<T[], E>;
   /** The values of all the Results, or every error there is. */
-  combineWithAllErrors<T, E>(results: Result<T, E>[]): Result<T[], E[]>;
+  readonly combineWithAllErrors<T, E>(
+    results: Read<Result<T, E>[]>,
+  ): Result<T[], E[]>;
 }
 
 export declare const Result: ResultConstructor;

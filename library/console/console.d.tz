@@ -5,15 +5,15 @@
  */
 export interface Console {
   /** Prints to the standard output. */
-  log(...values: unknown[]): void;
+  readonly log(...values: Read<unknown>[]): void;
   /** The same as `log`. */
-  info(...values: unknown[]): void;
+  readonly info(...values: Read<unknown>[]): void;
   /** The same as `log`. */
-  debug(...values: unknown[]): void;
+  readonly debug(...values: Read<unknown>[]): void;
   /** Prints to the standard error. */
-  error(...values: unknown[]): void;
+  readonly error(...values: Read<unknown>[]): void;
   /** The same as `error`. */
-  warn(...values: unknown[]): void;
+  readonly warn(...values: Read<unknown>[]): void;
 }
 
 /**

@@ -4,8 +4,8 @@
  */
 export declare class WeakRef<T> {
   /** A reference to an object; a number or a text is held itself. */
-  public constructor(target: T);
+  public constructor(target: Read<T>);
 
   /** The object, or `undefined` when it is freed already. */
-  public deref(): T | undefined;
+  public readonly deref(): T | undefined;
 }

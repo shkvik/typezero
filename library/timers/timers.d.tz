@@ -37,40 +37,40 @@ export declare class Immediate {
  * @example const timer = setTimeout(() => console.log("late"), 1000)
  */
 export declare function setTimeout(
-  callback: () => void,
+  callback: Own<() => void>,
   delay?: int | double,
 ): Timeout;
 
 /** Calls the function again and again, with the delay between the calls. */
 export declare function setInterval(
-  callback: () => void,
+  callback: Own<() => void>,
   delay?: int | double,
 ): Timeout;
 
 /** Calls the function after the events that have already come. */
-export declare function setImmediate(callback: () => void): Immediate;
+export declare function setImmediate(callback: Own<() => void>): Immediate;
 
 /**
  * Stops a timer of `setTimeout` or `setInterval`; nothing happens when it is
  * over or there is none. What `setImmediate` started is stopped by
  * `clearImmediate`: JavaScript would leave it running here without a word.
  */
-export declare function clearTimeout(timer?: Timeout): void;
+export declare function clearTimeout(timer?: Read<Timeout>): void;
 
 /** The same as `clearTimeout`: it stops a timer of either. */
-export declare function clearInterval(timer?: Timeout): void;
+export declare function clearInterval(timer?: Read<Timeout>): void;
 
 /**
  * Stops what `setImmediate` started; nothing happens when it has run or
  * there is none. A timer of `setTimeout` is stopped by `clearTimeout`.
  */
-export declare function clearImmediate(timer?: Immediate): void;
+export declare function clearImmediate(timer?: Read<Immediate>): void;
 
 /**
  * Calls the function as soon as the code that runs now is over, before any
  * timer and any event.
  */
-export declare function queueMicrotask(callback: () => void): void;
+export declare function queueMicrotask(callback: Own<() => void>): void;
 
 /** The clock of `performance`. */
 export interface Performance {
@@ -79,7 +79,7 @@ export interface Performance {
    * measuring how long something takes.
    * @example const started = performance.now()
    */
-  now(): double;
+  readonly now(): double;
 }
 
 export declare const performance: Performance;

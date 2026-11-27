@@ -14,5 +14,5 @@ export declare function shiftCells<T>(
   count: int,
 ): void;
 export declare function forget<T>(value: Own<T>): void;
-export declare function arrayCells<T>(items: T[]): Raw<T>;
+export declare function arrayCells<T>(items: Read<T[]>): Raw<T>;
 export declare function hashOf<T>(key: Read<T>): int;

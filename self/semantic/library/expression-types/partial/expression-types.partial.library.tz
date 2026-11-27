@@ -173,6 +173,8 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const receiver = this.libraryReceiver(object);
     if (receiver == undefined) {
       return undefined;
@@ -200,6 +202,12 @@ partial class ExpressionTypes {
     const isProved =
       (kSpecialMethods.includes(member.name) && !isFilter) ||
       this.types.isRegexSplit(expr, member);
+    const count = tree.argumentsOf(expr.argsList).length;
+    const overload = this.objectOverload(receiver, member.name, count);
+    if (overload != undefined) {
+      return this.overloadCalled(expr, member, overload, wanted, module);
+    }
+
     const generic = this.receiverMember(receiver, member.name, true);
     const isGeneric =
       generic != undefined &&

@@ -223,7 +223,7 @@ partial class OwnershipCheck {
 
     switch (type.kind) {
       case TypeKind.Object:
-        return this.interfaceCallee(type, name) != undefined;
+        return this.isOpenInterface(type, name);
       case TypeKind.Function:
         return true;
       case TypeKind.Instance:
@@ -231,6 +231,25 @@ partial class OwnershipCheck {
       default:
         return false;
     }
+  }
+
+  private isOpenInterface(type: Type, name: string): boolean {
+    if (!this.isOwnInterface(type)) {
+      return false;
+    }
+
+    return this.interfaceCallee(type, name) != undefined;
+  }
+
+  private readonly isOwnInterface(type: Type): boolean {
+    const home = this.values.types.aliasHomeOf(type);
+    if (home == undefined) {
+      return true;
+    }
+
+    const opened = this.values.types.program.modules[home.module];
+
+    return opened != undefined && !opened.source.isLibrary;
   }
 
   private readonly isFieldFunction(type: Type, name: string): boolean {

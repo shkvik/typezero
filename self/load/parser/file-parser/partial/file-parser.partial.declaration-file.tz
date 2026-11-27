@@ -297,6 +297,9 @@ partial class FileParser {
     const form = this.declaredForm(token, modifiers, optional, head.start);
     const type = this.declaredType(form, token, name);
 
+    const isReadonly =
+      modifiers.readonly && form.kind == DeclaredMemberKind.Method;
+
     this.endDeclaredMember(form);
     members.push({
       name,
@@ -304,6 +307,7 @@ partial class FileParser {
       access: modifiers.access,
       accessWritten: modifiers.accessWritten,
       isStatic: modifiers.isStatic,
+      isReadonly,
       form,
       type,
     });

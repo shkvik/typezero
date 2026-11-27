@@ -6,25 +6,25 @@
  */
 export interface ObjectConstructor {
   /** The names of the fields, or the keys of a dictionary. */
-  keys(value: object): string[];
+  readonly keys(value: Read<object>): string[];
   /** The values of the fields. */
-  values<T extends object>(value: T): T[keyof T][];
+  readonly values<T extends object>(value: Read<T>): T[keyof T][];
   /**
    * The fields as pairs of a name and a value.
    * @example Object.entries({ a: 1 }) // [["a", 1]]
    */
-  entries<T extends object>(value: T): [string, T[keyof T]][];
+  readonly entries<T extends object>(value: Read<T>): [string, T[keyof T]][];
   /** A dictionary of the pairs of a key and a value. */
-  fromEntries<V>(
-    entries: Iterable<[string, V]> | Iterator<[string, V]>,
+  readonly fromEntries<V>(
+    entries: Read<Iterable<[string, V]> | Iterator<[string, V]>>,
   ): Record<string, V>;
   /**
    * A dictionary of the items by the key the function gives for each. The
    * key is a string; `Map.groupBy` groups by any key.
    */
-  groupBy<T>(
-    items: Iterable<T> | Iterator<T>,
-    key: (item: T, index: int) => string,
+  readonly groupBy<T>(
+    items: Read<Iterable<T> | Iterator<T>>,
+    key: Read<(item: T, index: int) => string>,
   ): Record<string, T[]>;
 }
 

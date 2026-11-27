@@ -7,6 +7,7 @@ import {
 import {
   DeclaredVariable,
   Destination,
+  UnknownType,
   DestinationKind,
   HiddenName,
   ParamSlot,
@@ -41,7 +42,10 @@ import {
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import { kNoPlace } from "../../const/expression-types.const.tz";
+import {
+  kNoPlace,
+  kShortTextLength,
+} from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   public readonly variableOf(module: int, loc: int): Type | undefined {
@@ -176,9 +180,161 @@ partial class ExpressionTypes {
     });
     this.doorOrder.push(key);
     this.openVariable(key, variable, module);
+    this.unknownTypeCheck(key, variable, owned, module);
     this.errors.keepSince(owned);
 
     return this.variableDone(key);
+  }
+
+  private unknownTypeCheck(
+    key: string,
+    variable: DeclaredVariable,
+    owned: int,
+    module: int,
+  ): void {
+    const tree = this.types.program.tree;
+
+    const door = this.doors.get(key);
+    const init = tree.exprAt(variable.decl.initId);
+    const written = tree.typeRefAt(variable.decl.typeAnnId);
+    const isWritten = variable.decl.origin == NameOrigin.Written;
+    if (door == undefined || init == undefined || written != undefined) {
+      return;
+    }
+    if (!isWritten) {
+      return;
+    }
+    if (door.type.kind != TypeKind.Error || this.errors.mark() != owned) {
+      return;
+    }
+
+    const last = this.lastLocOf(init);
+    if (this.hasErrorWithin(module, variable.decl.loc, last)) {
+      return;
+    }
+    if (this.usesUnknown(init, module)) {
+      return;
+    }
+
+    const word = variable.decl.name;
+    const other = this.shortText(init, module);
+    const loc = variable.decl.loc;
+
+    this.unknownTypes.push({ module, loc, word, other });
+  }
+
+  private reportUnknownTypes(): void {
+    const unknown = this.unknownTypes.splice(0, this.unknownTypes.length);
+    const failed = new Set<int>();
+
+    for (const one of unknown) {
+      if (this.hasModuleErrors(one.module)) {
+        failed.add(one.module);
+      }
+    }
+
+    for (const one of unknown) {
+      if (failed.has(one.module)) {
+        continue;
+      }
+
+      this.errors.write(one.module, one.loc, Code.TypeNotWorkedOut, {
+        word: one.word,
+        other: one.other,
+      });
+    }
+  }
+
+  private readonly usesUnknown(expr: Expr, module: int): boolean {
+    const exprs: Expr[] = [expr];
+
+    this.types.exprs(expr, exprs, false);
+
+    for (const one of exprs) {
+      if (one.kind != ExprKind.Name) {
+        continue;
+      }
+
+      const target = this.targetOfName(one, module);
+      if (target == undefined) {
+        return true;
+      }
+
+      const key = `${target.module} ${target.loc}`;
+      const door = this.doors.get(key);
+      const param = this.paramTypes.get(key);
+      const isDoorUnknown = door != undefined && door.type.kind == TypeKind.Error;
+      const isParamUnknown = param != undefined && param.kind == TypeKind.Error;
+      if (isDoorUnknown || isParamUnknown) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private readonly firstLocOf(expr: Expr): int {
+    const exprs: Expr[] = [];
+    let first: int = expr.loc;
+
+    this.types.exprs(expr, exprs, false);
+
+    for (const one of exprs) {
+      if (one.loc < first) {
+        first = one.loc;
+      }
+    }
+
+    return first;
+  }
+
+  private readonly lastLocOf(expr: Expr): int {
+    const exprs: Expr[] = [];
+    let last: int = expr.loc;
+
+    this.types.exprs(expr, exprs, false);
+
+    for (const one of exprs) {
+      if (one.loc > last) {
+        last = one.loc;
+      }
+    }
+
+    return last;
+  }
+
+  private readonly shortText(expr: Expr, module: int): string {
+    const opened = this.types.program.modules[module];
+    if (opened == undefined) {
+      return "";
+    }
+
+    const start = this.firstLocOf(expr);
+    const end = start + kShortTextLength;
+    const rest = opened.source.text.toString("utf8", start, end);
+    const line = rest.indexOf("\n");
+    if (line >= 0) {
+      return rest.slice(0, line).trimEnd();
+    }
+    if (rest.length < kShortTextLength) {
+      return rest;
+    }
+
+    return `${rest}...`;
+  }
+
+  private readonly hasModuleErrors(module: int): boolean {
+    const own = this.errors.of(module).length;
+    const types = this.types.problems(module).length;
+    const scopes = this.types.scopeErrors(module).length;
+
+    return own + types + scopes > 0;
+  }
+
+  private readonly hasErrorWithin(module: int, from: int, to: int): boolean {
+    const errors = this.errors.of(module);
+
+    return errors.some((one) => one.loc >= from && one.loc <= to);
   }
 
   private variableDone(key: string): VariableDoor | undefined {

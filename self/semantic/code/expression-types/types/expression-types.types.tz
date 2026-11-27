@@ -220,6 +220,13 @@ export type StaticOwner = {
   readonly module: int;
 };
 
+export type UnknownType = {
+  readonly module: int;
+  readonly loc: int;
+  readonly word: string;
+  readonly other: string;
+};
+
 export type StaticField = {
   readonly module: int;
   readonly loc: int;

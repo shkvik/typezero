@@ -10,53 +10,53 @@ export interface string {
   readonly length: int;
 
   /** The character at the position; a negative position counts from the end. */
-  at(index: int): string | undefined;
+  readonly at(index: int): string | undefined;
   /** The character at the position, empty past the end. */
-  charAt(index?: int): string;
+  readonly charAt(index?: int): string;
   /** The UTF-16 unit at the position. */
-  charCodeAt(index: int): int | undefined;
+  readonly charCodeAt(index: int): int | undefined;
   /** The code point that starts at the position. */
-  codePointAt(index: int): int | undefined;
+  readonly codePointAt(index: int): int | undefined;
 
   /**
    * The part from `start` up to `end`; negative positions count from the end.
    * @example "abcd".slice(1, -1) // "bc"
    */
-  slice(start?: int, end?: int): string;
+  readonly slice(start?: int, end?: int): string;
   /** The part between the two positions, whichever is smaller first. */
-  substring(start: int, end?: int): string;
+  readonly substring(start: int, end?: int): string;
 
   /** The position of the first occurrence, -1 when there is none. */
-  indexOf(text: string, position?: int): int;
+  readonly indexOf(text: string, position?: int): int;
   /** The position of the last occurrence, -1 when there is none. */
-  lastIndexOf(text: string, position?: int): int;
-  includes(text: string, position?: int): boolean;
-  startsWith(text: string, position?: int): boolean;
+  readonly lastIndexOf(text: string, position?: int): int;
+  readonly includes(text: string, position?: int): boolean;
+  readonly startsWith(text: string, position?: int): boolean;
   /** `end` is where the string is taken to end. */
-  endsWith(text: string, end?: int): boolean;
+  readonly endsWith(text: string, end?: int): boolean;
 
   /** The string `count` times; the count must be proven not negative. */
-  repeat(count: int): string;
-  toString(): string;
+  readonly repeat(count: int): string;
+  readonly toString(): string;
   /** The string followed by the values, each as `String(value)` shows it. */
-  concat(...values: unknown[]): string;
+  readonly concat(...values: Read<unknown>[]): string;
 
   /**
    * The parts between the separators, at most `limit` of them; without a
    * separator the whole string, with an empty one its UTF-16 units.
    * @example "a,b,c".split(",") // ["a", "b", "c"]
    */
-  split(separator?: string | RegExp, limit?: int): string[];
+  readonly split(separator?: Read<string | RegExp>, limit?: int): string[];
 
-  trim(): string;
-  trimStart(): string;
-  trimEnd(): string;
+  readonly trim(): string;
+  readonly trimStart(): string;
+  readonly trimEnd(): string;
   /** Adds `fill` (a space) at the start until the length is reached. */
-  padStart(length: int, fill?: string): string;
+  readonly padStart(length: int, fill?: string): string;
   /** Adds `fill` (a space) at the end until the length is reached. */
-  padEnd(length: int, fill?: string): string;
-  toUpperCase(): string;
-  toLowerCase(): string;
+  readonly padEnd(length: int, fill?: string): string;
+  readonly toUpperCase(): string;
+  readonly toLowerCase(): string;
 
   /**
    * Replaces what the regex finds: the first match, or every match with the
@@ -64,40 +64,40 @@ export interface string {
    * replaces only its first occurrence; write `replaceAll`. A function gets
    * the match and its groups, typed by the regex.
    */
-  replace(
-    pattern: RegExp,
-    replacement: string | ((found: string) => string),
+  readonly replace(
+    pattern: Read<RegExp>,
+    replacement: Read<string | ((found: string) => string)>,
   ): string;
   /**
    * Replaces every occurrence of a text, or every match of a regex with the
    * flag `g`. A function as the replacement needs a regex.
    * @example "a-b-c".replaceAll("-", "+") // "a+b+c"
    */
-  replaceAll(
-    pattern: string | RegExp,
-    replacement: string | ((found: string) => string),
+  readonly replaceAll(
+    pattern: Read<string | RegExp>,
+    replacement: Read<string | ((found: string) => string)>,
   ): string;
   /**
    * The first match with its groups, or with the flag `g` the texts of all
    * matches; the groups are typed by the regex.
    */
-  match(pattern: RegExp): RegExpMatchArray | undefined;
+  readonly match(pattern: Read<RegExp>): RegExpMatchArray | undefined;
   /** Every match with its groups; the regex needs the flag `g`. */
-  matchAll(pattern: RegExp): Generator<RegExpMatchArray>;
+  readonly matchAll(pattern: Read<RegExp>): Generator<RegExpMatchArray>;
   /** The position of the first match, -1 when there is none. */
-  search(pattern: RegExp): int;
+  readonly search(pattern: Read<RegExp>): int;
 
   /**
    * Compares as the language does: negative, zero or positive. Without a
    * language the order of the system is used.
    */
-  localeCompare(
+  readonly localeCompare(
     other: string,
-    locale?: string | Intl.Locale,
-    options?: object,
+    locale?: Read<string | Intl.Locale>,
+    options?: Read<object>,
   ): int;
   /** The Unicode normalization form, NFC by default. */
-  normalize(form?: "NFC" | "NFD" | "NFKC" | "NFKD"): string;
+  readonly normalize(form?: "NFC" | "NFD" | "NFKC" | "NFKD"): string;
 
   /** The characters in order, each a string: what `for...of` goes through. */
   [Symbol.iterator](): Iterator<string>;
@@ -106,7 +106,7 @@ export interface string {
    * The string for a function of C: its bytes in UTF-8 with a zero at the
    * end; `undefined` when the string itself has a zero inside.
    */
-  toCString(): cstring | undefined;
+  readonly toCString(): cstring | undefined;
 }
 
 /**
@@ -123,11 +123,14 @@ export interface StringConstructor {
   (value?: unknown): string;
 
   /** A template without its escapes processed: String.raw`a\n` is `a\n`. */
-  raw(parts: TemplateStringsArray, ...values: unknown[]): string;
+  readonly raw(
+    parts: Read<TemplateStringsArray>,
+    ...values: Read<unknown>[],
+  ): string;
   /** A string of UTF-16 units. */
-  fromCharCode(...codes: (int | double)[]): string;
+  readonly fromCharCode(...codes: (int | double)[]): string;
   /** A string of code points, each proven to be from 0 to 1114111. */
-  fromCodePoint(...codes: int[]): string;
+  readonly fromCodePoint(...codes: int[]): string;
 }
 
 export declare const String: StringConstructor;

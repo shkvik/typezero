@@ -49,7 +49,7 @@ export declare class RegExp {
    */
   public exec(text: string): RegExpMatchArray | undefined;
   /** The regex as it is written: `/…/flags`. */
-  public toString(): string;
+  public readonly toString(): string;
 
   /**
    * Reads a regex of a text known only when the program runs; an error when

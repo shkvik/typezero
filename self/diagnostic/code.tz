@@ -329,6 +329,7 @@ export enum Code {
   DefaultMissing = "TZ2436",
   BuiltinTypeParameterName = "TZ2437",
   UnionOfNumbers = "TZ2438",
+  TypeNotWorkedOut = "TZ2439",
   NotAssignable = "TZ2501",
   ConvertExplicitly = "TZ2502",
   RoundThenConvert = "TZ2503",
