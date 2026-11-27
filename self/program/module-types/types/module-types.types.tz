@@ -15,6 +15,6 @@ export type TypedDeclaration = {
 };
 
 export type ModuleTypes = {
-  readonly module: Module;
+  readonly module: int;
   readonly declarations: TypedDeclaration[];
 };

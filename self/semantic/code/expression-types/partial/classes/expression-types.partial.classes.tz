@@ -33,6 +33,8 @@ import { CallKind, StaticOwner } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private walkClass(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     this.redeclareChecks(decl, module);
     this.decoratorChecks(decl, module);
     this.extendsCycleCheck(decl, module);
@@ -40,12 +42,13 @@ partial class ExpressionTypes {
     this.parentMethodChecks(decl, module);
     this.fieldStartChecks(decl, module);
 
-    for (const fn of decl.constructors) {
+    for (const fn of tree.functionsOf(decl.constructorsList)) {
       this.methodFunction(decl, fn, module);
     }
 
-    for (const fn of decl.methods) {
-      if (fn.body != undefined) {
+    for (const fn of tree.functionsOf(decl.methodsList)) {
+      const body = tree.blockAt(fn.bodyId);
+      if (body != undefined) {
         this.methodFunction(decl, fn, module);
       }
     }
@@ -62,9 +65,9 @@ partial class ExpressionTypes {
     const home = this.partModule(part, module);
     const self = this.selfOf(decl, fn, module);
 
-    const place = this.classes.methodPlace(fn);
+    const place = this.types.methodPlace(fn);
     const frame = this.superFrameOf(decl, fn, home);
-    const init = this.classes.initFrameOf(decl, fn);
+    const init = this.types.initFrameOf(decl, fn);
 
     this.selves.push(self);
     this.ownerClasses.push({ decl, module });
@@ -86,23 +89,28 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly selfOf(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
-    if (this.classes.isStaticMethod(fn)) {
-      return this.store.plain(TypeKind.Error);
+  private selfOf(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
+    const tree = this.types.program.tree;
+
+    if (this.types.isStaticMethod(fn)) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const part = this.partOf(decl, fn);
     const home = this.partModule(part, module);
-    const params = this.resolver.parameterTypes(home, part.typeParams);
+    const params = this.types.parameterTypes(
+      home,
+      tree.typeParamsOf(part.typeParamsList),
+    );
 
-    return this.resolver.classInstance(module, decl, params);
+    return this.types.classInstance(module, decl, params);
   }
 
-  private readonly thisTyped(expr: NameExpr, module: int): Type {
+  private thisTyped(expr: NameExpr, module: int): Type {
     const self = this.selves[this.selves.length - 1];
 
     if (this.thisInFunction(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.thisBeforeSuper(expr, module);
@@ -112,9 +120,9 @@ partial class ExpressionTypes {
       return self;
     }
 
-    this.report(module, expr.loc, Code.ThisOutsideMethod, kNoDetails);
+    this.errors.write(module, expr.loc, Code.ThisOutsideMethod, kNoDetails);
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private readonly isThisName(expr: Expr, module: int): boolean {
@@ -128,16 +136,21 @@ partial class ExpressionTypes {
   }
 
   private readonly isInsideClass(owner: ClassDecl): boolean {
-    return this.ownerClasses.some((one) => one.decl == owner);
+    return this.ownerClasses.some((one) => one.decl.id == owner.id);
   }
 
-  private readonly isDerivedInside(owner: ClassDecl): boolean {
+  private isDerivedInside(owner: ClassDecl): boolean {
+    const tree = this.types.program.tree;
+
     const current = this.ownerClasses[this.ownerClasses.length - 1];
-    if (current == undefined || current.decl.typeParams.length > 0) {
+    if (
+      current == undefined ||
+      tree.typeParamsOf(current.decl.typeParamsList).length > 0
+    ) {
       return false;
     }
 
-    const self = this.resolver.classInstance(current.module, current.decl, []);
+    const self = this.types.classInstance(current.module, current.decl, []);
     const chain = this.types.ancestorsOf(self);
 
     return chain.some(
@@ -176,25 +189,27 @@ partial class ExpressionTypes {
   ): Type {
     const found = this.staticMember(expr, owner, module);
     if (found == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (found.kind == TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.staticOrderCheck(expr, owner, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return found;
   }
 
-  private readonly staticOrderCheck(
+  private staticOrderCheck(
     expr: MemberExpr,
     owner: StaticOwner,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const decl = owner.decl;
-    const index = decl.fields.findIndex(
+    const index = tree.fieldsOf(decl.fieldsList).findIndex(
       (field) => field.form == FieldKind.Static && field.name == expr.name,
     );
     if (index < 0) {
@@ -208,9 +223,9 @@ partial class ExpressionTypes {
       isTopLevel &&
       !decl.expression &&
       owner.module == module &&
-      !this.walkedClasses.has(decl);
+      !this.walkedClasses.has(decl.id);
     if (isEarly) {
-      this.report(module, expr.loc, Code.StaticUsedEarly, {
+      this.errors.write(module, expr.loc, Code.StaticUsedEarly, {
         word,
         other: className,
       });
@@ -219,12 +234,14 @@ partial class ExpressionTypes {
     }
 
     const current = this.staticFields[this.staticFields.length - 1];
-    const position = decl.fields.findIndex((field) => field == current);
+    const position = tree
+      .fieldsOf(decl.fieldsList)
+      .findIndex((field) => field.loc == current?.loc);
     if (current == undefined || position < 0 || index < position) {
       return false;
     }
 
-    this.report(module, expr.loc, Code.StaticReadBeforeSet, { word });
+    this.errors.write(module, expr.loc, Code.StaticReadBeforeSet, { word });
 
     return true;
   }
@@ -235,11 +252,15 @@ partial class ExpressionTypes {
     owner: StaticOwner,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const found = this.staticMember(member, owner, module);
     if (found == undefined) {
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.fieldValueCall(expr, member, found, CallKind.Own, module);
@@ -250,72 +271,83 @@ partial class ExpressionTypes {
     owner: StaticOwner,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const decl = owner.decl;
     const name = expr.name;
     if (name == kPrototypeName) {
-      this.report(module, expr.loc, Code.NoPrototype, kNoDetails);
+      this.errors.write(module, expr.loc, Code.NoPrototype, kNoDetails);
 
       return undefined;
     }
 
-    const field = decl.fields.find(
+    const field = tree.fieldsOf(decl.fieldsList).find(
       (one) => one.name == name && one.form == FieldKind.Static,
     );
-    const methods = decl.methods.filter(
-      (one) => one.name == name && this.classes.isStaticMethod(one),
-    );
+    const methods = this.types
+      .classMethodsNamed(decl, name)
+      .filter((one) => this.types.isStaticMethod(one));
     const isMissing = field == undefined && methods.length == 0;
     if (isMissing && name == kClassNameMember) {
-      return this.store.plain(TypeKind.String);
+      return this.types.store.plain(TypeKind.String);
     }
-    if (isMissing && this.classes.hasInstanceMember(decl, name)) {
+    if (isMissing && this.types.hasInstanceMember(decl, name)) {
       const word = name;
       const first = decl.name ?? "";
 
-      this.report(module, expr.loc, Code.InstanceMemberViaClass, {
+      this.errors.write(module, expr.loc, Code.InstanceMemberViaClass, {
         word,
         first,
       });
 
       return undefined;
     }
-    if (isMissing && decl.base == undefined && decl.baseExpr == undefined) {
+    if (
+      isMissing &&
+      tree.typeRefAt(decl.baseId) == undefined &&
+      tree.exprAt(decl.baseExprId) == undefined
+    ) {
       const word = name;
       const first = decl.name ?? "";
 
-      this.report(module, expr.loc, Code.StaticMissing, { word, first });
+      this.errors.write(module, expr.loc, Code.StaticMissing, { word, first });
 
       return undefined;
     }
     if (field != undefined) {
       this.reportAccess(decl, field.access, name, expr.loc, module);
 
-      return this.staticFieldType(field.type, field.presence, owner);
+      return this.staticFieldType(
+        tree.typeRefAt(field.typeId),
+        field.presence,
+        owner,
+      );
     }
 
     const method = methods[0];
     if (method == undefined || methods.length > 1) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const access = this.classes.accessOf(method);
+    const access = this.types.classAccessOf(method);
 
     this.reportAccess(decl, access, name, expr.loc, module);
 
-    if (method.typeParams.length > 0) {
-      return this.store.plain(TypeKind.Error);
+    const typeParams = tree.typeParamsOf(method.typeParamsList);
+    if (typeParams.length > 0) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.methodFunction(decl, method, owner.module);
   }
 
-  private readonly staticFieldType(
+  private staticFieldType(
     written: TypeRef | undefined,
     presence: FieldPresence,
     owner: StaticOwner,
   ): Type {
     if (written == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const context: TypeContext = {
@@ -323,7 +355,7 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const type = this.resolver.resolve(written, context);
+    const type = this.types.resolve(written, context);
 
     if (presence == FieldPresence.Optional) {
       return this.types.optional(type);

@@ -11,96 +11,111 @@ import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private readonly genericClassRules(decl: ClassDecl, module: int): void {
+  private genericClassRules(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     this.classGrowthCheck(decl, module);
 
-    for (const fn of decl.methods) {
-      const genericMethodErrors = this.genericCalls.genericMethodErrors(
+    for (const fn of tree.functionsOf(decl.methodsList)) {
+      const genericMethodErrors = this.types.genericMethodErrors(
         decl,
         fn,
       );
 
-      this.reportAll(module, genericMethodErrors);
+      this.errors.writeAll(module, genericMethodErrors);
     }
   }
 
-  private readonly classGrowthCheck(decl: ClassDecl, module: int): void {
+  private classGrowthCheck(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     const name = decl.name ?? "";
-    if (decl.typeParams.length == 0 || name == "") {
+    if (tree.typeParamsOf(decl.typeParamsList).length == 0 || name == "") {
       return;
     }
 
-    const names = decl.typeParams.map((param) => param.name);
+    const names = tree
+      .typeParamsOf(decl.typeParamsList)
+      .map((param) => param.name);
     const refs: TypeRef[] = [];
 
-    for (const field of decl.fields) {
-      const type = field.type;
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      const type = tree.typeRefAt(field.typeId);
       if (type != undefined) {
         refs.push(type);
       }
     }
 
     const growing = refs.some((root) =>
-      this.resolver.isGrowingUse(root, name, names),
+      this.types.isGrowingUse(root, name, names),
     );
     if (growing) {
-      this.report(module, decl.loc, Code.GenericClassGrowing, { word: name });
+      this.errors.write(module, decl.loc, Code.GenericClassGrowing, {
+        word: name,
+      });
     }
   }
 
-  private readonly genericMethodValue(
+  private genericMethodValue(
     expr: MemberExpr,
     method: FunctionDecl,
     module: int,
   ): boolean {
-    const checked = this.genericCalls.genericMethodValue(expr, method);
+    const checked = this.types.genericMethodValue(expr, method);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly genericInstanceofCheck(
+  private genericInstanceofCheck(
     expr: BinaryExpr,
     left: Type,
     decl: ClassDecl,
     home: int,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const base = this.types.definedType(left);
     const word = decl.name ?? "";
-    if (decl.typeParams.length == 0) {
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
+    if (typeParams.length == 0) {
       return;
     }
 
     const isOpaque =
       base.kind == TypeKind.Unknown || base.kind == TypeKind.AnyObject;
     if (isOpaque) {
-      const code = this.genericCalls.genericTellCode(home);
-      const first = this.text.of(base);
+      const code = this.types.genericTellCode(home);
+      const first = this.types.typeText(base);
       const other = `${word}${kStringArgument}`;
 
-      return this.report(module, expr.loc, code, { word, first, other });
+      return this.errors.write(module, expr.loc, code, { word, first, other });
     }
-    if (this.classValues.isOpenTested(base)) {
+    if (this.types.isOpenTested(base)) {
       return;
     }
 
     const parts = this.types.unionMembers(base);
     const isMatching = parts.some((part) =>
-      this.generics.isInstanceOfClass(part, word),
+      this.types.isInstanceOfClass(part, word),
     );
     if (isMatching) {
       return;
     }
 
-    const first = this.text.of(base);
-    const open = decl.typeParams.map(() => this.store.plain(TypeKind.Error));
-    const instance = this.resolver.classInstance(home, decl, open);
+    const first = this.types.typeText(base);
+    const open = tree.typeParamsOf(decl.typeParamsList).map(() =>
+      this.types.store.plain(TypeKind.Error),
+    );
+    const instance = this.types.classInstance(home, decl, open);
     const ancestors = this.types.ancestorsOf(instance);
-    const isRelated = parts.some((part) => ancestors.includes(part));
+    const isRelated = parts.some((part) =>
+      ancestors.some((one) => one.id == part.id),
+    );
     if (!isRelated) {
-      this.report(module, expr.loc, Code.InstanceOfGenericNever, {
+      this.errors.write(module, expr.loc, Code.InstanceOfGenericNever, {
         word,
         first,
       });
@@ -108,8 +123,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const code = this.genericCalls.genericTellCode(home);
+    const code = this.types.genericTellCode(home);
 
-    this.report(module, expr.loc, code, { word, first, other: first });
+    this.errors.write(module, expr.loc, code, { word, first, other: first });
   }
 }

@@ -23,6 +23,8 @@ import { kLengthName } from "../../../expression-shapes/const/expression-shapes.
 
 partial class ExpressionTypes {
   private isPlacedLiteral(expr: Expr, wanted: Type, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -33,11 +35,12 @@ partial class ExpressionTypes {
     }
 
     const variable = this.record(target.module)?.variables.get(target.loc);
-    const init = variable?.decl.init;
+    const init = tree.exprAt(variable?.decl.initId);
     if (variable == undefined || init == undefined) {
       return false;
     }
-    if (variable.decl.typeAnn != undefined) {
+    const typeAnn = tree.typeRefAt(variable.decl.typeAnnId);
+    if (typeAnn != undefined) {
       return false;
     }
 
@@ -53,6 +56,8 @@ partial class ExpressionTypes {
   }
 
   private bothText(expr: Expr, wanted: Type, module: int): string {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Name) {
       return "";
     }
@@ -63,70 +68,84 @@ partial class ExpressionTypes {
     }
 
     const variable = this.record(target.module)?.variables.get(target.loc);
-    const init = variable?.decl.init;
+    const init = tree.exprAt(variable?.decl.initId);
     if (variable == undefined || init == undefined) {
       return "";
     }
 
     const places = this.conflictPlaces(variable, init, target.module);
     const goal = this.types.definedType(wanted);
-    const other = places.find((one) => this.types.definedType(one) != goal);
+    const other = places.find(
+      (one) => this.types.definedType(one).id != goal.id,
+    );
     if (other == undefined) {
       return "";
     }
 
-    const word = this.text.of(this.types.definedType(other));
+    const word = this.types.typeText(this.types.definedType(other));
 
     return `${kBothStart}${word}${kBothEnd}`;
   }
 
-  private readonly objectTargetCheck(
+  private objectTargetCheck(
     target: MemberExpr,
     object: Type,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (object.kind == TypeKind.Tuple && target.name == kLengthName) {
-      this.report(module, target.loc, Code.TupleLengthFixed, kNoDetails);
+      this.errors.write(module, target.loc, Code.TupleLengthFixed, kNoDetails);
 
       return;
     }
 
     const isOwn =
-      object.kind == TypeKind.Object && !this.resolver.isLibraryShape(object);
+      object.kind == TypeKind.Object && !this.types.isLibraryShape(object);
     if (!isOwn || object.kind != TypeKind.Object) {
       return;
     }
 
     const word = target.name;
-    const first = this.text.of(object);
-    const field = object.fields.find((one) => one.name == word);
+    const first = this.types.typeText(object);
+    const field = this.types.store
+      .fieldsOf(object)
+      .find((one) => one.name == word);
     if (field == undefined) {
-      return this.report(module, target.loc, Code.PropertyMissing, {
+      return this.errors.write(module, target.loc, Code.PropertyMissing, {
         word,
         first,
       });
     }
 
     if (field.method ?? false) {
-      return this.report(module, target.loc, Code.MethodReplaced, {
+      return this.errors.write(module, target.loc, Code.MethodReplaced, {
         word,
         first,
       });
     }
 
-    const count = object.fields.filter((one) => one.name == word).length;
+    const count = this.types.store
+      .fieldsOf(object)
+      .filter((one) => one.name == word).length;
     if (count > 1) {
-      return this.report(module, target.loc, Code.OverloadedMethodReplaced, {
-        word,
-        first,
-      });
+      return this.errors.write(
+        module,
+        target.loc,
+        Code.OverloadedMethodReplaced,
+        {
+          word,
+          first,
+        },
+      );
     }
 
     if (!field.readonly) {
       return;
     }
-    if (!this.isInferredName(target.object, module)) {
-      this.report(module, target.loc, Code.ObjectReadOnlyField, {
+    const objectExpr = tree.exprOf(target.objectId);
+    if (!this.isInferredName(objectExpr, module)) {
+      this.errors.write(module, target.loc, Code.ObjectReadOnlyField, {
         word,
         first,
       });
@@ -134,6 +153,8 @@ partial class ExpressionTypes {
   }
 
   private readonly isInferredName(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -144,19 +165,23 @@ partial class ExpressionTypes {
     }
 
     const variable = this.record(target.module)?.variables.get(target.loc);
-    const init = variable?.decl.init;
+    const init = tree.exprAt(variable?.decl.initId);
 
     return (
-      variable?.decl.typeAnn == undefined && init?.kind == ExprKind.ObjectLit
+      tree.typeRefAt(variable?.decl.typeAnnId) == undefined &&
+      init?.kind == ExprKind.ObjectLit
     );
   }
 
   private updateTargetCheck(target: Expr, module: int): void {
+    const tree = this.types.program.tree;
+
     if (target.kind != ExprKind.Member) {
       return;
     }
 
-    const object = this.peekType(target.object, module);
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.peekType(objectExpr, module);
 
     if (object.kind == TypeKind.Instance) {
       return this.instanceTargetCheck(target, object, module);
@@ -170,40 +195,58 @@ partial class ExpressionTypes {
     declared: Type,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (declared.kind == TypeKind.Error || this.types.isOptional(declared)) {
       return;
     }
 
-    const first = this.text.of(declared);
-    const target = expr.target;
+    const first = this.types.typeText(declared);
+    const target = tree.exprOf(expr.targetId);
     const isKeyed =
       target.kind == ExprKind.Member &&
-      this.recordValueOf(target.object, module) != undefined;
+      this.recordValueOf(tree.exprOf(target.objectId), module) != undefined;
     if (isKeyed) {
       return;
     }
 
     switch (target.kind) {
       case ExprKind.Name:
-        return this.report(module, expr.loc, Code.NullishNotOptionalVariable, {
-          word: target.name,
-          first,
-        });
+        return this.errors.write(
+          module,
+          expr.loc,
+          Code.NullishNotOptionalVariable,
+          {
+            word: target.name,
+            first,
+          },
+        );
       case ExprKind.Member:
-        return this.report(module, expr.loc, Code.NullishNotOptionalField, {
-          word: target.name,
-          first,
-        });
+        return this.errors.write(
+          module,
+          expr.loc,
+          Code.NullishNotOptionalField,
+          {
+            word: target.name,
+            first,
+          },
+        );
       default:
         return;
     }
   }
 
   private stringCallCheck(expr: CallExpr, callee: NameExpr, module: int): void {
-    const arg = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isString =
       callee.name == kStringClass && this.isGlobalUse(callee, module);
-    if (!isString || arg == undefined || expr.args.length != 1) {
+    if (
+      !isString ||
+      arg == undefined ||
+      tree.argumentsOf(expr.argsList).length != 1
+    ) {
       return;
     }
 

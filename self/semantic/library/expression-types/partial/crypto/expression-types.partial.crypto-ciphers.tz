@@ -1,0 +1,276 @@
+import { SourceError } from "../../../../../diagnostic/types/message.types.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../../../program/type/types/type.types.tz";
+import {
+  ExpressionTypes,
+} from "../../../../code/expression-types/expression-types.tz";
+import {
+  kZeroTerm,
+} from "../../../../flow/bound-rules/const/bound-rules.const.tz";
+import {
+  kAnyCryptoData,
+  kCipherOptions,
+  kKeylenName,
+  kTagLengthName,
+  kTextOrBuffers,
+} from "../../../crypto-rules/const/crypto-rules.const.tz";
+import {
+  CryptoData,
+  CryptoNumber,
+  DigestUse,
+} from "../../../crypto-rules/types/crypto-rules.types.tz";
+
+partial class ExpressionTypes {
+  private hkdfCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const args = tree.argumentsOf(expr.argsList);
+    if (args.length != 5) {
+      return;
+    }
+
+    this.cryptoIntAt(expr, 4, module);
+
+    const isHashFine = this.cryptoHashFine(expr, 0, DigestUse.Hmac, module);
+    const isDataFine = this.cryptoDataFine(
+      expr,
+      [
+        { index: 1, what: "ikm", kinds: kAnyCryptoData },
+        { index: 2, what: "salt", kinds: kTextOrBuffers },
+        { index: 3, what: "info", kinds: kTextOrBuffers },
+      ],
+      module,
+    );
+    if (!isHashFine || !isDataFine) {
+      return;
+    }
+
+    this.cryptoWholeFine(expr, 4, kKeylenName, module);
+  }
+
+  private cipherCheck(expr: CallExpr, shown: string, module: int): void {
+    const tree = this.types.program.tree;
+
+    const count = tree.argumentsOf(expr.argsList).length;
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (count < 3 || count > 4 || name == undefined) {
+      return;
+    }
+
+    const text = this.constantText(name);
+    const cipherError = this.cipherNameError(name, text);
+    const isDataFine = this.cryptoDataFine(
+      expr,
+      [
+        { index: 1, what: "key", kinds: kAnyCryptoData },
+        { index: 2, what: "iv", kinds: kTextOrBuffers },
+      ],
+      module,
+    );
+
+    this.errors.writeFound(module, cipherError);
+
+    const isRead = this.cryptoOptionsFine(
+      expr,
+      3,
+      shown,
+      kCipherOptions,
+      module,
+    );
+    if (cipherError != undefined || !isDataFine || !isRead) {
+      return;
+    }
+    if (text == undefined || !this.cipherLengthsFine(expr, text, module)) {
+      return;
+    }
+
+    const tag = this.cryptoOptionAt(expr, 3, kTagLengthName);
+    if (tag == undefined && this.types.needsTagLength(text)) {
+      this.errors.writeFound(module, this.types.tagLengthError(name.loc, text));
+    }
+  }
+
+  private cipherLengthsFine(
+    expr: CallExpr,
+    text: string,
+    module: int,
+  ): boolean {
+    const tree = this.types.program.tree;
+
+    const cipher = this.types.directCipher(text);
+    const key = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
+    const iv = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
+    if (cipher == undefined || key == undefined || iv == undefined) {
+      return true;
+    }
+
+    let isFine = true;
+    const keyBytes = this.cryptoBytes(key, module);
+    if (keyBytes != undefined) {
+      const keyError = this.types.keyError(key.loc, cipher, keyBytes);
+
+      this.errors.writeFound(module, keyError);
+      isFine = keyError == undefined;
+    }
+
+    const ivBytes = this.cryptoBytes(iv, module);
+    if (ivBytes != undefined) {
+      const ivError = this.types.ivError(iv.loc, cipher, ivBytes);
+
+      this.errors.writeFound(module, ivError);
+      isFine = isFine && ivError == undefined;
+    }
+
+    return isFine;
+  }
+
+  private readonly cryptoOptionAt(
+    expr: CallExpr,
+    index: int,
+    name: string,
+  ): Expr | undefined {
+    const tree = this.types.program.tree;
+
+    const options = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
+    if (options == undefined || options.kind == ExprKind.Undefined) {
+      return undefined;
+    }
+
+    return this.optionValue(options, name);
+  }
+
+  private readonly cipherNameError(
+    name: Expr,
+    text: string | undefined,
+  ): SourceError | undefined {
+    if (text == undefined) {
+      return undefined;
+    }
+
+    return this.types.cipherError(name.loc, text);
+  }
+
+  private cryptoDataFine(
+    expr: CallExpr,
+    items: Read<CryptoData[]>,
+    module: int,
+  ): boolean {
+    const tree = this.types.program.tree;
+
+    let isFine = true;
+
+    for (const item of items) {
+      const arg = tree.exprAt(
+        tree.argumentsOf(expr.argsList)[item.index]?.exprId,
+      );
+      if (arg == undefined) {
+        isFine = false;
+        continue;
+      }
+
+      const given = this.peekType(arg, module);
+      const dataError = this.types.dataError(
+        arg.loc,
+        item.what,
+        item.kinds,
+        given,
+      );
+
+      this.errors.writeFound(module, dataError);
+      isFine = isFine && dataError == undefined && given.kind != TypeKind.Error;
+    }
+
+    return isFine;
+  }
+
+  private cryptoWholeFine(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    module: int,
+  ): boolean {
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
+    if (arg == undefined) {
+      return false;
+    }
+
+    const number = this.cryptoNumber(arg, module);
+    if (number == undefined) {
+      return true;
+    }
+
+    const wholeError = this.types.wholeError(arg.loc, name, 1, number);
+
+    this.errors.writeFound(module, wholeError);
+
+    return wholeError == undefined;
+  }
+
+  private cryptoBytes(value: Expr, module: int): decimal | undefined {
+    const type = this.peekType(value, module);
+    if (!this.types.isKeyBytes(type)) {
+      return undefined;
+    }
+
+    const fixed = this.fixedCount(value, module);
+    if (fixed != undefined) {
+      return fixed;
+    }
+
+    const made = this.madeLinear(value, module);
+    if (made == undefined || made.term != kZeroTerm) {
+      return undefined;
+    }
+
+    return made.offset;
+  }
+
+  private cryptoNumber(value: Expr, module: int): CryptoNumber | undefined {
+    const tree = this.types.program.tree;
+
+    if (value.kind == ExprKind.Unary && value.op == UnaryOp.Neg) {
+      const operand = tree.exprOf(value.operandId);
+      const inner = this.cryptoNumber(operand, module);
+      if (inner == undefined) {
+        return undefined;
+      }
+
+      return {
+        value: -inner.value,
+        isWhole: inner.isWhole,
+        shown: `-${inner.shown}`,
+      };
+    }
+    if (value.kind == ExprKind.FloatLit) {
+      return this.fractionNumber(value.value);
+    }
+
+    const whole = this.plainConstant(value, module);
+    if (whole == undefined) {
+      return undefined;
+    }
+
+    return { value: whole, isWhole: true, shown: `${whole}` };
+  }
+
+  private readonly fractionNumber(value: double): CryptoNumber | undefined {
+    const floor = Math.floor(value);
+    if (floor != value) {
+      return { value: (0).toDecimal(), isWhole: false, shown: `${value}` };
+    }
+    if (floor < -1000000000000000.0 || floor > 1000000000000000.0) {
+      return undefined;
+    }
+
+    const whole = Math.trunc(floor).toInt().toDecimal();
+
+    return { value: whole, isWhole: true, shown: `${whole}` };
+  }
+}

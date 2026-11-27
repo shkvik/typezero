@@ -37,19 +37,23 @@ partial class ExpressionTypes {
     return this.isGlobalUse(expr, module);
   }
 
-  private readonly dateInstance(): InstanceType | undefined {
+  private dateInstance(): InstanceType | undefined {
+    const tree = this.types.program.tree;
+
     const target = this.globalValue(kDateName);
     if (target == undefined) {
       return undefined;
     }
 
-    const opened = this.program.modules[target.module];
-    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    const opened = this.types.program.modules[target.module];
+    const declared = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == target.loc);
     if (declared == undefined) {
       return undefined;
     }
 
-    const made = this.resolver.declaredInstance(target.module, declared, []);
+    const made = this.types.declaredInstance(target.module, declared, []);
     if (made == undefined || made.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -57,38 +61,42 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private readonly dateType(): Type {
-    return this.dateInstance() ?? this.store.plain(TypeKind.Error);
+  private dateType(): Type {
+    return this.dateInstance() ?? this.types.store.plain(TypeKind.Error);
   }
 
   private dateNew(expr: NewExpr, module: int): Type {
-    const args = expr.args;
+    const tree = this.types.program.tree;
+
+    const args = tree.argumentsOf(expr.argsList);
     const count = args.length;
     if (count > kMostDateFields) {
-      const word = this.calls.argumentCountText(0, kMostDateFields, false);
+      const word = this.types.argumentCountText(0, kMostDateFields, false);
 
-      this.report(module, expr.loc, Code.ArgumentCount, {
+      this.errors.write(module, expr.loc, Code.ArgumentCount, {
         word,
         other: `${count}`,
       });
       this.looseArguments(args, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const given = args[0]?.expr;
+    const given = tree.exprAt(args[0]?.exprId);
     if (given == undefined) {
       return this.dateType();
     }
     if (count > 1) {
-      this.dateFieldsCheck(args, 0, "", module);
+      const argsItem = tree.argumentsOf(expr.argsList);
+
+      this.dateFieldsCheck(argsItem, 0, "", module);
 
       return this.dateType();
     }
 
-    const dateTextErrors = this.dates.dateTextCheck(given);
+    const dateTextErrors = this.types.dateTextCheck(given);
 
-    this.reportAll(module, dateTextErrors);
+    this.errors.writeAll(module, dateTextErrors);
 
     return this.dateOfValue(given, module);
   }
@@ -105,10 +113,10 @@ partial class ExpressionTypes {
 
     const isText =
       base.kind == TypeKind.String || base.kind == TypeKind.Template;
-    if (isText && this.dates.dateTextOf(given) == undefined) {
-      this.report(module, given.loc, Code.DateNewText, kNoDetails);
+    if (isText && this.types.dateTextOf(given) == undefined) {
+      this.errors.write(module, given.loc, Code.DateNewText, kNoDetails);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (isText) {
       return this.dateType();
@@ -119,14 +127,14 @@ partial class ExpressionTypes {
       return this.dateType();
     }
 
-    const place = this.dates.dateValuePlace(type, base);
+    const place = this.types.dateValuePlace(type, base);
 
-    this.report(module, given.loc, Code.DateNewValue, {
-      word: this.text.of(type),
+    this.errors.write(module, given.loc, Code.DateNewValue, {
+      word: this.types.typeText(type),
       place,
     });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private dateFunctionCall(
@@ -134,14 +142,19 @@ partial class ExpressionTypes {
     callee: NameExpr,
     module: int,
   ): Type {
-    if (expr.args.length > 0) {
-      this.report(module, callee.loc, Code.DateWithoutNew, kNoDetails);
-      this.looseArguments(expr.args, module);
+    const tree = this.types.program.tree;
 
-      return this.store.plain(TypeKind.Error);
+    const argsItem = tree.argumentsOf(expr.argsList);
+    if (argsItem.length > 0) {
+      this.errors.write(module, callee.loc, Code.DateWithoutNew, kNoDetails);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.store.plain(TypeKind.String);
+    return this.types.store.plain(TypeKind.String);
   }
 
   private dateStaticCall(
@@ -149,8 +162,10 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const isSpread = expr.args.some((arg) => arg.spread);
-    if (!this.isDateName(member.object, module) || isSpread) {
+    const tree = this.types.program.tree;
+
+    const isSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
+    if (!this.isDateName(tree.exprOf(member.objectId), module) || isSpread) {
       return undefined;
     }
 
@@ -162,29 +177,33 @@ partial class ExpressionTypes {
 
     const found = this.declaredStatic(instance, name);
     if (found == undefined || found.kind != TypeKind.Function) {
-      const dateStaticError = this.dates.dateStaticError(member);
+      const dateStaticError = this.types.dateStaticError(member);
 
-      this.reportFound(module, dateStaticError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, dateStaticError);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
     if (!this.dateCountCheck(expr, member, found, 0, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const result = found.shape.result;
+    const result = this.types.store.returnTypeOf(found);
     if (name == kDateUtcName) {
-      this.dateFieldsCheck(expr.args, 0, "", module);
+      const argsItem = tree.argumentsOf(expr.argsList);
+
+      this.dateFieldsCheck(argsItem, 0, "", module);
 
       return result;
     }
 
-    const text = expr.args[0]?.expr;
+    const text = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (name == kDateParseName && text != undefined) {
-      const dateTextErrors = this.dates.dateTextCheck(text);
+      const dateTextErrors = this.types.dateTextCheck(text);
 
-      this.reportAll(module, dateTextErrors);
+      this.errors.writeAll(module, dateTextErrors);
       this.textArgument(text, module);
     }
 
@@ -192,7 +211,7 @@ partial class ExpressionTypes {
   }
 
   private textArgument(arg: Expr, module: int): void {
-    const string = this.store.plain(TypeKind.String);
+    const string = this.types.store.plain(TypeKind.String);
     const type = this.typed(arg, string, module);
     if (type.kind == TypeKind.Error) {
       return;
@@ -201,24 +220,24 @@ partial class ExpressionTypes {
     this.coerce(arg, type, string, module, kNoPlace);
   }
 
-  private readonly dateCountCheck(
+  private dateCountCheck(
     expr: CallExpr,
     member: MemberExpr,
     method: FunctionType,
     extra: int,
     module: int,
   ): boolean {
-    const checked = this.dates.dateCountCheck(expr, member, method, extra);
+    const checked = this.types.dateCountCheck(expr, member, method, extra);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly dateStaticRead(expr: MemberExpr, module: int): Type {
-    const checked = this.dates.dateStaticRead(expr);
+  private dateStaticRead(expr: MemberExpr, module: int): Type {
+    const checked = this.types.dateStaticRead(expr);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -230,8 +249,10 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const name = member.name;
-    const isSpread = expr.args.some((arg) => arg.spread);
+    const isSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
     if (!isSpread && kDateLocaleMethods.includes(name)) {
       const localeCall = this.dateLocaleCall(expr, member, module);
       if (localeCall != undefined) {
@@ -244,71 +265,80 @@ partial class ExpressionTypes {
 
     const method = this.libraryMemberType(instance, name, true);
     if (method == undefined || method.kind != TypeKind.Function) {
-      const dateMissingError = this.dates.dateMissingError(member, instance);
+      const dateMissingError = this.types.dateMissingError(member, instance);
 
-      this.reportFound(module, dateMissingError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, dateMissingError);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const isJson = name == kToJsonName;
-    const extra = this.dates.jsonExtra(isJson);
+    const extra = this.types.jsonExtra(isJson);
     if (!this.dateCountCheck(expr, member, method, extra, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const result = method.shape.result;
-    const key = expr.args[0]?.expr;
+    const result = this.types.store.returnTypeOf(method);
+    const key = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (isJson && key != undefined) {
       this.textArgument(key, module);
 
       return result;
     }
 
-    const first = this.dates.setterFirst(name);
+    const first = this.types.setterFirst(name);
     if (first != undefined) {
-      this.dateFieldsCheck(expr.args, first, name, module);
+      this.dateFieldsCheck(
+        tree.argumentsOf(expr.argsList),
+        first,
+        name,
+        module,
+      );
 
       return result;
     }
 
-    for (const arg of expr.args) {
-      this.timeArgument(arg.expr, module);
+    for (const arg of tree.argumentsOf(expr.argsList)) {
+      const exprExpr = tree.exprOf(arg.exprId);
+
+      this.timeArgument(exprExpr, module);
     }
 
     return result;
   }
 
-  private readonly dateMemberRead(
+  private dateMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
   ): Type {
     const word = expr.name;
     const method = this.libraryMemberType(instance, word, true);
-    const error = this.store.plain(TypeKind.Error);
+    const error = this.types.store.plain(TypeKind.Error);
     if (method != undefined) {
-      this.report(module, expr.loc, Code.DateMethodRead, { word });
+      this.errors.write(module, expr.loc, Code.DateMethodRead, { word });
 
       return error;
     }
     if (word == kGetYearName) {
-      this.report(module, expr.loc, Code.DateGetYearRead, kNoDetails);
+      this.errors.write(module, expr.loc, Code.DateGetYearRead, kNoDetails);
 
       return error;
     }
 
-    this.report(module, expr.loc, Code.PropertyMissing, {
+    this.errors.write(module, expr.loc, Code.PropertyMissing, {
       word,
-      first: this.text.of(instance),
+      first: this.types.typeText(instance),
     });
 
     return error;
   }
 
   private timeArgument(arg: Expr, module: int): Type {
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
     const type = this.typed(arg, int, module);
 
     this.timeCoerce(arg, type, module);
@@ -322,19 +352,19 @@ partial class ExpressionTypes {
       return;
     }
 
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
 
     this.coerce(arg, type, int, module, kNoPlace);
   }
 
-  private readonly dateArithmetic(
+  private dateArithmetic(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
   ): Type {
-    const checked = this.dates.dateArithmetic(expr, pair);
+    const checked = this.types.dateArithmetic(expr, pair);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

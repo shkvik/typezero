@@ -45,7 +45,7 @@ import {
 } from "./const/manifest-reader.const.tz";
 
 export class ManifestReader {
-  public errors: Cell<string[]>;
+  public errors: string[];
 
   public constructor() {
     this.errors = [];
@@ -83,7 +83,7 @@ export class ManifestReader {
     return stat.value.isDirectory();
   }
 
-  public readonly read(path: string): Manifest | undefined {
+  public read(path: string): Manifest | undefined {
     const root = this.rootOf(path);
     if (root == undefined) {
       return undefined;
@@ -127,7 +127,7 @@ export class ManifestReader {
     };
   }
 
-  public readonly readPackageDirectory(directory: string): Manifest | undefined {
+  public readPackageDirectory(directory: string): Manifest | undefined {
     const file = join(directory, kManifestFile);
     if (this.isFile(file) && this.namesSourceFiles(file)) {
       return this.read(file);
@@ -151,7 +151,7 @@ export class ManifestReader {
     };
   }
 
-  private readonly otherManifest(path: string, directory: string): Manifest | undefined {
+  private otherManifest(path: string, directory: string): Manifest | undefined {
     const root = this.rootOf(path);
     if (root == undefined) {
       return undefined;
@@ -174,7 +174,7 @@ export class ManifestReader {
     };
   }
 
-  private readonly rootOf(path: string): JsonNode | undefined {
+  private rootOf(path: string): JsonNode | undefined {
     const bytes = readFileSync(path);
     if (bytes.isErr()) {
       this.errors.push(`cannot read '${path}'`);
@@ -191,7 +191,7 @@ export class ManifestReader {
     return root;
   }
 
-  private readonly isFieldFine(
+  private isFieldFine(
     path: string,
     key: string,
     value: Read<JsonNode>,
@@ -214,7 +214,7 @@ export class ManifestReader {
     return true;
   }
 
-  private readonly isListFine(
+  private isListFine(
     path: string,
     key: string,
     value: Read<JsonNode>,
@@ -231,7 +231,7 @@ export class ManifestReader {
     return true;
   }
 
-  private readonly isScriptsFine(path: string, value: Read<JsonNode>): boolean {
+  private isScriptsFine(path: string, value: Read<JsonNode>): boolean {
     if (value.kind != JsonNodeKind.Object) {
       return this.failedField(path, kScriptsObjectText);
     }
@@ -246,7 +246,7 @@ export class ManifestReader {
     return true;
   }
 
-  private readonly isExportsFine(
+  private isExportsFine(
     path: string,
     value: Read<JsonNode>,
     exports: PackageExport[],
@@ -275,7 +275,7 @@ export class ManifestReader {
     return true;
   }
 
-  private readonly isExportFine(
+  private isExportFine(
     path: string,
     key: string,
     target: Read<JsonNode>,
@@ -291,7 +291,7 @@ export class ManifestReader {
     return true;
   }
 
-  private readonly isDependenciesFine(
+  private isDependenciesFine(
     path: string,
     value: Read<JsonNode>,
     dependencies: ManifestDependency[],
@@ -397,7 +397,10 @@ export class ManifestReader {
     return text != undefined && text.endsWith(kSourceExtension);
   }
 
-  private readonly fieldOf(root: JsonNode, name: string): JsonNode | undefined {
+  private readonly fieldOf(
+    root: Lent<JsonNode>,
+    name: string,
+  ): Read<JsonNode> | undefined {
     for (let index = 0; index < root.keys.length; index++) {
       if (this.decoded(root.keys[index] ?? "") == name) {
         return root.items[index];
@@ -413,7 +416,9 @@ export class ManifestReader {
     return this.textOf(field) ?? "";
   }
 
-  private readonly textOf(node: Read<JsonNode | undefined>): string | undefined {
+  private readonly textOf(
+    node: Read<JsonNode | undefined>,
+  ): string | undefined {
     if (node == undefined || node.kind != JsonNodeKind.String) {
       return undefined;
     }
@@ -507,23 +512,21 @@ export class ManifestReader {
     return stat.value.isFile();
   }
 
-  private readonly failed(path: string, message: string): Manifest | undefined {
+  private failed(path: string, message: string): Manifest | undefined {
     this.errors.push(`${path}: ${message}`);
 
     return undefined;
   }
 
-  private readonly failedNode(path: string, message: string): JsonNode | undefined {
+  private failedNode(path: string, message: string): JsonNode | undefined {
     this.errors.push(`${path}: ${message}`);
 
     return undefined;
   }
 
-  private readonly failedField(path: string, message: string): boolean {
+  private failedField(path: string, message: string): boolean {
     this.errors.push(`${path}: ${message}`);
 
     return false;
   }
 }
-
-export type InternedManifestReader = Interned<ManifestReader>;

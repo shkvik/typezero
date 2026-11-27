@@ -18,10 +18,10 @@ import {
 partial class Lowering {
   private readonly widened(type: Type): Type {
     if (this.isNumberUnion(type)) {
-      return this.store.integer(64, false);
+      return this.values.types.store.integer(64, false);
     }
     if (this.isTextUnion(type)) {
-      return this.store.plain(TypeKind.String);
+      return this.values.types.store.plain(TypeKind.String);
     }
     if (type.kind != TypeKind.Literal) {
       return type;
@@ -29,13 +29,13 @@ partial class Lowering {
 
     switch (type.literal) {
       case LiteralKind.Int:
-        return this.store.integer(64, false);
+        return this.values.types.store.integer(64, false);
       case LiteralKind.Double:
-        return this.store.plain(TypeKind.Double);
+        return this.values.types.store.plain(TypeKind.Double);
       case LiteralKind.Boolean:
-        return this.store.plain(TypeKind.Boolean);
+        return this.values.types.store.plain(TypeKind.Boolean);
       default:
-        return this.store.plain(TypeKind.String);
+        return this.values.types.store.plain(TypeKind.String);
     }
   }
 
@@ -44,7 +44,7 @@ partial class Lowering {
       return false;
     }
 
-    return type.parts.every(
+    return this.values.types.store.partsOf(type).every(
       (part) =>
         part.kind == TypeKind.Literal && part.literal == LiteralKind.Int,
     );
@@ -55,7 +55,7 @@ partial class Lowering {
       return false;
     }
 
-    return type.parts.every(
+    return this.values.types.store.partsOf(type).every(
       (part) =>
         part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
     );
@@ -165,7 +165,9 @@ partial class Lowering {
       case TypeKind.Tuple:
         return true;
       case TypeKind.Union:
-        return type.parts.every((part) => this.isObjectLike(part));
+        return this.values.types.store
+          .partsOf(type)
+          .every((part) => this.isObjectLike(part));
       default:
         return false;
     }

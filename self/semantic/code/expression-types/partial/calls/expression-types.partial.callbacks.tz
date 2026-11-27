@@ -35,28 +35,34 @@ partial class ExpressionTypes {
     plan: CallbackPlan,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const member = plan.member;
     const word = member.name;
-    const count = expr.args.length;
+    const count = tree.argumentsOf(expr.argsList).length;
     const isReduce = plan.kind == ArrayCallback.Reduce;
 
     if (count == 0) {
-      return this.report(module, member.loc, Code.CallbackMissing, { word });
+      return this.errors.write(module, member.loc, Code.CallbackMissing, {
+        word,
+      });
     }
 
-    const extraCallbackArgumentsError =
-      this.callbacks.extraCallbackArgumentsError(expr, plan);
+    const extraCallbackArgumentsError = this.types.extraCallbackArgumentsError(
+      expr,
+      plan,
+    );
 
-    this.reportFound(module, extraCallbackArgumentsError);
+    this.errors.writeFound(module, extraCallbackArgumentsError);
 
-    const first = expr.args[0]?.expr;
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (first != undefined) {
       plan.isValue = this.functionValueCheck(first, plan, module);
       this.booleanCallbackCheck(first, plan, module);
     }
   }
 
-  private readonly functionValueCheck(
+  private functionValueCheck(
     arg: Expr,
     plan: Read<CallbackPlan>,
     module: int,
@@ -67,26 +73,31 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const offered = Math.min(most, this.callbacks.offeredCount(plan.kind));
-    const primary = this.callbacks.primaryCount(plan.kind);
+    const offered = Math.min(most, this.types.offeredCount(plan.kind));
+    const primary = this.types.primaryCount(plan.kind);
     if (offered <= primary) {
       return true;
     }
 
     const method = plan.member.name;
 
-    this.report(module, arg.loc, Code.CallbackValueExtra, {
+    this.errors.write(module, arg.loc, Code.CallbackValueExtra, {
       word: name,
-      other: this.callbacks.callbackArgumentName(plan.kind, primary),
+      other: this.types.callbackArgumentName(plan.kind, primary),
       first: kCallbackOrdinals[primary] ?? "",
       second: method,
-      place: this.callbacks.callbackShapeText(plan.kind),
+      place: this.types.callbackShapeText(plan.kind),
     });
 
     return true;
   }
 
-  private readonly functionValueName(arg: Expr, module: int): string | undefined {
+  private readonly functionValueName(
+    arg: Expr,
+    module: int,
+  ): string | undefined {
+    const tree = this.types.program.tree;
+
     if (arg.kind == ExprKind.Name && this.isGlobalUse(arg, module)) {
       return arg.name;
     }
@@ -94,7 +105,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const object = arg.object;
+    const object = tree.exprOf(arg.objectId);
     if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
       return undefined;
     }
@@ -122,7 +133,9 @@ partial class ExpressionTypes {
     plan: Read<CallbackPlan>,
     module: int,
   ): void {
-    const arg = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (arg == undefined || plan.isValue) {
       return;
     }
@@ -137,26 +150,23 @@ partial class ExpressionTypes {
     this.passedFunctionCheck(arg, type, plan, module);
   }
 
-  private readonly literalCallbackCheck(
+  private literalCallbackCheck(
     arg: Expr,
     plan: Read<CallbackPlan>,
     module: int,
   ): void {
-    const type = this.closureTypes.get(arg);
+    const type = this.closureTypes.get(arg.id);
     if (type == undefined || type.kind != TypeKind.Function) {
       return;
     }
 
-    const result = type.shape.result;
+    const result = this.types.store.returnTypeOf(type);
     const word = plan.member.name;
 
     if (plan.kind == ArrayCallback.ForEach) {
-      const droppedPromiseErrors = this.callbacks.droppedPromiseCheck(
-        arg,
-        result,
-      );
+      const droppedPromiseErrors = this.types.droppedPromiseCheck(arg, result);
 
-      return this.reportAll(module, droppedPromiseErrors);
+      return this.errors.writeAll(module, droppedPromiseErrors);
     }
 
     const isMapping =
@@ -164,21 +174,21 @@ partial class ExpressionTypes {
     const isEmpty =
       result.kind == TypeKind.Void || result.kind == TypeKind.Undefined;
     if (isMapping && isEmpty) {
-      return this.report(module, arg.loc, Code.CallbackNoValue, { word });
+      return this.errors.write(module, arg.loc, Code.CallbackNoValue, { word });
     }
     if (
       plan.kind != ArrayCallback.Compare ||
-      this.callbacks.isNumberResult(result)
+      this.types.isNumberResult(result)
     ) {
       return;
     }
 
-    const found = this.text.of(result);
+    const found = this.types.typeText(result);
 
-    this.report(module, arg.loc, Code.CompareNotNumber, { word: found });
+    this.errors.write(module, arg.loc, Code.CompareNotNumber, { word: found });
   }
 
-  private readonly passedFunctionCheck(
+  private passedFunctionCheck(
     arg: Expr,
     type: Type,
     plan: Read<CallbackPlan>,
@@ -190,9 +200,9 @@ partial class ExpressionTypes {
       return;
     }
     if (type.kind != TypeKind.Function) {
-      const first = this.text.of(type);
+      const first = this.types.typeText(type);
 
-      return this.report(module, arg.loc, Code.CallbackNotFunction, {
+      return this.errors.write(module, arg.loc, Code.CallbackNotFunction, {
         word: method,
         first,
       });
@@ -200,8 +210,10 @@ partial class ExpressionTypes {
 
     const name = this.callbackName(arg, module);
 
-    if (type.shape.rest) {
-      return this.report(module, arg.loc, Code.CallbackRest, { word: name });
+    if (this.types.store.hasRest(type)) {
+      return this.errors.write(module, arg.loc, Code.CallbackRest, {
+        word: name,
+      });
     }
     if (plan.params.length == 0) {
       return;
@@ -210,15 +222,15 @@ partial class ExpressionTypes {
       return;
     }
 
-    const least = this.callbacks.requiredCallbackParams(type);
+    const least = this.types.requiredCallbackParams(type);
     if (least > plan.params.length) {
-      const passes = this.calls.argumentCountText(
+      const passes = this.types.argumentCountText(
         plan.params.length,
         plan.params.length,
         false,
       );
 
-      return this.report(module, arg.loc, Code.CallbackTooFew, {
+      return this.errors.write(module, arg.loc, Code.CallbackTooFew, {
         word: method,
         other: passes,
         first: name,
@@ -226,14 +238,14 @@ partial class ExpressionTypes {
       });
     }
 
-    const passedResultErrors = this.callbacks.passedResultCheck(
+    const passedResultErrors = this.types.passedResultCheck(
       arg,
       type,
       plan,
       name,
     );
 
-    this.reportAll(module, passedResultErrors);
+    this.errors.writeAll(module, passedResultErrors);
   }
 
   private readonly callbackName(arg: Expr, module: int): string {
@@ -254,13 +266,15 @@ partial class ExpressionTypes {
   }
 
   private readonly isConstFunction(module: int, loc: int): boolean {
+    const tree = this.types.program.tree;
+
     const variable = this.record(module)?.variables.get(loc);
-    const init = variable?.decl.init;
+    const init = tree.exprAt(variable?.decl.initId);
 
     return variable?.isConst == true && init?.kind == ExprKind.Function;
   }
 
-  private readonly callbackParamsCheck(
+  private callbackParamsCheck(
     arg: Expr,
     type: FunctionType,
     plan: Read<CallbackPlan>,
@@ -268,10 +282,10 @@ partial class ExpressionTypes {
     module: int,
   ): boolean {
     const method = plan.member.name;
-    const params = type.shape.params;
+    const params = this.types.store.paramsOf(type);
     const passed = Math.min(params.length, plan.params.length);
-    const primary = this.callbacks.primaryCount(plan.kind);
-    const least = this.callbacks.requiredCallbackParams(type);
+    const primary = this.types.primaryCount(plan.kind);
+    const least = this.types.requiredCallbackParams(type);
 
     for (let index = 0; index < passed; index++) {
       const param = params[index];
@@ -281,26 +295,26 @@ partial class ExpressionTypes {
       }
 
       const isFitting =
-        param.type == given ||
-        (param.optional && this.types.definedType(param.type) == given);
+        param.type.id == given.id ||
+        (param.optional && this.types.definedType(param.type).id == given.id);
       if (!isFitting) {
-        this.report(module, arg.loc, Code.CallbackParamType, {
+        this.errors.write(module, arg.loc, Code.CallbackParamType, {
           word: name,
-          first: this.text.of(param.type),
+          first: this.types.typeText(param.type),
           second: kCallbackOrdinals[index] ?? "next",
           other: method,
-          place: this.text.of(given),
+          place: this.types.typeText(given),
         });
 
         return true;
       }
       if (index >= primary && index >= least) {
-        this.report(module, arg.loc, Code.CallbackExtraParam, {
+        this.errors.write(module, arg.loc, Code.CallbackExtraParam, {
           word: name,
-          other: this.callbacks.callbackArgumentName(plan.kind, index),
+          other: this.types.callbackArgumentName(plan.kind, index),
           first: this.optionalParamName(arg, index, module),
           second: method,
-          place: this.callbacks.callbackShapeText(plan.kind),
+          place: this.types.callbackShapeText(plan.kind),
         });
 
         return true;
@@ -310,7 +324,13 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly optionalParamName(arg: Expr, index: int, module: int): string {
+  private readonly optionalParamName(
+    arg: Expr,
+    index: int,
+    module: int,
+  ): string {
+    const tree = this.types.program.tree;
+
     if (arg.kind != ExprKind.Name) {
       return "";
     }
@@ -321,7 +341,7 @@ partial class ExpressionTypes {
     }
 
     const fn = this.record(target.module)?.functions.get(target.loc);
-    const param = fn?.params[index];
+    const param = tree.paramsOf(fn?.paramsList)[index];
     if (param == undefined) {
       return "";
     }
@@ -330,25 +350,29 @@ partial class ExpressionTypes {
   }
 
   private noteArguments(args: Read<CallArgument[]>): void {
+    const tree = this.types.program.tree;
+
     for (const arg of args) {
-      this.argumentExprs.add(arg.expr);
+      const expr = tree.exprOf(arg.exprId);
+
+      this.argumentExprs.add(expr.id);
     }
   }
 
-  private readonly isLooseValue(expr: Expr, wanted: Type | undefined): boolean {
+  private isLooseValue(expr: Expr, wanted: Type | undefined): boolean {
     return (
-      !this.callbacks.isFunctionWanted(wanted) && !this.argumentExprs.has(expr)
+      !this.types.isFunctionWanted(wanted) && !this.argumentExprs.has(expr.id)
     );
   }
 
-  private readonly builtinValueCheck(
+  private builtinValueCheck(
     expr: NameExpr,
     wanted: Type | undefined,
     module: int,
   ): boolean {
     const use = this.record(module)?.uses.get(expr.loc);
     if (expr.name == kArgumentsName && use?.symbol == undefined) {
-      this.report(module, expr.loc, Code.ArgumentsName, kNoDetails);
+      this.errors.write(module, expr.loc, Code.ArgumentsName, kNoDetails);
 
       return true;
     }
@@ -358,20 +382,17 @@ partial class ExpressionTypes {
 
     const word = expr.name;
     if (kOkValueNames.includes(word)) {
-      this.report(module, expr.loc, Code.OkAsValue, { word });
+      this.errors.write(module, expr.loc, Code.OkAsValue, { word });
 
       return true;
     }
-    if (
-      !kFunctionValueNames.has(word) ||
-      !this.callbacks.isLooseBuiltin(word)
-    ) {
+    if (!kFunctionValueNames.has(word) || !this.types.isLooseBuiltin(word)) {
       return false;
     }
 
-    const first = this.callbacks.builtinResultText(word);
+    const first = this.types.builtinResultText(word);
 
-    this.report(module, expr.loc, Code.BuiltinAsValue, { word, first });
+    this.errors.write(module, expr.loc, Code.BuiltinAsValue, { word, first });
 
     return true;
   }
@@ -403,13 +424,13 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const forwardedResultError = this.callbacks.forwardedResultCheck(
+    const forwardedResultError = this.types.forwardedResultCheck(
       expr,
-      own.shape.result,
-      goal.shape.result,
+      this.types.store.returnTypeOf(own),
+      this.types.store.returnTypeOf(goal),
     );
 
-    this.reportFound(module, forwardedResultError);
+    this.errors.writeFound(module, forwardedResultError);
 
     return goal;
   }
@@ -437,7 +458,9 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): boolean {
-    const object = expr.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
     if (object.kind != ExprKind.Name || !this.isLooseValue(expr, wanted)) {
       return false;
     }
@@ -451,7 +474,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, expr.loc, Code.StaticAsValue, {
+    this.errors.write(module, expr.loc, Code.StaticAsValue, {
       word: object.name,
       first: expr.name,
     });
@@ -465,19 +488,21 @@ partial class ExpressionTypes {
     plan: Read<CallbackPlan>,
     module: int,
   ): void {
-    if (arg.kind != ExprKind.Function || !arg.fn.isAsync) {
+    const tree = this.types.program.tree;
+
+    if (arg.kind != ExprKind.Function || !tree.functionOf(arg.fnId).isAsync) {
       return;
     }
 
     const word = plan.member.name;
     if (kTestingCallbacks.includes(plan.kind)) {
-      return this.report(module, arg.loc, Code.CallbackAsyncTest, {
+      return this.errors.write(module, arg.loc, Code.CallbackAsyncTest, {
         word,
         first: "boolean",
       });
     }
 
-    const initial = expr.args[1]?.expr;
+    const initial = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (plan.kind != ArrayCallback.Reduce || initial == undefined) {
       return;
     }
@@ -487,9 +512,12 @@ partial class ExpressionTypes {
     const isPlain =
       base.kind != TypeKind.Promise && base.kind != TypeKind.Error;
     if (isPlain) {
-      const first = this.text.of(given);
+      const first = this.types.typeText(given);
 
-      this.report(module, arg.loc, Code.CallbackAsyncValue, { word, first });
+      this.errors.write(module, arg.loc, Code.CallbackAsyncValue, {
+        word,
+        first,
+      });
     }
   }
 }

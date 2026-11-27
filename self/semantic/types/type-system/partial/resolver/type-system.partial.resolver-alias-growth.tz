@@ -1,0 +1,138 @@
+import { TypeSystem } from "../../type-system.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  TypeAliasDecl,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../../program/ast/types/ast.types.types.tz";
+
+partial class TypeSystem {
+  private aliasGrowthCheck(module: int, decl: TypeAliasDecl): void {
+    const tree = this.program.tree;
+
+    if (
+      tree.typeParamsOf(decl.typeParamsList).length == 0 ||
+      this.record(module)?.library != false
+    ) {
+      return;
+    }
+
+    const typeRef = tree.typeRefOf(decl.typeId);
+    const refs = this.refsOf(typeRef);
+    const names = tree
+      .typeParamsOf(decl.typeParamsList)
+      .map((param) => param.name);
+    const isConditional = refs.some(
+      (ref) => ref.form.kind == TypeRefKind.Conditional,
+    );
+    if (isConditional) {
+      return;
+    }
+
+    const isGrowing = refs.some(
+      (ref) => ref.name == decl.name && !this.isSameArguments(ref, names),
+    );
+    if (!isGrowing) {
+      return;
+    }
+
+    this.report(module, decl.loc, Code.AliasEndless, { word: decl.name });
+  }
+
+  public readonly namedRefs(root: TypeRef, name: string): TypeRef[] {
+    const refs = this.refsOf(root);
+
+    return refs.filter((ref) => ref.name == name);
+  }
+
+  public readonly isGrowingUse(
+    root: TypeRef,
+    name: string,
+    names: Read<string[]>,
+  ): boolean {
+    const refs = this.refsOf(root);
+
+    return refs.some(
+      (ref) => ref.name == name && !this.isSameArguments(ref, names),
+    );
+  }
+
+  private readonly isSameArguments(
+    ref: TypeRef,
+    names: Read<string[]>,
+  ): boolean {
+    const tree = this.program.tree;
+
+    const args = tree.typeRefsOf(ref.argsList);
+    if (args.length != names.length) {
+      return true;
+    }
+
+    return tree
+      .typeRefsOf(ref.argsList)
+      .every(
+        (arg, index) =>
+          arg.form.kind == TypeRefKind.Name && arg.name == names[index],
+      );
+  }
+
+  private readonly refsOf(root: TypeRef): TypeRef[] {
+    const found: TypeRef[] = [root];
+
+    for (let index = 0; index < found.length; index++) {
+      const ref = found[index];
+      if (ref != undefined) {
+        this.addChildRefs(ref, found);
+      }
+    }
+
+    return found;
+  }
+
+  private readonly addChildRefs(ref: TypeRef, found: TypeRef[]): void {
+    const tree = this.program.tree;
+
+    for (const arg of tree.typeRefsOf(ref.argsList)) {
+      found.push(arg);
+    }
+
+    const form = ref.form;
+
+    switch (form.kind) {
+      case TypeRefKind.Function: {
+        for (const param of tree.functionTypeParamsOf(form.paramsList)) {
+          const typeRef = tree.typeRefOf(param.typeId);
+
+          found.push(typeRef);
+        }
+
+        const result = tree.typeRefAt(form.resultId);
+        if (result != undefined) {
+          found.push(result);
+        }
+
+        return;
+      }
+      case TypeRefKind.Object:
+        for (const field of tree.objectFieldsOf(form.fieldsList)) {
+          const fieldType = tree.typeRefOf(field.typeId);
+
+          found.push(fieldType);
+        }
+
+        return;
+      case TypeRefKind.Tuple:
+        for (const element of tree.tupleElementsOf(form.elementsList)) {
+          const elementType = tree.typeRefOf(element.typeId);
+
+          found.push(elementType);
+        }
+
+        return;
+      default:
+        return;
+    }
+  }
+}

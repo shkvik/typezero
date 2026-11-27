@@ -288,6 +288,16 @@ void tz_rt_shutdown(void) {
     tz_out_flush(1);
     stream_write(&tz_err_stream, message, (size_t)len);
   }
+  int64_t immortal_objects = tz_obj_immortal_objects();
+  int64_t immortal_arrays = tz_arr_immortal_arrays();
+  if ((immortal_objects != 0 || immortal_arrays != 0) && getenv("TZ_CHECK_LEAKS")) {
+    char message[160];
+    int len = snprintf(message, sizeof message,
+                       "tz: %lld object(s) and %lld array(s) were made immortal (never freed)\n",
+                       (long long)immortal_objects, (long long)immortal_arrays);
+    tz_out_flush(1);
+    stream_write(&tz_err_stream, message, (size_t)len);
+  }
   exit(tz_process_exit_status());
 }
 

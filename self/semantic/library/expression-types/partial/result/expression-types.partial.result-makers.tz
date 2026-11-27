@@ -28,31 +28,35 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
-    if (expr.args.some((arg) => arg.spread)) {
-      this.looseArguments(expr.args, module);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    if (tree.argumentsOf(expr.argsList).some((arg) => arg.spread)) {
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return error;
     }
 
-    const count = expr.args.length;
+    const count = tree.argumentsOf(expr.argsList).length;
     if (count > 1) {
-      this.report(module, callee.loc, Code.ArgumentCount, {
-        word: this.calls.argumentCountText(0, 1, false),
+      this.errors.write(module, callee.loc, Code.ArgumentCount, {
+        word: this.types.argumentCountText(0, 1, false),
         other: `${count}`,
       });
 
       return error;
     }
 
-    const typeArgs = callee.typeArgs;
+    const typeArgs = tree.typeRefsOf(callee.typeArgsList);
     if (typeArgs.length == 0) {
-      const goal = this.results.resultGoal(wanted);
+      const goal = this.types.resultGoal(wanted);
 
       return this.halfValueTyped(expr, callee, goal, false, module);
     }
     if (typeArgs.length != 2) {
-      this.report(module, callee.loc, Code.OkErrTypeArgs, {
+      this.errors.write(module, callee.loc, Code.OkErrTypeArgs, {
         word: callee.name,
       });
 
@@ -67,14 +71,16 @@ partial class ExpressionTypes {
     return this.halfValueTyped(expr, callee, written, true, module);
   }
 
-  private readonly writtenResult(callee: NameExpr, module: int): ResultType | undefined {
+  private writtenResult(callee: NameExpr, module: int): ResultType | undefined {
+    const tree = this.types.program.tree;
+
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const types = callee.typeArgs.map((ref) =>
-      this.resolver.resolve(ref, context),
+    const types = tree.typeRefsOf(callee.typeArgsList).map((ref) =>
+      this.types.resolve(ref, context),
     );
     const value = types[0];
     const failure = types[1];
@@ -85,7 +91,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const made = this.store.resultOf(value, failure);
+    const made = this.types.store.resultOf(value, failure);
     if (made.kind != TypeKind.Result) {
       return undefined;
     }
@@ -100,40 +106,44 @@ partial class ExpressionTypes {
     isWritten: boolean,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const isOk = callee.name == "ok";
-    const arg = expr.args[0]?.expr;
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (arg == undefined) {
-      return this.results.madeResult(
+      return this.types.madeResult(
         isOk,
-        this.store.plain(TypeKind.Void),
+        this.types.store.plain(TypeKind.Void),
         goal,
       );
     }
 
-    const half = this.results.goalHalf(goal, isOk);
+    const half = this.types.goalHalf(goal, isOk);
     const isHinted =
       half != undefined &&
       half.kind != TypeKind.Never &&
       half.kind != TypeKind.Void;
-    const hint = this.results.halfHint(isHinted, half);
+    const hint = this.types.halfHint(isHinted, half);
     const given = this.typed(arg, hint, module);
     if (given.kind == TypeKind.Void) {
-      this.report(module, arg.loc, Code.OkErrVoidValue, { word: callee.name });
+      this.errors.write(module, arg.loc, Code.OkErrVoidValue, {
+        word: callee.name,
+      });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (given.kind == TypeKind.Error) {
       return given;
     }
-    if (half != undefined && isHinted && this.relation.converts(given, half)) {
-      return this.results.madeResult(isOk, half, goal);
+    if (half != undefined && isHinted && this.types.converts(given, half)) {
+      return this.types.madeResult(isOk, half, goal);
     }
     if (half != undefined && isWritten) {
       this.coerce(arg, given, half, module, kNoPlace);
 
-      return this.results.madeResult(isOk, half, goal);
+      return this.types.madeResult(isOk, half, goal);
     }
 
-    return this.results.madeResult(isOk, given, goal);
+    return this.types.madeResult(isOk, given, goal);
   }
 }

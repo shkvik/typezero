@@ -4,7 +4,6 @@ import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   BinaryOp,
-  Expr,
   ExprKind,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
@@ -14,6 +13,9 @@ import {
   Operator,
   Precedence,
 } from "../types/file-parser.types.operators.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
 
 partial class FileParser {
   private readonly operator(): Operator {
@@ -137,7 +139,7 @@ partial class FileParser {
     }
   }
 
-  private applyOperator(left: Expr, op: BinaryOperator, start: int): Expr {
+  private applyOperator(left: Own<Expr>, op: BinaryOperator, start: int): Expr {
     const token = this.cursor.peek();
     const loc = token.start;
 
@@ -155,13 +157,13 @@ partial class FileParser {
     }
   }
 
-  private castTo(operand: Expr, loc: int): Expr {
+  private castTo(operand: Own<Expr>, loc: int): Expr {
     const target = this.type();
 
     return { kind: ExprKind.Cast, loc, operand, target };
   }
 
-  private satisfiesCheck(operand: Expr, loc: int): Expr {
+  private satisfiesCheck(operand: Own<Expr>, loc: int): Expr {
     const first = this.cursor.peek();
 
     this.type();
@@ -173,7 +175,7 @@ partial class FileParser {
     return operand;
   }
 
-  private instanceOfCheck(left: Expr, loc: int, start: int): Expr {
+  private instanceOfCheck(left: Own<Expr>, loc: int, start: int): Expr {
     const right = this.binary(Precedence.Relational);
     const source = this.cursor.spanFrom(start);
 
@@ -188,7 +190,7 @@ partial class FileParser {
   }
 
   private binaryOperation(
-    left: Expr,
+    left: Own<Expr>,
     op: BinaryOperator,
     loc: int,
     start: int,

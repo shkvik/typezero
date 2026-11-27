@@ -2,17 +2,25 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { Details } from "../../../../diagnostic/types/message.types.tz";
 import { Token, TokenKind } from "../../../token/types/token.types.tz";
-import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
-import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
-  DeclaredMember,
-  DeclaredMemberForm,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
   DeclaredMemberKind,
 } from "../../../../program/ast/types/ast.types.declarations.tz";
 import { Modifiers } from "../types/file-parser.types.classes.tz";
 import { ParamPattern } from "../types/file-parser.types.functions.tz";
 import { DeclarationDraft } from "../types/file-parser.types.result.tz";
+import {
+  DeclaredMember,
+  DeclaredMemberForm,
+} from "../../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 partial class FileParser {
   private declarationItem(file: DeclarationDraft): void {

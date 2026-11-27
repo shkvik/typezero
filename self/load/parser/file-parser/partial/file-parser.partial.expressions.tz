@@ -3,7 +3,6 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  Expr,
   ExprKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
@@ -11,6 +10,9 @@ import {
   FunctionKind,
 } from "../types/file-parser.types.context.tz";
 import { Precedence } from "../types/file-parser.types.operators.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
 
 partial class FileParser {
   private sequence(): Expr {
@@ -20,6 +22,7 @@ partial class FileParser {
       return first;
     }
 
+    const loc = first.loc;
     const exprs: Expr[] = [first];
 
     while (this.cursor.accept(TokenKind.Comma)) {
@@ -28,7 +31,7 @@ partial class FileParser {
       exprs.push(next);
     }
 
-    return { kind: ExprKind.Sequence, loc: first.loc, exprs };
+    return { kind: ExprKind.Sequence, loc, exprs };
   }
 
   private expression(): Expr {
@@ -154,8 +157,11 @@ partial class FileParser {
 
     if (this.context.functionKind != FunctionKind.Generator) {
       this.cursor.report(loc, Code.YieldOutsideGenerator);
+      if (value != undefined) {
+        return value;
+      }
 
-      return value ?? { kind: ExprKind.Undefined, loc };
+      return { kind: ExprKind.Undefined, loc };
     }
 
     return { kind: ExprKind.Yield, loc, value, delegate };

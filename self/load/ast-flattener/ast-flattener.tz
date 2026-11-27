@@ -1,0 +1,236 @@
+import "./partial/ast-flattener.partial.expressions.tz";
+import "./partial/ast-flattener.partial.statements.tz";
+import "./partial/ast-flattener.partial.declarations.tz";
+import "./partial/ast-flattener.partial.types.tz";
+import "./partial/ast-flattener.partial.lists.tz";
+import { replace } from "tz:mem";
+import { AstTree } from "../../program/ast/ast-tree/ast-tree.tz";
+import { AstTables } from "../../program/ast/ast-tree/types/ast-tree.types.tz";
+import {
+  ClassDecl,
+  ClassField,
+  Decorator,
+  EnumMember,
+} from "../../program/ast/types/ast.types.classes.tz";
+import {
+  DeclarationFile,
+  DeclaredClass,
+  DeclaredMember,
+} from "../../program/ast/types/ast.types.declarations.tz";
+import {
+  ArrayElement,
+  Expr,
+  Property,
+} from "../../program/ast/types/ast.types.expressions.tz";
+import { Param } from "../../program/ast/types/ast.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+  ModuleName,
+  SourceFile,
+} from "../../program/ast/types/ast.types.modules.tz";
+import { VarDeclarator } from "../../program/ast/types/ast.types.patterns.tz";
+import { AstList } from "../../program/ast/types/ast.types.span.tz";
+import {
+  Stmt,
+  StmtKind,
+  SwitchCase,
+} from "../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionTypeParam,
+  ObjectTypeField,
+  TupleElement,
+  TypeParamDecl,
+  TypeRef,
+} from "../../program/ast/types/ast.types.types.tz";
+import {
+  DeclarationFile as SyntaxDeclarationFile,
+  DeclaredClass as SyntaxDeclaredClass,
+} from "../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  ExportDecl as SyntaxExportDecl,
+  ImportDecl as SyntaxImportDecl,
+  SourceFile as SyntaxSourceFile,
+} from "../../program/syntax/types/syntax.types.modules.tz";
+import {
+  Stmt as SyntaxStmt,
+} from "../../program/syntax/types/syntax.types.statements.tz";
+
+export class AstFlattener {
+  private exprs: Expr[];
+  private stmts: Stmt[];
+  private typeRefs: TypeRef[];
+  private exprIds: int[];
+  private stmtIds: int[];
+  private typeRefIds: int[];
+  private texts: string[];
+  private arrayElements: ArrayElement[];
+  private classFields: ClassField[];
+  private declaredClasses: DeclaredClass[];
+  private declaredMembers: DeclaredMember[];
+  private decorators: Decorator[];
+  private enumMembers: EnumMember[];
+  private exportDecls: ExportDecl[];
+  private functionTypeParams: FunctionTypeParam[];
+  private importDecls: ImportDecl[];
+  private moduleNames: ModuleName[];
+  private objectTypeFields: ObjectTypeField[];
+  private params: Param[];
+  private properties: Property[];
+  private switchCases: SwitchCase[];
+  private tupleElements: TupleElement[];
+  private typeParamDecls: TypeParamDecl[];
+  private varDeclarators: VarDeclarator[];
+
+  public constructor() {
+    this.exprs = [];
+    this.stmts = [];
+    this.typeRefs = [];
+    this.exprIds = [];
+    this.stmtIds = [];
+    this.typeRefIds = [];
+    this.texts = [];
+    this.arrayElements = [];
+    this.classFields = [];
+    this.declaredClasses = [];
+    this.declaredMembers = [];
+    this.decorators = [];
+    this.enumMembers = [];
+    this.exportDecls = [];
+    this.functionTypeParams = [];
+    this.importDecls = [];
+    this.moduleNames = [];
+    this.objectTypeFields = [];
+    this.params = [];
+    this.properties = [];
+    this.switchCases = [];
+    this.tupleElements = [];
+    this.typeParamDecls = [];
+    this.varDeclarators = [];
+  }
+
+  public itemIds(items: Read<readonly SyntaxStmt[]>): int[] {
+    const ids: int[] = [];
+
+    for (const item of items) {
+      const id = this.stmt(item);
+
+      ids.push(id);
+    }
+
+    return ids;
+  }
+
+  public stmtIdList(ids: Read<int[]>): AstList {
+    return this.pushStmtIds(ids);
+  }
+
+  public importsOf(nodes: Read<readonly SyntaxImportDecl[]>): AstList {
+    return this.importDeclList(nodes);
+  }
+
+  public exportsOf(nodes: Read<readonly SyntaxExportDecl[]>): AstList {
+    return this.exportDeclList(nodes);
+  }
+
+  public declaredClassesOf(
+    nodes: Read<readonly SyntaxDeclaredClass[]>,
+  ): AstList {
+    return this.declaredClassList(nodes);
+  }
+
+  public declarationOf(file: Read<SyntaxDeclarationFile>): DeclarationFile {
+    return this.declarationFile(file);
+  }
+
+  public sourceFileOf(file: Read<SyntaxSourceFile>): SourceFile {
+    const ids = this.itemIds(file.items);
+    const itemsList = this.pushStmtIds(ids);
+    const importsList = this.importDeclList(file.imports);
+    const exportsList = this.exportDeclList(file.exports);
+
+    return { itemsList, importsList, exportsList };
+  }
+
+  public readonly methodIds(id: int): int[] {
+    const stmt = this.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Class) {
+      return [];
+    }
+
+    const list = stmt.methodsList;
+
+    return this.stmtIds.slice(list.start, list.end);
+  }
+
+  public setMethods(id: int, methodIds: Read<int[]>): void {
+    if (id < 0 || id >= this.stmts.length) {
+      return;
+    }
+
+    const stmt = this.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Class) {
+      return;
+    }
+
+    const methods = this.pushStmtIds(methodIds);
+    const joined: ClassDecl = { ...stmt, methodsList: methods };
+
+    this.stmts[id] = joined;
+  }
+
+  public takeTree(): AstTree {
+    const exprs = replace(this.exprs, []);
+    const stmts = replace(this.stmts, []);
+    const typeRefs = replace(this.typeRefs, []);
+    const exprIds = replace(this.exprIds, []);
+    const stmtIds = replace(this.stmtIds, []);
+    const typeRefIds = replace(this.typeRefIds, []);
+    const texts = replace(this.texts, []);
+    const arrayElements = replace(this.arrayElements, []);
+    const classFields = replace(this.classFields, []);
+    const declaredClasses = replace(this.declaredClasses, []);
+    const declaredMembers = replace(this.declaredMembers, []);
+    const decorators = replace(this.decorators, []);
+    const enumMembers = replace(this.enumMembers, []);
+    const exportDecls = replace(this.exportDecls, []);
+    const functionTypeParams = replace(this.functionTypeParams, []);
+    const importDecls = replace(this.importDecls, []);
+    const moduleNames = replace(this.moduleNames, []);
+    const objectTypeFields = replace(this.objectTypeFields, []);
+    const params = replace(this.params, []);
+    const properties = replace(this.properties, []);
+    const switchCases = replace(this.switchCases, []);
+    const tupleElements = replace(this.tupleElements, []);
+    const typeParamDecls = replace(this.typeParamDecls, []);
+    const varDeclarators = replace(this.varDeclarators, []);
+    const tables: AstTables = {
+      exprs,
+      stmts,
+      typeRefs,
+      exprIds,
+      stmtIds,
+      typeRefIds,
+      texts,
+      arrayElements,
+      classFields,
+      declaredClasses,
+      declaredMembers,
+      decorators,
+      enumMembers,
+      exportDecls,
+      functionTypeParams,
+      importDecls,
+      moduleNames,
+      objectTypeFields,
+      params,
+      properties,
+      switchCases,
+      tupleElements,
+      typeParamDecls,
+      varDeclarators,
+    };
+
+    return new AstTree(tables);
+  }
+}

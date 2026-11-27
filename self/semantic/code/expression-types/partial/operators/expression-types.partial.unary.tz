@@ -35,21 +35,24 @@ partial class ExpressionTypes {
       case UnaryOp.Delete:
         return this.deleteTyped(expr, module);
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
     }
   }
 
   private voidTyped(expr: UnaryExpr, module: int): Type {
-    const type = this.typed(expr.operand, undefined, module);
-    const isPromised = type.kind == TypeKind.Promise;
-    const dropped = this.operators.droppedValue(type);
-    if (this.types.holdsKind(dropped, TypeKind.Result)) {
-      const code = this.operators.droppedCode(isPromised);
+    const tree = this.types.program.tree;
 
-      this.report(module, expr.loc, code, kNoDetails);
+    const operand = tree.exprOf(expr.operandId);
+    const type = this.typed(operand, undefined, module);
+    const isPromised = type.kind == TypeKind.Promise;
+    const dropped = this.types.droppedValue(type);
+    if (this.types.holdsKind(dropped, TypeKind.Result)) {
+      const code = this.types.droppedCode(isPromised);
+
+      this.errors.write(module, expr.loc, code, kNoDetails);
     }
 
-    return this.store.plain(TypeKind.Undefined);
+    return this.types.store.plain(TypeKind.Undefined);
   }
 
   private nonNullTyped(
@@ -57,24 +60,29 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const type = this.typed(expr.operand, wanted, module);
-    const word = this.operators.assertedText(expr.operand) ?? kUnnamedOperand;
+    const tree = this.types.program.tree;
+
+    const operand = tree.exprOf(expr.operandId);
+    const type = this.typed(operand, wanted, module);
+    const word =
+      this.types.operatorAssertedText(tree.exprOf(expr.operandId)) ??
+      kUnnamedOperand;
 
     if (type.kind == TypeKind.Error) {
       return type;
     }
     if (type.kind == TypeKind.Undefined) {
-      this.report(module, expr.loc, Code.NonNullUndefined, kNoDetails);
+      this.errors.write(module, expr.loc, Code.NonNullUndefined, kNoDetails);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (!this.types.isOptional(type)) {
-      this.report(module, expr.loc, Code.NonNullNever, { word });
+      this.errors.write(module, expr.loc, Code.NonNullNever, { word });
 
       return type;
     }
 
-    this.report(module, expr.loc, Code.NonNullCheck, { word });
+    this.errors.write(module, expr.loc, Code.NonNullCheck, { word });
 
     return this.types.definedType(type);
   }
@@ -84,42 +92,48 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const hint = this.operators.signHint(expr, wanted);
-    const type = this.operandTyped(expr.operand, hint, module);
-    const other = this.operators.unaryText(expr.op);
+    const tree = this.types.program.tree;
+
+    const hint = this.types.signHint(expr, wanted);
+    const operand = tree.exprOf(expr.operandId);
+    const type = this.operandTyped(operand, hint, module);
+    const other = this.types.unaryText(expr.op);
     const isPlus = expr.op == UnaryOp.Plus;
 
     if (type.kind == TypeKind.String) {
-      this.report(module, expr.loc, Code.SignOfText, { other });
+      this.errors.write(module, expr.loc, Code.SignOfText, { other });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (type.kind == TypeKind.Boolean) {
-      this.report(module, expr.loc, Code.SignOfBoolean, { other });
+      this.errors.write(module, expr.loc, Code.SignOfBoolean, { other });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.types.isDate(type) && isPlus) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const isLiteral =
-      expr.operand.kind == ExprKind.IntLit ||
-      expr.operand.kind == ExprKind.FloatLit;
+      tree.exprOf(expr.operandId).kind == ExprKind.IntLit ||
+      tree.exprOf(expr.operandId).kind == ExprKind.FloatLit;
     if (type.kind == TypeKind.Decimal && isPlus && !isLiteral) {
-      this.report(module, expr.loc, Code.DecimalPlus, kNoDetails);
+      this.errors.write(module, expr.loc, Code.DecimalPlus, kNoDetails);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const isNumber =
       this.types.isNumberLike(type) || type.kind == TypeKind.Error;
     if (!isNumber) {
-      const first = this.text.of(type);
+      const first = this.types.typeText(type);
 
-      this.report(module, expr.loc, Code.UnaryOperandType, { other, first });
+      this.errors.write(module, expr.loc, Code.UnaryOperandType, {
+        other,
+        first,
+      });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.foldUnary(expr, type, module);
@@ -132,23 +146,29 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const expected = this.types.wantedPart(wanted);
-    const hint = this.operators.integerOf(expected);
-    const type = this.operandTyped(expr.operand, hint, module);
-    if (type.kind == TypeKind.Double) {
-      this.report(module, expr.loc, Code.BitNotOfDouble, kNoDetails);
+    const tree = this.types.program.tree;
 
-      return this.store.plain(TypeKind.Error);
+    const expected = this.types.wantedPart(wanted);
+    const hint = this.types.integerOf(expected);
+    const operand = tree.exprOf(expr.operandId);
+    const type = this.operandTyped(operand, hint, module);
+    if (type.kind == TypeKind.Double) {
+      this.errors.write(module, expr.loc, Code.BitNotOfDouble, kNoDetails);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const isInteger = type.kind == TypeKind.Int || type.kind == TypeKind.Error;
     if (!isInteger) {
-      const other = this.operators.unaryText(expr.op);
-      const first = this.text.of(type);
+      const other = this.types.unaryText(expr.op);
+      const first = this.types.typeText(type);
 
-      this.report(module, expr.loc, Code.UnaryOperandType, { other, first });
+      this.errors.write(module, expr.loc, Code.UnaryOperandType, {
+        other,
+        first,
+      });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.foldUnary(expr, type, module);

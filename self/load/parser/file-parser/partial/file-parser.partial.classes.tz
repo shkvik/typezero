@@ -1,37 +1,18 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import {
-  KnownName,
-  Token,
-  TokenKind,
-} from "../../../token/types/token.types.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
+import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
 import {
-  TypeRefKind,
-  TypeRef,
-} from "../../../../program/ast/types/ast.types.types.tz";
-import {
-  Expr,
   ExprKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
-  BlockStmt,
-  Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   BodySource,
-  FunctionDecl,
-  FunctionPlace,
-  Param,
-  ParamProperty,
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
-  Access,
-  ClassDecl,
-  ClassField,
-  ClassMember,
-  Decorator,
   FieldKind,
   FieldPresence,
   MethodKind,
@@ -42,10 +23,23 @@ import {
   MemberName,
   Modifiers,
 } from "../types/file-parser.types.classes.tz";
+import { kUnsafeDecorator } from "../const/file-parser.const.classes.tz";
 import {
-  kThisName,
-  kUnsafeDecorator,
-} from "../const/file-parser.const.classes.tz";
+  ClassDecl,
+  Decorator,
+} from "../../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  BlockStmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+import {
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 partial class FileParser {
   private classDeclaration(): ClassDeclDraft {
@@ -81,7 +75,10 @@ partial class FileParser {
     };
   }
 
-  private readonly namedClassDecl(decl: ClassDecl, name: string): ClassDecl {
+  private readonly namedClassDecl(
+    decl: Own<ClassDecl>,
+    name: string,
+  ): ClassDecl {
     return {
       kind: StmtKind.Class,
       loc: decl.loc,
@@ -93,7 +90,7 @@ partial class FileParser {
       baseArgs: decl.baseArgs,
       interfaces: decl.interfaces,
       fields: decl.fields,
-      methods: decl.methods.slice(),
+      methods: decl.methods,
       constructors: decl.constructors,
       expression: decl.expression,
       decorators: decl.decorators,
@@ -102,7 +99,10 @@ partial class FileParser {
     };
   }
 
-  private readonly decoratedClass(decl: ClassDecl, decorators: Read<Decorator[]>): ClassDecl {
+  private readonly decoratedClass(
+    decl: Own<ClassDecl>,
+    decorators: Own<Decorator[]>,
+  ): ClassDecl {
     const all = decorators.concat(decl.decorators);
 
     return {
@@ -116,7 +116,7 @@ partial class FileParser {
       baseArgs: decl.baseArgs,
       interfaces: decl.interfaces,
       fields: decl.fields,
-      methods: decl.methods.slice(),
+      methods: decl.methods,
       constructors: decl.constructors,
       expression: decl.expression,
       decorators: all,
@@ -126,8 +126,8 @@ partial class FileParser {
   }
 
   private readonly withBody(
-    fn: FunctionDecl,
-    body: BlockStmt,
+    fn: Own<FunctionDecl>,
+    body: Own<BlockStmt>,
     bodySource: BodySource,
   ): FunctionDecl {
     return {
@@ -356,12 +356,13 @@ partial class FileParser {
     };
 
     while (this.cursor.is(TokenKind.Dot)) {
-      const link = this.dotLink(expr);
-      if (link == undefined) {
+      if (!this.dotAhead()) {
+        this.brokenDot();
+
         return expr;
       }
 
-      expr = link;
+      expr = this.dotLink(expr);
     }
 
     if (this.cursor.is(TokenKind.LParen)) {
@@ -381,12 +382,17 @@ partial class FileParser {
     return callee.kind == ExprKind.Name && callee.name == kUnsafeDecorator;
   }
 
-  private readonly unsafeOptions(expr: Expr): Expr | undefined {
+  private readonly unsafeOptions(expr: Read<Expr>): Expr | undefined {
     if (expr.kind != ExprKind.Call) {
       return undefined;
     }
 
-    return expr.args[0]?.expr;
+    const first = expr.args[0];
+    if (first == undefined) {
+      return undefined;
+    }
+
+    return this.copyExpr(first.expr);
   }
 
   private rejectDecorators(decorators: Read<Decorator[]>): void {
@@ -394,411 +400,6 @@ partial class FileParser {
     if (first != undefined) {
       this.cursor.report(first.loc, Code.DecoratorTarget);
     }
-  }
-
-  private readonly memberAccessorAhead(): boolean {
-    const next = this.cursor.lookahead();
-
-    return (
-      (this.cursor.is(TokenKind.Get) || this.cursor.is(TokenKind.Set)) &&
-      !next.newline &&
-      (next.kind == TokenKind.Identifier ||
-        kTokenTable.isKeyword(next.kind) ||
-        next.kind == TokenKind.String)
-    );
-  }
-
-  private classMember(declaration: ClassDeclDraft): void {
-    if (this.cursor.accept(TokenKind.Semi)) {
-      return;
-    }
-
-    const decorators = this.decorators();
-
-    if (this.cursor.isRecovering()) {
-      return;
-    }
-
-    const head = this.cursor.peek();
-    const loc = head.start;
-    const modifiers = this.modifiers();
-    if (modifiers.staticBlock) {
-      return;
-    }
-    if (this.memberAccessorAhead()) {
-      return this.memberAccessor(loc);
-    }
-    if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
-      this.cursor.report(loc, Code.MemberNameInBrackets);
-      this.cursor.skipBracketed();
-
-      return this.skipClassMember();
-    }
-
-    const member = this.memberName(modifiers);
-    if (member == undefined) {
-      return;
-    }
-    if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
-      return this.classMethod(declaration, modifiers, decorators, loc, member);
-    }
-    if (member.generator || modifiers.isAsync) {
-      const token = this.cursor.peek();
-      const code = this.methodParenCode(member.generator);
-
-      return this.cursor.error(token.start, code);
-    }
-
-    this.classField(declaration, modifiers, decorators, loc, member);
-  }
-
-  private memberAccessor(loc: int): void {
-    const keyword = this.cursor.next();
-    const name = this.cursor.peek();
-
-    this.reportAccessor(loc, keyword.kind, name.text);
-    this.skipClassMember();
-  }
-
-  private reportAccessor(loc: int, keyword: TokenKind, name: string): void {
-    if (keyword == TokenKind.Get) {
-      return this.cursor.report(loc, Code.GettersNotSupported, { word: name });
-    }
-
-    const setter = this.setterName(name);
-
-    this.cursor.report(loc, Code.SettersNotSupported, { word: setter });
-  }
-
-  private readonly setterName(name: string): string {
-    const first = name.slice(0, 1);
-    const rest = name.slice(1);
-    const capital = first.toUpperCase();
-
-    return `set${capital}${rest}`;
-  }
-
-  private readonly methodParenCode(generator: boolean): Code {
-    if (generator) {
-      return Code.ExpectedParenAfterGeneratorName;
-    }
-
-    return Code.ExpectedParenAfterAsyncName;
-  }
-
-  private memberName(modifiers: Modifiers): MemberName | undefined {
-    const head = this.cursor.peek();
-    const start = head.start;
-    const generator = this.cursor.accept(TokenKind.Star);
-    const token = this.cursor.peek();
-    const name = this.fieldName();
-    if (name == undefined) {
-      return undefined;
-    }
-    if (token.hash) {
-      this.cursor.report(token.start, Code.NoPrivateName, { word: name });
-      modifiers.access = Access.Private;
-    }
-
-    return {
-      loc: token.start,
-      start,
-      name,
-      generator,
-      constructorName: token.kind == TokenKind.Constructor,
-    };
-  }
-
-  private classMethod(
-    declaration: ClassDeclDraft,
-    modifiers: Read<Modifiers>,
-    decorators: Own<Decorator[]>,
-    loc: int,
-    member: MemberName,
-  ): void {
-    const constructor = member.constructorName && !modifiers.isStatic;
-    const abstractMethod = modifiers.isAbstract && !constructor;
-
-    if (modifiers.accessor) {
-      this.cursor.report(loc, Code.AccessorBeforeMethod);
-    }
-
-    const first = decorators[0];
-    if (first != undefined && constructor) {
-      this.cursor.report(first.loc, Code.DecoratedConstructor);
-    }
-
-    const role: ClassMember = {
-      access: modifiers.access,
-      isOverride: modifiers.isOverride && !constructor,
-      isReadonly: modifiers.readonly && !constructor && !modifiers.isStatic,
-      decorators: this.methodDecorators(decorators, constructor),
-      method: this.methodKind(modifiers, constructor),
-    };
-
-    this.reportMethodModifiers(modifiers, member.generator, constructor, loc);
-    const method = this.method(
-      member.loc,
-      member.name,
-      member.start,
-      member.generator && !constructor,
-      modifiers.isAsync && !constructor,
-      FunctionPlace.Declared,
-      role,
-    );
-
-    if (this.cursor.isRecovering()) {
-      return;
-    }
-    if (abstractMethod) {
-      return this.addAbstractMethod(declaration, method, member);
-    }
-
-    const body = method.body;
-    if (body == undefined) {
-      return this.reportMissingBody(method, member);
-    }
-    if (!this.isConstructor(method)) {
-      declaration.methods.push(method);
-
-      return;
-    }
-
-    this.addConstructor(declaration, method, body);
-  }
-
-  private readonly methodKind(modifiers: Read<Modifiers>, constructor: boolean): MethodKind {
-    if (constructor) {
-      return MethodKind.Constructor;
-    }
-    if (modifiers.isStatic) {
-      return MethodKind.Static;
-    }
-    if (modifiers.isAbstract) {
-      return MethodKind.Abstract;
-    }
-
-    return MethodKind.Instance;
-  }
-
-  private reportMissingBody(method: FunctionDecl, member: MemberName): void {
-    if (this.isConstructor(method)) {
-      return this.cursor.report(member.loc, Code.ConstructorWithoutBody);
-    }
-
-    this.cursor.report(member.loc, Code.MethodWithoutBody, {
-      word: member.name,
-    });
-  }
-
-  private addAbstractMethod(
-    declaration: ClassDeclDraft,
-    method: FunctionDecl,
-    member: MemberName,
-  ): void {
-    if (method.body != undefined) {
-      this.cursor.report(member.loc, Code.AbstractMethodBody, {
-        word: member.name,
-        other: declaration.name,
-      });
-    }
-
-    const body: BlockStmt = { kind: StmtKind.Block, loc: member.loc, body: [] };
-
-    const bodied = this.withBody(method, body, method.bodySource);
-
-    declaration.methods.push(bodied);
-  }
-
-  private addConstructor(
-    declaration: ClassDeclDraft,
-    method: FunctionDecl,
-    body: BlockStmt,
-  ): void {
-    const returnType = method.returnType;
-    if (returnType != undefined) {
-      this.cursor.report(returnType.loc, Code.ConstructorReturnType);
-    }
-
-    const filled = this.withParameterFields(declaration, method, body);
-
-    declaration.constructors.push(filled);
-  }
-
-  private readonly constructorModifier(modifiers: Read<Modifiers>): TokenKind {
-    if (modifiers.isOverride) {
-      return TokenKind.Override;
-    }
-
-    return TokenKind.Abstract;
-  }
-
-  private reportMethodModifiers(
-    modifiers: Read<Modifiers>,
-    generator: boolean,
-    constructor: boolean,
-    loc: int,
-  ): void {
-    if (generator && constructor) {
-      this.cursor.report(loc, Code.GeneratorConstructor);
-    }
-    if (modifiers.isAsync && constructor) {
-      this.cursor.report(loc, Code.AsyncConstructor);
-    }
-    if (modifiers.readonly && constructor) {
-      this.cursor.report(loc, Code.ReadonlyNotMethod, { word: "a constructor" });
-    }
-    if (modifiers.readonly && modifiers.isStatic) {
-      this.cursor.report(loc, Code.ReadonlyNotMethod, {
-        word: "a static method",
-      });
-    }
-    if ((modifiers.isOverride || modifiers.isAbstract) && constructor) {
-      const found = this.constructorModifier(modifiers);
-
-      this.cursor.report(loc, Code.ConstructorModifier, { found });
-    }
-    if (modifiers.isAbstract && modifiers.isStatic) {
-      this.cursor.report(loc, Code.AbstractStaticMethod);
-    }
-  }
-
-  private readonly hasParameterField(declaration: ClassDecl, name: string): boolean {
-    for (const field of declaration.fields) {
-      if (field.form == FieldKind.Parameter && field.name == name) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private readonly superCallEnd(body: BlockStmt): int {
-    for (let i = 0; i < body.body.length; i++) {
-      const stmt = body.body[i];
-      if (stmt == undefined || stmt.kind != StmtKind.Expr) {
-        continue;
-      }
-
-      const call = stmt.expr;
-      if (call.kind != ExprKind.Call) {
-        continue;
-      }
-
-      const callee = call.callee;
-      if (callee.kind == ExprKind.Name && callee.known == KnownName.Super) {
-        return i + 1;
-      }
-    }
-
-    return 0;
-  }
-
-  private withParameterFields(
-    declaration: ClassDeclDraft,
-    constructorDecl: FunctionDecl,
-    body: BlockStmt,
-  ): FunctionDecl {
-    const sets: Stmt[] = [];
-    let properties = this.parameterFieldCount(declaration);
-
-    for (const param of constructorDecl.params) {
-      const property = param.property;
-      if (property == undefined) {
-        continue;
-      }
-
-      this.fieldNames.add(param.name);
-      if (!this.hasParameterField(declaration, param.name)) {
-        const field = this.parameterField(param, property);
-
-        declaration.fields.splice(properties, 0, field);
-        properties += 1;
-      }
-
-      const set = this.parameterSet(param);
-
-      sets.push(set);
-    }
-
-    const at = this.fieldSetsStart(declaration, body);
-    const before = body.body.slice(0, at);
-    const after = body.body.slice(at);
-
-    if (sets.length == 0) {
-      return constructorDecl;
-    }
-
-    const statements = before.concat(sets).concat(after);
-    const filled: BlockStmt = {
-      kind: StmtKind.Block,
-      loc: body.loc,
-      body: statements,
-      end: body.end,
-    };
-
-    return this.withBody(constructorDecl, filled, constructorDecl.bodySource);
-  }
-
-  private readonly parameterFieldCount(declaration: ClassDecl): int {
-    let count = 0;
-
-    for (const field of declaration.fields) {
-      if (field.form == FieldKind.Parameter) {
-        count += 1;
-      }
-    }
-
-    return count;
-  }
-
-  private readonly parameterField(param: Param, property: ParamProperty): ClassField {
-    return {
-      name: param.name,
-      loc: param.loc,
-      type: param.type,
-      form: FieldKind.Parameter,
-      presence: FieldPresence.Required,
-      readonly: property.readonly,
-      isOverride: false,
-      access: property.access,
-      decorators: [],
-      accessor: false,
-    };
-  }
-
-  private readonly parameterSet(param: Param): Stmt {
-    const self: Expr = {
-      kind: ExprKind.Name,
-      loc: param.loc,
-      name: kThisName,
-      known: KnownName.None,
-      typeArgs: [],
-    };
-    const target: Expr = {
-      kind: ExprKind.Member,
-      loc: param.loc,
-      object: self,
-      name: param.name,
-      known: KnownName.None,
-      optional: false,
-      typeArgs: [],
-    };
-    const value: Expr = {
-      kind: ExprKind.Name,
-      loc: param.loc,
-      name: param.name,
-      known: KnownName.None,
-      typeArgs: [],
-    };
-    const set: Expr = {
-      kind: ExprKind.Assign,
-      loc: param.loc,
-      target,
-      value,
-    };
-
-    return { kind: StmtKind.Expr, loc: param.loc, expr: set };
   }
 
   private classField(
@@ -880,14 +481,6 @@ partial class FileParser {
     }
 
     return decorators;
-  }
-
-  private readonly fieldSetsStart(declaration: Read<ClassDeclDraft>, body: BlockStmt): int {
-    if (declaration.base == undefined) {
-      return 0;
-    }
-
-    return this.superCallEnd(body);
   }
 
   private readonly fieldKind(modifiers: Read<Modifiers>): FieldKind {

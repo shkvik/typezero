@@ -52,11 +52,21 @@ partial class Lowering {
     return this.widened(type).kind == TypeKind.Decimal;
   }
 
-  private readonly decimalParts(frame: Read<Frame>, value: IrValue): LLVMValue[] {
-    return [frame.made.extract(value.value, 0), frame.made.extract(value.value, 1)];
+  private readonly decimalParts(
+    frame: Read<Frame>,
+    value: IrValue,
+  ): LLVMValue[] {
+    return [
+      frame.made.extract(value.value, 0),
+      frame.made.extract(value.value, 1),
+    ];
   }
 
-  private readonly decimalOut(frame: Read<Frame>, name: string, args: Own<LLVMValue[]>): IrValue {
+  private decimalOut(
+    frame: Read<Frame>,
+    name: string,
+    args: Own<LLVMValue[]>,
+  ): IrValue {
     const out = frame.made.slot(kDecimalType, "decimal.out");
     const params = [kPointerType].concat(args.map(() => kIntType));
     const callee = this.ir.declare(name, kVoidType, params);
@@ -64,13 +74,13 @@ partial class Lowering {
     frame.made.call(callee, [out].concat(args));
 
     const value = frame.made.load(kDecimalType, out);
-    const tz = this.store.plain(TypeKind.Decimal);
+    const tz = this.values.types.store.plain(TypeKind.Decimal);
 
     return { type: kDecimalType, value, tz, owned: true };
   }
 
-  private readonly decimalFrom(frame: Read<Frame>, value: IrValue): IrValue | undefined {
-    const tz = this.store.plain(TypeKind.Decimal);
+  private decimalFrom(frame: Read<Frame>, value: IrValue): IrValue | undefined {
+    const tz = this.values.types.store.plain(TypeKind.Decimal);
     if (this.isDecimal(value.tz)) {
       return value;
     }
@@ -110,11 +120,20 @@ partial class Lowering {
     frame: Frame,
     expr: BinaryExpr,
   ): IrValue | undefined {
-    const left = this.decimalOperand(frame, expr.lhs);
+    const tree = this.values.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.decimalOperand(frame, lhs);
     if (expr.op == BinaryOp.Pow) {
-      const int = this.store.integer(64, false);
-      const given = this.value(frame, expr.rhs);
-      const power = this.convertedOrNone(frame, given, int, expr.rhs.loc);
+      const int = this.values.types.store.integer(64, false);
+      const rhs = tree.exprOf(expr.rhsId);
+      const given = this.value(frame, rhs);
+      const power = this.convertedOrNone(
+        frame,
+        given,
+        int,
+        tree.exprOf(expr.rhsId).loc,
+      );
       if (left == undefined || power == undefined) {
         return undefined;
       }
@@ -131,7 +150,8 @@ partial class Lowering {
       return result;
     }
 
-    const right = this.decimalOperand(frame, expr.rhs);
+    const rhsExpr = tree.exprOf(expr.rhsId);
+    const right = this.decimalOperand(frame, rhsExpr);
     const name = this.decimalOperator(expr.op);
     if (left == undefined || right == undefined || name == undefined) {
       this.notLowered(frame.module, expr.loc, "this decimal operator");
@@ -154,7 +174,7 @@ partial class Lowering {
     return result;
   }
 
-  private readonly decimalCall(
+  private decimalCall(
     frame: Read<Frame>,
     name: string,
     args: Own<LLVMValue[]>,
@@ -180,7 +200,7 @@ partial class Lowering {
     frame.made.call(callee, [out].concat(args).concat([mode]));
 
     const value = frame.made.load(kDecimalType, out);
-    const tz = this.store.plain(TypeKind.Decimal);
+    const tz = this.values.types.store.plain(TypeKind.Decimal);
 
     return { type: kDecimalType, value, tz, owned: true };
   }
@@ -245,7 +265,7 @@ partial class Lowering {
     return converted;
   }
 
-  private readonly decimalsCompared(
+  private decimalsCompared(
     frame: Read<Frame>,
     op: BinaryOp,
     left: IrValue,
@@ -283,7 +303,7 @@ partial class Lowering {
     const params = [kIntType, kIntType];
     const callee = this.ir.declare(kDecimalToDouble, kDoubleType, params);
     const double = frame.made.call(callee, parts);
-    const tz = this.store.plain(TypeKind.Double);
+    const tz = this.values.types.store.plain(TypeKind.Double);
 
     this.dropping(frame, value);
 
@@ -314,7 +334,10 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const object = this.value(frame, member.object);
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const object = this.value(frame, objectExpr);
     if (object == undefined) {
       return undefined;
     }
@@ -336,8 +359,12 @@ partial class Lowering {
         const callee = this.ir.declare(kDecimalIsInteger, kFlagType, params);
         const zero = this.ir.zero(kFlagType);
         const flag = frame.made.call(callee, parts);
-        const value = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
-        const tz = this.store.plain(TypeKind.Boolean);
+        const value = frame.made.integerCompare(
+          IrIntPredicate.NotEqual,
+          flag,
+          zero,
+        );
+        const tz = this.values.types.store.plain(TypeKind.Boolean);
 
         this.dropping(frame, object);
 
@@ -347,7 +374,7 @@ partial class Lowering {
         const callee = this.ir.declare(kDecimalPlaces, kFlagType, params);
         const places = frame.made.call(callee, parts);
         const value = frame.made.cast(IrOpcode.SExt, places, kIntType);
-        const tz = this.store.integer(64, false);
+        const tz = this.values.types.store.integer(64, false);
 
         this.dropping(frame, object);
 
@@ -357,7 +384,7 @@ partial class Lowering {
       case "toDouble": {
         const callee = this.ir.declare(kDecimalToDouble, kDoubleType, params);
         const value = frame.made.call(callee, parts);
-        const tz = this.store.plain(TypeKind.Double);
+        const tz = this.values.types.store.plain(TypeKind.Double);
 
         this.dropping(frame, object);
 
@@ -388,14 +415,17 @@ partial class Lowering {
     call: CallExpr,
     object: IrValue,
   ): IrValue | undefined {
-    const divisor = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const divisor = tree.argumentsOf(call.argsList)[0];
     if (divisor == undefined) {
       this.notLowered(frame.module, call.loc, "a division of this form");
 
       return undefined;
     }
 
-    const given = this.value(frame, divisor.expr);
+    const expr = tree.exprOf(divisor.exprId);
+    const given = this.value(frame, expr);
     const right = this.decimalFromOrNone(frame, given);
     const places = this.placesArgument(frame, call, 1, kDivisionPlaces);
     const mode = this.roundingMode(frame, call, 2);
@@ -421,7 +451,7 @@ partial class Lowering {
     frame.made.call(callee, [out].concat(args).concat([places.value, mode]));
 
     const value = frame.made.load(kDecimalType, out);
-    const tz = this.store.plain(TypeKind.Decimal);
+    const tz = this.values.types.store.plain(TypeKind.Decimal);
     const result: IrValue = { type: kDecimalType, value, tz, owned: true };
 
     this.dropping(frame, object);
@@ -431,14 +461,17 @@ partial class Lowering {
   }
 
   private decimalOf(frame: Frame, call: CallExpr): IrValue | undefined {
-    const argument = call.args[0];
-    if (argument == undefined || call.args.length != 1) {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined || tree.argumentsOf(call.argsList).length != 1) {
       this.notLowered(frame.module, call.loc, "these arguments");
 
       return undefined;
     }
 
-    const given = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
     if (given != undefined && this.isString(given.tz)) {
       return this.decimalParsed(frame, call, given);
     }
@@ -456,7 +489,9 @@ partial class Lowering {
     let maker: LLVMValue = this.ir.zero(kPointerType);
 
     if (type != undefined && type.kind == TypeKind.Result) {
-      const failure = this.failureMaker(type.error, ["text"]);
+      const failure = this.failureMaker(this.values.types.store.errorOf(type), [
+        "text",
+      ]);
       if (failure == undefined) {
         this.notLowered(frame.module, call.loc, "a failure of this type");
 
@@ -474,7 +509,7 @@ partial class Lowering {
     frame.made.call(callee, args);
 
     const value = frame.made.load(kDecimalType, out);
-    const tz = this.store.plain(TypeKind.Decimal);
+    const tz = this.values.types.store.plain(TypeKind.Decimal);
     const parsed: IrValue = { type: kDecimalType, value, tz, owned: true };
 
     this.dropping(frame, text);
@@ -486,7 +521,7 @@ partial class Lowering {
     return this.caughtResult(frame, parsed, type, call.loc);
   }
 
-  private readonly decimalFromOrNone(
+  private decimalFromOrNone(
     frame: Read<Frame>,
     value: IrValue | undefined,
   ): IrValue | undefined {
@@ -503,7 +538,9 @@ partial class Lowering {
     position: int,
     absent: int,
   ): GivenNumber | undefined {
-    const argument = call.args[position];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[position];
     if (argument == undefined) {
       const value = this.ir.integer(kIntType, `${absent}`);
 
@@ -518,12 +555,14 @@ partial class Lowering {
     call: CallExpr,
     position: int,
   ): LLVMValue | undefined {
-    const argument = call.args[position];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[position];
     if (argument == undefined) {
       return this.ir.integer(kFlagType, `${kDecimalRoundHalfUp}`);
     }
 
-    const expr = argument.expr;
+    const expr = tree.exprOf(argument.exprId);
     if (expr.kind == ExprKind.StringLit) {
       const known = kRoundingModes.indexOf(expr.value);
       if (known >= 0) {
@@ -564,7 +603,7 @@ partial class Lowering {
     frame.made.call(callee, [out].concat(parts).concat([places.value, mode]));
 
     const value = frame.made.load(kDecimalType, out);
-    const tz = this.store.plain(TypeKind.Decimal);
+    const tz = this.values.types.store.plain(TypeKind.Decimal);
 
     this.dropping(frame, object);
 

@@ -1,0 +1,280 @@
+import { TypeSystem } from "../../type-system.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  Change,
+  DictKind,
+  LiteralKind,
+  ObjectField,
+  OperationKind,
+  TupleType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kLengthMember,
+} from "../../../type-resolver/const/type-resolver.const.tables.tz";
+import {
+  TypeContext,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private keyOf(ref: TypeRef, context: Read<TypeContext>): Type {
+    const tree = this.program.tree;
+
+    const args = tree.typeRefsOf(ref.argsList);
+    const operands = this.resolveAll(args, context);
+    const operand = operands[0];
+    if (operand == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    switch (operand.kind) {
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+        return this.operation(OperationKind.KeyOf, [operand], "");
+      case TypeKind.Object:
+        return this.namesOf(this.store.fieldsOf(operand));
+      case TypeKind.Instance: {
+        const fields = this.memberFields(operand);
+
+        return this.namesOf(fields);
+      }
+      default:
+        return this.keysOfOther(operand, ref.loc, context);
+    }
+  }
+
+  private keysOfOther(
+    operand: Type,
+    loc: int,
+    context: Read<TypeContext>,
+  ): Type {
+    if (operand.kind == TypeKind.Dict && operand.dict == DictKind.Record) {
+      return this.store.keyOf(operand);
+    }
+    if (operand.kind == TypeKind.Error) {
+      return operand;
+    }
+
+    const word = this.typeText(operand);
+
+    this.report(context.module, loc, Code.KeyofNeedsObject, { word });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private namesOf(fields: Read<ObjectField[]>): Type {
+    const names: Type[] = [];
+
+    for (const field of fields) {
+      const name = this.store.literal(LiteralKind.String, field.name);
+
+      names.push(name);
+    }
+
+    return this.store.unionOf(names);
+  }
+
+  private indexed(ref: TypeRef, context: Read<TypeContext>): Type {
+    const tree = this.program.tree;
+
+    const args = tree.typeRefsOf(ref.argsList);
+    const operands = this.resolveAll(args, context);
+    const object = operands[0];
+    const index = operands[1];
+    if (object == undefined || index == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.member(object, index, ref.loc, context);
+  }
+
+  private member(
+    object: Type,
+    index: Type,
+    loc: int,
+    context: Read<TypeContext>,
+  ): Type {
+    if (this.isOpen(object) || this.isOpen(index)) {
+      return this.operation(OperationKind.Indexed, [object, index], "");
+    }
+    if (object.kind == TypeKind.Error || index.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (index.kind == TypeKind.Union) {
+      const members: Type[] = [];
+
+      for (const part of this.store.partsOf(index)) {
+        const one = this.member(object, part, loc, context);
+
+        members.push(one);
+      }
+
+      return this.store.unionOf(members);
+    }
+
+    const found = this.memberOf(object, index);
+    if (found != undefined) {
+      return found;
+    }
+
+    this.report(context.module, loc, Code.NoSuchMember, {
+      word: this.typeText(object),
+      other: this.typeText(index),
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private memberOf(object: Type, index: Type): Type | undefined {
+    switch (object.kind) {
+      case TypeKind.Object:
+        return this.fieldOf(this.store.fieldsOf(object), index);
+      case TypeKind.Instance: {
+        const fields = this.memberFields(object);
+
+        return this.fieldOf(fields, index);
+      }
+      case TypeKind.Tuple:
+        return this.tupleMember(object, index);
+      case TypeKind.Array:
+        return this.atNumber(index, this.store.itemOf(object));
+      case TypeKind.Dict:
+        return this.atText(index, this.store.valueOf(object));
+      default:
+        return undefined;
+    }
+  }
+
+  private fieldOf(fields: Read<ObjectField[]>, index: Type): Type | undefined {
+    if (index.kind != TypeKind.Literal) {
+      return undefined;
+    }
+
+    const name = index.text;
+    const field = fields.find((each) => each.name == name);
+    if (field == undefined || !field.optional) {
+      return field?.type;
+    }
+
+    const nothing = this.store.plain(TypeKind.Undefined);
+
+    return this.store.unionOf([field.type, nothing]);
+  }
+
+  private tupleMember(tuple: TupleType, index: Type): Type | undefined {
+    if (index.kind == TypeKind.Int) {
+      return this.store.unionOf(this.store.itemsOf(tuple));
+    }
+    if (index.kind != TypeKind.Literal) {
+      return undefined;
+    }
+    if (index.text == kLengthMember) {
+      const count = `${this.store.itemsOf(tuple).length}`;
+
+      return this.store.literal(LiteralKind.Int, count);
+    }
+
+    const place = parseInt(index.text);
+    if (index.literal != LiteralKind.Int || place.isErr()) {
+      return undefined;
+    }
+
+    return this.store.itemsOf(tuple)[place.value];
+  }
+
+  private readonly atNumber(index: Type, item: Type): Type | undefined {
+    const isNumber =
+      index.kind == TypeKind.Int ||
+      (index.kind == TypeKind.Literal && index.literal == LiteralKind.Int);
+    if (isNumber) {
+      return item;
+    }
+
+    return undefined;
+  }
+
+  private readonly atText(index: Type, value: Type): Type | undefined {
+    const isText =
+      index.kind == TypeKind.String ||
+      (index.kind == TypeKind.Literal && index.literal == LiteralKind.String);
+    if (isText) {
+      return value;
+    }
+
+    return undefined;
+  }
+
+  private onlyTexts(type: Type): Type {
+    const texts: Type[] = [];
+
+    for (const part of this.resolverPartsOf(type)) {
+      if (this.isText(part)) {
+        texts.push(part);
+      }
+    }
+
+    return this.store.unionOf(texts);
+  }
+
+  private readonly isText(type: Type): boolean {
+    if (type.kind == TypeKind.String || type.kind == TypeKind.Template) {
+      return true;
+    }
+
+    return type.kind == TypeKind.Literal && type.literal == LiteralKind.String;
+  }
+
+  private withoutUndefined(type: Type): Type {
+    const kept: Type[] = [];
+
+    for (const part of this.resolverPartsOf(type)) {
+      if (part.kind != TypeKind.Undefined) {
+        kept.push(part);
+      }
+    }
+
+    return this.store.unionOf(kept);
+  }
+
+  private readonly resolverPartsOf(type: Type): Type[] {
+    if (type.kind == TypeKind.Union) {
+      return this.store.partsOf(type);
+    }
+
+    return [type];
+  }
+
+  private readonly isOpen(type: Type): boolean {
+    return (
+      type.kind == TypeKind.TypeParameter || type.kind == TypeKind.Operation
+    );
+  }
+
+  private operation(
+    op: OperationKind,
+    operands: Own<Type[]>,
+    word: string,
+  ): Type {
+    return this.store.operationOf({
+      op,
+      operands,
+      word,
+      optional: Change.None,
+      readonly: Change.None,
+    });
+  }
+
+  private readonly bound(
+    context: Read<TypeContext>,
+    loc: int,
+    type: Type,
+  ): TypeContext {
+    const bindings = new Map<int, Type>(context.bindings);
+
+    bindings.set(loc, type);
+
+    return { module: context.module, bindings, place: context.place };
+  }
+}

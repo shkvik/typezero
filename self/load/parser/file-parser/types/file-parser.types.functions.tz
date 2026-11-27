@@ -1,7 +1,11 @@
 import { Pattern } from "./file-parser.types.patterns.tz";
 import { Span } from "../../../../program/ast/types/ast.types.span.tz";
-import { Param } from "../../../../program/ast/types/ast.types.functions.tz";
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  Param,
+} from "../../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 export type ParamPattern = { readonly name: string; readonly pattern: Pattern };
 

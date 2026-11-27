@@ -1,0 +1,289 @@
+import { Lexer } from "../lexer.tz";
+import { KnownName, TokenKind } from "../../token/types/token.types.tz";
+import { kTokenTable } from "../../token/const/token.const.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  kBackslash,
+  kBacktick,
+  kDollar,
+  kDot,
+  kLeftBrace,
+  kLeftBracket,
+  kLowerB,
+  kLowerE,
+  kLowerN,
+  kLowerO,
+  kLowerX,
+  kMinus,
+  kNewline,
+  kPlus,
+  kRadixPrefixLength,
+  kReturn,
+  kRightBracket,
+  kSlash,
+  kUnderscore,
+  kUpperB,
+  kUpperE,
+  kUpperO,
+  kUpperX,
+  kZero,
+} from "../const/lexer.const.tz";
+
+partial class Lexer {
+  private regex(): void {
+    while (!this.atEnd() && !this.isLineBreak()) {
+      const code = this.at(0);
+
+      this.position += 1;
+
+      switch (code) {
+        case kBackslash:
+          this.skipEscaped();
+          break;
+        case kLeftBracket:
+          this.skipRegexClass();
+          break;
+        case kSlash:
+          this.skipIdentChars();
+          return this.push(TokenKind.Regex);
+      }
+    }
+
+    this.error(this.start, Code.UnterminatedRegex);
+    this.push(TokenKind.Regex);
+  }
+
+  private skipEscaped(): void {
+    if (!this.atEnd() && !this.isLineBreak()) {
+      this.position += 1;
+    }
+  }
+
+  private skipRegexClass(): void {
+    while (!this.atEnd() && !this.isLineBreak()) {
+      const code = this.at(0);
+
+      this.position += 1;
+      if (code == kRightBracket) {
+        return;
+      }
+      if (code == kBackslash) {
+        this.skipEscaped();
+      }
+    }
+  }
+
+  private number(): void {
+    const byte = this.source[this.start] ?? 0;
+    const first = byte.toInt();
+    const second = this.at(0);
+    if (first == kZero && this.isRadixLetter(second)) {
+      return this.radixNumber();
+    }
+
+    const leadingDot = first == kDot;
+
+    this.skipDigits();
+    const fraction = leadingDot || this.acceptFraction();
+    const exponent = this.acceptExponent();
+    if (fraction || exponent) {
+      return this.finishNumber(TokenKind.Float);
+    }
+
+    this.finishNumber(TokenKind.Int);
+  }
+
+  private readonly isRadixLetter(code: int): boolean {
+    return (
+      code == kLowerX ||
+      code == kUpperX ||
+      code == kLowerB ||
+      code == kUpperB ||
+      code == kLowerO ||
+      code == kUpperO
+    );
+  }
+
+  private acceptFraction(): boolean {
+    if (this.at(0) != kDot) {
+      return false;
+    }
+
+    const next = this.at(1);
+    const exponentLetter = next == kLowerE || next == kUpperE;
+    const member = this.isIdentStart(next) && !exponentLetter;
+    if (member) {
+      this.reportNameAfterPoint();
+
+      return false;
+    }
+
+    this.position += 1;
+    this.skipDigits();
+
+    return true;
+  }
+
+  private reportNameAfterPoint(): void {
+    let offset = 1;
+
+    while (this.identCharAt(offset)) {
+      offset += 1;
+    }
+
+    const nameStart = this.position + 1;
+    const nameEnd = this.position + offset;
+    const word = this.source.toString("utf8", this.start, this.position);
+    const other = this.source.toString("utf8", nameStart, nameEnd);
+
+    this.error(nameStart, Code.NameAfterNumberPoint, { word, other });
+  }
+
+  private acceptExponent(): boolean {
+    const letter = this.at(0);
+    if (letter != kLowerE && letter != kUpperE) {
+      return false;
+    }
+
+    const sign = this.at(1);
+    const signed = sign == kPlus || sign == kMinus;
+    if (signed && !this.digitAt(2)) {
+      return false;
+    }
+    if (!signed && !this.digitAt(1)) {
+      return false;
+    }
+
+    this.position += 2;
+    this.skipDigits();
+
+    return true;
+  }
+
+  private radixNumber(): void {
+    this.position += 1;
+
+    while (this.alphaAt(0) || this.digitAt(0) || this.at(0) == kUnderscore) {
+      this.position += 1;
+    }
+
+    const suffix = this.at(-1) == kLowerN;
+    const length = this.position - this.start;
+    const digits = length - kRadixPrefixLength - 1;
+    if (suffix && digits > 0) {
+      this.position -= 1;
+    }
+
+    this.finishNumber(TokenKind.Int);
+  }
+
+  private skipDigits(): void {
+    while (this.digitAt(0) || this.at(0) == kUnderscore) {
+      this.position += 1;
+    }
+  }
+
+  private finishNumber(kind: TokenKind): void {
+    if (this.at(0) == kLowerN && !this.identCharAt(1)) {
+      const word = this.source.toString("utf8", this.start, this.position);
+
+      this.error(this.start, Code.BigIntLiteral, { word });
+      this.push(kind);
+      this.position += 1;
+
+      return;
+    }
+    if (this.identStartAt(0)) {
+      this.error(this.position, Code.NameAfterNumber);
+      this.push(kind);
+      this.skipIdentChars();
+
+      return;
+    }
+
+    this.push(kind);
+  }
+
+  private skipIdentChars(): void {
+    while (this.identCharAt(0)) {
+      this.position += 1;
+    }
+  }
+
+  private string(quote: int): void {
+    while (!this.atEnd() && this.at(0) != kNewline && this.at(0) != kReturn) {
+      const code = this.at(0);
+
+      this.position += 1;
+      if (code == quote) {
+        return this.push(TokenKind.String);
+      }
+      if (code == kBackslash && !this.atEnd()) {
+        this.position += 1;
+      }
+    }
+
+    this.error(this.start, Code.UnterminatedString);
+    this.push(TokenKind.String);
+  }
+
+  private template(continuation: boolean): void {
+    let closed: TokenKind = TokenKind.TemplateString;
+    let opened: TokenKind = TokenKind.TemplateHead;
+
+    if (continuation) {
+      closed = TokenKind.TemplateTail;
+      opened = TokenKind.TemplateMiddle;
+    }
+
+    while (!this.atEnd()) {
+      const code = this.at(0);
+
+      this.position += 1;
+      if (code == kBacktick) {
+        return this.push(closed);
+      }
+      if (code == kDollar && this.at(0) == kLeftBrace) {
+        this.position += 1;
+        this.braces.push(0);
+
+        return this.push(opened);
+      }
+      if (code == kBackslash && !this.atEnd()) {
+        this.position += 1;
+      }
+    }
+
+    this.error(this.start, Code.UnterminatedTemplate);
+    this.push(closed);
+  }
+
+  private identifier(hash: boolean): void {
+    let start = this.start;
+
+    if (hash) {
+      start += 1;
+    }
+
+    this.skipIdentChars();
+
+    const text = this.source.toString("utf8", start, this.position);
+    let kind: TokenKind = TokenKind.Identifier;
+    let known: KnownName = KnownName.None;
+
+    if (!hash) {
+      kind = kTokenTable.keywordKind(text);
+      known = kTokenTable.knownName(text);
+    }
+
+    this.tokens.push({
+      kind,
+      known,
+      start,
+      end: this.position,
+      text,
+      newline: this.newline,
+      hash,
+    });
+  }
+}

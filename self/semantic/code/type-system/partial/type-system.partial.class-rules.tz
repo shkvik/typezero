@@ -1,0 +1,374 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ExprKind,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionType,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  ClassMemberEntry,
+  InitFrame,
+  ThisPlace,
+} from "../../expression-types/types/expression-types.types.tz";
+import {
+  Access,
+  ClassDecl,
+  ClassField,
+  FieldKind,
+  FieldPresence,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  kPrivateWord,
+  kProtectedWord,
+  kPublicWord,
+} from "../../class-rules/const/class-rules.const.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  public readonly contextOf(module: int, place: TypePlace): TypeContext {
+    return { module, bindings: new Map<int, Type>(), place };
+  }
+
+  public readonly isScalarField(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly isSameParameters(
+    own: FunctionType,
+    theirs: FunctionType,
+  ): boolean {
+    const mine = this.store.paramsOf(own);
+    const other = this.store.paramsOf(theirs);
+    if (
+      mine.length != other.length ||
+      this.store.hasRest(own) != this.store.hasRest(theirs)
+    ) {
+      return false;
+    }
+
+    return mine.every((param, index) => {
+      const that = other[index];
+
+      return (
+        that != undefined &&
+        (param.type.id == that.type.id || param.type.kind == TypeKind.Error) &&
+        param.optional == that.optional
+      );
+    });
+  }
+
+  public readonly accessRank(access: Access): int {
+    switch (access) {
+      case Access.Public:
+        return 0;
+      case Access.Protected:
+        return 1;
+      default:
+        return 2;
+    }
+  }
+
+  public readonly accessWord(access: Access): string {
+    switch (access) {
+      case Access.Public:
+        return kPublicWord;
+      case Access.Protected:
+        return kProtectedWord;
+      default:
+        return kPrivateWord;
+    }
+  }
+
+  public readonly variantText(fn: FunctionDecl, type: FunctionType): string {
+    const tree = this.program.tree;
+
+    const params = this.store.paramsOf(type);
+    const parts: string[] = [];
+
+    for (let index = 0; index < tree.paramsOf(fn.paramsList).length; index++) {
+      const param = tree.paramsOf(fn.paramsList)[index];
+      const typed = params[index];
+      if (param != undefined && typed != undefined) {
+        const text = this.typeText(typed.type);
+
+        parts.push(`${param.name}: ${text}`);
+      }
+    }
+
+    return `${fn.name}(${parts.join(", ")})`;
+  }
+
+  public readonly initFrameOf(decl: ClassDecl, fn: FunctionDecl): InitFrame {
+    const tree = this.program.tree;
+
+    const isConstructor = fn.role?.method == MethodKind.Constructor;
+    const isDerived =
+      tree.typeRefAt(decl.baseId) != undefined ||
+      tree.exprAt(decl.baseExprId) != undefined;
+
+    return { isConstructor, fn, decl, isDerived, closures: [] };
+  }
+
+  public readonly isArrowField(field: ClassField): boolean {
+    const tree = this.program.tree;
+
+    const init = tree.exprAt(field.initId);
+    const isArrow =
+      init?.kind == ExprKind.Function && tree.functionOf(init.fnId).isArrow;
+
+    return isArrow || field.form == FieldKind.ArrowMethod;
+  }
+
+  public readonly isRequiredField(field: ClassField): boolean {
+    const isValueField =
+      field.form == FieldKind.Instance || field.form == FieldKind.Parameter;
+
+    return isValueField && field.presence != FieldPresence.Optional;
+  }
+
+  public readonly ownValueField(
+    frame: Read<InitFrame>,
+    name: string,
+  ): ClassField | undefined {
+    const tree = this.program.tree;
+
+    return tree
+      .fieldsOf(frame.decl.fieldsList)
+      .find(
+        (field) =>
+          field.name == name &&
+          field.form != FieldKind.Static &&
+          !this.isArrowField(field),
+      );
+  }
+
+  public readonly isClassSameLayout(own: Type, theirs: Type): boolean {
+    if (own.id == theirs.id) {
+      return true;
+    }
+    if (own.kind == TypeKind.Array && theirs.kind == TypeKind.Array) {
+      return this.isClassSameLayout(
+        this.store.itemOf(own),
+        this.store.itemOf(theirs),
+      );
+    }
+    if (own.kind != TypeKind.Instance || theirs.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    return this.ancestorsOf(own).some((one) => one.id == theirs.id);
+  }
+
+  public readonly previousInCycle(
+    cycle: Read<InstanceType[]>,
+    member: InstanceType,
+  ): InstanceType | undefined {
+    const at = cycle.findIndex((one) => one.id == member.id);
+    if (at == 0) {
+      return cycle[cycle.length - 1];
+    }
+
+    return cycle[at - 1];
+  }
+
+  public readonly earliestOf(
+    cycle: Read<InstanceType[]>,
+  ): InstanceType | undefined {
+    let earliest: InstanceType | undefined = undefined;
+
+    for (const one of cycle) {
+      if (earliest == undefined || this.isDeclaredBefore(one, earliest)) {
+        earliest = one;
+      }
+    }
+
+    return earliest;
+  }
+
+  public readonly methodPlace(fn: FunctionDecl): ThisPlace {
+    if (this.isStaticMethod(fn)) {
+      return ThisPlace.StaticMethod;
+    }
+
+    return ThisPlace.Method;
+  }
+
+  public readonly hasInstanceMember(decl: ClassDecl, name: string): boolean {
+    const tree = this.program.tree;
+
+    const isField = tree
+      .fieldsOf(decl.fieldsList)
+      .some((one) => one.name == name && one.form != FieldKind.Static);
+    const isMethod = this.classMethodsNamed(decl, name).some(
+      (one) => !this.isStaticMethod(one),
+    );
+
+    return isField || isMethod;
+  }
+
+  public readonly classAccessOf(method: FunctionDecl): Access {
+    return method.role?.access ?? Access.Public;
+  }
+
+  public readonly parentOf(
+    instance: InstanceType,
+    decl: ClassDecl,
+  ): InstanceType | undefined {
+    const tree = this.program.tree;
+
+    const base = tree.typeRefAt(decl.baseId);
+    if (base == undefined) {
+      return undefined;
+    }
+
+    const parent = this.baseClassOf(instance);
+    if (parent == undefined || parent.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return parent;
+  }
+
+  public readonly ownMember(
+    instance: InstanceType,
+    owner: ClassDecl,
+    name: string,
+  ): ClassMemberEntry | undefined {
+    const tree = this.program.tree;
+
+    const field = tree
+      .fieldsOf(owner.fieldsList)
+      .find((one) => one.name == name && one.form != FieldKind.Static);
+    const methods = this.classMethodsNamed(owner, name).filter(
+      (one) => !this.isStaticMethod(one),
+    );
+    if (field != undefined || methods.length > 0) {
+      return { owner, instance, field, methods, isStatic: false };
+    }
+
+    const hasStaticField = tree
+      .fieldsOf(owner.fieldsList)
+      .some((one) => one.name == name && one.form == FieldKind.Static);
+    const hasStaticMethod = this.classMethodsNamed(owner, name).some((one) =>
+      this.isStaticMethod(one),
+    );
+    if (hasStaticField || hasStaticMethod) {
+      return { owner, instance, methods: [], isStatic: true };
+    }
+
+    return undefined;
+  }
+
+  public readonly isStaticMethod(method: FunctionDecl): boolean {
+    return method.role?.method == MethodKind.Static;
+  }
+
+  public readonly parameterSites(
+    fn: FunctionDecl,
+  ): ParameterSite[] | undefined {
+    const tree = this.program.tree;
+
+    const sites: ParameterSite[] = [];
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      const type = tree.typeRefAt(param.typeId);
+      if (type == undefined) {
+        return undefined;
+      }
+
+      sites.push({
+        name: param.name,
+        loc: param.loc,
+        kind: param.form.kind,
+        type,
+        isDeclared: false,
+      });
+    }
+
+    return sites;
+  }
+
+  public readonly classPluralMark(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
+  }
+
+  public readonly closureThisCheck(
+    frame: Read<InitFrame>,
+    expr: NameExpr,
+  ): SourceError | undefined {
+    const isReady = frame.closures[frame.closures.length - 1] ?? true;
+    if (isReady) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ThisInEarlyClosure,
+      loc: expr.loc,
+      details: kNoDetails,
+    };
+  }
+
+  public readonly fieldAccessCheck(
+    decl: ClassDecl,
+    field: ClassField,
+    inherited: ClassField,
+    owner: string,
+  ): SourceError | undefined {
+    const ownRank = this.accessRank(field.access);
+    const theirRank = this.accessRank(inherited.access);
+    if (ownRank <= theirRank) {
+      return undefined;
+    }
+
+    return {
+      code: Code.FieldAccessNarrower,
+      loc: field.loc,
+      details: {
+        word: field.name,
+        other: this.accessWord(inherited.access),
+        first: owner,
+        second: this.accessWord(field.access),
+        place: decl.name ?? "",
+      },
+    };
+  }
+
+  private readonly isDeclaredBefore(
+    one: InstanceType,
+    other: InstanceType,
+  ): boolean {
+    if (one.module != other.module) {
+      return one.module < other.module;
+    }
+
+    return one.loc < other.loc;
+  }
+}

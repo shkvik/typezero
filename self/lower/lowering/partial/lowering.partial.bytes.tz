@@ -36,7 +36,10 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private readonly bytesLength(frame: Read<Frame>, bytes: LLVMValue): LLVMValue {
+  private readonly bytesLength(
+    frame: Read<Frame>,
+    bytes: LLVMValue,
+  ): LLVMValue {
     const field = frame.made.field(kBytesStruct, bytes, kBytesLengthField);
     const length = frame.made.load(kFlagType, field);
 
@@ -44,19 +47,22 @@ partial class Lowering {
   }
 
   private bytesMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     if (expr.name != "length") {
       this.notLowered(frame.module, expr.loc, "this member of bytes");
 
       return undefined;
     }
 
-    const bytes = this.value(frame, expr.object);
+    const object = tree.exprOf(expr.objectId);
+    const bytes = this.value(frame, object);
     if (bytes == undefined) {
       return undefined;
     }
 
     const value = this.bytesLength(frame, bytes.value);
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
 
     this.dropping(frame, bytes);
 
@@ -68,9 +74,13 @@ partial class Lowering {
     expr: IndexExpr,
     result: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const resultIr = this.irType(result);
-    const bytes = this.value(frame, expr.object);
-    const index = this.value(frame, expr.index);
+    const object = tree.exprOf(expr.objectId);
+    const bytes = this.value(frame, object);
+    const indexExpr = tree.exprOf(expr.indexId);
+    const index = this.value(frame, indexExpr);
     if (resultIr == undefined || bytes == undefined || index == undefined) {
       return undefined;
     }
@@ -92,7 +102,7 @@ partial class Lowering {
     const data = this.bytesData(frame, bytes.value);
     const address = frame.made.element(kByteType, data, position);
     const byte = frame.made.load(kByteType, address);
-    const tz = this.store.integer(8, true);
+    const tz = this.values.types.store.integer(8, true);
     const loaded: IrValue = { type: kByteType, value: byte, tz };
     const placed = this.converted(frame, loaded, result, expr.loc);
     const readEnd = frame.made.currentBlock();
@@ -173,13 +183,17 @@ partial class Lowering {
   }
 
   private readonly encodingSource(expr: Expr | undefined): Expr | undefined {
+    const tree = this.values.types.program.tree;
+
     if (expr == undefined || expr.kind != ExprKind.ObjectLit) {
       return expr;
     }
 
-    const field = expr.props.find((one) => one.name == kEncodingField);
+    const field = tree
+      .propertiesOf(expr.propsList)
+      .find((one) => one.name == kEncodingField);
 
-    return field?.value;
+    return tree.exprAt(field?.valueId);
   }
 
   private positionsOf(
@@ -187,18 +201,21 @@ partial class Lowering {
     call: CallExpr,
     from: int,
   ): LLVMValue[] | undefined {
+    const tree = this.values.types.program.tree;
+
     const values: LLVMValue[] = [];
     let has: int = 0;
 
     for (let step = 0; step < 2; step++) {
-      const argument = call.args[from + step];
+      const argument = tree.argumentsOf(call.argsList)[from + step];
       if (argument == undefined) {
         values.push(this.ir.zero(kIntType));
 
         continue;
       }
 
-      const given = this.value(frame, argument.expr);
+      const expr = tree.exprOf(argument.exprId);
+      const given = this.value(frame, expr);
       if (given == undefined) {
         return undefined;
       }
@@ -217,12 +234,18 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const bytes = this.value(frame, member.object);
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const bytes = this.value(frame, object);
     if (bytes == undefined) {
       return undefined;
     }
 
-    const encoding = this.encodingOf(frame, call.args[0]?.expr);
+    const encoding = this.encodingOf(
+      frame,
+      tree.exprAt(tree.argumentsOf(call.argsList)[0]?.exprId),
+    );
     const positions = this.positionsOf(frame, call, 1);
     if (positions == undefined) {
       return undefined;
@@ -242,7 +265,10 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const bytes = this.value(frame, member.object);
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const bytes = this.value(frame, object);
     if (bytes == undefined) {
       return undefined;
     }
@@ -266,21 +292,33 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const bytes = this.value(frame, member.object);
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const bytes = this.value(frame, object);
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (bytes == undefined || argument == undefined) {
       return undefined;
     }
 
-    const given = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
     if (given == undefined) {
       return undefined;
     }
 
     const count = frame.made.cast(IrOpcode.Trunc, given.value, kFlagType);
     const dataAt = frame.made.field(kBytesStruct, bytes.value, kBytesDataField);
-    const lengthAt = frame.made.field(kBytesStruct, bytes.value, kBytesLengthField);
-    const offsetAt = frame.made.field(kBytesStruct, bytes.value, kBytesOffsetField);
+    const lengthAt = frame.made.field(
+      kBytesStruct,
+      bytes.value,
+      kBytesLengthField,
+    );
+    const offsetAt = frame.made.field(
+      kBytesStruct,
+      bytes.value,
+      kBytesOffsetField,
+    );
     const data = frame.made.load(kPointerType, dataAt);
     const length = frame.made.load(kFlagType, lengthAt);
     const offset = frame.made.load(kFlagType, offsetAt);
@@ -290,12 +328,12 @@ partial class Lowering {
     frame.made.store(frame.made.binary(IrOpcode.Add, offset, count), offsetAt);
     this.dropping(frame, bytes);
 
-    const tz = this.store.plain(TypeKind.Void);
+    const tz = this.values.types.store.plain(TypeKind.Void);
 
     return { type: kVoidType, value: this.ir.zero(kCharType), tz };
   }
 
-  private readonly isBufferName(expr: Expr): boolean {
+  private isBufferName(expr: Expr): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kBufferName) {
       return false;
     }
@@ -310,15 +348,18 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeOf(call);
-    const first = call.args[0];
+    const first = tree.argumentsOf(call.argsList)[0];
     if (result == undefined || first == undefined) {
       this.notLowered(frame.module, call.loc, "this call of Buffer");
 
       return undefined;
     }
 
-    const given = this.value(frame, first.expr);
+    const expr = tree.exprOf(first.exprId);
+    const given = this.value(frame, expr);
     if (given == undefined) {
       return undefined;
     }
@@ -338,7 +379,10 @@ partial class Lowering {
       return { type: kPointerType, value, tz: result, owned: true };
     }
     if (member.name == "from" && this.isString(given.tz)) {
-      const encoding = this.encodingOf(frame, call.args[1]?.expr);
+      const encoding = this.encodingOf(
+        frame,
+        tree.exprAt(tree.argumentsOf(call.argsList)[1]?.exprId),
+      );
       const params = [kPointerType, kIntType, kFlagType];
       const callee = this.ir.declare(kBufferFromText, kPointerType, params);
       const args = this.textParts(frame, given).concat([encoding]);

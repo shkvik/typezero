@@ -30,20 +30,19 @@ import {
 
 partial class ExpressionTypes {
   private reflectCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (
-      callee.kind != ExprKind.Member ||
-      this.modules.isLibraryModule(module)
-    ) {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Member || this.types.isLibraryModule(module)) {
       return;
     }
 
-    const owner = callee.object;
+    const owner = tree.exprOf(callee.objectId);
     const isReflect =
       owner.kind == ExprKind.Name &&
       owner.name == "Reflect" &&
       this.isGlobalUse(owner, module);
-    const hasSpread = expr.args.some((one) => one.spread);
+    const hasSpread = tree.argumentsOf(expr.argsList).some((one) => one.spread);
     if (!isReflect || hasSpread) {
       return;
     }
@@ -59,7 +58,7 @@ partial class ExpressionTypes {
         return this.metadataValueCheck(owner.loc, callee.loc, module);
       case "getMetadataKeys":
       case "getOwnMetadataKeys":
-        return this.report(module, callee.loc, Code.ReflectMetadataKeys, {
+        return this.errors.write(module, callee.loc, Code.ReflectMetadataKeys, {
           word: callee.name,
         });
       default:
@@ -67,14 +66,14 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly metadataValueCheck(start: int, loc: int, module: int): void {
-    const text = this.program.modules[module]?.source.text;
+  private metadataValueCheck(start: int, loc: int, module: int): void {
+    const text = this.types.program.modules[module]?.source.text;
     const before = text?.[start - 1];
     if (before == 64) {
       return;
     }
 
-    this.report(module, loc, Code.ReflectMetadataValue, kNoDetails);
+    this.errors.write(module, loc, Code.ReflectMetadataValue, kNoDetails);
   }
 
   private reflectOtherCheck(
@@ -83,24 +82,28 @@ partial class ExpressionTypes {
     loc: int,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (!kReflectNames.includes(name)) {
-      return this.report(module, loc, Code.ReflectUnknown, { word: name });
+      return this.errors.write(module, loc, Code.ReflectUnknown, {
+        word: name,
+      });
     }
     if (!kMetadataNames.includes(name)) {
       return;
     }
 
     const isDefine = name == "defineMetadata";
-    const key = expr.args[0]?.expr;
+    const key = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (key != undefined && !this.metadataKeyFine(key, isDefine, module)) {
       return;
     }
 
-    const value = expr.args[1]?.expr;
+    const value = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (isDefine && value != undefined) {
       const given = this.peekType(value, module);
       if (given.kind == TypeKind.Void) {
-        return this.report(
+        return this.errors.write(
           module,
           value.loc,
           Code.MetadataVoidValue,
@@ -112,7 +115,9 @@ partial class ExpressionTypes {
       }
     }
 
-    const target = expr.args[this.metadataTargetAt(isDefine)]?.expr;
+    const target = tree.exprAt(
+      tree.argumentsOf(expr.argsList)[this.metadataTargetAt(isDefine)]?.exprId,
+    );
     if (target == undefined) {
       return;
     }
@@ -120,13 +125,16 @@ partial class ExpressionTypes {
     const targetType = this.peekType(target, module);
     const base = this.types.definedType(targetType);
     if (this.isPlainReflectValue(base.kind)) {
-      this.report(module, target.loc, Code.MetadataTarget, {
-        word: this.text.of(targetType),
+      this.errors.write(module, target.loc, Code.MetadataTarget, {
+        word: this.types.typeText(targetType),
       });
     }
   }
 
-  private readonly metadataIdentity(key: Expr, module: int): string | undefined {
+  private readonly metadataIdentity(
+    key: Expr,
+    module: int,
+  ): string | undefined {
     if (key.kind != ExprKind.Name) {
       return undefined;
     }
@@ -156,26 +164,30 @@ partial class ExpressionTypes {
     const known = this.metadataRecords.get(identity);
     if (known != undefined) {
       const fits =
-        this.relation.extends(given, known) ||
-        this.relation.converts(given, known);
+        this.types.extends(given, known) || this.types.converts(given, known);
       if (!fits && given.kind != TypeKind.Error) {
-        this.report(module, value.loc, Code.MetadataRecordType, {
+        this.errors.write(module, value.loc, Code.MetadataRecordType, {
           word,
-          first: this.text.of(given),
-          second: this.text.of(known),
+          first: this.types.typeText(given),
+          second: this.types.typeText(known),
         });
       }
 
       return;
     }
     if (given.kind == TypeKind.Undefined) {
-      return this.report(module, value.loc, Code.MetadataUndefinedRecord, {
-        word,
-      });
+      return this.errors.write(
+        module,
+        value.loc,
+        Code.MetadataUndefinedRecord,
+        {
+          word,
+        },
+      );
     }
 
     const record = this.types.apparent(given);
-    if (record.kind == TypeKind.Error || this.parts.mentionsParameter(record)) {
+    if (record.kind == TypeKind.Error || this.types.mentionsParameter(record)) {
       return;
     }
 
@@ -188,12 +200,14 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
-    const owner = member.object;
+    const tree = this.types.program.tree;
+
+    const owner = tree.exprOf(member.objectId);
     const isReflect =
       owner.kind == ExprKind.Name &&
       owner.name == kReflectName &&
       this.isGlobalUse(owner, module);
-    const key = expr.args[0]?.expr;
+    const key = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isRead = kMetadataReads.includes(member.name);
     if (!isReflect || !isRead || key == undefined) {
       return undefined;
@@ -205,7 +219,9 @@ partial class ExpressionTypes {
     }
 
     this.reflectCallCheck(expr, module);
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     const known = this.metadataRecords.get(identity);
     if (known != undefined) {
@@ -214,9 +230,11 @@ partial class ExpressionTypes {
 
     const written = this.writtenRecord(wanted);
     if (written == undefined) {
-      this.report(module, key.loc, Code.MetadataNoRecord, { word: key.name });
+      this.errors.write(module, key.loc, Code.MetadataNoRecord, {
+        word: key.name,
+      });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.metadataRecords.set(identity, written);
@@ -224,7 +242,7 @@ partial class ExpressionTypes {
     return this.types.optional(written);
   }
 
-  private readonly writtenRecord(wanted: Type | undefined): Type | undefined {
+  private writtenRecord(wanted: Type | undefined): Type | undefined {
     if (wanted == undefined) {
       return undefined;
     }
@@ -233,7 +251,7 @@ partial class ExpressionTypes {
     const isOpen =
       plain.kind == TypeKind.Unknown ||
       plain.kind == TypeKind.Error ||
-      this.parts.mentionsParameter(plain);
+      this.types.mentionsParameter(plain);
     if (isOpen) {
       return undefined;
     }
@@ -253,7 +271,7 @@ partial class ExpressionTypes {
     const isDesign =
       key.kind == ExprKind.StringLit && key.value.startsWith("design:");
     if (isDefine && isDesign) {
-      this.report(module, key.loc, Code.MetadataKeyDesign, kNoDetails);
+      this.errors.write(module, key.loc, Code.MetadataKeyDesign, kNoDetails);
 
       return false;
     }
@@ -266,8 +284,8 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Decimal ||
       base.kind == TypeKind.Boolean;
     if (isWrong) {
-      this.report(module, key.loc, Code.MetadataKeyType, {
-        word: this.text.of(given),
+      this.errors.write(module, key.loc, Code.MetadataKeyType, {
+        word: this.types.typeText(given),
       });
 
       return false;
@@ -277,7 +295,9 @@ partial class ExpressionTypes {
   }
 
   private reflectGetCheck(expr: CallExpr, module: int): void {
-    const target = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const target = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (target == undefined) {
       return;
     }
@@ -285,17 +305,24 @@ partial class ExpressionTypes {
     const given = this.peekType(target, module);
     const base = this.types.definedType(given);
     if (base.kind == TypeKind.Json) {
-      return this.report(module, target.loc, Code.ReflectGetJson, kNoDetails);
+      return this.errors.write(
+        module,
+        target.loc,
+        Code.ReflectGetJson,
+        kNoDetails,
+      );
     }
     if (this.isPlainReflectValue(base.kind)) {
-      this.report(module, target.loc, Code.ReflectGetNotObject, {
-        word: this.text.of(given),
+      this.errors.write(module, target.loc, Code.ReflectGetNotObject, {
+        word: this.types.typeText(given),
       });
     }
   }
 
   private reflectApplyCheck(expr: CallExpr, module: int): void {
-    const fn = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const fn = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (fn == undefined) {
       return;
     }
@@ -307,18 +334,23 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Error ||
       base.kind == TypeKind.Unknown;
     if (!isFunction) {
-      return this.report(module, fn.loc, Code.ReflectApplyNotFunction, {
-        word: this.text.of(given),
+      return this.errors.write(module, fn.loc, Code.ReflectApplyNotFunction, {
+        word: this.types.typeText(given),
       });
     }
 
-    this.reflectArgumentsCheck(expr.args[2]?.expr, module);
+    this.reflectArgumentsCheck(
+      tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId),
+      module,
+    );
   }
 
   private reflectConstructCheck(expr: CallExpr, module: int): void {
-    const third = expr.args[2]?.expr;
+    const tree = this.types.program.tree;
+
+    const third = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
     if (third != undefined) {
-      return this.report(
+      return this.errors.write(
         module,
         third.loc,
         Code.ReflectConstructThird,
@@ -326,7 +358,7 @@ partial class ExpressionTypes {
       );
     }
 
-    const made = expr.args[0]?.expr;
+    const made = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (made == undefined) {
       return;
     }
@@ -334,12 +366,20 @@ partial class ExpressionTypes {
     const given = this.peekType(made, module);
     const base = this.types.definedType(given);
     if (this.isPlainReflectValue(base.kind)) {
-      return this.report(module, made.loc, Code.ReflectConstructNotClass, {
-        word: this.text.of(given),
-      });
+      return this.errors.write(
+        module,
+        made.loc,
+        Code.ReflectConstructNotClass,
+        {
+          word: this.types.typeText(given),
+        },
+      );
     }
 
-    this.reflectArgumentsCheck(expr.args[1]?.expr, module);
+    this.reflectArgumentsCheck(
+      tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId),
+      module,
+    );
   }
 
   private reflectArgumentsCheck(list: Expr | undefined, module: int): void {
@@ -349,7 +389,12 @@ partial class ExpressionTypes {
 
     const given = this.peekType(list, module);
     if (this.types.definedType(given).kind == TypeKind.Tuple) {
-      this.report(module, list.loc, Code.ReflectArgumentsTuple, kNoDetails);
+      this.errors.write(
+        module,
+        list.loc,
+        Code.ReflectArgumentsTuple,
+        kNoDetails,
+      );
     }
   }
 
@@ -369,13 +414,15 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const owner = member.object;
+    const tree = this.types.program.tree;
+
+    const owner = tree.exprOf(member.objectId);
     const isReflect =
       owner.kind == ExprKind.Name &&
       owner.name == kReflectName &&
       this.isGlobalUse(owner, module);
-    const hasSpread = expr.args.some((one) => one.spread);
-    const key = expr.args[0]?.expr;
+    const hasSpread = tree.argumentsOf(expr.argsList).some((one) => one.spread);
+    const key = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (!isReflect || hasSpread || key == undefined) {
       return undefined;
     }
@@ -389,9 +436,11 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Unknown);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Unknown);
   }
 
   private reflectFillCall(
@@ -399,22 +448,24 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const owner = member.object;
+    const tree = this.types.program.tree;
+
+    const owner = tree.exprOf(member.objectId);
     const isReflect =
       owner.kind == ExprKind.Name &&
       owner.name == kReflectName &&
       this.isGlobalUse(owner, module);
-    const hasSpread = expr.args.some((one) => one.spread);
+    const hasSpread = tree.argumentsOf(expr.argsList).some((one) => one.spread);
     const isFill = isReflect && member.name == kFillName && !hasSpread;
-    const cls = expr.args[0]?.expr;
-    const values = expr.args[1]?.expr;
-    if (!isFill || expr.args.length != 2) {
+    const cls = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const values = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
+    if (!isFill || tree.argumentsOf(expr.argsList).length != 2) {
       return undefined;
     }
     if (cls == undefined || values == undefined) {
       return undefined;
     }
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return undefined;
     }
 
@@ -422,15 +473,17 @@ partial class ExpressionTypes {
   }
 
   private filledType(cls: Expr, values: Expr, module: int): Type {
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
     if (this.libraryClassFill(cls, values, module)) {
       return error;
     }
 
     const given = this.typed(cls, undefined, module);
-    const string = this.store.plain(TypeKind.String);
-    const unknown = this.store.plain(TypeKind.Unknown);
-    const map = this.store.dictOf(DictKind.Map, string, unknown);
+    const string = this.types.store.plain(TypeKind.String);
+    const unknown = this.types.store.plain(TypeKind.Unknown);
+    const map = this.types.store.dictOf(DictKind.Map, string, unknown);
     const mapped = this.checked(values, map, module, kNoPlace);
     if (given.kind == TypeKind.Error || mapped.kind == TypeKind.Error) {
       return error;
@@ -438,17 +491,23 @@ partial class ExpressionTypes {
 
     const base = this.types.definedType(given);
     if (base.kind != TypeKind.Class) {
-      const word = this.text.of(given);
+      const word = this.types.typeText(given);
 
-      this.report(module, cls.loc, Code.ReflectFillNotClass, { word });
+      this.errors.write(module, cls.loc, Code.ReflectFillNotClass, { word });
 
       return error;
     }
     if (!base.exact) {
-      return this.filledResult(base.instance, kFillError, module);
+      return this.filledResult(
+        this.types.store.classInstanceOf(base),
+        kFillError,
+        module,
+      );
     }
 
-    const instance = this.types.definedType(base.instance);
+    const instance = this.types.definedType(
+      this.types.store.classInstanceOf(base),
+    );
     if (instance.kind != TypeKind.Instance) {
       return error;
     }
@@ -461,13 +520,18 @@ partial class ExpressionTypes {
     if (decl.isAbstract) {
       return this.fillRefused(cls, word, kFillAbstract, module);
     }
-    if (decl.constructors.length > 0) {
+    const constructors = tree.countOf(decl.constructorsList);
+    if (constructors > 0) {
       const other = `${kFillOwnCtor}${word}${kFillOwnCtorEnd}`;
 
       return this.fillRefused(cls, word, other, module);
     }
 
-    return this.filledResult(base.instance, kFillValueError, module);
+    return this.filledResult(
+      this.types.store.classInstanceOf(base),
+      kFillValueError,
+      module,
+    );
   }
 
   private libraryClassFill(cls: Expr, values: Expr, module: int): boolean {
@@ -479,7 +543,7 @@ partial class ExpressionTypes {
     if (target == undefined || target.kind != SymbolKind.Class) {
       return false;
     }
-    if (!this.modules.isLibraryModule(target.module)) {
+    if (!this.types.isLibraryModule(target.module)) {
       return false;
     }
 
@@ -489,23 +553,23 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly fillRefused(
+  private fillRefused(
     cls: Expr,
     word: string,
     other: string,
     module: int,
   ): Type {
-    this.report(module, cls.loc, Code.ReflectFillCannot, { word, other });
+    this.errors.write(module, cls.loc, Code.ReflectFillCannot, { word, other });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly filledResult(made: Type, failure: string, module: int): Type {
+  private filledResult(made: Type, failure: string, module: int): Type {
     const fails = this.namedLibraryType(failure, 0, module);
     if (fails.kind == TypeKind.Error) {
       return fails;
     }
 
-    return this.store.resultOf(made, fails);
+    return this.types.store.resultOf(made, fails);
   }
 }

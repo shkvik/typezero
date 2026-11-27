@@ -33,13 +33,13 @@ partial class ExpressionTypes {
     target: ValueTarget,
     module: int,
   ): Type | undefined {
-    const home = this.program.modules[target.module]?.name ?? "";
+    const home = this.types.program.modules[target.module]?.name ?? "";
     const declared = this.record(target.module)?.functions.get(target.loc);
     const isStreamFunction =
       target.kind == SymbolKind.Function &&
       kStreamModules.includes(home) &&
       kStreamFunctions.includes(declared?.name ?? callee.name);
-    if (isStreamFunction && !this.modules.isLibraryModule(module)) {
+    if (isStreamFunction && !this.types.isLibraryModule(module)) {
       const name = declared?.name ?? callee.name;
 
       return this.streamFunctionCall(expr, name, module);
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     owner: StaticOwner,
     module: int,
   ): Type | undefined {
-    const home = this.program.modules[owner.module]?.name;
+    const home = this.types.program.modules[owner.module]?.name;
     const isStatic =
       owner.decl.name == kEmitterName &&
       home == kEventsModule &&
@@ -82,8 +82,10 @@ partial class ExpressionTypes {
     loc: int,
     module: int,
   ): Type | undefined {
-    const first = expr.args[0]?.expr;
-    if (first == undefined || this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (first == undefined || this.types.isLibraryModule(module)) {
       return undefined;
     }
 
@@ -103,21 +105,23 @@ partial class ExpressionTypes {
       return undefined;
     }
     if (isTarget) {
-      this.report(module, loc, Code.EventsTargetOn, kNoDetails);
+      this.errors.write(module, loc, Code.EventsTargetOn, kNoDetails);
     } else {
       const other = this.targetHint(name);
-      const shown = this.text.of(given);
+      const shown = this.types.typeText(given);
 
-      this.report(module, first.loc, Code.EventsNotEmitter, {
+      this.errors.write(module, first.loc, Code.EventsNotEmitter, {
         word: name,
         other,
         first: shown,
       });
     }
 
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private readonly targetHint(name: string): string {

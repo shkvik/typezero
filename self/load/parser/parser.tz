@@ -4,25 +4,20 @@ import { Lexer } from "../lexer/lexer.tz";
 import { Token } from "../token/types/token.types.tz";
 import { FileParser } from "./file-parser/file-parser.tz";
 import { OpenBlocks } from "./open-blocks/open-blocks.tz";
-import { LexResult } from "../lexer/types/lexer.types.tz";
+import { LexResult, LexedFile } from "../lexer/types/lexer.types.tz";
+import { SourceText } from "../../program/module/types/module.types.tz";
 import {
   ParsedDeclaration,
   ParsedFile,
-  SourceText,
-} from "../../program/module/types/module.types.tz";
+} from "../../program/syntax/types/syntax.types.files.tz";
 
 export class Parser {
-  private readonly sources: SourceText[];
-
-  public constructor(sources: Own<SourceText[]>) {
-    this.sources = sources;
-  }
-
-  public readonly run(): ParsedFile[] {
+  public readonly run(sources: Read<SourceText[]>): ParsedFile[] {
     const parsed: ParsedFile[] = [];
 
-    for (const source of this.sources) {
-      const file = this.parseFile(source);
+    for (const source of sources) {
+      const copy = this.copiedSource(source);
+      const file = this.parseFile(copy);
 
       parsed.push(file);
     }
@@ -30,11 +25,14 @@ export class Parser {
     return parsed;
   }
 
-  public readonly runDeclarations(): ParsedDeclaration[] {
+  public readonly runDeclarations(
+    sources: Read<SourceText[]>,
+  ): ParsedDeclaration[] {
     const parsed: ParsedDeclaration[] = [];
 
-    for (const source of this.sources) {
-      const file = this.parseDeclaration(source);
+    for (const source of sources) {
+      const copy = this.copiedSource(source);
+      const file = this.parseDeclaration(copy);
 
       parsed.push(file);
     }
@@ -42,55 +40,69 @@ export class Parser {
     return parsed;
   }
 
-  public readonly parseFile(source: SourceText): ParsedFile {
-    const lexer = new Lexer(source.text);
-    const lexed = lexer.run();
+  private readonly copiedSource(source: Read<SourceText>): SourceText {
+    const text = Buffer.from(source.text);
+    const pieces = source.pieces?.slice();
 
-    return this.parseLexed(source, lexed);
+    return {
+      path: source.path,
+      text,
+      isLibrary: source.isLibrary,
+      pieces,
+    };
   }
 
-  public readonly parseLexed(source: Own<SourceText>, lexed: Read<LexResult>): ParsedFile {
+  public readonly parseFile(source: Own<SourceText>): ParsedFile {
+    const lexer = new Lexer(source.text);
+    const lexed = lexer.run();
+    const parsed = this.parseLexed(source, lexed);
+
+    return parsed.parsed;
+  }
+
+  public readonly parseLexed(
+    source: Own<SourceText>,
+    lexed: Own<LexResult>,
+  ): LexedFile {
+    const lexical = lexed.errors;
     const fileParser = new FileParser(
       source.text,
       lexed.tokens,
       source.isLibrary,
     );
     const result = fileParser.run();
-    const errors = this.explained(source, lexed, result.errors);
+    const tokens = fileParser.takeTokens();
+    const merged = this.mergeByPlace(lexical, tokens, result.errors);
+    const blocks = new OpenBlocks(source.text, tokens);
+    const errors = blocks.explain(merged);
+    const parsed: ParsedFile = { source, file: result.file, errors };
 
-    return { source, file: result.file, errors };
+    return { parsed, tokens: blocks.takeTokens() };
   }
 
   public readonly parseDeclaration(source: Own<SourceText>): ParsedDeclaration {
     const lexer = new Lexer(source.text);
     const lexed = lexer.run();
+    const lexical = lexed.errors;
     const fileParser = new FileParser(
       source.text,
       lexed.tokens,
       source.isLibrary,
     );
     const result = fileParser.runDeclaration();
-    const errors = this.explained(source, lexed, result.errors);
+    const tokens = fileParser.takeTokens();
+    const merged = this.mergeByPlace(lexical, tokens, result.errors);
+    const blocks = new OpenBlocks(source.text, tokens);
+    const errors = blocks.explain(merged);
 
     return { source, file: result.file, errors };
   }
 
-  private readonly explained(
-    source: SourceText,
-    lexed: Read<LexResult>,
-    syntactic: Own<SourceError[]>,
-  ): SourceError[] {
-    const merged = this.mergeByPlace(lexed, syntactic);
-    const blocks = new OpenBlocks(source.text, lexed.tokens);
-
-    return blocks.explain(merged);
-  }
-
   private readonly mergeByPlace(
-    lexed: Read<LexResult>,
+    lexical: Read<SourceError[]>,
+    tokens: Read<Token[]>,
     syntactic: Own<SourceError[]>,
   ): SourceError[] {
-    const lexical = lexed.errors;
     if (lexical.length == 0) {
       return syntactic;
     }
@@ -107,7 +119,7 @@ export class Parser {
         }
 
         merged.push(earlier);
-        explained = this.explainedPlace(earlier, lexed.tokens);
+        explained = this.explainedPlace(earlier, tokens);
         taken += 1;
       }
 
@@ -121,7 +133,10 @@ export class Parser {
     return merged.concat(rest);
   }
 
-  private readonly explainedPlace(error: SourceError, tokens: readonly Token[]): int {
+  private readonly explainedPlace(
+    error: SourceError,
+    tokens: Read<Token[]>,
+  ): int {
     if (error.code != Code.UnexpectedCharacter) {
       return error.loc;
     }

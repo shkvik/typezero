@@ -12,6 +12,7 @@ import {
   ParamSlot,
   ValueDraft,
   ValueRecord,
+  LiteralValue,
   VariableDoor,
 } from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
@@ -48,26 +49,37 @@ partial class ExpressionTypes {
   }
 
   public prepare(): void {
-    for (const module of this.program.modules) {
+    for (const module of this.types.program.modules) {
       this.madeRecord(module.id);
     }
 
     this.indexGlobalValues();
   }
 
-  private readonly record(module: int): ValueRecord | undefined {
+  private readonly record(module: int): Read<ValueRecord> | undefined {
     return this.records.get(module);
   }
 
+  private readonly destinationsOf(module: int, loc: int): Destination[] {
+    const list = this.records.get(module)?.destinations.get(loc);
+    if (list == undefined) {
+      return [];
+    }
+
+    return list.slice();
+  }
+
   private madeRecord(module: int): void {
-    const opened = this.program.modules[module];
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[module];
     if (this.records.has(module) || opened == undefined) {
       return;
     }
 
     const uses = new Map<int, NameUse>();
 
-    for (const use of this.scopes.get(module)?.uses ?? []) {
+    for (const use of this.types.usesOf(module)) {
       if (!use.isType) {
         uses.set(use.loc, use);
       }
@@ -87,13 +99,22 @@ partial class ExpressionTypes {
       owners: [],
     };
 
-    this.indexStatements(opened.file.items, record);
+    const items = tree.stmtsOf(opened.file.itemsList);
 
-    for (const part of opened.parts) {
+    this.indexStatements(items, record);
+
+    for (const part of tree.classesOf(opened.partsList)) {
       this.indexClass(part, record);
     }
 
     this.records.set(module, this.frozenRecord(record));
+
+    const isQuiet =
+      this.types.isTypedLibrary(module) &&
+      !this.types.isCheckedLibrary(module);
+    if (!isQuiet) {
+      this.errors.allow(module);
+    }
   }
 
   private readonly frozenRecord(draft: Own<ValueDraft>): ValueRecord {
@@ -145,42 +166,113 @@ partial class ExpressionTypes {
 
     this.noteLate("variable", module, loc);
 
-    const door: VariableDoor = {
-      state: DoorState.InWork,
-      type: this.store.plain(TypeKind.Error),
-      isWhole: false,
-    };
-
+    const error = this.types.store.plain(TypeKind.Error);
     const owned = this.errors.mark();
 
-    this.doors.set(key, door);
+    this.doors.set(key, {
+      state: DoorState.InWork,
+      type: error,
+      isWhole: false,
+    });
     this.doorOrder.push(key);
-    this.openVariable(door, variable, module);
+    this.openVariable(key, variable, module);
     this.errors.keepSince(owned);
-    door.state = DoorState.Done;
 
-    return door;
+    return this.variableDone(key);
+  }
+
+  private variableDone(key: string): VariableDoor | undefined {
+    const door = this.doors.get(key);
+    if (door == undefined) {
+      return undefined;
+    }
+
+    const done: VariableDoor = { ...door, state: DoorState.Done };
+
+    this.doors.set(key, done);
+
+    return done;
+  }
+
+  private setDoorType(key: string, type: Type): void {
+    const door = this.doors.get(key);
+    if (door != undefined) {
+      const changed: VariableDoor = { ...door, type };
+
+      this.doors.set(key, changed);
+    }
+  }
+
+  private setDoorGiven(key: string, given: Type): void {
+    const door = this.doors.get(key);
+    if (door != undefined) {
+      const changed: VariableDoor = { ...door, given };
+
+      this.doors.set(key, changed);
+    }
+  }
+
+  private setDoorLiteral(key: string, literal: LiteralValue | undefined): void {
+    const door = this.doors.get(key);
+    if (door != undefined) {
+      const changed: VariableDoor = { ...door, literal };
+
+      this.doors.set(key, changed);
+    }
+  }
+
+  private setDoorConstant(key: string, constant: decimal | undefined): void {
+    const door = this.doors.get(key);
+    if (door != undefined) {
+      const changed: VariableDoor = { ...door, constant };
+
+      this.doors.set(key, changed);
+    }
+  }
+
+  private setDoorWhole(key: string, isWhole: boolean): void {
+    const door = this.doors.get(key);
+    if (door != undefined) {
+      const changed: VariableDoor = { ...door, isWhole };
+
+      this.doors.set(key, changed);
+    }
+  }
+
+  private doorTextsOfName(expr: NameExpr, module: int): string[] | undefined {
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return undefined;
+    }
+
+    const key = `${target.module} ${target.loc}`;
+
+    this.door(target.module, target.loc);
+
+    return this.doorTexts.get(key)?.slice();
   }
 
   private open(
-    door: VariableDoor,
+    key: string,
     variable: DeclaredVariable,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const decl = variable.decl;
-    const written = decl.typeAnn;
-    const init = decl.init;
+    const written = tree.typeRefAt(decl.typeAnnId);
+    const init = tree.exprAt(decl.initId);
     const loop = variable.loop;
     const isPattern =
       decl.form.kind != BindingKind.Plain &&
       decl.origin == NameOrigin.Generated;
     if (isPattern) {
-      return this.patternSource(door, variable, module);
+      return this.patternSource(key, variable, module);
     }
     if (loop != undefined) {
-      door.type = this.loopItem(loop, module);
+      const item = this.loopItem(loop, module);
 
-      return;
+      return this.setDoorType(key, item);
     }
 
     const isPlain =
@@ -194,25 +286,26 @@ partial class ExpressionTypes {
         bindings: new Map<int, Type>(),
         place: TypePlace.Plain,
       };
-      const type = this.resolver.value(written, context);
+      const type = this.types.value(written, context);
 
-      door.type = type;
+      this.setDoorType(key, type);
 
       if (init == undefined || type.kind == TypeKind.Error) {
         return;
       }
 
       const given = this.checked(init, type, module, kNoPlace);
+      const constant = this.keptConstant(variable, init, given, module);
 
-      door.given = given;
+      this.setDoorGiven(key, given);
 
-      return this.keepConstant(door, variable, init, given, module);
+      return this.setDoorConstant(key, constant);
     }
     if (init == undefined) {
       const first = this.assignedTypeText(decl, false, module);
-      const code = this.statements.untypedCode(first, false);
+      const code = this.types.untypedCode(first, false);
 
-      this.report(module, decl.loc, code, { word: decl.name, first });
+      this.errors.write(module, decl.loc, code, { word: decl.name, first });
 
       return;
     }
@@ -220,39 +313,53 @@ partial class ExpressionTypes {
     const destination = this.destinationOf(variable, init, module);
     const given = this.typed(init, destination, module);
     if (given.kind == TypeKind.Void) {
-      this.report(module, init.loc, Code.VoidInitializer, kNoDetails);
+      this.errors.write(module, init.loc, Code.VoidInitializer, kNoDetails);
 
       return;
     }
     if (given.kind == TypeKind.Undefined && !variable.isConst) {
       const first = this.assignedTypeText(decl, true, module);
-      const code = this.statements.untypedCode(first, true);
+      const code = this.types.untypedCode(first, true);
 
-      return this.report(module, decl.loc, code, { word: decl.name, first });
+      return this.errors.write(module, decl.loc, code, {
+        word: decl.name,
+        first,
+      });
     }
     if (given.kind == TypeKind.Undefined) {
-      const undefinedError = this.statements.undefinedError(variable, init);
+      const undefinedError = this.types.undefinedError(variable, init);
 
-      return this.reportFound(module, undefinedError);
+      return this.errors.writeFound(module, undefinedError);
     }
 
-    door.type = this.placedType(given, destination);
+    const placed = this.placedType(given, destination);
+
+    this.setDoorType(key, placed);
 
     if (variable.isConst) {
-      door.literal = this.literalOf(init, module);
+      const literal = this.literalOf(init, module);
+
+      this.setDoorLiteral(key, literal);
     }
     if (variable.isConst && given.kind == TypeKind.String) {
-      door.texts = this.constTexts(init, module);
+      const texts = this.constTexts(init, module);
+      if (texts != undefined) {
+        this.doorTexts.set(key, texts);
+      }
     }
 
-    this.keepConstant(door, variable, init, given, module);
+    const constant = this.keptConstant(variable, init, given, module);
 
-    door.isWhole = this.isWholeConstant(door, init, given, module);
+    this.setDoorConstant(key, constant);
+
+    const isWhole = this.isWholeConstant(constant, init, given, module);
+
+    this.setDoorWhole(key, isWhole);
   }
 
   private constTexts(init: Expr, module: int): string[] | undefined {
     if (init.kind == ExprKind.Name) {
-      return this.doorOfName(init, module)?.texts;
+      return this.doorTextsOfName(init, module);
     }
 
     const texts: string[] = [];
@@ -265,10 +372,12 @@ partial class ExpressionTypes {
   }
 
   private readonly collectTexts(expr: Expr, texts: string[]): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind == ExprKind.Conditional) {
       return (
-        this.collectTexts(expr.thenExpr, texts) &&
-        this.collectTexts(expr.elseExpr, texts)
+        this.collectTexts(tree.exprOf(expr.thenExprId), texts) &&
+        this.collectTexts(tree.exprOf(expr.elseExprId), texts)
       );
     }
     if (expr.kind != ExprKind.StringLit) {
@@ -281,30 +390,29 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private keepConstant(
-    door: VariableDoor,
+  private keptConstant(
     variable: DeclaredVariable,
     init: Expr,
     given: Type,
     module: int,
-  ): void {
+  ): decimal | undefined {
     if (variable.isConst && given.kind == TypeKind.Decimal) {
-      door.constant = this.plainConstant(init, module);
-
-      return;
+      return this.plainConstant(init, module);
     }
     if (variable.isConst) {
-      door.constant = this.rawConstant(init, given, module);
+      return this.rawConstant(init, given, module);
     }
+
+    return undefined;
   }
 
   private isWholeConstant(
-    door: VariableDoor,
+    constant: decimal | undefined,
     init: Expr,
     given: Type,
     module: int,
   ): boolean {
-    if (given.kind != TypeKind.Int || door.constant == undefined) {
+    if (given.kind != TypeKind.Int || constant == undefined) {
       return false;
     }
     if (given.bits != 64 || given.unsigned) {
@@ -319,11 +427,11 @@ partial class ExpressionTypes {
     isUndefined: boolean,
     module: int,
   ): string {
-    const list = this.record(module)?.destinations.get(decl.loc) ?? [];
+    const list = this.destinationsOf(module, decl.loc);
     let joined: Type | undefined = undefined;
 
     if (isUndefined) {
-      joined = this.store.plain(TypeKind.Undefined);
+      joined = this.types.store.plain(TypeKind.Undefined);
     }
 
     for (const one of list) {
@@ -345,10 +453,10 @@ partial class ExpressionTypes {
       return "";
     }
 
-    return this.text.of(joined);
+    return this.types.typeText(joined);
   }
 
-  private readonly assignedJoin(joined: Type | undefined, given: Type): Type {
+  private assignedJoin(joined: Type | undefined, given: Type): Type {
     if (joined == undefined) {
       return given;
     }
@@ -358,11 +466,11 @@ partial class ExpressionTypes {
       this.types.isNumeric(given) &&
       joined.kind != given.kind;
     if (isMixed) {
-      return this.store.plain(TypeKind.Double);
+      return this.types.store.plain(TypeKind.Double);
     }
 
     return (
-      this.unifier.unify(joined, given) ?? this.store.plain(TypeKind.Error)
+      this.types.unify(joined, given) ?? this.types.store.plain(TypeKind.Error)
     );
   }
 }

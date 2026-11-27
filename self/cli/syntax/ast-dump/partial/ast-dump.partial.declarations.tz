@@ -1,5 +1,4 @@
 import { Dumper } from "../ast-dump.tz";
-import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   FunctionDecl,
   Param,
@@ -11,6 +10,9 @@ import {
   ClassField,
   Decorator,
 } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  TypeParamDecl,
+} from "../../../../program/ast/types/ast.types.types.tz";
 
 partial class Dumper {
   private readonly role(declaration: FunctionDecl): string {
@@ -23,7 +25,7 @@ partial class Dumper {
 
     return (
       `member ${member.access} ${isOverride} ${member.method} ` +
-      `${member.decorators.length}`
+      `${this.tree.decoratorsOf(member.decoratorsList).length}`
     );
   }
 
@@ -41,22 +43,30 @@ partial class Dumper {
       `Function ${declaration.loc} ${name} arrow=${isArrow} concise=${concise} ` +
         `own=${ownName} place=${declaration.place} body=${declaration.bodySource} ` +
         `gen=${isGenerator} async=${isAsync} role=${role} src=${source} ` +
-        `tp=${declaration.typeParams.length} params=${declaration.params.length}`,
+        `tp=${this.tree.typeParamsOf(declaration.typeParamsList).length} params=${this.tree.paramsOf(declaration.paramsList).length}`,
     );
     this.nested();
     const member = declaration.role;
     if (member != undefined) {
-      this.dumpDecorators(member.decorators);
+      const decorators = this.tree.decoratorsOf(member.decoratorsList);
+
+      this.dumpDecorators(decorators);
     }
 
-    this.dumpTypeParams(declaration.typeParams);
+    const typeParams = this.tree.typeParamsOf(declaration.typeParamsList);
 
-    for (const param of declaration.params) {
+    this.dumpTypeParams(typeParams);
+
+    for (const param of this.tree.paramsOf(declaration.paramsList)) {
       this.dumpParam(param);
     }
 
-    this.dumpOptionalType(declaration.returnType);
-    this.dumpOptionalStmt(declaration.body);
+    const returnType = this.tree.typeRefAt(declaration.returnTypeId);
+
+    this.dumpOptionalType(returnType);
+    const bodyBlock = this.tree.blockAt(declaration.bodyId);
+
+    this.dumpOptionalStmt(bodyBlock);
     this.back();
   }
 
@@ -68,14 +78,20 @@ partial class Dumper {
 
     this.line(
       `Param ${param.loc} ${name} form=${param.form.kind} ` +
-        `prop=${prop} pattern=${pattern} dec=${param.decorators.length}`,
+        `prop=${prop} pattern=${pattern} dec=${this.tree.decoratorsOf(param.decoratorsList).length}`,
     );
     this.nested();
-    this.dumpDecorators(param.decorators);
-    this.dumpOptionalType(param.type);
+    const decorators = this.tree.decoratorsOf(param.decoratorsList);
+
+    this.dumpDecorators(decorators);
+    const typeRef = this.tree.typeRefAt(param.typeId);
+
+    this.dumpOptionalType(typeRef);
     const form = param.form;
     if (form.kind == ParamKind.Defaulted) {
-      this.dumpExpr(form.defaultValue);
+      const defaultValue = this.tree.exprOf(form.defaultValueId);
+
+      this.dumpExpr(defaultValue);
     }
 
     this.back();
@@ -87,8 +103,12 @@ partial class Dumper {
 
       this.line(`TypeParam ${param.loc} ${name}`);
       this.nested();
-      this.dumpOptionalType(param.constraint);
-      this.dumpOptionalType(param.defaultType);
+      const constraint = this.tree.typeRefAt(param.constraintId);
+
+      this.dumpOptionalType(constraint);
+      const defaultType = this.tree.typeRefAt(param.defaultTypeId);
+
+      this.dumpOptionalType(defaultType);
       this.back();
     }
   }
@@ -96,7 +116,9 @@ partial class Dumper {
   private dumpDecorators(decorators: Read<Decorator[]>): void {
     for (const decorator of decorators) {
       this.line(`Decorator ${decorator.loc}`);
-      this.dumpChildren([decorator.expr]);
+      const expr = this.tree.exprOf(decorator.exprId);
+
+      this.dumpChildren([expr]);
     }
   }
 
@@ -106,45 +128,59 @@ partial class Dumper {
     const isAbstract = this.flag(declaration.isAbstract);
     const isPartial = this.flag(declaration.isPartial);
     const expression = this.flag(declaration.expression);
-    const generic = this.flag(declaration.typeParams.length > 0);
+    const generic = this.flag(
+      this.tree.typeParamsOf(declaration.typeParamsList).length > 0,
+    );
     const source = this.span(declaration.source);
-    const hasBase = this.flag(declaration.base != undefined);
-    const hasBaseExpr = this.flag(declaration.baseExpr != undefined);
+    const hasBase = this.flag(
+      this.tree.typeRefAt(declaration.baseId) != undefined,
+    );
+    const hasBaseExpr = this.flag(
+      this.tree.exprAt(declaration.baseExprId) != undefined,
+    );
 
     this.line(
       `Class ${declaration.loc} ${name} abstract=${isAbstract} partial=${isPartial} ` +
         `expr=${expression} generic=${generic} src=${source} ` +
-        `tp=${declaration.typeParams.length} base=${hasBase} ` +
-        `baseExpr=${hasBaseExpr} baseArgs=${declaration.baseArgs.length} ` +
-        `ifaces=${declaration.interfaces.length} dec=${declaration.decorators.length} ` +
-        `fields=${declaration.fields.length} methods=${declaration.methods.length} ` +
-        `ctors=${declaration.constructors.length}`,
+        `tp=${this.tree.typeParamsOf(declaration.typeParamsList).length} base=${hasBase} ` +
+        `baseExpr=${hasBaseExpr} baseArgs=${this.tree.typeRefsOf(declaration.baseArgsList).length} ` +
+        `ifaces=${this.tree.typeRefsOf(declaration.interfacesList).length} dec=${this.tree.decoratorsOf(declaration.decoratorsList).length} ` +
+        `fields=${this.tree.fieldsOf(declaration.fieldsList).length} methods=${this.tree.functionsOf(declaration.methodsList).length} ` +
+        `ctors=${this.tree.functionsOf(declaration.constructorsList).length}`,
     );
     this.nested();
-    this.dumpDecorators(declaration.decorators);
-    this.dumpTypeParams(declaration.typeParams);
-    const base = declaration.base;
+    const decorators = this.tree.decoratorsOf(declaration.decoratorsList);
+
+    this.dumpDecorators(decorators);
+    const typeParams = this.tree.typeParamsOf(declaration.typeParamsList);
+
+    this.dumpTypeParams(typeParams);
+    const base = this.tree.typeRefAt(declaration.baseId);
     if (base != undefined) {
       this.dumpType(base);
     }
 
-    const baseExpr = declaration.baseExpr;
+    const baseExpr = this.tree.exprAt(declaration.baseExprId);
     if (baseExpr != undefined) {
       this.dumpExpr(baseExpr);
     }
 
-    this.dumpTypes(declaration.baseArgs);
-    this.dumpTypes(declaration.interfaces);
+    const baseArgsItem = this.tree.typeRefsOf(declaration.baseArgsList);
 
-    for (const field of declaration.fields) {
+    this.dumpTypes(baseArgsItem);
+    const interfaces = this.tree.typeRefsOf(declaration.interfacesList);
+
+    this.dumpTypes(interfaces);
+
+    for (const field of this.tree.fieldsOf(declaration.fieldsList)) {
       this.dumpField(field);
     }
 
-    for (const method of declaration.methods) {
+    for (const method of this.tree.functionsOf(declaration.methodsList)) {
       this.dumpFunction(method);
     }
 
-    for (const ctor of declaration.constructors) {
+    for (const ctor of this.tree.functionsOf(declaration.constructorsList)) {
       this.dumpFunction(ctor);
     }
 
@@ -161,12 +197,18 @@ partial class Dumper {
       `Field ${field.loc} ${name} form=${field.form} ` +
         `presence=${field.presence} ro=${isReadonly} ` +
         `override=${isOverride} access=${field.access} ` +
-        `accessor=${accessor} dec=${field.decorators.length}`,
+        `accessor=${accessor} dec=${this.tree.decoratorsOf(field.decoratorsList).length}`,
     );
     this.nested();
-    this.dumpDecorators(field.decorators);
-    this.dumpOptionalType(field.type);
-    this.dumpOptionalExpr(field.init);
+    const decorators = this.tree.decoratorsOf(field.decoratorsList);
+
+    this.dumpDecorators(decorators);
+    const typeRef = this.tree.typeRefAt(field.typeId);
+
+    this.dumpOptionalType(typeRef);
+    const init = this.tree.exprAt(field.initId);
+
+    this.dumpOptionalExpr(init);
     this.back();
   }
 

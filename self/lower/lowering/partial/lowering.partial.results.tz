@@ -1,6 +1,7 @@
 import { dirname, relative, resolve } from "node:path";
 import {
   CallExpr,
+  ExprKind,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
@@ -41,14 +42,14 @@ partial class Lowering {
       return undefined;
     }
 
-    const value = this.halfType(type.value);
-    const error = this.halfType(type.error);
+    const value = this.halfType(this.values.types.store.valueOf(type));
+    const error = this.halfType(this.values.types.store.errorOf(type));
     if (value == undefined || error == undefined) {
       return undefined;
     }
 
-    const valueAlign = this.halfAlign(type.value);
-    const errorAlign = this.halfAlign(type.error);
+    const valueAlign = this.halfAlign(this.values.types.store.valueOf(type));
+    const errorAlign = this.halfAlign(this.values.types.store.errorOf(type));
     const isErrorFirst = errorAlign > valueAlign;
     if (isErrorFirst) {
       const struct = `{ ${error}, ${value}, i1, ptr }`;
@@ -95,15 +96,23 @@ partial class Lowering {
     }
 
     const layout = this.resultLayout(type);
-    const value = this.halfDescriptor(type.value);
-    const error = this.halfDescriptor(type.error);
+    const value = this.halfDescriptor(this.values.types.store.valueOf(type));
+    const error = this.halfDescriptor(this.values.types.store.errorOf(type));
     if (layout == undefined || value == undefined || error == undefined) {
       return undefined;
     }
 
     const isValueFirst = layout.value == 0;
-    const first = this.pickType(isValueFirst, type.value, type.error);
-    const second = this.pickType(isValueFirst, type.error, type.value);
+    const first = this.pickType(
+      isValueFirst,
+      this.values.types.store.valueOf(type),
+      this.values.types.store.errorOf(type),
+    );
+    const second = this.pickType(
+      isValueFirst,
+      this.values.types.store.errorOf(type),
+      this.values.types.store.valueOf(type),
+    );
     const secondOffset = this.aligned(
       this.halfSize(first),
       this.halfAlign(second),
@@ -127,7 +136,7 @@ partial class Lowering {
 
   private halfDescriptor(type: Type): LLVMValue | undefined {
     if (this.isEmptyHalf(type)) {
-      const empty = this.store.plain(TypeKind.Undefined);
+      const empty = this.values.types.store.plain(TypeKind.Undefined);
 
       return this.descriptor(empty);
     }
@@ -180,7 +189,11 @@ partial class Lowering {
     const empty = this.ir.zero(layout.struct);
     const sited = this.sitedResult(frame, empty, layout, isOk, loc);
     const flagged = frame.made.insert(sited, flag, layout.ok);
-    const target = this.pickType(isOk, type.value, type.error);
+    const target = this.pickType(
+      isOk,
+      this.values.types.store.valueOf(type),
+      this.values.types.store.errorOf(type),
+    );
     const position = this.choose(isOk, layout.value, layout.error);
     if (half == undefined || this.isEmptyHalf(target)) {
       return { type: layout.struct, value: flagged, tz: type, owned: true };
@@ -210,8 +223,10 @@ partial class Lowering {
     call: CallExpr,
     isOk: boolean,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(call);
-    const argument = call.args[0];
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (type == undefined || type.kind != TypeKind.Result) {
       this.notLowered(frame.module, call.loc, "a result of this type");
 
@@ -221,8 +236,13 @@ partial class Lowering {
       return this.madeResult(frame, type, isOk, undefined, call.loc);
     }
 
-    const half = this.pickType(isOk, type.value, type.error);
-    const given = this.wantedValue(frame, argument.expr, half);
+    const half = this.pickType(
+      isOk,
+      this.values.types.store.valueOf(type),
+      this.values.types.store.errorOf(type),
+    );
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.wantedValue(frame, expr, half);
     if (given == undefined) {
       return undefined;
     }
@@ -247,13 +267,13 @@ partial class Lowering {
   }
 
   private errorSite(frame: Read<Frame>, loc: int): LLVMValue {
-    const module = this.program.modules[frame.module];
+    const module = this.values.types.program.modules[frame.module];
     if (module == undefined || module.source.isLibrary) {
       return this.ir.zero(kPointerType);
     }
 
     const lines = this.linesOf(frame.module, module.source.text);
-    const line = lines.placeOf(loc).line;
+    const line = lines?.placeOf(loc).line ?? 0;
     const file = this.siteFile(module.source.path);
     const where = `${file}:${line}`;
     const title = frame.place ?? "";
@@ -283,24 +303,24 @@ partial class Lowering {
   }
 
   private readonly siteFile(path: string): string {
-    const entry = this.program.modules[0]?.source.path ?? "";
+    const entry = this.values.types.program.modules[0]?.source.path ?? "";
     const base = dirname(resolve(entry));
     const native = relative(base, resolve(path));
 
     return native.replaceAll(kWindowsSeparator, kPathSeparator);
   }
 
-  private linesOf(module: int, text: Own<Buffer>): SourceLines {
-    const known = this.lines.get(module);
-    if (known != undefined) {
-      return known;
+  private linesOf(
+    module: int,
+    text: Read<Buffer>,
+  ): Read<SourceLines> | undefined {
+    if (!this.lines.has(module)) {
+      const made = new SourceLines(text);
+
+      this.lines.set(module, made);
     }
 
-    const made = new SourceLines(text);
-
-    this.lines.set(module, made);
-
-    return made;
+    return this.lines.get(module);
   }
 
   private resultConverted(
@@ -329,8 +349,8 @@ partial class Lowering {
       sited,
       source.value,
       layout.value,
-      from.value,
-      target.value,
+      this.values.types.store.valueOf(from),
+      this.values.types.store.valueOf(target),
     );
     if (withValue == undefined) {
       return undefined;
@@ -342,8 +362,8 @@ partial class Lowering {
       withValue,
       source.error,
       layout.error,
-      from.error,
-      target.error,
+      this.values.types.store.errorOf(from),
+      this.values.types.store.errorOf(target),
     );
     if (whole == undefined) {
       return undefined;
@@ -390,7 +410,10 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const result = this.value(frame, member.object);
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const result = this.value(frame, object);
     if (result == undefined) {
       return undefined;
     }
@@ -401,7 +424,7 @@ partial class Lowering {
     }
 
     const ok = frame.made.extract(result.value, layout.ok);
-    const tz = this.store.plain(TypeKind.Boolean);
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     switch (member.name) {
       case "isOk":
@@ -435,9 +458,11 @@ partial class Lowering {
     result: IrValue,
     ok: LLVMValue,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(call);
     const resultIr = this.typeOrUndefined(type);
-    const fallback = call.args[0];
+    const fallback = tree.argumentsOf(call.argsList)[0];
     const from = result.tz;
     const layout = this.resultLayout(from);
     if (type == undefined || resultIr == undefined || fallback == undefined) {
@@ -454,14 +479,20 @@ partial class Lowering {
     frame.made.conditionalBranch(ok, kept, other);
     frame.made.open(kept);
 
-    const half = this.resultHalf(frame, result, layout.value, from.value);
+    const half = this.resultHalf(
+      frame,
+      result,
+      layout.value,
+      this.values.types.store.valueOf(from),
+    );
     const first = this.branchOwned(frame, half, type, call.loc);
     const firstEnd = frame.made.currentBlock();
 
     frame.made.branch(end);
     frame.made.open(other);
 
-    const second = this.branchValue(frame, fallback.expr, type);
+    const expr = tree.exprOf(fallback.exprId);
+    const second = this.branchValue(frame, expr, type);
     const secondEnd = frame.made.currentBlock();
 
     frame.made.branch(end);
@@ -495,7 +526,15 @@ partial class Lowering {
   }
 
   private resultMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
-    const result = this.value(frame, expr.object);
+    const tree = this.values.types.program.tree;
+
+    const moved = this.movedHalf(frame, expr);
+    if (moved != undefined) {
+      return moved;
+    }
+
+    const object = tree.exprOf(expr.objectId);
+    const result = this.value(frame, object);
     if (result == undefined) {
       return undefined;
     }
@@ -514,7 +553,11 @@ partial class Lowering {
     }
 
     const position = this.choose(isValue, layout.value, layout.error);
-    const type = this.pickType(isValue, from.value, from.error);
+    const type = this.pickType(
+      isValue,
+      this.values.types.store.valueOf(from),
+      this.values.types.store.errorOf(from),
+    );
     const half = this.resultHalf(frame, result, position, type);
     if (result.owned != true) {
       return half;
@@ -525,6 +568,47 @@ partial class Lowering {
     this.dropping(frame, result);
 
     return kept;
+  }
+
+  private movedHalf(frame: Read<Frame>, expr: MemberExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const isMoved = this.moves.has(expr.id) && frame.inline == undefined;
+    if (!isMoved || object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const place = this.ownLocalPlace(frame, object);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const from = place.tz;
+    const layout = this.resultLayout(from);
+    if (layout == undefined || from.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const isValue = expr.name == "value";
+    const position = this.choose(isValue, layout.value, layout.error);
+    const type = this.pickType(
+      isValue,
+      this.values.types.store.valueOf(from),
+      this.values.types.store.errorOf(from),
+    );
+    const ir = this.halfType(type);
+    if (ir == undefined || !this.isManaged(type)) {
+      return undefined;
+    }
+
+    const whole = frame.made.load(place.type, place.pointer);
+    const half = frame.made.extract(whole, position);
+    const emptied = frame.made.insert(whole, this.ir.zero(ir), position);
+
+    frame.made.store(emptied, place.pointer);
+
+    return { type: ir, value: half, tz: type, owned: true };
   }
 
   private resultCounter(type: Type, isRetain: boolean): IrCallee | undefined {
@@ -547,6 +631,7 @@ partial class Lowering {
       module: 0,
       loops: [],
       scopes: [],
+      place: name,
     };
     const argument = made.param(0);
     const whole: IrValue = { type: layout.struct, value: argument, tz: type };
@@ -557,10 +642,22 @@ partial class Lowering {
 
     made.conditionalBranch(ok, isOk, isError);
     made.open(isOk);
-    this.halfCounted(frame, whole, layout.value, type.value, isRetain);
+    this.halfCounted(
+      frame,
+      whole,
+      layout.value,
+      this.values.types.store.valueOf(type),
+      isRetain,
+    );
     made.branch(done);
     made.open(isError);
-    this.halfCounted(frame, whole, layout.error, type.error, isRetain);
+    this.halfCounted(
+      frame,
+      whole,
+      layout.error,
+      this.values.types.store.errorOf(type),
+      isRetain,
+    );
     made.branch(done);
     made.open(done);
     made.finishVoid();

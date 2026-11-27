@@ -46,56 +46,97 @@ partial class ExpressionTypes {
   }
 
   private readonly indexStatement(statement: Stmt, record: ValueDraft): void {
+    const tree = this.types.program.tree;
+
     switch (statement.kind) {
       case StmtKind.Block:
-        return this.indexStatements(statement.body, record);
+        const body = tree.stmtsOf(statement.bodyList);
+
+        return this.indexStatements(body, record);
       case StmtKind.VarDecl:
         return this.indexVariables(statement, record);
       case StmtKind.Function:
         return this.indexFunction(statement, record);
       case StmtKind.Expr:
-        return this.indexExpression(statement.expr, record);
-      case StmtKind.If:
-        this.indexExpression(statement.cond, record);
-        this.indexStatement(statement.thenStmt, record);
+        const expr = tree.exprOf(statement.exprId);
 
-        return this.indexOptionalStatement(statement.elseStmt, record);
+        return this.indexExpression(expr, record);
+      case StmtKind.If:
+        const cond = tree.exprOf(statement.condId);
+
+        this.indexExpression(cond, record);
+        const thenStmt = tree.stmtOf(statement.thenStmtId);
+
+        this.indexStatement(thenStmt, record);
+
+        return this.indexOptionalStatement(
+          tree.stmtAt(statement.elseStmtId),
+          record,
+        );
       case StmtKind.While:
       case StmtKind.DoWhile:
-        this.indexExpression(statement.cond, record);
+        const condExpr = tree.exprOf(statement.condId);
 
-        return this.indexStatement(statement.body, record);
+        this.indexExpression(condExpr, record);
+
+        const bodyStmt = tree.stmtOf(statement.bodyId);
+
+        return this.indexStatement(bodyStmt, record);
       case StmtKind.For:
-        this.indexOptionalStatement(statement.init, record);
-        this.indexOptionalExpression(statement.cond, record);
-        this.indexOptionalExpression(statement.step, record);
+        const init = tree.stmtAt(statement.initId);
 
-        return this.indexOptionalStatement(statement.body, record);
+        this.indexOptionalStatement(init, record);
+        const statementCond = tree.exprAt(statement.condId);
+
+        this.indexOptionalExpression(statementCond, record);
+        const step = tree.exprAt(statement.stepId);
+
+        this.indexOptionalExpression(step, record);
+
+        return this.indexOptionalStatement(
+          tree.stmtAt(statement.bodyId),
+          record,
+        );
       case StmtKind.ForOf: {
         const decl = statement.binding;
         const isConst = statement.isConst;
 
         record.variables.set(decl.loc, { decl, isConst, loop: statement });
         this.keepHidden(decl.name, SymbolKind.Variable, decl.loc, record);
-        this.indexExpression(statement.iterable, record);
+        const iterable = tree.exprOf(statement.iterableId);
 
-        return this.indexStatement(statement.body, record);
+        this.indexExpression(iterable, record);
+
+        const statementBody = tree.stmtOf(statement.bodyId);
+
+        return this.indexStatement(statementBody, record);
       }
       case StmtKind.Switch:
-        this.indexExpression(statement.discriminant, record);
+        const discriminant = tree.exprOf(statement.discriminantId);
 
-        for (const option of statement.cases) {
-          this.indexOptionalExpression(option.test, record);
-          this.indexStatements(option.body, record);
+        this.indexExpression(discriminant, record);
+
+        for (const option of tree.casesOf(statement.casesList)) {
+          const test = tree.exprAt(option.testId);
+
+          this.indexOptionalExpression(test, record);
+          const bodyItem = tree.stmtsOf(option.bodyList);
+
+          this.indexStatements(bodyItem, record);
         }
 
         return;
       case StmtKind.Labeled:
-        return this.indexStatement(statement.body, record);
+        return this.indexStatement(tree.stmtOf(statement.bodyId), record);
       case StmtKind.Return:
-        this.keepReturned(statement.value, record);
+        const value = tree.exprAt(statement.valueId);
 
-        return this.indexOptionalExpression(statement.value, record);
+        this.keepReturned(value, record);
+
+        return this.indexOptionalExpression(
+          tree.exprAt(statement.valueId),
+          record,
+        );
       case StmtKind.Class:
         return this.indexClass(statement, record);
       case StmtKind.Enum:
@@ -122,13 +163,21 @@ partial class ExpressionTypes {
     statement: VarDeclStmt,
     record: ValueDraft,
   ): void {
+    const tree = this.types.program.tree;
+
     const isConst = statement.isConst;
 
-    for (const decl of statement.decls) {
+    for (const decl of tree.declaratorsOf(statement.declsList)) {
       record.variables.set(decl.loc, { decl, isConst });
       this.keepHidden(decl.name, SymbolKind.Variable, decl.loc, record);
-      this.keepDeclared(decl.init, decl.typeAnn, record);
-      this.indexOptionalExpression(decl.init, record);
+      this.keepDeclared(
+        tree.exprAt(decl.initId),
+        tree.typeRefAt(decl.typeAnnId),
+        record,
+      );
+      const init = tree.exprAt(decl.initId);
+
+      this.indexOptionalExpression(init, record);
     }
   }
 
@@ -182,8 +231,10 @@ partial class ExpressionTypes {
     value: Expr | undefined,
     record: ValueDraft,
   ): void {
+    const tree = this.types.program.tree;
+
     const fn = record.owners[record.owners.length - 1];
-    if (fn != undefined && fn.returnType != undefined) {
+    if (fn != undefined && tree.typeRefAt(fn.returnTypeId) != undefined) {
       const kind = DestinationKind.Returned;
 
       this.keepDestination(value, { kind, index: 0, fn }, record);
@@ -191,51 +242,71 @@ partial class ExpressionTypes {
   }
 
   private readonly keepArguments(call: CallExpr, record: ValueDraft): void {
+    const tree = this.types.program.tree;
+
     const kind = DestinationKind.Argument;
 
-    for (let index = 0; index < call.args.length; index++) {
-      const arg = call.args[index];
+    for (
+      let index = 0;
+      index < tree.argumentsOf(call.argsList).length;
+      index++
+    ) {
+      const arg = tree.argumentsOf(call.argsList)[index];
       if (arg != undefined && !arg.spread) {
-        this.keepDestination(arg.expr, { kind, index, call }, record);
+        this.keepDestination(
+          tree.exprOf(arg.exprId),
+          { kind, index, call },
+          record,
+        );
       }
     }
   }
 
   private readonly indexFunction(fn: FunctionDecl, record: ValueDraft): void {
+    const tree = this.types.program.tree;
+
     record.functions.set(fn.loc, fn);
 
-    for (const param of fn.params) {
+    for (const param of tree.paramsOf(fn.paramsList)) {
       const form = param.form;
 
       record.params.set(param.loc, { fn, param });
       this.keepHidden(param.name, SymbolKind.Parameter, param.loc, record);
 
       if (form.kind == ParamKind.Defaulted) {
-        this.indexExpression(form.defaultValue, record);
+        const defaultValue = tree.exprOf(form.defaultValueId);
+
+        this.indexExpression(defaultValue, record);
       }
     }
 
-    const body = fn.body;
+    const body = tree.blockAt(fn.bodyId);
     if (body != undefined) {
       record.owners.push(fn);
-      this.indexStatements(body.body, record);
+      const bodyItem = tree.stmtsOf(body.bodyList);
+
+      this.indexStatements(bodyItem, record);
       record.owners.pop();
     }
   }
 
   private readonly indexClass(decl: ClassDecl, record: ValueDraft): void {
+    const tree = this.types.program.tree;
+
     record.classes.set(decl.loc, decl);
 
-    for (const field of decl.fields) {
-      this.indexOptionalExpression(field.init, record);
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      const init = tree.exprAt(field.initId);
+
+      this.indexOptionalExpression(init, record);
     }
 
-    for (const fn of decl.constructors) {
+    for (const fn of tree.functionsOf(decl.constructorsList)) {
       this.indexFunction(fn, record);
     }
 
-    for (const fn of decl.methods) {
-      if (decl.isPartial || this.partOf(decl, fn) == decl) {
+    for (const fn of tree.functionsOf(decl.methodsList)) {
+      if (decl.isPartial || this.partOf(decl, fn).id == decl.id) {
         this.indexFunction(fn, record);
       }
     }
@@ -271,84 +342,147 @@ partial class ExpressionTypes {
   }
 
   private readonly indexExpression(expr: Expr, record: ValueDraft): void {
+    const tree = this.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.Member:
-        return this.indexExpression(expr.object, record);
+        const object = tree.exprOf(expr.objectId);
+
+        return this.indexExpression(object, record);
       case ExprKind.Index:
-        this.indexExpression(expr.object, record);
+        const objectExpr = tree.exprOf(expr.objectId);
 
-        return this.indexExpression(expr.index, record);
+        this.indexExpression(objectExpr, record);
+
+        const index = tree.exprOf(expr.indexId);
+
+        return this.indexExpression(index, record);
       case ExprKind.Unary:
-        return this.indexExpression(expr.operand, record);
-      case ExprKind.Binary:
-        this.indexExpression(expr.lhs, record);
+        const operand = tree.exprOf(expr.operandId);
 
-        return this.indexExpression(expr.rhs, record);
+        return this.indexExpression(operand, record);
+      case ExprKind.Binary:
+        const lhs = tree.exprOf(expr.lhsId);
+
+        this.indexExpression(lhs, record);
+
+        const rhs = tree.exprOf(expr.rhsId);
+
+        return this.indexExpression(rhs, record);
       case ExprKind.Assign:
         record.changes.push(expr);
-        this.keepAssigned(expr.target, expr.value, expr.op, record);
-        this.indexAssigned(expr.target, record);
-        this.indexExpression(expr.target, record);
+        this.keepAssigned(
+          tree.exprOf(expr.targetId),
+          tree.exprOf(expr.valueId),
+          expr.op,
+          record,
+        );
+        const target = tree.exprOf(expr.targetId);
 
-        return this.indexExpression(expr.value, record);
+        this.indexAssigned(target, record);
+        const targetExpr = tree.exprOf(expr.targetId);
+
+        this.indexExpression(targetExpr, record);
+
+        const value = tree.exprOf(expr.valueId);
+
+        return this.indexExpression(value, record);
       case ExprKind.Update:
         record.changes.push(expr);
-        this.indexAssigned(expr.target, record);
+        const exprTarget = tree.exprOf(expr.targetId);
 
-        return this.indexExpression(expr.target, record);
+        this.indexAssigned(exprTarget, record);
+
+        return this.indexExpression(tree.exprOf(expr.targetId), record);
       case ExprKind.Call: {
-        const values = expr.args.map((argument) => argument.expr);
+        const values = tree
+          .argumentsOf(expr.argsList)
+          .map((argument) => tree.exprOf(argument.exprId));
 
         this.keepArguments(expr, record);
-        this.indexExpression(expr.callee, record);
+        const callee = tree.exprOf(expr.calleeId);
+
+        this.indexExpression(callee, record);
 
         return this.indexExpressions(values, record);
       }
       case ExprKind.New: {
         const form = expr.form;
-        const values = expr.args.map((argument) => argument.expr);
+        const values = tree
+          .argumentsOf(expr.argsList)
+          .map((argument) => tree.exprOf(argument.exprId));
 
         if (form.kind != NewKind.Named) {
-          this.indexExpression(form.callee, record);
+          const calleeExpr = tree.exprOf(form.calleeId);
+
+          this.indexExpression(calleeExpr, record);
         }
 
         return this.indexExpressions(values, record);
       }
       case ExprKind.Conditional:
-        this.indexExpression(expr.cond, record);
-        this.indexExpression(expr.thenExpr, record);
+        const cond = tree.exprOf(expr.condId);
 
-        return this.indexExpression(expr.elseExpr, record);
+        this.indexExpression(cond, record);
+        const thenExpr = tree.exprOf(expr.thenExprId);
+
+        this.indexExpression(thenExpr, record);
+
+        const elseExpr = tree.exprOf(expr.elseExprId);
+
+        return this.indexExpression(elseExpr, record);
       case ExprKind.Cast:
-        return this.indexExpression(expr.operand, record);
+        const operandExpr = tree.exprOf(expr.operandId);
+
+        return this.indexExpression(operandExpr, record);
       case ExprKind.Sequence:
-        return this.indexExpressions(expr.exprs, record);
+        const exprs = tree.exprsOf(expr.exprsList);
+
+        return this.indexExpressions(exprs, record);
       case ExprKind.OptionalChain:
-        return this.indexExpression(expr.chain, record);
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.indexExpression(chain, record);
       case ExprKind.Function:
-        return this.indexFunction(expr.fn, record);
+        const fn = tree.functionOf(expr.fnId);
+
+        return this.indexFunction(fn, record);
       case ExprKind.Yield:
-        return this.indexOptionalExpression(expr.value, record);
+        const valueExpr = tree.exprAt(expr.valueId);
+
+        return this.indexOptionalExpression(valueExpr, record);
       case ExprKind.Await:
-        return this.indexExpression(expr.value, record);
+        const exprValue = tree.exprOf(expr.valueId);
+
+        return this.indexExpression(exprValue, record);
       case ExprKind.Class:
-        return this.indexClass(expr.decl, record);
+        const decl = tree.classOf(expr.declId);
+
+        return this.indexClass(decl, record);
       case ExprKind.Template:
-        return this.indexExpressions(expr.exprs, record);
+        const exprsItem = tree.exprsOf(expr.exprsList);
+
+        return this.indexExpressions(exprsItem, record);
       case ExprKind.ArrayLit: {
-        const values = expr.elements.map((element) => element.expr);
+        const values = tree
+          .elementsOf(expr.elementsList)
+          .map((element) => tree.exprOf(element.exprId));
 
         return this.indexExpressions(values, record);
       }
       case ExprKind.ObjectLit:
-        for (const property of expr.props) {
+        for (const property of tree.propertiesOf(expr.propsList)) {
           const form = property.form;
 
           if (form.kind == PropertyKind.Computed) {
-            this.indexExpression(form.key, record);
+            const key = tree.exprOf(form.keyId);
+
+            this.indexExpression(key, record);
           }
 
-          this.indexExpression(property.value, record);
+          const propertyValue = tree.exprOf(property.valueId);
+
+          this.indexExpression(propertyValue, record);
         }
 
         return;

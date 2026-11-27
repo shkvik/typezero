@@ -48,6 +48,8 @@ partial class ExpressionTypes {
   }
 
   private computedRange(expr: Expr, type: Type, module: int): ValueRange {
+    const tree = this.types.program.tree;
+
     const constant = this.intConstant(expr, type, module);
     if (constant != undefined) {
       return this.intervals.exact(constant);
@@ -65,8 +67,10 @@ partial class ExpressionTypes {
       case ExprKind.Binary:
         return this.binaryRange(expr, module);
       case ExprKind.Conditional: {
-        const first = this.valueRange(expr.thenExpr, module);
-        const second = this.valueRange(expr.elseExpr, module);
+        const thenExpr = tree.exprOf(expr.thenExprId);
+        const first = this.valueRange(thenExpr, module);
+        const elseExpr = tree.exprOf(expr.elseExprId);
+        const second = this.valueRange(elseExpr, module);
 
         return this.intervals.unite(first, second);
       }
@@ -95,19 +99,22 @@ partial class ExpressionTypes {
   }
 
   private listedRange(list: Expr, module: int): ValueRange | undefined {
+    const tree = this.types.program.tree;
+
     if (list.kind != ExprKind.ArrayLit) {
       return undefined;
     }
 
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
     let range: ValueRange | undefined = undefined;
 
-    for (const element of list.elements) {
+    for (const element of tree.elementsOf(list.elementsList)) {
       if (element.spread || element.hole) {
         return undefined;
       }
 
-      const value = this.intConstant(element.expr, int, module);
+      const expr = tree.exprOf(element.exprId);
+      const value = this.intConstant(expr, int, module);
       if (value == undefined) {
         return undefined;
       }
@@ -131,7 +138,10 @@ partial class ExpressionTypes {
   }
 
   private rememberLoopElement(loop: ForOfStmt, module: int): void {
-    const range = this.listedRange(loop.iterable, module);
+    const tree = this.types.program.tree;
+
+    const iterable = tree.exprOf(loop.iterableId);
+    const range = this.listedRange(iterable, module);
     const isPlain = loop.isConst && !loop.keys && !loop.isAwait;
     if (range != undefined && isPlain) {
       this.elementRanges.set(`${module} ${loop.binding.loc}`, range);
@@ -144,7 +154,9 @@ partial class ExpressionTypes {
     plan: Read<CallbackPlan | undefined>,
     module: int,
   ): void {
-    const callback = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const callback = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (plan == undefined || plan.kind == ArrayCallback.Compare) {
       return;
     }
@@ -152,9 +164,12 @@ partial class ExpressionTypes {
       return;
     }
 
-    const position = this.callbacks.indexPosition(plan.kind) - 1;
-    const param = callback.fn.params[position];
-    const range = this.listedRange(member.object, module);
+    const position = this.types.indexPosition(plan.kind) - 1;
+    const param = tree.paramsOf(tree.functionOf(callback.fnId).paramsList)[
+      position
+    ];
+    const object = tree.exprOf(member.objectId);
+    const range = this.listedRange(object, module);
     if (param == undefined || range == undefined) {
       return;
     }
@@ -182,7 +197,9 @@ partial class ExpressionTypes {
     plan: Read<CallbackPlan | undefined>,
     module: int,
   ): void {
-    const callback = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const callback = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (plan == undefined || plan.kind == ArrayCallback.Compare) {
       return;
     }
@@ -190,8 +207,10 @@ partial class ExpressionTypes {
       return;
     }
 
-    const position = this.callbacks.indexPosition(plan.kind);
-    const param = callback.fn.params[position];
+    const position = this.types.indexPosition(plan.kind);
+    const param = tree.paramsOf(tree.functionOf(callback.fnId).paramsList)[
+      position
+    ];
     if (param != undefined) {
       this.indexParams.add(`${module} ${param.loc}`);
     }
@@ -214,7 +233,9 @@ partial class ExpressionTypes {
   }
 
   private callRange(expr: CallExpr, module: int): ValueRange {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return {};
     }
@@ -233,23 +254,26 @@ partial class ExpressionTypes {
     callee: MemberExpr,
     module: int,
   ): ValueRange {
-    const owner = callee.object;
+    const tree = this.types.program.tree;
+
+    const owner = tree.exprOf(callee.objectId);
     const isMath =
       owner.kind == ExprKind.Name &&
       owner.name == kMathName &&
       this.isGlobalUse(owner, module);
     const isMin = callee.name == kMinName;
     const isChoice = isMin || callee.name == kMaxName;
-    const hasSpread = expr.args.some((arg) => arg.spread);
-    const first = expr.args[0];
+    const hasSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
+    const first = tree.argumentsOf(expr.argsList)[0];
     if (!isMath || !isChoice || hasSpread || first == undefined) {
       return {};
     }
 
-    let range = this.valueRange(first.expr, module);
+    let range = this.valueRange(tree.exprOf(first.exprId), module);
 
-    for (const arg of expr.args.slice(1)) {
-      const next = this.valueRange(arg.expr, module);
+    for (const arg of tree.argumentsOf(expr.argsList).slice(1)) {
+      const exprExpr = tree.exprOf(arg.exprId);
+      const next = this.valueRange(exprExpr, module);
 
       range = this.chosenRange(isMin, range, next);
     }
@@ -270,7 +294,10 @@ partial class ExpressionTypes {
   }
 
   private unaryRange(expr: UnaryExpr, module: int): ValueRange {
-    const operand = this.valueRange(expr.operand, module);
+    const tree = this.types.program.tree;
+
+    const operandExpr = tree.exprOf(expr.operandId);
+    const operand = this.valueRange(operandExpr, module);
 
     switch (expr.op) {
       case UnaryOp.Plus:
@@ -285,8 +312,12 @@ partial class ExpressionTypes {
   }
 
   private binaryRange(expr: BinaryExpr, module: int): ValueRange {
-    const left = this.valueRange(expr.lhs, module);
-    const right = this.valueRange(expr.rhs, module);
+    const tree = this.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.valueRange(lhs, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.valueRange(rhs, module);
     if (expr.op == BinaryOp.Nullish) {
       return this.intervals.unite(left, right);
     }

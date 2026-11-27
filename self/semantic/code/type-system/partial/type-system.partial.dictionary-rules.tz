@@ -1,0 +1,592 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  BinaryExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ForOfStmt,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  kUnnamedOperand,
+} from "../../source-texts/const/source-texts.const.tz";
+import {
+  kBuiltinValueClasses,
+  kDictIterating,
+} from "../../dictionary-rules/const/dictionary-rules.const.tz";
+
+partial class TypeSystem {
+  public collectionOf(type: Type): DictKind | undefined {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Dict || base.dict == DictKind.Record) {
+      return undefined;
+    }
+
+    return base.dict;
+  }
+
+  public readonly collectionWord(dict: DictKind): string {
+    if (dict == DictKind.Map) {
+      return "Map";
+    }
+
+    return "Set";
+  }
+
+  public readonly iteratingSource(isMap: boolean): string {
+    if (isMap) {
+      return ".entries()";
+    }
+
+    return ".values()";
+  }
+
+  public readonly dictAccess(target: Expr): string {
+    if (target.kind == ExprKind.Member) {
+      return `.${target.name}`;
+    }
+
+    return "[key]";
+  }
+
+  public readonly entryPart(isMap: boolean): string {
+    if (isMap) {
+      return "key";
+    }
+
+    return "value";
+  }
+
+  public listedElement(element: Type | undefined, candidate: Type): Type {
+    if (element == undefined) {
+      return candidate;
+    }
+
+    return this.store.unionOf([element, candidate]);
+  }
+
+  public readonly isNeverObject(type: Type): boolean {
+    const base = this.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+        return true;
+      case TypeKind.Instance:
+        return this.isBuiltinValue(base);
+      default:
+        return false;
+    }
+  }
+
+  public readonly listingMethod(name: string, isSetEntries: boolean): string {
+    if (isSetEntries) {
+      return "values";
+    }
+
+    return name;
+  }
+
+  public readonly dictionaryDictText(expr: Expr, dict: DictKind): string {
+    if (expr.kind == ExprKind.Name) {
+      return expr.name;
+    }
+
+    const holder = this.memberHolder(expr);
+    if (holder != undefined) {
+      return holder;
+    }
+
+    switch (dict) {
+      case DictKind.Map:
+        return "m";
+      case DictKind.Set:
+        return "s";
+      default:
+        return "r";
+    }
+  }
+
+  public wantedDict(
+    wanted: Type | undefined,
+    dict: DictKind,
+  ): Type | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const parts = this.unionMembers(this.definedType(wanted));
+    const found = parts.filter(
+      (part) => part.kind == TypeKind.Dict && part.dict == dict,
+    );
+    if (found.length != 1) {
+      return undefined;
+    }
+
+    return found[0];
+  }
+
+  public readonly dictTypesCode(dict: DictKind): Code {
+    if (dict == DictKind.Map) {
+      return Code.NewMapNeedsTypes;
+    }
+
+    return Code.NewSetNeedsType;
+  }
+
+  public dictElement(dict: DictKind, key: Type, value: Type): Type {
+    if (dict == DictKind.Map) {
+      return this.store.tupleOf({
+        items: [key, value],
+        readonly: false,
+        required: 2,
+        rest: -1,
+      });
+    }
+
+    return key;
+  }
+
+  public readonly recordKeyText(target: Expr): string {
+    const tree = this.program.tree;
+
+    if (target.kind == ExprKind.Member) {
+      const holder = this.hintText(
+        tree.exprOf(target.objectId),
+        kUnnamedOperand,
+      );
+
+      return `${holder}.${target.name}`;
+    }
+    if (target.kind == ExprKind.Index) {
+      const holder = this.hintText(
+        tree.exprOf(target.objectId),
+        kUnnamedOperand,
+      );
+
+      return `${holder}[k]`;
+    }
+
+    return "";
+  }
+
+  public readonly recordMissingCode(value: Type): Code {
+    const base = this.apparent(value);
+    if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
+      return Code.RecordTextKeyMissing;
+    }
+
+    return Code.RecordKeyMissing;
+  }
+
+  public recordMemberTyped(expr: MemberExpr, object: Type): Type | undefined {
+    const base = this.definedType(object);
+    if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
+      return undefined;
+    }
+
+    return this.optional(this.store.valueOf(base));
+  }
+
+  public spreadCode(type: Type): Code | undefined {
+    if (this.isOptional(type)) {
+      return this.optionalSpreadCode(type);
+    }
+
+    const base = this.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+      case TypeKind.String:
+      case TypeKind.Template:
+        return Code.SpreadArrayIndices;
+      case TypeKind.Dict:
+        if (base.dict == DictKind.Record) {
+          return undefined;
+        }
+
+        return Code.SpreadNotObject;
+      case TypeKind.Instance:
+        if (this.isBuiltinValue(base)) {
+          return Code.SpreadNotObject;
+        }
+
+        return undefined;
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+        return Code.SpreadNotObject;
+      default:
+        return undefined;
+    }
+  }
+
+  public readonly recordSpreadCode(base: Type): Code | undefined {
+    switch (base.kind) {
+      case TypeKind.Dict:
+        if (base.dict == DictKind.Record) {
+          return undefined;
+        }
+
+        return Code.RecordSpreadCollection;
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+      case TypeKind.String:
+      case TypeKind.Template:
+        return Code.RecordSpreadNotObject;
+      default:
+        return undefined;
+    }
+  }
+
+  public readonly isRecord(type: Type): boolean {
+    return type.kind == TypeKind.Dict && type.dict == DictKind.Record;
+  }
+
+  public readonly keyPlace(name: string): string {
+    return ` of key '${name}'`;
+  }
+
+  public jsonTarget(json: Type, given: Type): Type {
+    if (this.isOptional(given) || given.kind == TypeKind.Undefined) {
+      return this.optional(json);
+    }
+
+    return json;
+  }
+
+  public readonly forInText(object: Expr, type: Type): string {
+    if (object.kind == ExprKind.Name) {
+      return object.name;
+    }
+
+    const base = this.apparent(type);
+    if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
+      return "s";
+    }
+
+    return "a";
+  }
+
+  public readonly indexedWord(base: Type): string | undefined {
+    switch (base.kind) {
+      case TypeKind.Array:
+        return "an array";
+      case TypeKind.String:
+      case TypeKind.Template:
+        return "a string";
+      case TypeKind.Tuple:
+        return "a tuple";
+      default:
+        return undefined;
+    }
+  }
+
+  public readonly forEachPlace(base: Type, text: string): string {
+    if (base.kind != TypeKind.Array) {
+      return "";
+    }
+
+    return ` or '${text}.forEach((x, i) => ...)'`;
+  }
+
+  public readonly isKeyHolder(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+        return true;
+      case TypeKind.Dict:
+        return type.dict == DictKind.Record;
+      default:
+        return false;
+    }
+  }
+
+  public readonly isKeyless(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+        return true;
+      case TypeKind.Instance:
+        return this.isBuiltinValue(base);
+      default:
+        return false;
+    }
+  }
+
+  public readonly forInCode(isMap: boolean): Code {
+    if (isMap) {
+      return Code.MapForIn;
+    }
+
+    return Code.SetForIn;
+  }
+
+  public objectArgumentCheck(
+    arg: Expr,
+    type: Type,
+    word: string,
+  ): SourceError | undefined {
+    const base = this.definedType(type);
+    const isHolder =
+      base.kind == TypeKind.Object ||
+      base.kind == TypeKind.Dict ||
+      base.kind == TypeKind.Instance;
+    if (this.isOptional(type) && isHolder) {
+      return {
+        code: Code.ObjectMaybeUndefined,
+        loc: arg.loc,
+        details: kNoDetails,
+      };
+    }
+    if (!this.isNeverObject(type)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ObjectNeedsObject,
+      loc: arg.loc,
+      details: {
+        word,
+        first: this.typeText(type),
+      },
+    };
+  }
+
+  public readonly pairsDifferError(
+    expr: Expr,
+    code: Code,
+    first: Type,
+    second: Type,
+  ): SourceError | undefined {
+    return {
+      code,
+      loc: expr.loc,
+      details: {
+        first: this.typeText(first),
+        second: this.typeText(second),
+      },
+    };
+  }
+
+  public dictInCheck(expr: BinaryExpr, object: Type): Checked<boolean> {
+    const tree = this.program.tree;
+
+    const dict = this.collectionOf(object);
+    if (dict == undefined) {
+      return { value: false };
+    }
+
+    const isMap = dict == DictKind.Map;
+
+    return {
+      value: true,
+      error: {
+        code: Code.DictIn,
+        loc: expr.loc,
+        details: {
+          word: this.collectionWord(dict),
+          first: this.dictionaryDictText(tree.exprOf(expr.rhsId), dict),
+          other: this.entryPart(isMap),
+        },
+      },
+    };
+  }
+
+  public readonly dictMissingCall(
+    expr: MemberExpr,
+    dict: DictKind,
+    word: string,
+    first: string,
+  ): Checked<boolean> {
+    const name = expr.name;
+    const isMap = dict == DictKind.Map;
+    const details: Details = { word, first, other: name };
+
+    if (isMap && name == "add") {
+      return {
+        value: true,
+        error: { code: Code.MapHasNoAdd, loc: expr.loc, details },
+      };
+    }
+    if (!isMap && (name == "set" || name == "get")) {
+      return {
+        value: true,
+        error: { code: Code.SetHasNoGet, loc: expr.loc, details },
+      };
+    }
+    if (!kDictIterating.includes(name)) {
+      return { value: false };
+    }
+
+    const place = this.iteratingSource(isMap);
+
+    return {
+      value: true,
+      error: {
+        code: Code.DictNotIterating,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+          other: name,
+          place,
+        },
+      },
+    };
+  }
+
+  public forInKeys(loop: ForOfStmt, iterable: Type): Checked<Type> {
+    const tree = this.program.tree;
+
+    const error = this.store.plain(TypeKind.Error);
+    const object = tree.exprOf(loop.iterableId);
+    const text = this.forInText(object, iterable);
+    const base = this.apparent(iterable);
+    const indexed = this.indexedWord(base);
+    if (indexed != undefined) {
+      return {
+        value: error,
+        error: {
+          code: Code.ForInIndices,
+          loc: object.loc,
+          details: {
+            word: indexed,
+            other: text,
+            place: this.forEachPlace(base, text),
+          },
+        },
+      };
+    }
+
+    const defined = this.apparent(this.definedType(iterable));
+    if (this.isOptional(iterable) && this.isKeyHolder(defined)) {
+      return {
+        value: error,
+        error: {
+          code: Code.ForInUndefined,
+          loc: object.loc,
+          details: kNoDetails,
+        },
+      };
+    }
+    if (defined.kind == TypeKind.Dict && defined.dict != DictKind.Record) {
+      const code = this.forInCode(defined.dict == DictKind.Map);
+
+      return {
+        value: error,
+        error: { code, loc: object.loc, details: { word: text } },
+      };
+    }
+    if (this.isKeyless(base)) {
+      return {
+        value: error,
+        error: {
+          code: Code.ForInNotObject,
+          loc: object.loc,
+          details: {
+            word: this.typeText(iterable),
+          },
+        },
+      };
+    }
+    if (base.kind == TypeKind.Error) {
+      return { value: error };
+    }
+
+    return { value: this.store.plain(TypeKind.String) };
+  }
+
+  public readonly setTargetCheck(target: Expr, word: string): Checked<boolean> {
+    if (target.kind == ExprKind.Index) {
+      return {
+        value: true,
+        error: { code: Code.SetIndexSet, loc: target.loc, details: { word } },
+      };
+    }
+    if (target.kind == ExprKind.Member && target.name == "size") {
+      return {
+        value: true,
+        error: { code: Code.SetSizeSet, loc: target.loc, details: { word } },
+      };
+    }
+
+    return { value: false };
+  }
+
+  private readonly memberHolder(expr: Expr): string | undefined {
+    const tree = this.program.tree;
+
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const object = tree.exprOf(expr.objectId);
+    if (object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    return `${object.name}.${expr.name}`;
+  }
+
+  private optionalSpreadCode(type: Type): Code {
+    const base = this.apparent(this.definedType(type));
+
+    switch (base.kind) {
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+        return Code.SpreadArrayIndices;
+      case TypeKind.Object:
+      case TypeKind.AnyObject:
+      case TypeKind.Error:
+        return Code.SpreadMaybeUndefined;
+      case TypeKind.Dict:
+        if (base.dict == DictKind.Record) {
+          return Code.SpreadMaybeUndefined;
+        }
+
+        return Code.SpreadNotObject;
+      case TypeKind.Instance:
+        if (this.isBuiltinValue(base)) {
+          return Code.SpreadNotObject;
+        }
+
+        return Code.SpreadMaybeUndefined;
+      default:
+        return Code.SpreadNotObject;
+    }
+  }
+
+  private readonly isBuiltinValue(type: InstanceType): boolean {
+    const isLibrary = this.isLibraryModule(type.module);
+
+    return isLibrary && kBuiltinValueClasses.includes(type.name);
+  }
+}

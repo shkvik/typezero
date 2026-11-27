@@ -14,54 +14,68 @@ import {
   ModuleTypes,
   TypedDeclaration,
 } from "../../../program/module-types/types/module-types.types.tz";
-import { Module } from "../../../program/module/types/module.types.tz";
+import { SourceFile } from "../../../program/ast/types/ast.types.modules.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { ExpressionTypes } from "../../code/expression-types/expression-types.tz";
-import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
+import { TypeSystem } from "../../types/type-system/type-system.tz";
 import {
   TypeContext,
   TypePlace,
 } from "../../types/type-resolver/types/type-resolver.types.tz";
 
 export class DeclarationTypes {
-  private readonly module: Module;
-  private readonly resolver: TypeResolver;
+  private readonly module: int;
+  private readonly file: SourceFile;
+  private readonly isLibrary: boolean;
   private readonly context: TypeContext;
   private declarations: TypedDeclaration[];
 
-  public constructor(resolver: Own<TypeResolver>, module: Own<Module>) {
+  public constructor(module: int, file: SourceFile, isLibrary: boolean) {
     this.module = module;
-    this.resolver = resolver;
+    this.file = file;
+    this.isLibrary = isLibrary;
     this.context = {
-      module: this.module.id,
+      module: this.module,
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
     this.declarations = [];
   }
 
-  public readonly resolveAliases(): void {
-    for (const item of this.module.file.items) {
-      if (item.kind == StmtKind.TypeAlias && item.typeParams.length == 0) {
-        this.resolver.declaredAlias(this.module.id, item);
+  public readonly resolveAliases(types: TypeSystem): void {
+    const tree = types.program.tree;
+
+    for (const item of tree.stmtsOf(this.file.itemsList)) {
+      if (
+        item.kind == StmtKind.TypeAlias &&
+        tree.typeParamsOf(item.typeParamsList).length == 0
+      ) {
+        types.declaredAlias(this.module, item);
       }
     }
   }
 
   public run(expressions: ExpressionTypes): ModuleTypes {
-    expressions.checkModule(this.module.id);
+    const tree = expressions.types.program.tree;
 
-    for (const item of this.module.file.items) {
+    expressions.checkModule(this.module);
+
+    for (const item of tree.stmtsOf(this.file.itemsList)) {
       this.typeItem(item, expressions);
     }
 
-    return { module: this.module, declarations: replace(this.declarations, []) };
+    return {
+      module: this.module,
+      declarations: replace(this.declarations, []),
+    };
   }
 
   private typeItem(item: Stmt, expressions: ExpressionTypes): void {
+    const tree = expressions.types.program.tree;
+
     switch (item.kind) {
       case StmtKind.VarDecl:
-        for (const decl of item.decls) {
+        for (const decl of tree.declaratorsOf(item.declsList)) {
           this.typeVariable(decl, expressions);
         }
         break;
@@ -69,23 +83,37 @@ export class DeclarationTypes {
         this.typeFunction(item, expressions);
         break;
       case StmtKind.Class:
-        this.resolver.typeParameters(this.module.id, item.typeParams);
+        expressions.types.typeParameters(
+          this.module,
+          tree.typeParamsOf(item.typeParamsList),
+        );
         break;
       case StmtKind.TypeAlias:
-        this.resolver.typeParameters(this.module.id, item.typeParams);
-        this.typeAlias(item);
+        expressions.types.typeParameters(
+          this.module,
+          tree.typeParamsOf(item.typeParamsList),
+        );
+        this.typeAlias(item, expressions);
         break;
       case StmtKind.Enum:
-        this.typeEnum(item);
+        this.typeEnum(item, expressions);
         break;
       default:
         break;
     }
   }
 
-  private typeVariable(decl: VarDeclarator, expressions: ExpressionTypes): void {
-    const type = expressions.variable(this.module.id, decl.loc);
-    if (decl.typeAnn == undefined && type.kind == TypeKind.Error) {
+  private typeVariable(
+    decl: VarDeclarator,
+    expressions: ExpressionTypes,
+  ): void {
+    const tree = expressions.types.program.tree;
+
+    const type = expressions.variable(this.module, decl.loc);
+    if (
+      tree.typeRefAt(decl.typeAnnId) == undefined &&
+      type.kind == TypeKind.Error
+    ) {
       return;
     }
 
@@ -93,31 +121,44 @@ export class DeclarationTypes {
   }
 
   private typeFunction(fn: FunctionDecl, expressions: ExpressionTypes): void {
-    const type = expressions.functionTyped(this.module.id, fn.loc);
+    const tree = expressions.types.program.tree;
+
+    const type = expressions.functionTyped(this.module, fn.loc);
     if (type.kind == TypeKind.Error) {
       return;
     }
-    if (fn.returnType == undefined && this.isBroken(type)) {
+    if (
+      tree.typeRefAt(fn.returnTypeId) == undefined &&
+      this.isBroken(type, expressions)
+    ) {
       return;
     }
 
     this.declare(DeclarationForm.Value, fn.name, fn.loc, type);
 
-    if (!this.module.source.isLibrary) {
-      this.typeLocals(fn.body?.body ?? [], expressions);
+    if (!this.isLibrary) {
+      this.typeLocals(
+        tree.stmtsOf(tree.blockAt(fn.bodyId)?.bodyList) ?? [],
+        expressions,
+      );
     }
   }
 
-  private typeLocals(statements: Read<Stmt[]>, expressions: ExpressionTypes): void {
+  private typeLocals(
+    statements: Read<Stmt[]>,
+    expressions: ExpressionTypes,
+  ): void {
     for (const statement of statements) {
       this.typeLocal(statement, expressions);
     }
   }
 
   private typeLocal(statement: Stmt, expressions: ExpressionTypes): void {
+    const tree = expressions.types.program.tree;
+
     switch (statement.kind) {
       case StmtKind.VarDecl:
-        for (const decl of statement.decls) {
+        for (const decl of tree.declaratorsOf(statement.declsList)) {
           this.typeVariable(decl, expressions);
         }
         break;
@@ -125,28 +166,42 @@ export class DeclarationTypes {
         this.typeFunction(statement, expressions);
         break;
       case StmtKind.Block:
-        this.typeLocals(statement.body, expressions);
+        const body = tree.stmtsOf(statement.bodyList);
+
+        this.typeLocals(body, expressions);
         break;
       case StmtKind.If:
-        this.typeLocal(statement.thenStmt, expressions);
-        this.typeOptionalLocal(statement.elseStmt, expressions);
+        const thenStmt = tree.stmtOf(statement.thenStmtId);
+
+        this.typeLocal(thenStmt, expressions);
+        const elseStmt = tree.stmtAt(statement.elseStmtId);
+
+        this.typeOptionalLocal(elseStmt, expressions);
         break;
       case StmtKind.While:
       case StmtKind.DoWhile:
       case StmtKind.Labeled:
-        this.typeLocal(statement.body, expressions);
+        const bodyStmt = tree.stmtOf(statement.bodyId);
+
+        this.typeLocal(bodyStmt, expressions);
         break;
       case StmtKind.For:
-        this.typeOptionalLocal(statement.init, expressions);
-        this.typeOptionalLocal(statement.body, expressions);
+        const init = tree.stmtAt(statement.initId);
+
+        this.typeOptionalLocal(init, expressions);
+        const statementBody = tree.stmtAt(statement.bodyId);
+
+        this.typeOptionalLocal(statementBody, expressions);
         break;
       case StmtKind.ForOf:
         this.typeVariable(statement.binding, expressions);
-        this.typeLocal(statement.body, expressions);
+        this.typeLocal(tree.stmtOf(statement.bodyId), expressions);
         break;
       case StmtKind.Switch:
-        for (const option of statement.cases) {
-          this.typeLocals(option.body, expressions);
+        for (const option of tree.casesOf(statement.casesList)) {
+          const bodyItem = tree.stmtsOf(option.bodyList);
+
+          this.typeLocals(bodyItem, expressions);
         }
         break;
       default:
@@ -163,24 +218,33 @@ export class DeclarationTypes {
     }
   }
 
-  private readonly isBroken(type: Type): boolean {
+  private readonly isBroken(
+    type: Type,
+    expressions: Read<ExpressionTypes>,
+  ): boolean {
     if (type.kind != TypeKind.Function) {
       return false;
     }
 
-    return type.shape.result.kind == TypeKind.Error;
+    const shape = expressions.types.store.functionShapeOf(type);
+
+    return shape.result.kind == TypeKind.Error;
   }
 
-  private typeAlias(decl: TypeAliasDecl): void {
-    const type = this.resolver.declaredAlias(this.module.id, decl);
-    const params = decl.typeParams.map((param) => param.name);
+  private typeAlias(decl: TypeAliasDecl, expressions: ExpressionTypes): void {
+    const tree = expressions.types.program.tree;
+
+    const type = expressions.types.declaredAlias(this.module, decl);
+    const params = tree
+      .typeParamsOf(decl.typeParamsList)
+      .map((param) => param.name);
     const name = this.genericName(decl.name, params);
 
     this.declare(DeclarationForm.TypeAlias, name, decl.loc, type);
   }
 
-  private typeEnum(decl: EnumDecl): void {
-    const type = this.resolver.declaredEnum(this.module.id, decl);
+  private typeEnum(decl: EnumDecl, expressions: ExpressionTypes): void {
+    const type = expressions.types.declaredEnum(this.module, decl);
 
     this.declare(DeclarationForm.Enum, decl.name, decl.loc, type);
   }

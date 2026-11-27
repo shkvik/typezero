@@ -28,7 +28,7 @@ import { LinkKind } from "../../../../../program/module/types/module.types.tz";
 import { DoorState } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
-  private readonly laterBlockCheck(
+  private laterBlockCheck(
     expr: NameExpr,
     target: ValueTarget,
     module: int,
@@ -38,25 +38,25 @@ partial class ExpressionTypes {
       target.module == module &&
       target.loc > expr.loc;
     const closure = this.openFunctions[this.openFunctions.length - 1];
-    if (!isLater || closure == undefined || !this.shapes.isClosure(closure)) {
+    if (!isLater || closure == undefined || !this.types.isClosure(closure)) {
       return;
     }
-    if (this.statements.isInsideFunction(closure, target.loc)) {
+    if (this.types.isInsideFunction(closure, target.loc)) {
       return;
     }
 
     const outer = this.openFunctions.slice(0, this.openFunctions.length - 1);
     const isLocal = outer.some((fn) =>
-      this.statements.isInsideFunction(fn, target.loc),
+      this.types.isInsideFunction(fn, target.loc),
     );
     if (!isLocal) {
       return;
     }
 
-    this.report(module, expr.loc, Code.LaterInBlock, { word: expr.name });
+    this.errors.write(module, expr.loc, Code.LaterInBlock, { word: expr.name });
   }
 
-  private readonly notLoadedCheck(expr: NameExpr, module: int): boolean {
+  private notLoadedCheck(expr: NameExpr, module: int): boolean {
     const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
     const source = symbol?.target;
     if (this.openFunctions.length > 0 || source == undefined) {
@@ -69,7 +69,7 @@ partial class ExpressionTypes {
     const target = this.exportedValue(source.module, source.name);
     const isValue =
       target?.kind == SymbolKind.Variable || target?.kind == SymbolKind.Class;
-    if (!isValue || this.modules.isLibraryModule(source.module)) {
+    if (!isValue || this.types.isLibraryModule(source.module)) {
       return false;
     }
 
@@ -79,7 +79,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, expr.loc, Code.ReadWhileLoading, {
+    this.errors.write(module, expr.loc, Code.ReadWhileLoading, {
       word: this.moduleName(module),
       first: this.loadLabel(expr.name, source.name, source.module),
       second: this.moduleName(source.module),
@@ -90,7 +90,9 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly importBackCheck(target: ValueTarget, module: int): void {
+  private importBackCheck(target: ValueTarget, module: int): void {
+    const tree = this.types.program.tree;
+
     if (target.kind != SymbolKind.Variable || target.module == module) {
       return;
     }
@@ -101,28 +103,35 @@ partial class ExpressionTypes {
     }
 
     const variable = this.record(target.module)?.variables.get(target.loc);
-    const init = variable?.decl.init;
+    const init = tree.exprAt(variable?.decl.initId);
     if (variable == undefined || init == undefined) {
       return;
     }
-    if (init.kind != ExprKind.Function || init.fn.returnType != undefined) {
+    if (
+      init.kind != ExprKind.Function ||
+      tree.typeRefAt(tree.functionOf(init.fnId).returnTypeId) != undefined
+    ) {
       return;
     }
 
-    this.report(target.module, init.loc, Code.ImportBackReturn, {
+    this.errors.write(target.module, init.loc, Code.ImportBackReturn, {
       word: `'${variable.decl.name}'`,
     });
   }
 
   private readonly loadIndex(module: int): int {
-    return this.program.order.findIndex((one) => one.id == module);
+    return this.types.program.order.findIndex((one) => one == module);
   }
 
   private readonly moduleName(module: int): string {
-    return this.program.modules[module]?.name ?? "";
+    return this.types.program.modules[module]?.name ?? "";
   }
 
-  private readonly loadLabel(name: string, declared: string, source: int): string {
+  private readonly loadLabel(
+    name: string,
+    declared: string,
+    source: int,
+  ): string {
     const file = this.moduleName(source);
     if (name != declared) {
       return `'${name}' ('${declared}' of ${file})`;
@@ -151,19 +160,23 @@ partial class ExpressionTypes {
     return kNotLoadedYet;
   }
 
-  private readonly walkLoads(id: int, path: Read<int[]>, paths: Map<int, int[]>): void {
+  private readonly walkLoads(
+    id: int,
+    path: Read<int[]>,
+    paths: Map<int, int[]>,
+  ): void {
     const own = path.concat([id]);
 
     paths.set(id, own.slice());
 
-    for (const link of this.program.modules[id]?.links ?? []) {
+    for (const link of this.types.program.modules[id]?.links ?? []) {
       if (link.kind == LinkKind.Module && !paths.has(link.target)) {
         this.walkLoads(link.target, own, paths);
       }
     }
   }
 
-  private readonly earlyCallCheck(
+  private earlyCallCheck(
     expr: CallExpr,
     callee: NameExpr,
     target: ValueTarget,
@@ -178,7 +191,7 @@ partial class ExpressionTypes {
     if (
       owner == undefined ||
       fn == undefined ||
-      !this.statements.isInsideFunction(owner, fn.loc)
+      !this.types.isInsideFunction(owner, fn.loc)
     ) {
       return;
     }
@@ -188,7 +201,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, callee.loc, Code.UsedBeforeDeclared, {
+    this.errors.write(module, callee.loc, Code.UsedBeforeDeclared, {
       word: fn.name,
       first: later,
     });
@@ -207,14 +220,14 @@ partial class ExpressionTypes {
 
     for (const [loc, use] of record.uses) {
       const symbol = use.symbol;
-      if (symbol == undefined || !this.statements.isInsideFunction(fn, loc)) {
+      if (symbol == undefined || !this.types.isInsideFunction(fn, loc)) {
         continue;
       }
 
       const isOuterLocal =
         symbol.kind == SymbolKind.Variable &&
-        !this.statements.isInsideFunction(fn, symbol.loc) &&
-        this.statements.isInsideFunction(owner, symbol.loc);
+        !this.types.isInsideFunction(fn, symbol.loc) &&
+        this.types.isInsideFunction(owner, symbol.loc);
       if (isOuterLocal && symbol.loc > at) {
         return use.name;
       }
@@ -223,27 +236,33 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly functionMemberCall(
+  private functionMemberCall(
     member: MemberExpr,
     object: Type,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const word = member.name;
 
-    if (this.isLibraryFunctionName(member.object, module)) {
-      return this.store.plain(TypeKind.Error);
+    const objectExpr = tree.exprOf(member.objectId);
+    if (this.isLibraryFunctionName(objectExpr, module)) {
+      return this.types.store.plain(TypeKind.Error);
     }
     if (kFunctionMethods.includes(word)) {
-      this.report(module, member.loc, Code.FunctionSetsThis, { word });
+      this.errors.write(module, member.loc, Code.FunctionSetsThis, { word });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const first = this.text.of(object);
+    const first = this.types.typeText(object);
 
-    this.report(module, member.loc, Code.PropertyMissing, { word, first });
+    this.errors.write(module, member.loc, Code.PropertyMissing, {
+      word,
+      first,
+    });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private readonly isLibraryFunctionName(expr: Expr, module: int): boolean {
@@ -256,19 +275,19 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return this.modules.isLibraryModule(target.module);
+    return this.types.isLibraryModule(target.module);
   }
 
-  private readonly arrayTextCheck(member: MemberExpr, object: Type, module: int): void {
+  private arrayTextCheck(member: MemberExpr, object: Type, module: int): void {
     if (object.kind != TypeKind.Array || !kTextMethods.includes(member.name)) {
       return;
     }
 
-    const held = this.statements.heldValue(object.item);
+    const held = this.types.heldValue(this.types.store.itemOf(object));
     const word = member.name;
     const code = this.textElementsCode(held);
     if (code != undefined) {
-      this.report(module, member.loc, code, { word });
+      this.errors.write(module, member.loc, code, { word });
     }
   }
 
@@ -288,14 +307,18 @@ partial class ExpressionTypes {
       case TypeKind.AnyObject:
         return Code.ArrayTextObjects;
       case TypeKind.Instance:
-        return this.statements.instanceTextCode(held);
+        return this.types.instanceTextCode(held);
       default:
         return undefined;
     }
   }
 
   private readonly unknownCode(code: Code): Code | undefined {
-    const isGeneric = this.openFunctions.some((fn) => fn.typeParams.length > 0);
+    const tree = this.types.program.tree;
+
+    const isGeneric = this.openFunctions.some(
+      (fn) => tree.typeParamsOf(fn.typeParamsList).length > 0,
+    );
     if (isGeneric) {
       return undefined;
     }
@@ -309,12 +332,15 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): void {
-    const isPlainSort = member.name == "sort" && expr.args.length == 0;
+    const tree = this.types.program.tree;
+
+    const isPlainSort =
+      member.name == "sort" && tree.argumentsOf(expr.argsList).length == 0;
     if (object.kind != TypeKind.Array || !isPlainSort) {
       return;
     }
 
-    const element = object.item;
+    const element = this.types.store.itemOf(object);
     const code = this.sortProblem(element);
     if (code == undefined) {
       const held = this.types.definedType(element);
@@ -322,14 +348,14 @@ partial class ExpressionTypes {
       return this.requireOf(held, RequirementKind.Sort, "");
     }
 
-    const word = this.text.of(this.types.definedType(element));
-    const other = this.statements.sortExample(element);
+    const word = this.types.typeText(this.types.definedType(element));
+    const other = this.types.sortExample(element);
 
-    this.report(module, member.loc, code, { word, other });
+    this.errors.write(module, member.loc, code, { word, other });
   }
 
-  private readonly sortProblem(element: Type): Code | undefined {
-    const held = this.statements.heldValue(element);
+  private sortProblem(element: Type): Code | undefined {
+    const held = this.types.heldValue(element);
 
     switch (held.kind) {
       case TypeKind.Function:
@@ -345,9 +371,9 @@ partial class ExpressionTypes {
       case TypeKind.Result:
         return Code.SortObjects;
       case TypeKind.Instance:
-        return this.statements.instanceSortCode(held);
+        return this.types.instanceSortCode(held);
       default:
-        return this.statements.plainSortProblem(element);
+        return this.types.plainSortProblem(element);
     }
   }
 }

@@ -1,4 +1,4 @@
-import { Stmt } from "./ast.types.statements.tz";
+import { AstList } from "./ast.types.span.tz";
 
 export enum ExportForm {
   Local,
@@ -23,7 +23,7 @@ export type WholeImport = {
 
 export type ImportDecl = {
   readonly loc: int;
-  readonly names: readonly ModuleName[];
+  readonly namesList: AstList;
   readonly from: ModulePath;
   readonly whole?: WholeImport;
   readonly isPartList: boolean;
@@ -32,14 +32,12 @@ export type ImportDecl = {
 export type ExportDecl = {
   readonly loc: int;
   readonly form: ExportForm;
-  readonly names: readonly ModuleName[];
+  readonly namesList: AstList;
   readonly from?: ModulePath;
 };
 
 export type SourceFile = {
-  readonly items: readonly Stmt[];
-  readonly imports: readonly ImportDecl[];
-  readonly exports: readonly ExportDecl[];
-  readonly fieldNames: Set<string>;
-  readonly stringConstants: Map<string, string[]>;
+  readonly itemsList: AstList;
+  readonly importsList: AstList;
+  readonly exportsList: AstList;
 };

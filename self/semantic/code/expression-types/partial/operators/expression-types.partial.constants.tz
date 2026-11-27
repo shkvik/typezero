@@ -13,7 +13,7 @@ import {
 import { kLargestInt } from "../../../integer-math/const/integer-math.const.tz";
 
 partial class ExpressionTypes {
-  public readonly enumText(expr: Expr, module: int): string | undefined {
+  public enumText(expr: Expr, module: int): string | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -26,7 +26,7 @@ partial class ExpressionTypes {
     return literal.text;
   }
 
-  public readonly enumNumber(expr: Expr, module: int): decimal | undefined {
+  public enumNumber(expr: Expr, module: int): decimal | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -82,7 +82,9 @@ partial class ExpressionTypes {
   }
 
   private readonly unaryConstant(expr: UnaryExpr): decimal | undefined {
-    const operand = expr.operand;
+    const tree = this.types.program.tree;
+
+    const operand = tree.exprOf(expr.operandId);
     if (operand.kind != ExprKind.IntLit) {
       return this.answers.foldedOf(expr);
     }
@@ -100,6 +102,8 @@ partial class ExpressionTypes {
   }
 
   private isWholeTree(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.IntLit:
         return true;
@@ -109,13 +113,14 @@ partial class ExpressionTypes {
         return this.enumConstant(expr, module) != undefined;
       case ExprKind.Unary:
         return (
-          this.shapes.isSign(expr.op) && this.isWholeTree(expr.operand, module)
+          this.types.isSign(expr.op) &&
+          this.isWholeTree(tree.exprOf(expr.operandId), module)
         );
       case ExprKind.Binary:
         return (
-          this.shapes.isWholeArithmetic(expr.op) &&
-          this.isWholeTree(expr.lhs, module) &&
-          this.isWholeTree(expr.rhs, module)
+          this.types.isWholeArithmetic(expr.op) &&
+          this.isWholeTree(tree.exprOf(expr.lhsId), module) &&
+          this.isWholeTree(tree.exprOf(expr.rhsId), module)
         );
       default:
         return false;
@@ -137,7 +142,7 @@ partial class ExpressionTypes {
     const isLiteral =
       target != undefined &&
       type.kind == TypeKind.Int &&
-      type != target &&
+      type.id != target.id &&
       this.isWholeTree(expr, module);
     if (!isLiteral || target == undefined) {
       return undefined;
@@ -160,12 +165,14 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly numberTarget(to: Type): Type | undefined {
+  private numberTarget(to: Type): Type | undefined {
     const target = this.types.definedType(to);
     if (target.kind != TypeKind.Union) {
       return target;
     }
 
-    return target.parts.find((part) => this.types.isNumberLike(part));
+    return this.types.store
+      .partsOf(target)
+      .find((part) => this.types.isNumberLike(part));
   }
 }

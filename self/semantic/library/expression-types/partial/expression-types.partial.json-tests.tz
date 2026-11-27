@@ -22,14 +22,19 @@ import { kArrayClass } from "../../../code/expression-types/const/expression-typ
 
 partial class ExpressionTypes {
   private redundantTestsCheck(expr: BinaryExpr, module: int): void {
+    const tree = this.types.program.tree;
+
     const isAnd = expr.op == BinaryOp.LogAnd;
-    const rhs = expr.rhs;
+    const rhs = tree.exprOf(expr.rhsId);
     const test = this.jsonTestOf(rhs, module);
     if (test == undefined) {
       return;
     }
 
-    for (const term of this.sameOperatorTerms(expr.lhs, expr.op)) {
+    for (const term of this.sameOperatorTerms(
+      tree.exprOf(expr.lhsId),
+      expr.op,
+    )) {
       const name = this.typeOfTextFor(term, test.tested, isAnd, module);
       if (name != undefined) {
         return this.typeOfAgreesCheck(rhs, test, name, isAnd, module);
@@ -38,17 +43,22 @@ partial class ExpressionTypes {
   }
 
   private readonly sameOperatorTerms(expr: Expr, op: BinaryOp): Expr[] {
+    const tree = this.types.program.tree;
+
     const terms: Expr[] = [];
     let current = expr;
 
     while (current.kind == ExprKind.Binary && current.op == op) {
-      terms.push(current.rhs);
-      current = current.lhs;
+      const rhs = tree.exprOf(current.rhsId);
+
+      terms.push(rhs);
+      current = tree.exprOf(current.lhsId);
     }
 
     terms.push(current);
+    terms.reverse();
 
-    return terms.reverse();
+    return terms;
   }
 
   private jsonTestOf(rhs: Expr, module: int): JsonTest | undefined {
@@ -66,18 +76,22 @@ partial class ExpressionTypes {
   }
 
   private readonly testedSide(rhs: Expr, module: int): JsonTest | undefined {
+    const tree = this.types.program.tree;
+
     if (rhs.kind == ExprKind.Binary) {
       const isEquality = rhs.op == BinaryOp.Eq || rhs.op == BinaryOp.Ne;
-      const isLeftNull = this.isNullValue(rhs.lhs, module);
-      const isRightNull = this.isNullValue(rhs.rhs, module);
+      const lhs = tree.exprOf(rhs.lhsId);
+      const isLeftNull = this.isNullValue(lhs, module);
+      const rhsExpr = tree.exprOf(rhs.rhsId);
+      const isRightNull = this.isNullValue(rhsExpr, module);
       if (!isEquality || (!isLeftNull && !isRightNull)) {
         return undefined;
       }
       if (isLeftNull) {
-        return { tested: rhs.rhs, isNullTest: true };
+        return { tested: tree.exprOf(rhs.rhsId), isNullTest: true };
       }
 
-      return { tested: rhs.lhs, isNullTest: true };
+      return { tested: tree.exprOf(rhs.lhsId), isNullTest: true };
     }
 
     const inner = this.withoutNot(rhs);
@@ -94,24 +108,28 @@ partial class ExpressionTypes {
   }
 
   private readonly withoutNot(expr: Expr): Expr {
+    const tree = this.types.program.tree;
+
     if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
-      return expr.operand;
+      return tree.exprOf(expr.operandId);
     }
 
     return expr;
   }
 
   private readonly isArrayArgument(expr: Expr, module: int): Expr | undefined {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Call) {
       return undefined;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return undefined;
     }
 
-    const owner = callee.object;
+    const owner = tree.exprOf(callee.objectId);
     const isArray =
       owner.kind == ExprKind.Name &&
       owner.name == kArrayClass &&
@@ -121,7 +139,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return expr.args[0]?.expr;
+    return tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
   }
 
   private readonly typeOfTextFor(
@@ -130,6 +148,8 @@ partial class ExpressionTypes {
     isAnd: boolean,
     module: int,
   ): string | undefined {
+    const tree = this.types.program.tree;
+
     if (term.kind != ExprKind.Binary) {
       return undefined;
     }
@@ -139,17 +159,25 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const left = term.lhs;
-    const right = term.rhs;
+    const left = tree.exprOf(term.lhsId);
+    const right = tree.exprOf(term.rhsId);
     if (left.kind == ExprKind.Unary && right.kind == ExprKind.StringLit) {
       const isTypeOf = left.op == UnaryOp.TypeOf;
-      const isSame = this.isSameRef(left.operand, tested, module);
+      const isSame = this.isSameRef(
+        tree.exprOf(left.operandId),
+        tested,
+        module,
+      );
 
       return this.typeOfName(isTypeOf && isSame, right.value);
     }
     if (right.kind == ExprKind.Unary && left.kind == ExprKind.StringLit) {
       const isTypeOf = right.op == UnaryOp.TypeOf;
-      const isSame = this.isSameRef(right.operand, tested, module);
+      const isSame = this.isSameRef(
+        tree.exprOf(right.operandId),
+        tested,
+        module,
+      );
 
       return this.typeOfName(isTypeOf && isSame, left.value);
     }
@@ -157,7 +185,10 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly typeOfName(isTest: boolean, name: string): string | undefined {
+  private readonly typeOfName(
+    isTest: boolean,
+    name: string,
+  ): string | undefined {
     if (isTest) {
       return name;
     }
@@ -174,6 +205,8 @@ partial class ExpressionTypes {
   }
 
   private readonly isSameRef(first: Expr, second: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     let left = first;
     let right = second;
 
@@ -182,8 +215,8 @@ partial class ExpressionTypes {
         return false;
       }
 
-      left = left.object;
-      right = right.object;
+      left = tree.exprOf(left.objectId);
+      right = tree.exprOf(right.objectId);
     }
 
     if (left.kind != ExprKind.Name || right.kind != ExprKind.Name) {
@@ -202,7 +235,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly typeOfAgreesCheck(
+  private typeOfAgreesCheck(
     rhs: Expr,
     test: JsonTest,
     name: string,
@@ -213,10 +246,10 @@ partial class ExpressionTypes {
     const first = this.testOperatorText(isAnd);
     const details: Details = { word, first, other: name };
     if (test.isNullTest && !kNullTypeOfs.includes(name)) {
-      return this.report(module, rhs.loc, Code.JsonNeverNull, details);
+      return this.errors.write(module, rhs.loc, Code.JsonNeverNull, details);
     }
     if (!test.isNullTest && name != kArrayTypeOf) {
-      this.report(module, rhs.loc, Code.JsonNeverArray, details);
+      this.errors.write(module, rhs.loc, Code.JsonNeverArray, details);
     }
   }
 
@@ -229,12 +262,14 @@ partial class ExpressionTypes {
   }
 
   private readonly refText(expr: Expr): string {
+    const tree = this.types.program.tree;
+
     const names: string[] = [];
     let link = expr;
 
     while (link.kind == ExprKind.Member) {
       names.push(link.name);
-      link = link.object;
+      link = tree.exprOf(link.objectId);
     }
 
     let text = kValuePlaceholder;

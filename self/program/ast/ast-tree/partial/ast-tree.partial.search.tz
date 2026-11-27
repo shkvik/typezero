@@ -1,0 +1,84 @@
+import { AstTree } from "../ast-tree.tz";
+import { FunctionDecl } from "../../types/ast.types.functions.tz";
+import { AstList } from "../../types/ast.types.span.tz";
+import { StmtKind } from "../../types/ast.types.statements.tz";
+
+partial class AstTree {
+  public readonly countOf(list: AstList | undefined): int {
+    if (list == undefined) {
+      return 0;
+    }
+
+    return list.end - list.start;
+  }
+
+  public readonly holdsStmt(list: AstList | undefined, id: int): boolean {
+    if (list == undefined) {
+      return false;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      if (this.tables.stmtIds[index] == id) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public readonly functionNamed(
+    list: AstList | undefined,
+    name: string,
+  ): FunctionDecl | undefined {
+    if (list == undefined) {
+      return undefined;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const stmt = this.tables.stmts[this.tables.stmtIds[index] ?? -1];
+      if (stmt?.kind == StmtKind.Function && stmt.name == name) {
+        return stmt;
+      }
+    }
+
+    return undefined;
+  }
+
+  public readonly hasFunctionNamed(
+    list: AstList | undefined,
+    name: string,
+  ): boolean {
+    return this.functionNamed(list, name) != undefined;
+  }
+
+  public readonly functionsNamed(
+    list: AstList | undefined,
+    name: string,
+  ): FunctionDecl[] {
+    const found: FunctionDecl[] = [];
+    if (list == undefined) {
+      return found;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const stmt = this.tables.stmts[this.tables.stmtIds[index] ?? -1];
+      if (stmt?.kind == StmtKind.Function && stmt.name == name) {
+        found.push(stmt);
+      }
+    }
+
+    return found;
+  }
+
+  public readonly classIds(): int[] {
+    const ids: int[] = [];
+
+    for (let id = 0; id < this.tables.stmts.length; id++) {
+      if (this.tables.stmts[id]?.kind == StmtKind.Class) {
+        ids.push(id);
+      }
+    }
+
+    return ids;
+  }
+}

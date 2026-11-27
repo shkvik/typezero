@@ -31,21 +31,27 @@ import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
 
 partial class ExpressionTypes {
   private instanceofTyped(expr: BinaryExpr, module: int): Type {
-    const left = this.typed(expr.lhs, undefined, module);
-    const boolean = this.store.plain(TypeKind.Boolean);
+    const tree = this.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.typed(lhs, undefined, module);
+    const boolean = this.types.store.plain(TypeKind.Boolean);
     if (this.collectionInstanceof(expr, left, module)) {
       return boolean;
     }
     if (this.bytesInstanceof(expr, left, module)) {
       return boolean;
     }
-    const decl = this.testedClass(expr.rhs, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const decl = this.testedClass(rhs, module);
     if (decl == undefined) {
       return boolean;
     }
 
-    const instance = this.testedInstance(expr.rhs, decl, module);
-    const home = this.classHomeOf(expr.rhs, module);
+    const rhsExpr = tree.exprOf(expr.rhsId);
+    const instance = this.testedInstance(rhsExpr, decl, module);
+    const exprRhs = tree.exprOf(expr.rhsId);
+    const home = this.classHomeOf(exprRhs, module);
     if (instance == undefined && home != undefined) {
       this.genericInstanceofCheck(expr, left, decl, home, module);
 
@@ -55,24 +61,26 @@ partial class ExpressionTypes {
       return boolean;
     }
 
-    const instanceofErrors = this.classValues.instanceofCheck(
+    const instanceofErrors = this.types.instanceofCheck(
       expr,
       left,
       instance,
       decl,
     );
 
-    this.reportAll(module, instanceofErrors);
+    this.errors.writeAll(module, instanceofErrors);
 
     return boolean;
   }
 
-  private readonly collectionInstanceof(
+  private collectionInstanceof(
     expr: BinaryExpr,
     left: Type,
     module: int,
   ): boolean {
-    const rhs = expr.rhs;
+    const tree = this.types.program.tree;
+
+    const rhs = tree.exprOf(expr.rhsId);
     if (rhs.kind != ExprKind.Name || !this.isGlobalUse(rhs, module)) {
       return false;
     }
@@ -89,37 +97,37 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Unknown || base.kind == TypeKind.AnyObject;
     const example = kCollectionExamples.find((one) => one.name == word);
     if (isOpaque && example != undefined) {
-      this.report(module, expr.loc, Code.InstanceOfUntyped, {
+      this.errors.write(module, expr.loc, Code.InstanceOfUntyped, {
         word,
         other: example.example,
       });
 
       return true;
     }
-    if (isOpaque || this.classValues.isOpenTested(base)) {
+    if (isOpaque || this.types.isOpenTested(base)) {
       return true;
     }
     if (base.kind == TypeKind.Union) {
-      const collectionUnionErrors = this.classValues.collectionUnionCheck(
+      const collectionUnionErrors = this.types.collectionUnionCheck(
         expr,
         left,
-        base.parts,
+        this.types.store.partsOf(base),
         word,
       );
 
-      this.reportAll(module, collectionUnionErrors);
+      this.errors.writeAll(module, collectionUnionErrors);
 
       return true;
     }
 
-    const collectionTypeError = this.classValues.collectionTypeCheck(
+    const collectionTypeError = this.types.collectionTypeCheck(
       expr,
       left,
       base,
       word,
     );
 
-    this.reportFound(module, collectionTypeError);
+    this.errors.writeFound(module, collectionTypeError);
 
     return true;
   }
@@ -139,7 +147,7 @@ partial class ExpressionTypes {
     const type = this.typed(rhs, undefined, module);
     const isClass = type.kind == TypeKind.Class;
     if (type.kind != TypeKind.Error && !isClass) {
-      this.report(module, rhs.loc, Code.InstanceOfNotClass, kNoDetails);
+      this.errors.write(module, rhs.loc, Code.InstanceOfNotClass, kNoDetails);
     }
 
     return undefined;
@@ -153,48 +161,57 @@ partial class ExpressionTypes {
     return this.targetOfName(rhs, module)?.module;
   }
 
-  private readonly testedInstance(
+  private testedInstance(
     rhs: Expr,
     decl: ClassDecl,
     module: int,
   ): Type | undefined {
-    if (rhs.kind != ExprKind.Name || decl.typeParams.length > 0) {
+    const tree = this.types.program.tree;
+
+    if (
+      rhs.kind != ExprKind.Name ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return undefined;
     }
 
     const target = this.targetOfName(rhs, module);
-    if (target == undefined || this.modules.isLibraryModule(target.module)) {
+    if (target == undefined || this.types.isLibraryModule(target.module)) {
       return undefined;
     }
 
-    return this.resolver.classInstance(target.module, decl, []);
+    return this.types.classInstance(target.module, decl, []);
   }
 
   private memberTargetDeclared(
     target: MemberExpr,
     module: int,
   ): Type | undefined {
-    const owner = this.staticOwner(target.object, module);
+    const tree = this.types.program.tree;
+
+    const objectExpr = tree.exprOf(target.objectId);
+    const owner = this.staticOwner(objectExpr, module);
     if (owner != undefined) {
       return this.staticTargetDeclared(target, owner, module);
     }
 
     if (this.undefinedTargetCheck(target, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const keyed = this.recordValueOf(target.object, module);
+    const targetObject = tree.exprOf(target.objectId);
+    const keyed = this.recordValueOf(targetObject, module);
     if (keyed != undefined) {
       return keyed;
     }
 
     const declared = this.fieldDeclared(target, module);
 
-    if (this.isMadeThis(target.object, module)) {
+    if (this.isMadeThis(tree.exprOf(target.objectId), module)) {
       return declared;
     }
 
-    const object = this.peekType(target.object, module);
+    const object = this.peekType(tree.exprOf(target.objectId), module);
 
     if (object.kind == TypeKind.Instance) {
       this.instanceTargetCheck(target, object, module);
@@ -203,7 +220,7 @@ partial class ExpressionTypes {
       object.kind == TypeKind.Instance &&
       this.isMethodTarget(target, object)
     ) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.objectTargetCheck(target, object, module);
@@ -211,12 +228,17 @@ partial class ExpressionTypes {
     return declared;
   }
 
-  private readonly isMethodTarget(target: MemberExpr, object: InstanceType): boolean {
+  private readonly isMethodTarget(
+    target: MemberExpr,
+    object: InstanceType,
+  ): boolean {
     if (this.isDeclaredLibrary(object.module, object.loc)) {
       return false;
     }
 
-    const entry = this.classMember(object, target.name).entry;
+    const entryLookup = this.classMember(object, target.name);
+
+    const entry = entryLookup.entry;
 
     return entry != undefined && entry.field == undefined && !entry.isStatic;
   }
@@ -247,9 +269,12 @@ partial class ExpressionTypes {
       return;
     }
     if (entry == undefined) {
-      const first = this.text.of(object);
+      const first = this.types.typeText(object);
 
-      this.report(module, target.loc, Code.PropertyMissing, { word, first });
+      this.errors.write(module, target.loc, Code.PropertyMissing, {
+        word,
+        first,
+      });
 
       return;
     }
@@ -268,7 +293,10 @@ partial class ExpressionTypes {
       return;
     }
     if (field.readonly && !this.isConstructorOf(owner)) {
-      this.report(module, target.loc, Code.ReadOnlyField, { word, first });
+      this.errors.write(module, target.loc, Code.ReadOnlyField, {
+        word,
+        first,
+      });
     }
   }
 
@@ -281,23 +309,25 @@ partial class ExpressionTypes {
 
     const isMaker = method.role?.method == MethodKind.Constructor;
 
-    return isMaker && current.decl == owner;
+    return isMaker && current.decl.id == owner.id;
   }
 
-  private readonly staticTargetDeclared(
+  private staticTargetDeclared(
     target: MemberExpr,
     owner: StaticOwner,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const decl = owner.decl;
     const name = target.name;
     const first = decl.name ?? "";
-    const field = decl.fields.find(
-      (one) => one.name == name && one.form == FieldKind.Static,
-    );
-    const isMethod = decl.methods.some(
-      (one) => one.name == name && this.classes.isStaticMethod(one),
-    );
+    const field = tree
+      .fieldsOf(decl.fieldsList)
+      .find((one) => one.name == name && one.form == FieldKind.Static);
+    const isMethod = this.types
+      .classMethodsNamed(decl, name)
+      .some((one) => this.types.isStaticMethod(one));
 
     if (field != undefined) {
       this.reportAccess(decl, field.access, name, target.loc, module);
@@ -305,31 +335,41 @@ partial class ExpressionTypes {
       if (field.readonly) {
         const word = `${first}.${name}`;
 
-        this.report(module, target.loc, Code.ReadOnlyStatic, { word });
+        this.errors.write(module, target.loc, Code.ReadOnlyStatic, { word });
       }
 
-      return this.staticFieldType(field.type, field.presence, owner);
+      return this.staticFieldType(
+        tree.typeRefAt(field.typeId),
+        field.presence,
+        owner,
+      );
     }
     if (isMethod) {
-      this.report(module, target.loc, Code.StaticMethodReplaced, {
+      this.errors.write(module, target.loc, Code.StaticMethodReplaced, {
         word: name,
         first,
       });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (decl.base == undefined && decl.baseExpr == undefined) {
-      this.report(module, target.loc, Code.StaticFieldMissing, {
+    if (
+      tree.typeRefAt(decl.baseId) == undefined &&
+      tree.exprAt(decl.baseExprId) == undefined
+    ) {
+      this.errors.write(module, target.loc, Code.StaticFieldMissing, {
         word: name,
         first,
       });
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly thisPlaceCheck(expr: MemberExpr, module: int): boolean {
-    if (!this.isThisName(expr.object, module)) {
+  private thisPlaceCheck(expr: MemberExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    if (!this.isThisName(object, module)) {
       return false;
     }
 
@@ -343,23 +383,26 @@ partial class ExpressionTypes {
 
     const first = owner.decl.name ?? "";
     const word = expr.name;
-    const loc = expr.object.loc;
+    const loc = tree.exprOf(expr.objectId).loc;
 
     if (place == ThisPlace.StaticField) {
-      this.report(module, loc, Code.StaticThisField, { word, first });
+      this.errors.write(module, loc, Code.StaticThisField, { word, first });
     } else {
-      this.report(module, loc, Code.StaticThisMethod, { word, first });
+      this.errors.write(module, loc, Code.StaticThisMethod, { word, first });
     }
 
     return true;
   }
 
-  private readonly superReadCheck(expr: MemberExpr, module: int): boolean {
-    if (!this.isSuperName(expr.object, module)) {
+  private superReadCheck(expr: MemberExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    if (!this.isSuperName(object, module)) {
       return false;
     }
 
-    this.report(module, expr.loc, Code.SuperRead, { word: expr.name });
+    this.errors.write(module, expr.loc, Code.SuperRead, { word: expr.name });
 
     return true;
   }
@@ -374,7 +417,7 @@ partial class ExpressionTypes {
     return use?.symbol == undefined;
   }
 
-  private readonly thisInFunction(expr: NameExpr, module: int): boolean {
+  private thisInFunction(expr: NameExpr, module: int): boolean {
     const place = this.thisPlaces[this.thisPlaces.length - 1];
     if (place != ThisPlace.Function) {
       return false;
@@ -387,12 +430,12 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, expr.loc, Code.ThisInFunction, kNoDetails);
+    this.errors.write(module, expr.loc, Code.ThisInFunction, kNoDetails);
 
     return true;
   }
 
-  private readonly methodTargetReport(
+  private methodTargetReport(
     object: InstanceType,
     target: MemberExpr,
     owner: ClassDecl,
@@ -400,8 +443,8 @@ partial class ExpressionTypes {
   ): void {
     const word = target.name;
     const first = object.name;
-    if (!this.modules.isTypedLibrary(object.module)) {
-      return this.report(module, target.loc, Code.MethodReplaced, {
+    if (!this.types.isTypedLibrary(object.module)) {
+      return this.errors.write(module, target.loc, Code.MethodReplaced, {
         word,
         first,
       });
@@ -409,16 +452,17 @@ partial class ExpressionTypes {
 
     const head = word.slice(0, 1).toUpperCase();
     const setter = `set${head}${word.slice(1)}`;
-    const found = this.classMember(object, setter).entry;
+    const foundLookup = this.classMember(object, setter);
+    const found = foundLookup.entry;
     if (found != undefined && found.field == undefined) {
-      return this.report(module, target.loc, Code.LibrarySetterMethod, {
+      return this.errors.write(module, target.loc, Code.LibrarySetterMethod, {
         word,
         first,
         other: setter,
       });
     }
 
-    this.report(module, target.loc, Code.LibraryMethodAssigned, {
+    this.errors.write(module, target.loc, Code.LibraryMethodAssigned, {
       word,
       first,
     });

@@ -51,14 +51,19 @@ export class ProgramReport {
     }
   }
 
-  public moduleErrors(program: Program): void {
+  public moduleErrors(program: Read<Program>): void {
     for (const builtin of program.builtins) {
       const parsed = builtin.parsed;
 
       this.sourceErrors(parsed.source, parsed.errors);
     }
 
-    for (const module of program.order) {
+    for (const id of program.order) {
+      const module = program.modules[id];
+      if (module == undefined) {
+        continue;
+      }
+
       this.sourceErrors(module.source, module.errors);
 
       const declaration = module.declaration;
@@ -68,7 +73,10 @@ export class ProgramReport {
     }
   }
 
-  public sourceErrors(source: SourceText, errors: Read<SourceError[]>): void {
+  public sourceErrors(
+    source: Read<SourceText>,
+    errors: Read<SourceError[]>,
+  ): void {
     if (errors.length == 0) {
       return;
     }

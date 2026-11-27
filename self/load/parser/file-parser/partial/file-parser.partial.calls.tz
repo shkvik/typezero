@@ -7,17 +7,20 @@ import {
 } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  ArrayElement,
-  CallArgument,
-  Expr,
   ExprKind,
-  MemberExpr,
-  NameExpr,
-  NewForm,
   NewKind,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { ExpressionPlace } from "../types/file-parser.types.context.tz";
+import {
+  ArrayElement,
+  CallArgument,
+  Expr,
+  MemberExpr,
+  NameExpr,
+  NewForm,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import { TypeRef } from "../../../../program/syntax/types/syntax.types.types.tz";
 
 partial class FileParser {
   private arguments(): CallArgument[] {
@@ -67,9 +70,9 @@ partial class FileParser {
     let optionalChain = false;
 
     while (true) {
-      const attached = this.withTypeArguments(expr, optionalChain);
-      if (attached != undefined) {
-        expr = attached;
+      const typeArgs = this.typeArgumentsFor(expr, optionalChain);
+      if (typeArgs != undefined) {
+        expr = this.withTypeArguments(expr, typeArgs);
 
         continue;
       }
@@ -78,41 +81,89 @@ partial class FileParser {
       if (optionalLink) {
         optionalChain = true;
       }
+      if (!this.linkAhead(optionalLink)) {
+        this.brokenLink(optionalLink);
 
-      const link = this.chainLink(expr, optionalLink, optionalChain);
-      if (link == undefined) {
         break;
       }
 
-      expr = link;
+      expr = this.chainLink(expr, optionalLink, optionalChain);
     }
 
     if (!optionalChain) {
       return expr;
     }
 
-    return { kind: ExprKind.OptionalChain, loc: expr.loc, chain: expr };
+    const loc = expr.loc;
+
+    return { kind: ExprKind.OptionalChain, loc, chain: expr };
   }
 
-  private optionalLink(expr: Expr): Expr | undefined {
-    if (this.isPropertyName()) {
-      return this.memberLink(expr, true);
-    }
-
+  private readonly linkAhead(optionalLink: boolean): boolean {
     const token = this.cursor.peek();
+    if (optionalLink) {
+      return (
+        this.isPropertyName() ||
+        token.kind == TokenKind.LParen ||
+        token.kind == TokenKind.LBracket
+      );
+    }
 
     switch (token.kind) {
       case TokenKind.LParen:
-        return this.callLink(expr, true);
       case TokenKind.LBracket:
-        return this.indexLink(expr, true);
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateHead:
+        return true;
+      case TokenKind.Dot:
+        return this.dotAhead();
+      case TokenKind.Bang:
+        return !token.newline;
       default:
-        this.cursor.error(token.start, Code.ExpectedPropertyAfterOptionalDot);
-        return undefined;
+        return false;
     }
   }
 
-  private plainLink(expr: Expr, optionalChain: boolean): Expr | undefined {
+  private readonly dotAhead(): boolean {
+    const token = this.cursor.lookahead();
+
+    return (
+      token.kind == TokenKind.Identifier || kTokenTable.isKeyword(token.kind)
+    );
+  }
+
+  private brokenLink(optionalLink: boolean): void {
+    const token = this.cursor.peek();
+    if (optionalLink) {
+      this.cursor.error(token.start, Code.ExpectedPropertyAfterOptionalDot);
+
+      return;
+    }
+    if (token.kind == TokenKind.Dot) {
+      this.brokenDot();
+    }
+  }
+
+  private brokenDot(): void {
+    this.cursor.next();
+
+    const token = this.cursor.peek();
+
+    this.cursor.error(token.start, Code.ExpectedPropertyAfterDot);
+  }
+
+  private optionalLink(expr: Own<Expr>): Expr {
+    if (this.isPropertyName()) {
+      return this.memberLink(expr, true);
+    }
+    if (this.cursor.is(TokenKind.LParen)) {
+      return this.callLink(expr, true);
+    }
+
+    return this.indexLink(expr, true);
+  }
+
+  private plainLink(expr: Own<Expr>, optionalChain: boolean): Expr {
     const token = this.cursor.peek();
 
     switch (token.kind) {
@@ -125,31 +176,19 @@ partial class FileParser {
       case TokenKind.TemplateString:
       case TokenKind.TemplateHead:
         return this.taggedTemplate(expr, optionalChain);
-      case TokenKind.Bang:
-        return this.nonNullLink(expr);
       default:
-        return undefined;
+        return this.nonNullLink(expr);
     }
   }
 
-  private dotLink(object: Expr): Expr | undefined {
+  private dotLink(object: Own<Expr>): Expr {
     this.cursor.next();
-    if (!this.isPropertyName()) {
-      const token = this.cursor.peek();
-
-      this.cursor.error(token.start, Code.ExpectedPropertyAfterDot);
-
-      return undefined;
-    }
 
     return this.memberLink(object, false);
   }
 
-  private nonNullLink(operand: Expr): Expr | undefined {
+  private nonNullLink(operand: Own<Expr>): Expr {
     const bang = this.cursor.peek();
-    if (bang.newline) {
-      return undefined;
-    }
 
     this.cursor.next();
 
@@ -161,7 +200,7 @@ partial class FileParser {
     };
   }
 
-  private memberLink(object: Expr, optional: boolean): Expr {
+  private memberLink(object: Own<Expr>, optional: boolean): Expr {
     const name = this.cursor.next();
 
     return {
@@ -175,7 +214,7 @@ partial class FileParser {
     };
   }
 
-  private callLink(callee: Expr, optional: boolean): Expr {
+  private callLink(callee: Own<Expr>, optional: boolean): Expr {
     this.cursor.next();
     const args = this.arguments();
 
@@ -189,7 +228,7 @@ partial class FileParser {
     };
   }
 
-  private indexLink(object: Expr, optional: boolean): Expr {
+  private indexLink(object: Own<Expr>, optional: boolean): Expr {
     const bracket = this.cursor.next();
     const index = this.indexInside();
 
@@ -202,30 +241,42 @@ partial class FileParser {
     };
   }
 
-  private withTypeArguments(expr: Expr, optionalChain: boolean): Expr | undefined {
+  private typeArgumentsFor(
+    expr: Read<Expr>,
+    optionalChain: boolean,
+  ): TypeRef[] | undefined {
     if (!this.cursor.is(TokenKind.Less)) {
       return undefined;
     }
     if (expr.kind == ExprKind.Name && !optionalChain) {
-      return this.nameWithTypeArguments(expr);
+      if (expr.typeArgs.length > 0) {
+        return undefined;
+      }
+
+      return this.tryTypeArguments(false);
     }
-    if (expr.kind == ExprKind.Member) {
-      return this.memberWithTypeArguments(expr);
+    if (expr.kind == ExprKind.Member && expr.typeArgs.length == 0) {
+      return this.tryTypeArguments(true);
     }
 
     return undefined;
   }
 
-  private nameWithTypeArguments(expr: NameExpr): Expr | undefined {
-    if (expr.typeArgs.length > 0) {
-      return undefined;
+  private withTypeArguments(expr: Own<Expr>, typeArgs: Own<TypeRef[]>): Expr {
+    if (expr.kind == ExprKind.Name) {
+      return this.nameWithTypeArguments(expr, typeArgs);
+    }
+    if (expr.kind == ExprKind.Member) {
+      return this.memberWithTypeArguments(expr, typeArgs);
     }
 
-    const typeArgs = this.tryTypeArguments(false);
-    if (typeArgs == undefined) {
-      return undefined;
-    }
+    return expr;
+  }
 
+  private readonly nameWithTypeArguments(
+    expr: Read<NameExpr>,
+    typeArgs: Own<TypeRef[]>,
+  ): Expr {
     return {
       kind: ExprKind.Name,
       loc: expr.loc,
@@ -235,16 +286,10 @@ partial class FileParser {
     };
   }
 
-  private memberWithTypeArguments(expr: MemberExpr): Expr | undefined {
-    if (expr.typeArgs.length > 0) {
-      return undefined;
-    }
-
-    const typeArgs = this.tryTypeArguments(true);
-    if (typeArgs == undefined) {
-      return undefined;
-    }
-
+  private readonly memberWithTypeArguments(
+    expr: Own<MemberExpr>,
+    typeArgs: Own<TypeRef[]>,
+  ): Expr {
     return {
       kind: ExprKind.Member,
       loc: expr.loc,
@@ -256,7 +301,7 @@ partial class FileParser {
     };
   }
 
-  private taggedTemplate(tag: Expr, optional: boolean): Expr {
+  private taggedTemplate(tag: Own<Expr>, optional: boolean): Expr {
     if (optional) {
       const token = this.cursor.peek();
 
@@ -290,7 +335,9 @@ partial class FileParser {
     const args: CallArgument[] = [{ expr: texts, spread: false }];
 
     for (const part of template.exprs) {
-      args.push({ expr: part, spread: false });
+      const copy = this.copyExpr(part);
+
+      args.push({ expr: copy, spread: false });
     }
 
     return {
@@ -436,26 +483,27 @@ partial class FileParser {
     return this.newPath(path);
   }
 
-  private newPath(from: Expr): Expr {
+  private newPath(from: Own<Expr>): Expr {
     let path = from;
 
     while (this.newPathAhead()) {
-      const link = this.pathLink(path);
-      if (link == undefined) {
+      if (this.cursor.is(TokenKind.Dot) && !this.dotAhead()) {
+        this.brokenDot();
+
         return path;
       }
 
-      path = link;
+      path = this.pathLink(path);
     }
 
     return path;
   }
 
   private chainLink(
-    expr: Expr,
+    expr: Own<Expr>,
     optionalLink: boolean,
     optionalChain: boolean,
-  ): Expr | undefined {
+  ): Expr {
     if (optionalLink) {
       return this.optionalLink(expr);
     }
@@ -477,7 +525,7 @@ partial class FileParser {
     }
   }
 
-  private pathLink(path: Expr): Expr | undefined {
+  private pathLink(path: Own<Expr>): Expr {
     if (this.cursor.is(TokenKind.LBracket)) {
       return this.indexLink(path, false);
     }

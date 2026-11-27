@@ -1,0 +1,126 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+import {
+  kDateOptions,
+  kDateStyleName,
+  kDigitsName,
+  kHour12Name,
+  kTimeStyleName,
+} from "../../intl-rules/const/intl-rules.const.tz";
+import {
+  DateLocaleKind,
+  DateOption,
+} from "../../intl-rules/types/intl-rules.types.tz";
+
+partial class TypeSystem {
+  public readonly isHour12(name: string): boolean {
+    return name == kHour12Name;
+  }
+
+  public readonly isDigitsName(name: string): boolean {
+    return name == kDigitsName;
+  }
+
+  public readonly isForeignStyle(name: string, kind: DateLocaleKind): boolean {
+    const isTime = kind == DateLocaleKind.Date && name == kTimeStyleName;
+    const isDate = kind == DateLocaleKind.Time && name == kDateStyleName;
+
+    return isTime || isDate;
+  }
+
+  public readonly dateObjectError(
+    loc: int,
+    what: string,
+    found: Type,
+  ): SourceError {
+    const first = this.typeText(found);
+
+    return {
+      code: Code.DateOptionsNotObject,
+      loc,
+      details: { word: what, first },
+    };
+  }
+
+  public readonly dateUnknownError(
+    loc: int,
+    name: string,
+    what: string,
+  ): SourceError {
+    return {
+      code: Code.DateOptionUnknown,
+      loc,
+      details: { word: name, first: what },
+    };
+  }
+
+  public readonly dateKindError(
+    loc: int,
+    name: string,
+    wanted: string,
+    found: Type,
+  ): SourceError {
+    const second = this.typeText(found);
+    const details: Details = { word: name, first: wanted, second };
+
+    return { code: Code.IntlOptionKindWrong, loc, details };
+  }
+
+  public readonly styleOnlyError(
+    loc: int,
+    name: string,
+    what: string,
+  ): SourceError {
+    return {
+      code: Code.DateStyleOnly,
+      loc,
+      details: { word: name, first: what },
+    };
+  }
+
+  public readonly stylePartsError(loc: int): SourceError {
+    return { code: Code.DateStyleParts, loc, details: kNoDetails };
+  }
+
+  public readonly digitsOpenError(loc: int): SourceError {
+    return { code: Code.DateDigitsOpen, loc, details: kNoDetails };
+  }
+
+  public readonly dateValueOpenError(
+    loc: int,
+    option: Read<DateOption>,
+    written: string,
+  ): SourceError {
+    const first = option.values[0] ?? "";
+    const second = option.values[1] ?? "";
+    const details: Details = {
+      word: option.name,
+      first,
+      second,
+      other: written,
+    };
+
+    return { code: Code.DateOptionUnknownValue, loc, details };
+  }
+
+  public readonly dateValueError(
+    loc: int,
+    option: Read<DateOption>,
+    text: string,
+  ): SourceError {
+    const other = this.valuesText(option.values);
+    const details: Details = { word: option.name, first: text, other };
+
+    return { code: Code.IntlOptionValue, loc, details };
+  }
+
+  public readonly dateRangeError(loc: int, name: string): SourceError {
+    return { code: Code.DateFormatRange, loc, details: { word: name } };
+  }
+}

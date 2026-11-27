@@ -24,7 +24,8 @@ export type PackageInfo = {
   readonly manifestPath: string;
   readonly main: string;
   readonly exports: readonly PackageExport[];
-  readonly aliases: Map<string, int>;
+  readonly aliasNames: readonly string[];
+  readonly aliasTargets: readonly int[];
   readonly remote: readonly string[];
 };
 
@@ -49,5 +50,3 @@ export type PackageSpecifier = {
   readonly name: string;
   readonly subpath: string;
 };
-
-export type InternedPackages = Interned<Manifest | PackageInfo>;

@@ -1,0 +1,313 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Checked } from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallArgument,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  RankedVariant,
+} from "../../expression-types/types/expression-types.types.tz";
+
+partial class TypeSystem {
+  public readonly sharedCount(one: FunctionType, other: FunctionType): int {
+    const least = Math.max(this.leastOf(one), this.leastOf(other));
+    const most = Math.min(
+      this.store.paramCount(one),
+      this.store.paramCount(other),
+    );
+
+    for (let count = least; count <= most; count++) {
+      if (this.isSamePrefix(one, other, count)) {
+        return count;
+      }
+    }
+
+    return -1;
+  }
+
+  public readonly leastOf(type: FunctionType): int {
+    let least = 0;
+
+    for (const param of this.store.paramsOf(type)) {
+      if (!param.optional) {
+        least += 1;
+      }
+    }
+
+    if (this.store.hasRest(type) && least > 0) {
+      return least - 1;
+    }
+
+    return least;
+  }
+
+  public readonly overloadText(fn: FunctionDecl, type: FunctionType): string {
+    const tree = this.program.tree;
+
+    const parts: string[] = [];
+    const names = this.overloadNames(fn, type);
+    const shownParams = this.store.paramsOf(type);
+
+    for (let index = 0; index < names.length; index++) {
+      const name = names[index];
+      const shown = shownParams[index];
+      if (shown == undefined) {
+        continue;
+      }
+
+      const mark = this.optionalMark(shown.optional);
+      const written = this.typeText(shown.type);
+
+      parts.push(`${name}${mark}: ${written}`);
+    }
+
+    const name = this.variantName(fn);
+
+    return `${name}(${parts.join(", ")})`;
+  }
+
+  public readonly variantList(texts: Read<string[]>): string {
+    const last = texts[texts.length - 1];
+    if (texts.length < 2 || last == undefined) {
+      return texts.join("");
+    }
+
+    const head = texts.slice(0, texts.length - 1);
+
+    return `${head.join(", ")} and ${last}`;
+  }
+
+  public readonly isCountFitting(type: FunctionType, count: int): boolean {
+    const least = this.leastOf(type);
+    const most = this.store.paramCount(type);
+
+    return count >= least && (count <= most || this.store.hasRest(type));
+  }
+
+  public readonly tieCode(isAdapted: boolean): Code {
+    if (isAdapted) {
+      return Code.VariantTieLiteral;
+    }
+
+    return Code.VariantTie;
+  }
+
+  public variantParam(type: FunctionType, index: int): Type | undefined {
+    const params = this.store.paramsOf(type);
+    const param = params[index] ?? params[params.length - 1];
+    if (param == undefined) {
+      return undefined;
+    }
+
+    const isRest = this.store.hasRest(type) && index >= params.length - 1;
+    if (isRest && param.type.kind == TypeKind.Array) {
+      return this.store.itemOf(param.type);
+    }
+    if (param.optional && !isRest) {
+      return this.optional(param.type);
+    }
+
+    return param.type;
+  }
+
+  public variantHint(
+    args: Read<CallArgument[]>,
+    given: Read<Type[]>,
+    variant: Read<RankedVariant>,
+    module: int,
+  ): string {
+    const tree = this.program.tree;
+
+    const index = variant.failed;
+    const arg = args[index];
+    const type = given[index];
+    const param = this.variantParam(variant.type, index);
+    if (arg == undefined || type == undefined || param == undefined) {
+      return "";
+    }
+
+    const code = this.numberCode(this.apparent(type), param);
+    const expr = tree.exprOf(arg.exprId);
+    const word = this.operandName(expr);
+    const other = this.conversionName(param);
+    if (code == Code.ConvertExplicitly) {
+      return `; convert it explicitly: '${word}.${other}()'`;
+    }
+    if (code == Code.RoundThenConvert) {
+      return `; round it first, then convert: 'Math.trunc(${word}).${other}()' (or Math.round, Math.floor, Math.ceil)`;
+    }
+
+    return "";
+  }
+
+  public readonly isBestAmong(
+    variant: Read<RankedVariant>,
+    counted: Read<RankedVariant[]>,
+    fitting: Read<int[]>,
+  ): boolean {
+    return fitting.every((index) => {
+      const other = counted[index];
+
+      if (other == undefined || other == variant) {
+        return true;
+      }
+
+      return this.isBetterVariant(variant, other);
+    });
+  }
+
+  public readonly variantPairCheck(
+    first: FunctionDecl,
+    second: FunctionDecl,
+    one: FunctionType,
+    other: FunctionType,
+    what: string,
+  ): Checked<boolean> {
+    const tree = this.program.tree;
+
+    if (this.isSameParameters(one, other)) {
+      const isReturnOnly =
+        this.store.returnTypeOf(one).id != this.store.returnTypeOf(other).id;
+      if (isReturnOnly && tree.typeRefAt(first.returnTypeId) != undefined) {
+        return {
+          value: true,
+          error: {
+            code: Code.VariantReturnOnly,
+            loc: second.loc,
+            details: { word: what },
+          },
+        };
+      }
+
+      return {
+        value: true,
+        error: {
+          code: Code.VariantDuplicate,
+          loc: second.loc,
+          details: {
+            word: this.overloadText(second, other),
+          },
+        },
+      };
+    }
+
+    const count = this.sharedCount(one, other);
+    if (count < 0) {
+      return { value: false };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.VariantAmbiguous,
+        loc: second.loc,
+        details: {
+          first: this.overloadText(first, one),
+          second: this.overloadText(second, other),
+          other: `${count}`,
+          place: this.classPluralMark(count),
+        },
+      },
+    };
+  }
+
+  public readonly isCountTaking(params: Read<Param[]>, count: int): boolean {
+    const needed = params.filter(
+      (param) => param.form.kind == ParamKind.Required,
+    );
+    const hasRest = params.some((param) => param.form.kind == ParamKind.Rest);
+
+    return count >= needed.length && (hasRest || count <= params.length);
+  }
+
+  private readonly isSamePrefix(
+    one: FunctionType,
+    other: FunctionType,
+    count: int,
+  ): boolean {
+    for (let index = 0; index < count; index++) {
+      const mine = this.store.paramsOf(one)[index];
+      const theirs = this.store.paramsOf(other)[index];
+      if (
+        mine == undefined ||
+        theirs == undefined ||
+        mine.type.id != theirs.type.id
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly optionalMark(isOptional: boolean): string {
+    if (isOptional) {
+      return "?";
+    }
+
+    return "";
+  }
+
+  private readonly variantName(fn: FunctionDecl): string {
+    if (fn.name == "" || fn.name == "constructor") {
+      return "constructor";
+    }
+
+    return fn.name;
+  }
+
+  private readonly isBetterVariant(
+    variant: Read<RankedVariant>,
+    other: Read<RankedVariant>,
+  ): boolean {
+    const isFuller = !this.isLeavingOut(variant) && this.isLeavingOut(other);
+    let isStrictly = isFuller;
+
+    for (let index = 0; index < variant.ranks.length; index++) {
+      const mine = variant.ranks[index] ?? 0;
+      const theirs = other.ranks[index] ?? 0;
+      if (mine > theirs) {
+        return false;
+      }
+      if (mine < theirs) {
+        isStrictly = true;
+      }
+    }
+
+    return isStrictly;
+  }
+
+  private readonly isLeavingOut(variant: Read<RankedVariant>): boolean {
+    const shape = this.store.functionShapeOf(variant.type);
+
+    return shape.rest || variant.ranks.length < shape.params.length;
+  }
+
+  private readonly overloadNames(
+    fn: FunctionDecl,
+    type: FunctionType,
+  ): string[] {
+    const tree = this.program.tree;
+    if (fn.id >= 0) {
+      return tree.paramsOf(fn.paramsList).map((param) => param.name);
+    }
+
+    const names: string[] = [];
+
+    for (let index = 0; index < this.store.paramCount(type); index++) {
+      names.push(this.signatureParamName(index));
+    }
+
+    return names;
+  }
+}

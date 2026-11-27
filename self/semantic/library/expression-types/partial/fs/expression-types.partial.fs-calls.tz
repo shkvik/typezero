@@ -24,11 +24,13 @@ import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
   private fsCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Name || this.types.isLibraryModule(module)) {
       return;
     }
-    if (expr.args.some((one) => one.spread)) {
+    if (tree.argumentsOf(expr.argsList).some((one) => one.spread)) {
       return;
     }
     if (this.isFsPromisesName(callee, module)) {
@@ -38,7 +40,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const row = this.fs.call(callee.name);
+    const row = this.tables.fsCall(callee.name);
     if (row != undefined) {
       this.fsShapeCheck(expr, row, module);
     }
@@ -58,9 +60,9 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const opened = this.program.modules[target.module];
+    const opened = this.types.program.modules[target.module];
 
-    return opened != undefined && this.fs.isPromisesModule(opened.name);
+    return opened != undefined && this.types.isPromisesModule(opened.name);
   }
 
   private fsPromisesCheck(
@@ -69,13 +71,17 @@ partial class ExpressionTypes {
     loc: int,
     module: int,
   ): void {
-    const row = this.fs.promiseCall(name);
+    const row = this.types.promiseCall(name);
     if (row != undefined) {
       this.fsShapeCheck(expr, row, module);
     }
   }
 
-  private readonly isFsName(expr: Expr, kind: SymbolKind, module: int): boolean {
+  private readonly isFsName(
+    expr: Expr,
+    kind: SymbolKind,
+    module: int,
+  ): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -85,9 +91,9 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const opened = this.program.modules[target.module];
+    const opened = this.types.program.modules[target.module];
 
-    return opened != undefined && this.fs.isFsModule(opened.name);
+    return opened != undefined && this.types.isFsModule(opened.name);
   }
 
   private fsShapeCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
@@ -142,16 +148,23 @@ partial class ExpressionTypes {
   }
 
   private fsWriteCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
-    const data = expr.args[1];
+    const tree = this.types.program.tree;
+
+    const data = tree.argumentsOf(expr.argsList)[1];
     if (data == undefined) {
       return;
     }
 
-    const given = this.peekType(data.expr, module);
-    if (!this.fs.isWritable(given)) {
-      const dataError = this.fs.dataError(data.expr.loc, row.name, given);
+    const exprExpr = tree.exprOf(data.exprId);
+    const given = this.peekType(exprExpr, module);
+    if (!this.types.isWritable(given)) {
+      const dataError = this.types.fsDataError(
+        tree.exprOf(data.exprId).loc,
+        row.name,
+        given,
+      );
 
-      return this.reportFound(module, dataError);
+      return this.errors.writeFound(module, dataError);
     }
     if (!this.fsEncodingOrOptions(expr, 2, row, module)) {
       return;
@@ -160,16 +173,16 @@ partial class ExpressionTypes {
     const encoding = this.givenEncoding(expr, 2);
     const isText = this.types.definedType(given).kind == TypeKind.String;
     if (encoding != undefined && !isText) {
-      const forTextError = this.fs.forTextError(encoding.loc, row.name);
+      const forTextError = this.types.forTextError(encoding.loc, row.name);
 
-      return this.reportFound(module, forTextError);
+      return this.errors.writeFound(module, forTextError);
     }
     if (this.fsEncodingCheck(encoding, row, module)) {
       this.fsOpenFlagCheck(expr, 2, row, module);
     }
   }
 
-  private readonly fsStatCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
+  private fsStatCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     if (!this.fsOptionsCheck(expr, 1, row, module)) {
       return;
     }
@@ -194,12 +207,14 @@ partial class ExpressionTypes {
       bigint.kind == ExprKind.BoolLit &&
       bigint.value
     ) {
-      this.reportFound(module, this.fs.bigintError(bigint.loc));
+      this.errors.writeFound(module, this.types.bigintError(bigint.loc));
     }
   }
 
-  private readonly fsMkdirCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
-    const options = expr.args[1]?.expr;
+  private fsMkdirCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
+    const tree = this.types.program.tree;
+
+    const options = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     const isMode =
       options != undefined &&
       options.kind != ExprKind.ObjectLit &&
@@ -209,22 +224,29 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly fsRmdirCheck(expr: CallExpr, module: int): void {
-    const options = expr.args[1]?.expr;
+  private fsRmdirCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const options = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (options == undefined || options.kind == ExprKind.Undefined) {
       return;
     }
 
-    this.reportFound(module, this.fs.rmdirError(options.loc));
+    this.errors.writeFound(module, this.types.rmdirError(options.loc));
   }
 
-  private readonly fsCopyCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
-    const mode = expr.args[2];
-    if (mode == undefined || expr.args.length != 3) {
+  private fsCopyCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
+    const tree = this.types.program.tree;
+
+    const mode = tree.argumentsOf(expr.argsList)[2];
+    if (mode == undefined || tree.argumentsOf(expr.argsList).length != 3) {
       return;
     }
 
-    this.reportFound(module, this.fs.copyModeError(mode.expr.loc, row.name));
+    this.errors.writeFound(
+      module,
+      this.types.copyModeError(tree.exprOf(mode.exprId).loc, row.name),
+    );
   }
 
   private fsEncodingOrOptions(
@@ -233,7 +255,9 @@ partial class ExpressionTypes {
     row: Read<FsCall>,
     module: int,
   ): boolean {
-    const arg = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
     if (arg == undefined || arg.kind == ExprKind.StringLit) {
       return true;
     }
@@ -246,45 +270,54 @@ partial class ExpressionTypes {
     if (base.kind == TypeKind.Error) {
       return false;
     }
-    if (this.intl.isTextLike(base)) {
-      this.reportFound(module, this.fs.dependsError(arg.loc, row.name));
+    if (this.types.isTextLike(base)) {
+      this.errors.writeFound(
+        module,
+        this.types.dependsError(arg.loc, row.name),
+      );
 
       return false;
     }
 
     const first = row.options[0] ?? "";
-    const literalError = this.fs.optionsLiteralError(arg.loc, row.name, first);
+    const literalError = this.types.fsOptionsLiteralError(
+      arg.loc,
+      row.name,
+      first,
+    );
 
-    this.reportFound(module, literalError);
+    this.errors.writeFound(module, literalError);
 
     return false;
   }
 
-  private readonly fsOptionsCheck(
+  private fsOptionsCheck(
     expr: CallExpr,
     index: int,
     row: Read<FsCall>,
     module: int,
   ): boolean {
-    const arg = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
     if (arg == undefined || arg.kind == ExprKind.Undefined) {
       return true;
     }
 
     const first = row.options[0] ?? "";
     if (arg.kind != ExprKind.ObjectLit) {
-      const literalError = this.fs.optionsLiteralError(
+      const literalError = this.types.fsOptionsLiteralError(
         arg.loc,
         row.name,
         first,
       );
 
-      this.reportFound(module, literalError);
+      this.errors.writeFound(module, literalError);
 
       return false;
     }
 
-    for (const property of arg.props) {
+    for (const property of tree.propertiesOf(arg.propsList)) {
       const kind = property.form.kind;
       const isByName =
         kind != PropertyKind.Spread &&
@@ -292,21 +325,25 @@ partial class ExpressionTypes {
         kind != PropertyKind.Method &&
         property.name != "";
       if (!isByName) {
-        const byNameError = this.fs.byNameError(property.loc, row.name, first);
+        const byNameError = this.types.byNameError(
+          property.loc,
+          row.name,
+          first,
+        );
 
-        this.reportFound(module, byNameError);
+        this.errors.writeFound(module, byNameError);
 
         return false;
       }
       if (!row.options.includes(property.name)) {
-        const unknownError = this.fs.unknownOptionError(
+        const unknownError = this.types.unknownOptionError(
           property.loc,
           row.name,
           property.name,
           row.options,
         );
 
-        this.reportFound(module, unknownError);
+        this.errors.writeFound(module, unknownError);
 
         return false;
       }
@@ -320,7 +357,9 @@ partial class ExpressionTypes {
     index: int,
     name: string,
   ): Expr | undefined {
-    const arg = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
     if (arg == undefined) {
       return undefined;
     }
@@ -329,7 +368,9 @@ partial class ExpressionTypes {
   }
 
   private readonly givenEncoding(expr: CallExpr, index: int): Expr | undefined {
-    const arg = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
     if (arg != undefined && arg.kind == ExprKind.StringLit) {
       return arg;
     }
@@ -342,7 +383,7 @@ partial class ExpressionTypes {
     return encoding;
   }
 
-  private readonly fsEncodingCheck(
+  private fsEncodingCheck(
     encoding: Expr | undefined,
     row: Read<FsCall>,
     module: int,
@@ -351,24 +392,27 @@ partial class ExpressionTypes {
       return true;
     }
     if (encoding.kind != ExprKind.StringLit) {
-      const literalError = this.fs.encodingLiteralError(encoding.loc, row.name);
+      const literalError = this.types.fsEncodingLiteralError(
+        encoding.loc,
+        row.name,
+      );
 
-      this.reportFound(module, literalError);
+      this.errors.writeFound(module, literalError);
 
       return false;
     }
 
     const text = encoding.value;
-    const unknownError = this.byteSources.encodingError(encoding.loc, [text]);
+    const unknownError = this.types.encodingError(encoding.loc, [text]);
     if (unknownError != undefined) {
-      this.reportFound(module, unknownError);
+      this.errors.writeFound(module, unknownError);
 
       return false;
     }
-    if (row.isUtf8Only && !this.fs.isUtf8(text)) {
-      const utf8Error = this.fs.utf8OnlyError(encoding.loc, row.name, text);
+    if (row.isUtf8Only && !this.types.isUtf8(text)) {
+      const utf8Error = this.types.utf8OnlyError(encoding.loc, row.name, text);
 
-      this.reportFound(module, utf8Error);
+      this.errors.writeFound(module, utf8Error);
 
       return false;
     }
@@ -376,7 +420,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly fsOpenFlagCheck(
+  private fsOpenFlagCheck(
     expr: CallExpr,
     index: int,
     row: Read<FsCall>,
@@ -386,13 +430,16 @@ partial class ExpressionTypes {
     if (flag == undefined) {
       return;
     }
-    if (flag.kind == ExprKind.StringLit && this.fs.isFlag(flag.value)) {
+    if (flag.kind == ExprKind.StringLit && this.types.isFlag(flag.value)) {
       return;
     }
 
     const written = this.writtenFlag(flag);
 
-    this.reportFound(module, this.fs.flagError(flag.loc, row.name, written));
+    this.errors.writeFound(
+      module,
+      this.types.flagError(flag.loc, row.name, written),
+    );
   }
 
   private readonly writtenFlag(flag: Expr): string | undefined {
@@ -403,7 +450,7 @@ partial class ExpressionTypes {
     return flag.value;
   }
 
-  private readonly fsFlagOption(
+  private fsFlagOption(
     expr: CallExpr,
     index: int,
     option: string,
@@ -418,40 +465,51 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const flagError = this.fs.flagOptionError(value.loc, row.name, option);
+    const flagError = this.types.flagOptionError(value.loc, row.name, option);
 
-    this.reportFound(module, flagError);
+    this.errors.writeFound(module, flagError);
 
     return false;
   }
 
-  private readonly fsConstantCheck(expr: MemberExpr, module: int): boolean {
-    const object = expr.object;
+  private fsConstantCheck(expr: MemberExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
     if (object.kind != ExprKind.Name || object.name != kConstantsName) {
       return false;
     }
     if (!this.isFsName(object, SymbolKind.Variable, module)) {
       return false;
     }
-    if (this.fs.isConstant(expr.name)) {
+    if (this.types.isConstant(expr.name)) {
       return false;
     }
 
-    this.reportFound(module, this.fs.constantError(expr.loc, expr.name));
+    this.errors.writeFound(
+      module,
+      this.types.constantError(expr.loc, expr.name),
+    );
 
     return true;
   }
 
-  private readonly fsZeroPathCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
+  private fsZeroPathCheck(
+    expr: CallExpr,
+    row: Read<FsCall>,
+    module: int,
+  ): void {
+    const tree = this.types.program.tree;
+
     const count = this.fsPathCount(row.shape);
 
     for (let index = 0; index < count; index++) {
-      const path = expr.args[index]?.expr;
+      const path = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
       if (path == undefined || path.kind != ExprKind.StringLit) {
         continue;
       }
       if (path.value.includes("\u0000")) {
-        this.report(module, path.loc, Code.FsZeroPath, kNoDetails);
+        this.errors.write(module, path.loc, Code.FsZeroPath, kNoDetails);
       }
     }
   }
@@ -465,26 +523,31 @@ partial class ExpressionTypes {
   }
 
   private statsDateCheck(expr: AssignExpr, module: int): boolean {
-    const target = expr.target;
+    const tree = this.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
     if (target.kind != ExprKind.Member || !kStatsDates.includes(target.name)) {
       return false;
     }
 
-    const object = this.peekType(target.object, module);
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.peekType(objectExpr, module);
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Instance || base.name != kStatsClass) {
       return false;
     }
 
-    const opened = this.program.modules[base.module];
-    if (opened == undefined || !this.fs.isFsModule(opened.name)) {
+    const opened = this.types.program.modules[base.module];
+    if (opened == undefined || !this.types.isFsModule(opened.name)) {
       return false;
     }
 
-    this.report(module, target.loc, Code.StatsDateAssign, {
+    this.errors.write(module, target.loc, Code.StatsDateAssign, {
       word: target.name,
     });
-    this.typed(expr.value, undefined, module);
+    const value = tree.exprOf(expr.valueId);
+
+    this.typed(value, undefined, module);
 
     return true;
   }

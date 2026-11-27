@@ -46,8 +46,8 @@ import {
 export class LiteralReader {
   private readonly source: Buffer;
 
-  public constructor(source: Own<Buffer>) {
-    this.source = source;
+  public constructor(source: Read<Buffer>) {
+    this.source = Buffer.from(source);
   }
 
   public readonly written(start: int, end: int): string {
@@ -172,7 +172,11 @@ export class LiteralReader {
     return undefined;
   }
 
-  private readonly hexEscape(at: int, end: int, count: int): Escape | undefined {
+  private readonly hexEscape(
+    at: int,
+    end: int,
+    count: int,
+  ): Escape | undefined {
     let value = 0;
 
     for (let index = 0; index < count; index++) {
@@ -253,7 +257,11 @@ export class LiteralReader {
     }
   }
 
-  private readonly decodeText(start: int, end: int, kind: TextKind): DecodedText {
+  private readonly decodeText(
+    start: int,
+    end: int,
+    kind: TextKind,
+  ): DecodedText {
     let i = this.plainEnd(start, end, kind);
     const first = this.source.toString("utf8", start, i);
 
@@ -391,7 +399,11 @@ export class LiteralReader {
     return token.end;
   }
 
-  private readonly allDigitsValid(digits: Read<int[]>, from: int, radix: int): boolean {
+  private readonly allDigitsValid(
+    digits: Read<int[]>,
+    from: int,
+    radix: int,
+  ): boolean {
     for (let i = from; i < digits.length; i++) {
       const code = digits[i] ?? 0;
       const digit = this.digitValue(code);
@@ -424,7 +436,11 @@ export class LiteralReader {
     return sum.value;
   }
 
-  private readonly largeInteger(digits: Read<int[]>, radix: int, from: int): NumberText {
+  private readonly largeInteger(
+    digits: Read<int[]>,
+    radix: int,
+    from: int,
+  ): NumberText {
     if (!this.allDigitsValid(digits, from, radix)) {
       return this.invalidInteger();
     }

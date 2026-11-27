@@ -1,0 +1,284 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  AssignExpr,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  CallbackMode,
+  FunctionFrame,
+  Holding,
+  Loan,
+  Operand,
+  OperandKind,
+  Place,
+  ResultMode,
+} from "../types/ownership-check.types.tz";
+import { kThisKey } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private evaluateAssign(expr: AssignExpr): Operand {
+    const tree = this.values.types.program.tree;
+
+    if (expr.op != undefined) {
+      const valueExpr = tree.exprOf(expr.valueId);
+
+      this.evaluate(valueExpr);
+      const targetExpr = tree.exprOf(expr.targetId);
+
+      this.changePlaceOf(targetExpr, expr.loc);
+
+      return this.copyOperand(expr.loc);
+    }
+
+    const target = tree.exprOf(expr.targetId);
+    if (target.kind == ExprKind.Name) {
+      this.assignName(target.name, expr);
+
+      return this.copyOperand(expr.loc);
+    }
+    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
+      const value = this.evaluateFor(
+        tree.exprOf(expr.valueId),
+        CallbackMode.Kept,
+      );
+
+      const exprValue = tree.exprOf(expr.valueId);
+
+      this.liveFrom = this.lastLocIn(exprValue);
+      this.changePlaceOf(target, expr.loc);
+      this.liveFrom = -1;
+      this.take(value, tree.exprOf(expr.valueId));
+
+      return this.copyOperand(expr.loc);
+    }
+
+    this.evaluate(tree.exprOf(expr.valueId));
+
+    return this.copyOperand(expr.loc);
+  }
+
+  private readonly lastLocIn(expr: Expr): int {
+    const exprs: Expr[] = [];
+    let last: int = expr.loc;
+
+    this.values.types.exprs(expr, exprs, false);
+
+    for (const one of exprs) {
+      if (one.loc > last) {
+        last = one.loc;
+      }
+    }
+
+    return last;
+  }
+
+  private assignName(name: string, expr: AssignExpr): void {
+    const tree = this.values.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
+    const valueExpr = tree.exprOf(expr.valueId);
+    const value = this.evaluate(valueExpr);
+    if (target.kind != ExprKind.Name) {
+      return;
+    }
+
+    const key = this.keyOfName(target);
+    if (key == undefined) {
+      return;
+    }
+
+    if (!this.isKnownVariable(target, key)) {
+      return;
+    }
+
+    const holding = this.holdingOf(key);
+    const declared = this.declaredOf(key);
+    if (holding == undefined || holding == Holding.Copy) {
+      return;
+    }
+    if (holding == Holding.Global) {
+      const frame = this.frame();
+      const hasFunction = frame != undefined && frame.fn != undefined;
+
+      this.reportGlobalChange(hasFunction, name, expr.loc);
+
+      return;
+    }
+
+    const whole = this.wholePlace(key);
+
+    if (holding == Holding.Own) {
+      this.checkWrite(whole, expr.loc, true);
+    }
+
+    this.revive(key);
+    const exprValue = tree.exprOf(expr.valueId);
+
+    this.bind(key, value, exprValue);
+    this.noteBorrowDecl(key, declared);
+  }
+
+  private walkReturn(value: Expr | undefined, loc: int): void {
+    const result = this.frameResult();
+    if (value == undefined || result == undefined) {
+      this.state.isDead = true;
+
+      return;
+    }
+
+    const operand = this.evaluateFor(value, CallbackMode.Kept);
+
+    if (result == ResultMode.Read || result == ResultMode.Mut) {
+      this.returnBorrow(operand, value);
+    } else {
+      this.returnOwn(operand, value);
+    }
+
+    this.state.isDead = true;
+  }
+
+  private returnOwn(operand: Read<Operand>, value: Expr): void {
+    const place = operand.place;
+    if (operand.kind == OperandKind.Borrowed) {
+      const firstRoot = this.firstLoanRoot(operand.loans);
+
+      this.reportReturnPart(value, firstRoot);
+
+      return;
+    }
+    if (operand.kind != OperandKind.Place || place == undefined) {
+      return;
+    }
+
+    const root = this.variableOf(place.root);
+    if (root == undefined) {
+      return;
+    }
+
+    const holding = root.holding;
+    const name = root.name;
+    const firstRoot = this.firstLoanRoot(root.loans);
+    if (holding == Holding.Borrow) {
+      this.reportReturnPart(value, firstRoot);
+
+      return;
+    }
+    if (holding == Holding.Own || holding == Holding.Global) {
+      this.take(operand, value);
+
+      return;
+    }
+    if (place.depth == 0) {
+      this.reportLentTaken(place.root, place, value.loc);
+
+      return;
+    }
+
+    const word = this.exprText(value);
+
+    this.errors.write(this.home, value.loc, Code.OwnReturnPart, {
+      word,
+      other: name,
+    });
+  }
+
+  private readonly firstLoanRoot(loans: Read<Loan[]>): int | undefined {
+    const first = loans[0];
+    if (first == undefined) {
+      return undefined;
+    }
+
+    return first.place.root;
+  }
+
+  private reportReturnPart(value: Expr, root: int | undefined): void {
+    const word = this.exprText(value);
+    let other: string = "another value";
+
+    if (root != undefined) {
+      other = this.rootName(root);
+    }
+
+    this.errors.write(this.home, value.loc, Code.OwnReturnPart, {
+      word,
+      other,
+    });
+  }
+
+  private returnBorrow(operand: Read<Operand>, value: Expr): void {
+    const problem = this.returnBorrowProblem(operand, value);
+
+    this.errors.writeFound(this.home, problem);
+  }
+
+  private readonly returnBorrowProblem(
+    operand: Read<Operand>,
+    value: Expr,
+  ): SourceError | undefined {
+    const frame = this.frame();
+    if (frame == undefined) {
+      return undefined;
+    }
+
+    const fresh: SourceError = {
+      code: Code.OwnFreshBorrow,
+      loc: value.loc,
+      details: {},
+    };
+    if (operand.kind == OperandKind.Fresh) {
+      return fresh;
+    }
+
+    const loans = this.heldLoans(operand);
+
+    for (const loan of loans) {
+      const root = loan.place.root;
+      const variable = this.variableOf(root);
+      if (variable == undefined || variable.holding == Holding.Global) {
+        continue;
+      }
+      if (variable.holding == Holding.Own && !frame.outer.has(root)) {
+        return fresh;
+      }
+
+      const problem = this.sourceProblem(frame, root, value.loc);
+      if (problem != undefined) {
+        return problem;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readonly sourceProblem(
+    frame: Read<FunctionFrame>,
+    root: int,
+    loc: int,
+  ): SourceError | undefined {
+    if (frame.lentParams.size > 0) {
+      if (frame.lentParams.has(root)) {
+        return undefined;
+      }
+
+      const other = this.rootName(root);
+      const details = { word: "its Lent parameters", other };
+
+      return { code: Code.OwnReturnSource, loc, details };
+    }
+    if (frame.variables.has(kThisKey)) {
+      if (root == kThisKey) {
+        return undefined;
+      }
+
+      const other = this.rootName(root);
+      const details = { word: "this", other };
+
+      return { code: Code.OwnReturnSource, loc, details };
+    }
+
+    return { code: Code.OwnLentMissing, loc, details: {} };
+  }
+}

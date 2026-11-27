@@ -21,6 +21,7 @@ import {
 } from "../const/scope-traversal.const.modules.tz";
 import { KnownModuleRow } from "../types/scope-traversal.types.tz";
 import { ScopeTraversal } from "../scope-traversal.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ScopeTraversal {
   private noteMemberUse(object: Expr, name: string): void {
@@ -39,8 +40,12 @@ partial class ScopeTraversal {
     }
   }
 
-  private wholeImportsCheck(): void {
-    for (const decl of this.module.file.imports) {
+  private wholeImportsCheck(program: Read<Program>): void {
+    const tree = program.tree;
+
+    for (const decl of tree.importsOf(
+      program.modules[this.module]?.file.importsList,
+    )) {
       const whole = decl.whole;
       if (whole != undefined) {
         this.wholeImportCheck(decl, whole);
@@ -54,7 +59,9 @@ partial class ScopeTraversal {
       }
     }
 
-    for (const decl of this.module.file.exports) {
+    for (const decl of tree.exportsOf(
+      program.modules[this.module]?.file.exportsList,
+    )) {
       const from = decl.from;
       if (from != undefined && from.path == kResultPackage) {
         this.errors.push({

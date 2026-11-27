@@ -1,0 +1,622 @@
+import { TypeSystem } from "../../type-system.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  Access,
+  ClassDecl,
+  FieldKind,
+  MethodKind,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  FunctionDecl,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  StmtKind,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+  TypeRefKind,
+} from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  NameSymbol,
+  SymbolKind,
+} from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  ParamWriter,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kSettableEnd,
+  kSettableStart,
+  kTakerMiddle,
+  kTakerStart,
+} from "../../../type-resolver/const/type-resolver.const.variance.tz";
+import {
+  kFewArgumentCodes,
+  kFunctionUtilities,
+} from "../../../type-resolver/const/type-resolver.const.tables.tz";
+import {
+  kEmitterName,
+  kEventsModule,
+  kStreamClassNames,
+  kStreamModule,
+} from "../../../../library/event-rules/const/event-rules.const.tz";
+import {
+  ClassHome,
+  TypeContext,
+  TypeDeclaration,
+  TypePlace,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private declared(
+    ref: TypeRef,
+    symbol: NameSymbol,
+    context: Read<TypeContext>,
+  ): Type {
+    switch (symbol.kind) {
+      case SymbolKind.TypeParameter:
+        return this.parameter(ref, symbol, context);
+      case SymbolKind.Import:
+        return this.imported(ref, symbol, context);
+      default: {
+        const record = this.record(context.module);
+        const found = record?.declarations.get(symbol.name);
+        if (found == undefined) {
+          return this.fromModule(ref, context.module, symbol.name, context);
+        }
+        if (found.loc != symbol.loc) {
+          return this.store.plain(TypeKind.Error);
+        }
+        if (this.prefixes.has(context.module)) {
+          const builtin = this.builtin(symbol.name, ref, context);
+          if (builtin != undefined) {
+            return builtin;
+          }
+        }
+
+        return this.ofDeclaration(ref, context.module, found, context);
+      }
+    }
+  }
+
+  private parameter(
+    ref: TypeRef,
+    symbol: NameSymbol,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    const args = tree.typeRefsOf(ref.argsList);
+    if (args.length > 0) {
+      this.report(context.module, ref.loc, Code.TypeNotGeneric, {
+        word: symbol.name,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const bound = context.bindings.get(symbol.loc);
+    if (bound != undefined) {
+      return bound;
+    }
+
+    return this.opened(
+      context.module,
+      symbol.loc,
+      symbol.name,
+      symbol.constraint,
+    );
+  }
+
+  private imported(
+    ref: TypeRef,
+    symbol: NameSymbol,
+    context: Read<TypeContext>,
+  ): Type {
+    const target = symbol.target;
+    if (target == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.declaresType(target.module, target.name)) {
+      return this.global(ref, context);
+    }
+
+    return this.fromModule(ref, target.module, target.name, context);
+  }
+
+  private declaresType(module: int, name: string): boolean {
+    const record = this.record(module);
+    if (record == undefined || this.prefixes.has(module)) {
+      return true;
+    }
+
+    return record.declarations.has(name) || record.classes.has(name);
+  }
+
+  private ofDeclaration(
+    ref: TypeRef,
+    module: int,
+    found: TypeDeclaration,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    switch (found.kind) {
+      case StmtKind.TypeAlias: {
+        const name = found.name;
+        const params = tree.typeParamsOf(found.typeParamsList);
+        const written = this.written(ref, name, params, context);
+        const fits =
+          written != undefined &&
+          this.resolverArgumentsFit(
+            ref,
+            module,
+            name,
+            params,
+            written,
+            context,
+          );
+        if (written == undefined || !fits) {
+          return this.store.plain(TypeKind.Error);
+        }
+        if (this.utilityOperandCheck(ref, module, name, written, context)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        const isTail = this.tailUses.has(ref.id);
+
+        return this.alias(module, found, written, isTail);
+      }
+      case StmtKind.Class: {
+        const name = found.name ?? "";
+        const params = tree.typeParamsOf(found.typeParamsList);
+        if (this.isBareEmitter(ref, module, name, context)) {
+          const parents = this.parentRefs(
+            tree.typeRefAt(found.baseId),
+            tree.typeRefsOf(found.interfacesList),
+          );
+          const home: ClassHome = { module, name, loc: found.loc };
+          const unknown = this.store.plain(TypeKind.Error);
+
+          return this.instance(home, params, [unknown], parents);
+        }
+        if (this.isBareStream(ref, module, name, context)) {
+          this.report(context.module, ref.loc, Code.StreamUntypedBase, {
+            word: name,
+          });
+
+          return this.store.plain(TypeKind.Error);
+        }
+
+        const written = this.written(ref, name, params, context, true);
+        const fits =
+          written != undefined &&
+          this.resolverArgumentsFit(
+            ref,
+            module,
+            name,
+            params,
+            written,
+            context,
+          );
+        if (written == undefined || !fits) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        const parents = this.parentRefs(
+          tree.typeRefAt(found.baseId),
+          tree.typeRefsOf(found.interfacesList),
+        );
+        const home: ClassHome = { module, name, loc: found.loc };
+
+        return this.instance(home, params, written, parents);
+      }
+      case StmtKind.Enum: {
+        const written = this.written(ref, found.name, [], context);
+        if (written == undefined) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.enumType(ref, found, module, context);
+      }
+      default: {
+        const params = tree.typeParamsOf(found.typeParamsList);
+        const written = this.written(ref, found.name, params, context);
+        if (written == undefined) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.store.instanceOf(module, found.loc, found.name, written);
+      }
+    }
+  }
+
+  private written(
+    ref: TypeRef,
+    name: string,
+    params: Read<TypeParamDecl[]>,
+    context: Read<TypeContext>,
+    isClass: boolean = false,
+  ): Type[] | undefined {
+    const tree = this.program.tree;
+
+    const count = tree.typeRefsOf(ref.argsList).length;
+    const isBare = count == 0 && this.neededCount(params) > 0;
+    if (context.place == TypePlace.Base && isBare) {
+      return undefined;
+    }
+    if (params.length == 0 && count > 0) {
+      const code = this.notGenericCode(isClass);
+
+      this.report(context.module, ref.loc, code, { word: name });
+
+      return undefined;
+    }
+
+    const needed = this.neededCount(params);
+    if (count < needed) {
+      const code = kFewArgumentCodes.get(name) ?? Code.TypeArgumentsFew;
+
+      this.report(context.module, ref.loc, code, {
+        word: name,
+        other: `${params.length}`,
+        place: this.pluralMark(params.length),
+      });
+
+      return undefined;
+    }
+    if (count > params.length) {
+      this.report(context.module, ref.loc, Code.TypeArgumentsMany, {
+        word: name,
+        other: `${params.length}`,
+        place: this.pluralMark(params.length),
+        first: `${count}`,
+      });
+
+      return undefined;
+    }
+
+    const args = tree.typeRefsOf(ref.argsList);
+
+    return this.resolveAll(args, context);
+  }
+
+  private readonly isBareEmitter(
+    ref: TypeRef,
+    module: int,
+    name: string,
+    context: Read<TypeContext>,
+  ): boolean {
+    const tree = this.program.tree;
+
+    const isBase =
+      context.place == TypePlace.Base &&
+      tree.typeRefsOf(ref.argsList).length == 0;
+    const home = this.program.modules[module]?.name;
+
+    return isBase && home == kEventsModule && name == kEmitterName;
+  }
+
+  private readonly isBareStream(
+    ref: TypeRef,
+    module: int,
+    name: string,
+    context: Read<TypeContext>,
+  ): boolean {
+    const tree = this.program.tree;
+
+    const isBase =
+      context.place == TypePlace.Base &&
+      tree.typeRefsOf(ref.argsList).length == 0;
+    const home = this.program.modules[module]?.name;
+    const user = this.program.modules[context.module];
+    const isUser = user != undefined && !user.source.isLibrary;
+
+    return (
+      isBase &&
+      isUser &&
+      home == kStreamModule &&
+      kStreamClassNames.includes(name)
+    );
+  }
+
+  private readonly notGenericCode(isClass: boolean): Code {
+    if (isClass) {
+      return Code.ClassNotGeneric;
+    }
+
+    return Code.TypeNotGeneric;
+  }
+
+  private readonly pluralMark(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
+  }
+
+  private readonly neededCount(params: Read<TypeParamDecl[]>): int {
+    const tree = this.program.tree;
+
+    let needed = 0;
+
+    for (const param of params) {
+      const defaultType = tree.typeRefAt(param.defaultTypeId);
+      if (defaultType == undefined) {
+        needed += 1;
+      }
+    }
+
+    return needed;
+  }
+
+  public classInstance(
+    module: int,
+    decl: ClassDecl,
+    written: Read<Type[]>,
+  ): Type {
+    const tree = this.program.tree;
+
+    const isUnknown = this.store.writersOf(module, decl.loc) == undefined;
+    if (tree.typeParamsOf(decl.typeParamsList).length > 0 && isUnknown) {
+      this.store.setWriters(module, decl.loc, this.resolverWritersOf(decl));
+    }
+
+    const name = decl.name ?? "";
+    const parents = this.parentRefs(
+      tree.typeRefAt(decl.baseId),
+      tree.typeRefsOf(decl.interfacesList),
+    );
+    const home: ClassHome = { module, name, loc: decl.loc };
+
+    return this.instance(
+      home,
+      tree.typeParamsOf(decl.typeParamsList),
+      written,
+      parents,
+    );
+  }
+
+  private readonly parentRefs(
+    base: TypeRef | undefined,
+    others: Own<TypeRef[]>,
+  ): TypeRef[] {
+    if (base == undefined) {
+      return others;
+    }
+
+    return [base].concat(others);
+  }
+
+  private instance(
+    home: ClassHome,
+    params: Read<TypeParamDecl[]>,
+    written: Read<Type[]>,
+    parents: Read<TypeRef[]>,
+  ): Type {
+    const module = home.module;
+    const bindings = this.bind(module, params, written);
+    const args = Array.from(bindings.values());
+    const type = this.store.instanceOf(module, home.loc, home.name, args);
+    const shown = this.shownArguments(module, params, bindings);
+    const label = this.labelText(module, home.name, shown);
+
+    this.store.label(type, label);
+
+    if (this.store.hasParents(type)) {
+      return type;
+    }
+
+    this.store.inherit(type, []);
+
+    const inside: TypeContext = { module, bindings, place: TypePlace.Base };
+    const resolved: Type[] = [];
+
+    for (const parent of parents) {
+      const found = this.resolve(parent, inside);
+      if (found.kind != TypeKind.Error) {
+        resolved.push(found);
+      }
+    }
+
+    for (const parent of resolved) {
+      this.store.markBase(parent);
+    }
+
+    this.store.inherit(type, resolved);
+
+    return type;
+  }
+
+  private bind(
+    module: int,
+    params: Read<TypeParamDecl[]>,
+    written: Read<Type[]>,
+  ): Map<int, Type> {
+    const bindings = new Map<int, Type>();
+
+    for (let index = 0; index < params.length; index++) {
+      const param = params[index];
+      const given = written[index];
+      if (given != undefined) {
+        bindings.set(param.loc, given);
+
+        continue;
+      }
+
+      const filled = this.defaultArgument(param, {
+        module,
+        bindings: new Map<int, Type>(bindings),
+        place: TypePlace.Plain,
+      });
+
+      bindings.set(param.loc, filled);
+    }
+
+    return bindings;
+  }
+
+  private defaultArgument(
+    param: TypeParamDecl,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    const written = tree.typeRefAt(param.defaultTypeId);
+    if (written == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.resolve(written, context);
+  }
+
+  private shownArguments(
+    module: int,
+    params: Read<TypeParamDecl[]>,
+    bindings: Read<Map<int, Type>>,
+  ): Type[] {
+    const args = Array.from(bindings.values());
+    let count = args.length;
+
+    while (count > 0) {
+      const param = params[count - 1];
+      const arg = args[count - 1];
+      if (!this.isDefaultOf(module, param, arg, bindings)) {
+        break;
+      }
+
+      count -= 1;
+    }
+
+    return args.slice(0, count);
+  }
+
+  private isDefaultOf(
+    module: int,
+    param: TypeParamDecl | undefined,
+    arg: Type | undefined,
+    bindings: Read<Map<int, Type>>,
+  ): boolean {
+    const tree = this.program.tree;
+    const written = tree.typeRefAt(param?.defaultTypeId);
+    if (written == undefined) {
+      return false;
+    }
+
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(bindings),
+      place: TypePlace.Plain,
+    };
+    const fallback = this.resolve(written, context);
+
+    return fallback.id == arg?.id;
+  }
+
+  private readonly labelText(
+    module: int,
+    name: string,
+    written: Read<Type[]>,
+  ): string {
+    const prefix = this.prefixes.get(module) ?? "";
+
+    if (written.length == 0) {
+      return `${prefix}${name}`;
+    }
+
+    const texts = written.map((type) => this.typeText(type));
+
+    return `${prefix}${name}<${texts.join(", ")}>`;
+  }
+
+  private utilityOperandCheck(
+    ref: TypeRef,
+    module: int,
+    name: string,
+    written: Read<Type[]>,
+    context: Read<TypeContext>,
+  ): boolean {
+    const operand = written[0];
+    const isUtility =
+      kFunctionUtilities.includes(name) && this.record(module)?.library == true;
+    if (!isUtility || operand == undefined) {
+      return false;
+    }
+
+    const base = operand;
+    const isFunction =
+      base.kind == TypeKind.Function ||
+      base.kind == TypeKind.TypeParameter ||
+      base.kind == TypeKind.Error;
+    if (isFunction) {
+      return false;
+    }
+
+    this.report(context.module, ref.loc, Code.UtilityNotFunction, {
+      word: name,
+      other: this.typeText(operand),
+    });
+
+    return true;
+  }
+
+  private readonly resolverWritersOf(decl: ClassDecl): ParamWriter[] {
+    const tree = this.program.tree;
+
+    return tree.typeParamsOf(decl.typeParamsList).map((param) => ({
+      name: param.name,
+      writer: this.writerOf(decl, param.name),
+    }));
+  }
+
+  private readonly writerOf(decl: ClassDecl, name: string): string {
+    const tree = this.program.tree;
+
+    const taker = tree
+      .functionsOf(decl.methodsList)
+      .find((method) => this.isTaking(method, name));
+    if (taker != undefined) {
+      return `${kTakerStart}${taker.name}${kTakerMiddle}${name}`;
+    }
+
+    const field = tree.fieldsOf(decl.fieldsList).find((one) => {
+      const isOpen =
+        one.form != FieldKind.Static &&
+        one.access == Access.Public &&
+        !one.readonly;
+      const written = tree.typeRefAt(one.typeId);
+
+      return isOpen && written != undefined && this.isMentioning(written, name);
+    });
+    if (field != undefined) {
+      return `${kSettableStart}${field.name}${kSettableEnd}`;
+    }
+
+    return "";
+  }
+
+  private readonly isTaking(method: FunctionDecl, name: string): boolean {
+    const tree = this.program.tree;
+
+    const role = method.role;
+    const isStatic = role?.method == MethodKind.Static;
+    if (isStatic || (role != undefined && role.access != Access.Public)) {
+      return false;
+    }
+
+    return tree.paramsOf(method.paramsList).some((param) => {
+      const written = tree.typeRefAt(param.typeId);
+
+      return written != undefined && this.isMentioning(written, name);
+    });
+  }
+
+  private readonly isMentioning(ref: TypeRef, name: string): boolean {
+    return this.refsOf(ref).some(
+      (part) => part.form.kind == TypeRefKind.Name && part.name == name,
+    );
+  }
+}

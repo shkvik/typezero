@@ -24,29 +24,37 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const first = written[0];
     const second = written[1] ?? first;
-    const source = expr.args[0]?.expr;
+    const source = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (first != undefined && second != undefined) {
-      const typed = this.store.dictOf(dict, first, second);
+      const typed = this.types.store.dictOf(dict, first, second);
 
       this.dictSourceCheck(source, dict, first, second, module);
 
       return typed;
     }
 
-    const goal = this.dictionaries.wantedDict(wanted, dict);
+    const goal = this.types.wantedDict(wanted, dict);
     if (goal != undefined && goal.kind == TypeKind.Dict) {
-      this.dictSourceCheck(source, dict, goal.key, goal.value, module);
+      this.dictSourceCheck(
+        source,
+        dict,
+        this.types.store.keyOf(goal),
+        this.types.store.valueOf(goal),
+        module,
+      );
 
       return goal;
     }
     if (source == undefined) {
-      const code = this.dictionaries.dictTypesCode(dict);
+      const code = this.types.dictTypesCode(dict);
 
-      this.report(module, expr.loc, code, kNoDetails);
+      this.errors.write(module, expr.loc, code, kNoDetails);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (dict == DictKind.Map) {
       return this.mapFromPairs(source, module);
@@ -66,14 +74,16 @@ partial class ExpressionTypes {
       return;
     }
 
-    const element = this.dictionaries.dictElement(dict, key, value);
-    const list = this.store.arrayOf(element);
+    const element = this.types.dictElement(dict, key, value);
+    const list = this.types.store.arrayOf(element);
 
     this.checked(source, list, module, kNoPlace);
   }
 
   private mapFromPairs(source: Expr, module: int): Type {
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
     if (source.kind != ExprKind.ArrayLit) {
       const from = this.typed(source, undefined, module);
 
@@ -83,53 +93,53 @@ partial class ExpressionTypes {
     let key: Type | undefined = undefined;
     let value: Type | undefined = undefined;
 
-    for (const element of source.elements) {
-      const pair = element.expr;
+    for (const element of tree.elementsOf(source.elementsList)) {
+      const pair = tree.exprOf(element.exprId);
       if (element.spread || pair.kind != ExprKind.ArrayLit) {
         const found = this.typed(pair, undefined, module);
 
-        this.report(module, source.loc, Code.MapNotPairs, {
-          word: this.text.of(this.functions.widened(found)),
+        this.errors.write(module, source.loc, Code.MapNotPairs, {
+          word: this.types.typeText(this.types.widened(found)),
         });
 
         return error;
       }
 
-      const parts = pair.elements;
-      const head = parts[0]?.expr;
-      const tail = parts[1]?.expr;
+      const parts = tree.elementsOf(pair.elementsList);
+      const head = tree.exprAt(parts[0]?.exprId);
+      const tail = tree.exprAt(parts[1]?.exprId);
       if (parts.length != 2 || head == undefined || tail == undefined) {
         return error;
       }
 
-      const keyType = this.functions.widened(
+      const keyType = this.types.widened(
         this.typed(head, undefined, module),
       );
-      const valueType = this.functions.widened(
+      const valueType = this.types.widened(
         this.typed(tail, undefined, module),
       );
 
-      if (key != undefined && key != keyType) {
-        const pairsDifferError = this.dictionaries.pairsDifferError(
+      if (key != undefined && key.id != keyType.id) {
+        const pairsDifferError = this.types.pairsDifferError(
           head,
           Code.MapKeysDiffer,
           key,
           keyType,
         );
 
-        this.reportFound(module, pairsDifferError);
+        this.errors.writeFound(module, pairsDifferError);
 
         return error;
       }
-      if (value != undefined && value != valueType) {
-        const pairsDifferError2 = this.dictionaries.pairsDifferError(
+      if (value != undefined && value.id != valueType.id) {
+        const pairsDifferError2 = this.types.pairsDifferError(
           tail,
           Code.MapValuesDiffer,
           value,
           valueType,
         );
 
-        this.reportFound(module, pairsDifferError2);
+        this.errors.writeFound(module, pairsDifferError2);
 
         return error;
       }
@@ -142,37 +152,54 @@ partial class ExpressionTypes {
       return error;
     }
 
-    return this.store.dictOf(DictKind.Map, key, value);
+    return this.types.store.dictOf(DictKind.Map, key, value);
   }
 
-  private readonly mapFromValue(from: Type): Type {
+  private mapFromValue(from: Type): Type {
     const base = this.types.apparent(from);
     if (base.kind == TypeKind.Dict && base.dict == DictKind.Map) {
-      return this.store.dictOf(DictKind.Map, base.key, base.value);
+      return this.types.store.dictOf(
+        DictKind.Map,
+        this.types.store.keyOf(base),
+        this.types.store.valueOf(base),
+      );
     }
-    if (base.kind != TypeKind.Array || base.item.kind != TypeKind.Tuple) {
-      return this.store.plain(TypeKind.Error);
+    if (
+      base.kind != TypeKind.Array ||
+      this.types.store.itemOf(base).kind != TypeKind.Tuple
+    ) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const key = base.item.items[0];
-    const value = base.item.items[1];
-    if (key == undefined || value == undefined || base.item.items.length != 2) {
-      return this.store.plain(TypeKind.Error);
+    const pair = this.types.store.itemOf(base);
+    const items = this.types.store.itemsOf(pair);
+    const key = items[0];
+    const value = items[1];
+    if (key == undefined || value == undefined || items.length != 2) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.store.dictOf(DictKind.Map, key, value);
+    return this.types.store.dictOf(DictKind.Map, key, value);
   }
 
   private setFromValues(source: Expr, module: int): Type {
     const type = this.typed(source, undefined, module);
     const base = this.types.apparent(type);
-    const error = this.store.plain(TypeKind.Error);
+    const error = this.types.store.plain(TypeKind.Error);
 
     switch (base.kind) {
       case TypeKind.Array:
-        return this.store.dictOf(DictKind.Set, base.item, base.item);
+        return this.types.store.dictOf(
+          DictKind.Set,
+          this.types.store.itemOf(base),
+          this.types.store.itemOf(base),
+        );
       case TypeKind.Dict:
-        return this.store.dictOf(DictKind.Set, base.value, base.value);
+        return this.types.store.dictOf(
+          DictKind.Set,
+          this.types.store.valueOf(base),
+          this.types.store.valueOf(base),
+        );
       default:
         return error;
     }
@@ -184,8 +211,10 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const base = this.types.definedType(object);
-    const arg = expr.args[0]?.expr;
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isSet = base.kind == TypeKind.Dict && base.dict == DictKind.Set;
     if (!isSet || arg == undefined || !kSetCombiners.includes(member.name)) {
       return false;
@@ -202,21 +231,23 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, arg.loc, Code.SetCombineNeedsSet, {
+    this.errors.write(module, arg.loc, Code.SetCombineNeedsSet, {
       word: member.name,
-      first: this.text.of(base.value),
-      other: this.text.of(given),
+      first: this.types.typeText(this.types.store.valueOf(base)),
+      other: this.types.typeText(given),
     });
 
     return true;
   }
 
   private recordTargetCheck(target: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
       return false;
     }
 
-    const holder = target.object;
+    const holder = tree.exprOf(target.objectId);
 
     const object = this.peekType(holder, module);
 
@@ -225,10 +256,10 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const word = this.dictionaries.recordKeyText(target);
-    const code = this.dictionaries.recordMissingCode(base.value);
+    const word = this.types.recordKeyText(target);
+    const code = this.types.recordMissingCode(this.types.store.valueOf(base));
 
-    this.report(module, target.loc, code, { word });
+    this.errors.write(module, target.loc, code, { word });
 
     return true;
   }
@@ -241,7 +272,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return base.value;
+    return this.types.store.valueOf(base);
   }
 
   private recordMethodCheck(
@@ -250,6 +281,8 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
       return false;
@@ -258,10 +291,13 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const other = this.sources.tupleText(member.object);
+    const objectExpr = tree.exprOf(member.objectId);
+    const other = this.types.sourceTupleText(objectExpr);
 
-    this.looseArguments(expr.args, module);
-    this.report(module, member.loc, Code.RecordHasOwn, {
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
+    this.errors.write(module, member.loc, Code.RecordHasOwn, {
       word: `${other}.${member.name}`,
       other,
     });
@@ -270,47 +306,60 @@ partial class ExpressionTypes {
   }
 
   private spreadCheck(property: Property, module: int): void {
-    const type = this.peekType(property.value, module);
+    const tree = this.types.program.tree;
+
+    const value = tree.exprOf(property.valueId);
+    const type = this.peekType(value, module);
 
     if (this.types.hasMethodFields(type)) {
-      this.report(module, property.value.loc, Code.SpreadMethods, kNoDetails);
+      this.errors.write(
+        module,
+        tree.exprOf(property.valueId).loc,
+        Code.SpreadMethods,
+        kNoDetails,
+      );
 
       return;
     }
 
-    const code = this.dictionaries.spreadCode(type);
+    const code = this.types.spreadCode(type);
     if (code == undefined) {
       return;
     }
 
-    this.report(module, property.value.loc, code, {
-      word: this.text.of(type),
+    this.errors.write(module, tree.exprOf(property.valueId).loc, code, {
+      word: this.types.typeText(type),
     });
   }
 
   private recordSpreadCheck(property: Property, module: int): boolean {
-    const type = this.peekType(property.value, module);
+    const tree = this.types.program.tree;
+
+    const value = tree.exprOf(property.valueId);
+    const type = this.peekType(value, module);
 
     const base = this.types.apparent(type);
-    const code = this.dictionaries.recordSpreadCode(base);
+    const code = this.types.recordSpreadCode(base);
     if (code == undefined) {
       return false;
     }
 
-    this.report(module, property.value.loc, code, {
-      word: this.text.of(type),
+    this.errors.write(module, tree.exprOf(property.valueId).loc, code, {
+      word: this.types.typeText(type),
     });
 
     return true;
   }
 
   private objectKeysCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return;
     }
 
-    const holder = callee.object;
+    const holder = tree.exprOf(callee.objectId);
     const isObject =
       holder.kind == ExprKind.Name &&
       holder.name == "Object" &&
@@ -329,9 +378,11 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly numberEnumListCheck(expr: CallExpr, name: string, module: int): void {
-    const listed = expr.args[0]?.expr;
-    if (listed == undefined || expr.args.length != 1) {
+  private numberEnumListCheck(expr: CallExpr, name: string, module: int): void {
+    const tree = this.types.program.tree;
+
+    const listed = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (listed == undefined || tree.argumentsOf(expr.argsList).length != 1) {
       return;
     }
 
@@ -341,19 +392,16 @@ partial class ExpressionTypes {
     }
 
     const decl = home.decl;
-    const isText = decl.members.some(
-      (member) =>
-        member.init != undefined &&
-        (member.init.kind == ExprKind.StringLit ||
-          member.init.kind == ExprKind.Template),
+    const isText = tree.enumMembersOf(decl.membersList).some((member) =>
+      this.isTextInit(tree.exprAt(member.initId)),
     );
     if (isText) {
       return;
     }
 
-    const other = decl.members[0]?.name ?? "A";
+    const other = tree.enumMembersOf(decl.membersList)[0]?.name ?? "A";
 
-    this.report(module, listed.loc, Code.ObjectNumberEnum, {
+    this.errors.write(module, listed.loc, Code.ObjectNumberEnum, {
       word: name,
       first: decl.name,
       other,
@@ -361,8 +409,10 @@ partial class ExpressionTypes {
   }
 
   private groupByKeysCheck(expr: CallExpr, module: int): void {
-    const items = expr.args[0]?.expr;
-    const callback = expr.args[1]?.expr;
+    const tree = this.types.program.tree;
+
+    const items = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const callback = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (items == undefined || callback == undefined) {
       return;
     }
@@ -373,10 +423,10 @@ partial class ExpressionTypes {
     this.errors.beginTrial();
 
     const list = this.typed(items, undefined, module);
-    const element = this.callbacks.elementOf(this.types.apparent(list));
-    const result = this.store.plain(TypeKind.Error);
+    const element = this.types.callbackElementOf(this.types.apparent(list));
+    const result = this.types.store.plain(TypeKind.Error);
     const params = [{ type: element, optional: false }];
-    const wanted = this.store.functionOf({ params, rest: false, result });
+    const wanted = this.types.store.functionOf({ params, rest: false, result });
     const typed = this.typed(callback, wanted, module);
 
     this.errors.endTrial();
@@ -385,29 +435,31 @@ partial class ExpressionTypes {
       return;
     }
 
-    const key = this.types.apparent(typed.shape.result);
+    const key = this.types.apparent(this.types.store.returnTypeOf(typed));
     const isNumeric = key.kind == TypeKind.Int || key.kind == TypeKind.Double;
     if (!isNumeric) {
       return;
     }
 
-    this.report(module, callback.loc, Code.GroupByKeys, {
-      word: this.text.of(key),
+    this.errors.write(module, callback.loc, Code.GroupByKeys, {
+      word: this.types.typeText(key),
     });
   }
 
   private fromEntriesKeysCheck(expr: CallExpr, module: int): void {
-    const pairs = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const pairs = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (pairs == undefined || pairs.kind != ExprKind.ArrayLit) {
       return;
     }
 
-    const first = pairs.elements[0]?.expr;
+    const first = tree.exprAt(tree.elementsOf(pairs.elementsList)[0]?.exprId);
     if (first == undefined || first.kind != ExprKind.ArrayLit) {
       return;
     }
 
-    const head = first.elements[0]?.expr;
+    const head = tree.exprAt(tree.elementsOf(first.elementsList)[0]?.exprId);
     if (head == undefined) {
       return;
     }
@@ -423,8 +475,16 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, pairs.loc, Code.FromEntriesKeys, {
-      word: this.text.of(key),
+    this.errors.write(module, pairs.loc, Code.FromEntriesKeys, {
+      word: this.types.typeText(key),
     });
+  }
+
+  private readonly isTextInit(init: Expr | undefined): boolean {
+    if (init == undefined) {
+      return false;
+    }
+
+    return init.kind == ExprKind.StringLit || init.kind == ExprKind.Template;
   }
 }

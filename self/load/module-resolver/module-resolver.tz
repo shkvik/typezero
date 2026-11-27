@@ -13,7 +13,7 @@ import {
   kSourceExtension,
   kWindowsSeparator,
 } from "../../program/module/const/module.const.tz";
-import { PackageGraph } from "../package-graph/package-graph.tz";
+import { PackageInfo } from "../package-graph/types/package-graph.types.tz";
 import {
   Location,
   LocationKind,
@@ -39,9 +39,9 @@ import {
 
 export class ModuleResolver {
   private readonly listings: Map<string, string[]>;
-  private readonly packages: PackageGraph;
+  private readonly packages: readonly PackageInfo[];
 
-  public constructor(packages: Own<PackageGraph>) {
+  public constructor(packages: Own<readonly PackageInfo[]>) {
     this.listings = new Map<string, string[]>();
     this.packages = packages;
   }
@@ -338,11 +338,15 @@ export class ModuleResolver {
     }
 
     const listed = readdirSync(directory);
-    const names = listed.unwrapOr([]);
+    if (listed.isErr()) {
+      this.listings.set(directory, []);
 
-    this.listings.set(directory, names.slice());
+      return [];
+    }
 
-    return names;
+    this.listings.set(directory, listed.value.slice());
+
+    return listed.value;
   }
 
   private readonly isFile(path: string): boolean {

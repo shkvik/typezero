@@ -1,0 +1,155 @@
+import { replace } from "tz:mem";
+import { OwnershipCheck } from "../ownership-check.tz";
+import {
+  FunctionFrame,
+  Holding,
+  Loan,
+  ResultMode,
+  Variable,
+} from "../types/ownership-check.types.tz";
+
+partial class OwnershipCheck {
+  private readonly frame(): Read<FunctionFrame> | undefined {
+    return this.frames[this.frames.length - 1];
+  }
+
+  private currentFrame(): Mut<FunctionFrame> | undefined {
+    return this.frames[this.frames.length - 1];
+  }
+
+  private readonly frameResult(): ResultMode | undefined {
+    const frame = this.frame();
+    if (frame == undefined) {
+      return undefined;
+    }
+
+    return frame.result;
+  }
+
+  private readonly variableOf(key: int): Read<Variable> | undefined {
+    return this.frame()?.variables.get(key);
+  }
+
+  private currentVariable(key: int): Mut<Variable> | undefined {
+    return this.currentFrame()?.variables.get(key);
+  }
+
+  private readonly hasVariable(key: int): boolean {
+    const frame = this.frame();
+
+    return frame != undefined && frame.variables.has(key);
+  }
+
+  private readonly holdingOf(key: int): Holding | undefined {
+    const variable = this.variableOf(key);
+    if (variable == undefined) {
+      return undefined;
+    }
+
+    return variable.holding;
+  }
+
+  private readonly declaredOf(key: int): int {
+    const variable = this.variableOf(key);
+    if (variable == undefined) {
+      return -1;
+    }
+
+    return variable.declared;
+  }
+
+  private readonly isChangedVariable(key: int): boolean {
+    const variable = this.variableOf(key);
+
+    return variable != undefined && variable.isChanged;
+  }
+
+  private readonly isLoopBinding(key: int): boolean {
+    const frame = this.frame();
+
+    return frame != undefined && frame.bindings.has(key);
+  }
+
+  private setHolding(key: int, holding: Holding): void {
+    const variable = this.currentVariable(key);
+    if (variable != undefined) {
+      variable.holding = holding;
+    }
+  }
+
+  private setLoans(key: int, loans: Own<Loan[]>): void {
+    const variable = this.currentVariable(key);
+    if (variable != undefined) {
+      variable.loans = loans;
+    }
+  }
+
+  private setHeld(key: int, holding: Holding, loans: Own<Loan[]>): void {
+    const variable = this.currentVariable(key);
+    if (variable == undefined) {
+      return;
+    }
+
+    variable.holding = holding;
+    variable.loans = loans;
+  }
+
+  private addLoans(key: int, loans: Own<Loan[]>): void {
+    const variable = this.currentVariable(key);
+    if (variable != undefined) {
+      variable.loans = variable.loans.concat(loans);
+    }
+  }
+
+  private takeLoans(key: int): Loan[] {
+    const variable = this.currentVariable(key);
+    if (variable == undefined) {
+      return [];
+    }
+
+    return replace(variable.loans, []);
+  }
+
+  private setLastUse(key: int, loc: int): void {
+    const variable = this.currentVariable(key);
+    if (variable != undefined) {
+      variable.lastUse = loc;
+    }
+  }
+
+  private markChanged(key: int): void {
+    const variable = this.currentVariable(key);
+    if (variable != undefined) {
+      variable.isChanged = true;
+    }
+  }
+
+  private noteBinding(key: int): void {
+    const frame = this.currentFrame();
+    if (frame != undefined) {
+      frame.bindings.add(key);
+    }
+  }
+
+  private addGlobal(key: int, name: string): boolean {
+    const frame = this.currentFrame();
+    if (frame == undefined) {
+      return false;
+    }
+
+    frame.variables.set(key, {
+      key,
+      name,
+      holding: Holding.Global,
+      loans: [],
+      isReadOnly: false,
+      isConst: true,
+      isUsing: false,
+      declared: -1,
+      lastUse: -1,
+      isChanged: false,
+    });
+
+    return true;
+  }
+}

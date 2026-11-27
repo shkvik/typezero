@@ -1,0 +1,395 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  ArrayCallback,
+  CallbackPlan,
+} from "../../expression-types/types/expression-types.types.tz";
+import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  kCallbackMethods,
+  kUriValueNames,
+} from "../../callback-rules/const/callback-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly callbackPlan(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): CallbackPlan | undefined {
+    const tree = this.program.tree;
+
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const kind = kCallbackMethods.get(member.name);
+    if (kind == undefined) {
+      return undefined;
+    }
+    if (
+      kind == ArrayCallback.Compare &&
+      tree.argumentsOf(expr.argsList).length == 0
+    ) {
+      return undefined;
+    }
+
+    const params = this.callbackParams(kind, object);
+
+    return { kind, member, array: object, params, isValue: false };
+  }
+
+  public readonly callbackElementOf(array: Type): Type {
+    if (array.kind != TypeKind.Array) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.itemOf(array);
+  }
+
+  public readonly callbackArgumentLimit(isReduce: boolean): int {
+    if (isReduce) {
+      return 2;
+    }
+
+    return 1;
+  }
+
+  public readonly offeredCount(kind: ArrayCallback): int {
+    switch (kind) {
+      case ArrayCallback.Compare:
+        return 2;
+      case ArrayCallback.Reduce:
+        return 4;
+      default:
+        return 3;
+    }
+  }
+
+  public readonly primaryCount(kind: ArrayCallback): int {
+    if (kind == ArrayCallback.Compare || kind == ArrayCallback.Reduce) {
+      return 2;
+    }
+
+    return 1;
+  }
+
+  public readonly callbackArgumentName(
+    kind: ArrayCallback,
+    index: int,
+  ): string {
+    const reduceNames = ["accumulator", "value", "index", "array"];
+    const names = ["value", "index", "array"];
+
+    if (kind == ArrayCallback.Reduce) {
+      return reduceNames[index] ?? "array";
+    }
+
+    return names[index] ?? "array";
+  }
+
+  public readonly callbackShapeText(kind: ArrayCallback): string {
+    switch (kind) {
+      case ArrayCallback.Reduce:
+        return "(accumulator, value, index, array)";
+      case ArrayCallback.Compare:
+        return "(a, b)";
+      default:
+        return "(value, index, array)";
+    }
+  }
+
+  public readonly conciseValueLoc(arg: Expr): int {
+    const tree = this.program.tree;
+
+    if (arg.kind != ExprKind.Function || !tree.functionOf(arg.fnId).concise) {
+      return arg.loc;
+    }
+
+    const first = tree.stmtsOf(
+      tree.blockAt(tree.functionOf(arg.fnId).bodyId)?.bodyList,
+    )[0];
+    if (first == undefined) {
+      return arg.loc;
+    }
+    if (first.kind != StmtKind.Return) {
+      return arg.loc;
+    }
+
+    return tree.exprAt(first.valueId)?.loc ?? arg.loc;
+  }
+
+  public readonly isNumberResult(result: Type): boolean {
+    switch (result.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Error:
+        return true;
+      case TypeKind.Literal:
+        return this.isNumberMember(result);
+      default:
+        return false;
+    }
+  }
+
+  public readonly requiredCallbackParams(type: FunctionType): int {
+    let least = 0;
+
+    for (const param of this.store.paramsOf(type)) {
+      if (param.optional) {
+        break;
+      }
+
+      least += 1;
+    }
+
+    if (this.store.hasRest(type) && least > 0) {
+      return least - 1;
+    }
+
+    return least;
+  }
+
+  public readonly callbackWanted(kind: ArrayCallback): Type | undefined {
+    switch (kind) {
+      case ArrayCallback.Filter:
+      case ArrayCallback.Find:
+      case ArrayCallback.FindIndex:
+      case ArrayCallback.Test:
+        return this.store.plain(TypeKind.Boolean);
+      default:
+        return undefined;
+    }
+  }
+
+  public readonly isLooseBuiltin(name: string): boolean {
+    return name.startsWith("parse") || kUriValueNames.includes(name);
+  }
+
+  public readonly builtinResultText(name: string): string {
+    if (kUriValueNames.includes(name)) {
+      return "string";
+    }
+
+    return "double";
+  }
+
+  public isFunctionWanted(wanted: Type | undefined): boolean {
+    if (wanted == undefined) {
+      return false;
+    }
+
+    return this.definedType(wanted).kind == TypeKind.Function;
+  }
+
+  public droppedPromiseCheck(arg: Expr, result: Type): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+
+    if (arg.kind == ExprKind.Function && tree.functionOf(arg.fnId).isAsync) {
+      errors.push({
+        code: Code.AsyncCallbackDropped,
+        loc: arg.loc,
+        details: kNoDetails,
+      });
+
+      return errors;
+    }
+    const kind = this.definedType(result).kind;
+    if (kind == TypeKind.Promise) {
+      const loc = this.conciseValueLoc(arg);
+
+      errors.push({
+        code: Code.CallbackPromiseDropped,
+        loc,
+        details: kNoDetails,
+      });
+    }
+    if (kind == TypeKind.Result && arg.kind == ExprKind.Function) {
+      const loc = this.conciseValueLoc(arg);
+
+      errors.push({
+        code: Code.CallbackResultDropped,
+        loc,
+        details: kNoDetails,
+      });
+    }
+
+    return errors;
+  }
+
+  public readonly droppedResultCheck(
+    arg: Expr,
+    result: Type,
+    name: string,
+    method: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (result.kind == TypeKind.Result) {
+      errors.push({
+        code: Code.CallbackDropsResult,
+        loc: arg.loc,
+        details: {
+          word: name,
+          other: method,
+        },
+      });
+
+      return errors;
+    }
+    if (result.kind == TypeKind.Promise) {
+      errors.push({
+        code: Code.CallbackDropsPromise,
+        loc: arg.loc,
+        details: {
+          word: name,
+          other: method,
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public readonly extraCallbackArgumentsError(
+    expr: CallExpr,
+    plan: Read<CallbackPlan>,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const member = plan.member;
+    const word = member.name;
+    const count = tree.argumentsOf(expr.argsList).length;
+    const isReduce = plan.kind == ArrayCallback.Reduce;
+    const most = this.callbackArgumentLimit(isReduce);
+    const second = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
+    if (count == 2 && !isReduce && second != undefined) {
+      return { code: Code.CallbackThisArg, loc: second.loc, details: { word } };
+    }
+    if (count <= most) {
+      return undefined;
+    }
+
+    const wanted = this.argumentCountText(1, most, false);
+
+    return {
+      code: Code.ArgumentCount,
+      loc: member.loc,
+      details: {
+        word: wanted,
+        other: `${count}`,
+      },
+    };
+  }
+
+  public forwardedResultCheck(
+    expr: Expr,
+    result: Type,
+    wanted: Type,
+  ): SourceError | undefined {
+    const isOpen =
+      wanted.kind == TypeKind.Void ||
+      wanted.kind == TypeKind.Error ||
+      result.kind == TypeKind.Error;
+    if (isOpen || this.converts(result, wanted)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.NotAssignable,
+      loc: expr.loc,
+      details: {
+        first: this.typeText(result),
+        second: this.typeText(wanted),
+        place: "",
+      },
+    };
+  }
+
+  public readonly passedResultCheck(
+    arg: Expr,
+    type: FunctionType,
+    plan: Read<CallbackPlan>,
+    name: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const method = plan.member.name;
+    const result = this.store.returnTypeOf(type);
+
+    if (plan.kind == ArrayCallback.ForEach) {
+      const droppedResultErrors = this.droppedResultCheck(
+        arg,
+        result,
+        name,
+        method,
+      );
+
+      for (const found of droppedResultErrors) {
+        errors.push(found);
+      }
+
+      return errors;
+    }
+
+    const wanted = this.callbackWanted(plan.kind);
+    if (wanted == undefined || result.id == wanted.id) {
+      return errors;
+    }
+    if (result.kind == TypeKind.Error) {
+      return errors;
+    }
+
+    errors.push({
+      code: Code.CallbackReturn,
+      loc: arg.loc,
+      details: {
+        word: method,
+        first: this.typeText(wanted),
+        other: name,
+        second: this.typeText(result),
+      },
+    });
+
+    return errors;
+  }
+
+  public readonly indexPosition(kind: ArrayCallback): int {
+    if (kind == ArrayCallback.Reduce) {
+      return 2;
+    }
+
+    return 1;
+  }
+
+  private readonly callbackParams(kind: ArrayCallback, array: Type): Type[] {
+    const item = this.callbackElementOf(array);
+    const index = this.store.integer(64, false);
+
+    switch (kind) {
+      case ArrayCallback.Compare:
+        return [item, item];
+      case ArrayCallback.Reduce:
+        return [];
+      default:
+        return [item, index, array];
+    }
+  }
+}

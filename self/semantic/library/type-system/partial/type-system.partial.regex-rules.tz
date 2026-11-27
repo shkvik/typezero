@@ -1,0 +1,659 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  LiteralKind,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kDigits,
+  kSetsFlag,
+} from "../../regex-parser/const/regex-parser.const.tz";
+import { RegexParser } from "../../regex-parser/regex-parser.tz";
+import {
+  kLeadFirst,
+  kLoneBracketsText,
+  kNothingToRepeatText,
+  kOneByteEnd,
+  kRepeatHint,
+  kTrailLast,
+  kTwoBytesEnd,
+} from "../../regex-syntax/const/regex-syntax.const.tz";
+import { RegexSyntax } from "../../regex-syntax/regex-syntax.tz";
+import {
+  RegexShape,
+  RegexText,
+} from "../../regex-parser/types/regex-parser.types.tz";
+import {
+  kEscapeName,
+  kFlagsArgument,
+  kGlobalFlag,
+  kLegacyPrefix,
+  kLegacyStatics,
+  kMatchAllName,
+  kMethodsCalled,
+  kNamedGroupsHint,
+  kOrString,
+  kParseName,
+  kPlainQuoted,
+  kPatternMethods,
+  kRegexFields,
+  kRegexFlagLetters,
+  kRegexSpecials,
+  kReplaceAllName,
+  kReplaceName,
+  kRunMethods,
+  kSearchName,
+  kSplitName,
+  kTextPlaceholder,
+  kUnicodeFlag,
+} from "../../regex-rules/const/regex-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly shapeOf(written: RegexText): RegexShape | undefined {
+    const flags = written.flags;
+    if (!this.isFlagsValid(flags)) {
+      return undefined;
+    }
+
+    const parser = new RegexParser(written.pattern, flags.includes(kSetsFlag));
+    const root = parser.parse();
+    if (root == undefined) {
+      return undefined;
+    }
+
+    const names = parser.groupNames();
+    const required = parser.requiredGroups(root, false);
+    const namedRequired = parser.requiredGroups(root, true);
+    const mandatory: boolean[] = [];
+    const namedMandatory: boolean[] = [];
+
+    for (let group = 0; group < names.length; group++) {
+      mandatory.push(this.isIn(required, group));
+      namedMandatory.push(this.isIn(namedRequired, group));
+    }
+
+    return {
+      pattern: written.pattern,
+      flags,
+      groups: names.length - 1,
+      names,
+      mandatory,
+      namedMandatory,
+    };
+  }
+
+  public readonly isFlagsValid(flags: string): boolean {
+    const letters = flags.split("");
+    const isKnown = letters.every((letter) =>
+      kRegexFlagLetters.includes(letter),
+    );
+    const isOnce = letters.every(
+      (letter, index) => letters.indexOf(letter) == index,
+    );
+    const isBothUnicode =
+      letters.includes(kUnicodeFlag) && letters.includes(kSetsFlag);
+
+    return isKnown && isOnce && !isBothUnicode;
+  }
+
+  public readonly isGlobal(shape: Read<RegexShape>): boolean {
+    return shape.flags.includes(kGlobalFlag);
+  }
+
+  public readonly isRegexRegExp(type: Type): boolean {
+    return this.isRegExp(type);
+  }
+
+  public readonly isRegexText(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+        return true;
+      case TypeKind.Literal:
+        return type.literal == LiteralKind.String;
+      case TypeKind.Union:
+        return this.store.partsOf(type).every((part) => this.isRegexText(part));
+      default:
+        return false;
+    }
+  }
+
+  public readonly isPatternMethod(name: string): boolean {
+    return kPatternMethods.includes(name);
+  }
+
+  public readonly isField(name: string): boolean {
+    return kRegexFields.includes(name);
+  }
+
+  public readonly isKnownStatic(name: string): boolean {
+    return name == kParseName || name == kEscapeName;
+  }
+
+  public readonly isEscape(name: string): boolean {
+    return name == kEscapeName;
+  }
+
+  public readonly regexLeastArguments(method: string): int {
+    if (method == kReplaceName || method == kReplaceAllName) {
+      return 2;
+    }
+    if (method == kSplitName) {
+      return 0;
+    }
+
+    return 1;
+  }
+
+  public readonly mostArguments(method: string): int {
+    const isPair =
+      method == kSplitName ||
+      method == kReplaceName ||
+      method == kReplaceAllName;
+    if (isPair) {
+      return 2;
+    }
+
+    return 1;
+  }
+
+  public readonly isTextAllowed(method: string): boolean {
+    return method == kSplitName || method == kReplaceAllName;
+  }
+
+  public readonly flagsError(loc: int, flags: string): SourceError {
+    return { code: Code.RegexFlagsInvalid, loc, details: { word: flags } };
+  }
+
+  public readonly testGlobalError(loc: int): SourceError {
+    return { code: Code.RegexTestGlobal, loc, details: kNoDetails };
+  }
+
+  public readonly compileError(loc: int): SourceError {
+    return { code: Code.RegexCompile, loc, details: kNoDetails };
+  }
+
+  public readonly readError(loc: int, name: string): SourceError {
+    const other = this.calledHint(kRunMethods.includes(name));
+
+    return { code: Code.RegexNoMember, loc, details: { word: name, other } };
+  }
+
+  public readonly regexStaticError(loc: int, name: string): SourceError {
+    if (name == kEscapeName) {
+      return { code: Code.RegexStaticEscape, loc, details: kNoDetails };
+    }
+
+    const isLegacy =
+      name.startsWith(kLegacyPrefix) || kLegacyStatics.includes(name);
+    if (isLegacy) {
+      return { code: Code.RegexStaticLegacy, loc, details: { word: name } };
+    }
+
+    return { code: Code.RegexStaticNoMember, loc, details: { word: name } };
+  }
+
+  public readonly unknownNewError(loc: int, hasFlags: boolean): SourceError {
+    const other = this.flagsHint(hasFlags);
+
+    return { code: Code.RegexNewUnknown, loc, details: { other } };
+  }
+
+  public readonly matchFlagError(loc: int): SourceError {
+    return { code: Code.RegexMatchFlag, loc, details: kNoDetails };
+  }
+
+  public readonly needsGlobalError(
+    loc: int,
+    method: string,
+    shape: Read<RegexShape>,
+  ): SourceError {
+    const details = {
+      word: method,
+      first: shape.pattern,
+      other: shape.flags,
+    };
+
+    return { code: Code.RegexNeedsGlobal, loc, details };
+  }
+
+  public readonly notPatternError(
+    loc: int,
+    method: string,
+    type: Type,
+  ): SourceError {
+    const other = this.orStringHint(this.isTextAllowed(method));
+    const first = this.typeText(type);
+    const details = { word: method, other, first };
+
+    return { code: Code.RegexNotPattern, loc, details };
+  }
+
+  public readonly textPatternError(
+    loc: int,
+    method: string,
+    pattern: Expr,
+  ): SourceError {
+    const text = this.argumentText(pattern);
+    const isWritten = pattern.kind == ExprKind.StringLit;
+    const regex = this.patternRegexText(pattern, text);
+    if (method == kReplaceName) {
+      const details = { word: text, first: regex };
+
+      return { code: Code.RegexTextReplace, loc, details };
+    }
+    if (method == kSearchName) {
+      const first = this.writtenRegex(isWritten, regex, method, "");
+
+      return {
+        code: Code.RegexTextSearch,
+        loc,
+        details: { word: text, first },
+      };
+    }
+
+    const suffix = this.globalSuffix(method);
+    const other = this.writtenRegex(isWritten, regex, method, suffix);
+    const details = { word: method, first: text, other };
+
+    return { code: Code.RegexTextInclude, loc, details };
+  }
+
+  public readonly functionTextError(loc: int, pattern: Expr): SourceError {
+    const text = this.argumentText(pattern);
+    const word = this.functionRegexText(pattern, text);
+
+    return { code: Code.RegexFunctionText, loc, details: { word } };
+  }
+
+  public readonly groupReferenceError(
+    loc: int,
+    shape: Read<RegexShape>,
+    value: string,
+  ): SourceError | undefined {
+    for (const at of this.groupReferences(value)) {
+      const error = this.referenceError(loc, shape, value, at);
+      if (error != undefined) {
+        return error;
+      }
+    }
+
+    return undefined;
+  }
+
+  public readonly syntaxError(
+    written: RegexText,
+    loc: int,
+    isWritten: boolean,
+  ): SourceError | undefined {
+    const syntax = new RegexSyntax(written.pattern, written.flags);
+    const found = syntax.check();
+    if (found == undefined) {
+      return undefined;
+    }
+
+    const word = this.syntaxText(found.message);
+    const at = this.syntaxLoc(written.pattern, found.at, loc, isWritten);
+
+    return { code: Code.RegexInvalid, loc: at, details: { word } };
+  }
+
+  public readonly onlyMatchError(loc: int): SourceError {
+    return { code: Code.RegexOnlyMatch, loc, details: kNoDetails };
+  }
+
+  public readonly passesError(
+    loc: int,
+    method: string,
+    count: int,
+    shape: Read<RegexShape>,
+  ): SourceError {
+    const place = this.namedGroupsHint(this.hasNamedGroups(shape));
+    const details = {
+      word: method,
+      first: `${count}`,
+      second: `${shape.groups}`,
+      other: this.pluralEnd(shape.groups),
+      place,
+    };
+
+    return { code: Code.RegexPasses, loc, details };
+  }
+
+  public replacerParams(shape: Read<RegexShape | undefined>): Type[] {
+    const text = this.store.plain(TypeKind.String);
+    if (shape == undefined) {
+      return [text];
+    }
+
+    const params = [text];
+
+    for (let group = 1; group <= shape.groups; group++) {
+      params.push(this.groupType(shape.mandatory[group] == true));
+    }
+
+    params.push(this.store.integer(64, false));
+    params.push(text);
+
+    const named = this.namedGroupsType(shape);
+    if (named != undefined) {
+      params.push(named);
+    }
+
+    return params;
+  }
+
+  public replacerType(params: Read<Type[]>): Type {
+    const result = this.store.plain(TypeKind.String);
+    const shaped = params.map((type) => ({ type, optional: false }));
+
+    return this.store.functionOf({ params: shaped, rest: false, result });
+  }
+
+  public splitType(shape: Read<RegexShape | undefined>): Type {
+    const hasOptional =
+      shape == undefined || shape.mandatory.some((one) => !one);
+
+    return this.store.arrayOf(this.groupType(!hasOptional));
+  }
+
+  public textsType(): Type {
+    return this.store.arrayOf(this.store.plain(TypeKind.String));
+  }
+
+  public namedGroupsType(shape: Read<RegexShape>): Type | undefined {
+    const fields: ObjectField[] = [];
+
+    for (let group = 1; group <= shape.groups; group++) {
+      const name = shape.names[group] ?? "";
+      const isSeen = fields.some((field) => field.name == name);
+      if (name == "" || isSeen) {
+        continue;
+      }
+
+      const type = this.groupType(shape.namedMandatory[group] == true);
+
+      fields.push({ name, type, optional: false, readonly: false });
+    }
+
+    if (fields.length == 0) {
+      return undefined;
+    }
+
+    return this.store.objectOf(fields);
+  }
+
+  public readonly hasNamedGroups(shape: Read<RegexShape>): boolean {
+    return shape.names.some((name) => name != "");
+  }
+
+  private readonly syntaxText(message: string): string {
+    const first = message.slice(0, 1).toLowerCase();
+    const lowered = `${first}${message.slice(1)}`;
+    const isRepeat =
+      lowered == kNothingToRepeatText.toLowerCase() ||
+      lowered == kLoneBracketsText.toLowerCase();
+    if (isRepeat) {
+      return `${lowered}${kRepeatHint}`;
+    }
+
+    return lowered;
+  }
+
+  private readonly syntaxLoc(
+    pattern: string,
+    at: int,
+    loc: int,
+    isWritten: boolean,
+  ): int {
+    if (!isWritten) {
+      return loc;
+    }
+
+    let bytes = 0;
+
+    for (let index = 0; index < at && index < pattern.length; index++) {
+      bytes += this.utf8Size(pattern.charCodeAt(index));
+    }
+
+    return loc + 1 + bytes;
+  }
+
+  private readonly utf8Size(unit: int): int {
+    if (unit < kOneByteEnd) {
+      return 1;
+    }
+    if (unit < kTwoBytesEnd) {
+      return 2;
+    }
+    if (unit >= kLeadFirst && unit <= kTrailLast) {
+      return 2;
+    }
+
+    return 3;
+  }
+
+  private groupType(isMandatory: boolean): Type {
+    const text = this.store.plain(TypeKind.String);
+    if (isMandatory) {
+      return text;
+    }
+
+    return this.optional(text);
+  }
+
+  private readonly referenceError(
+    loc: int,
+    shape: Read<RegexShape>,
+    value: string,
+    at: int,
+  ): SourceError | undefined {
+    const next = value.slice(at + 1, at + 2);
+    const digit = kDigits.indexOf(next);
+    const isNumbered = digit >= 1;
+    if (isNumbered && !this.isNumberedKnown(value, at, shape.groups)) {
+      const details = {
+        word: `${shape.groups}`,
+        other: this.pluralEnd(shape.groups),
+        first: next,
+      };
+
+      return { code: Code.RegexNoGroup, loc, details };
+    }
+    if (next != "<") {
+      return undefined;
+    }
+
+    const name = this.referenceName(value, at);
+    if (shape.names.slice(1).includes(name)) {
+      return undefined;
+    }
+    if (this.hasNamedGroups(shape)) {
+      return { code: Code.RegexNoNamedGroup, loc, details: { word: name } };
+    }
+
+    return { code: Code.RegexNoNamedGroups, loc, details: { word: name } };
+  }
+
+  private readonly groupReferences(value: string): int[] {
+    const found: int[] = [];
+    let index = 0;
+
+    while (index + 1 < value.length) {
+      const isDollar = value.slice(index, index + 1) == "$";
+      const isEscaped = isDollar && value.slice(index + 1, index + 2) == "$";
+      if (isDollar && !isEscaped) {
+        found.push(index);
+      }
+
+      index += this.referenceStep(isEscaped);
+    }
+
+    return found;
+  }
+
+  private readonly referenceStep(isEscaped: boolean): int {
+    if (isEscaped) {
+      return 2;
+    }
+
+    return 1;
+  }
+
+  private readonly isNumberedKnown(
+    value: string,
+    at: int,
+    groups: int,
+  ): boolean {
+    const one = kDigits.indexOf(value.slice(at + 1, at + 2));
+    const next = kDigits.indexOf(value.slice(at + 2, at + 3));
+    const two = this.twoDigits(one, next);
+
+    return (two != 0 && two <= groups) || one <= groups;
+  }
+
+  private readonly twoDigits(one: int, next: int): int {
+    if (next < 0) {
+      return 0;
+    }
+
+    return one * 10 + next;
+  }
+
+  private readonly referenceName(value: string, at: int): string {
+    const close = value.indexOf(">", at + 2);
+    if (close < 0) {
+      return "";
+    }
+
+    return value.slice(at + 2, close);
+  }
+
+  private readonly argumentText(pattern: Expr): string {
+    if (pattern.kind == ExprKind.StringLit) {
+      const isPlain = pattern.value
+        .split("")
+        .every((char) => this.isPlainQuoted(char));
+      if (isPlain) {
+        return `"${pattern.value}"`;
+      }
+    }
+    if (pattern.kind == ExprKind.Name) {
+      return pattern.name;
+    }
+
+    return kTextPlaceholder;
+  }
+
+  private readonly isPlainQuoted(char: string): boolean {
+    return kPlainQuoted.includes(char);
+  }
+
+  private readonly escapedLiteral(value: string): string {
+    const escaped = value
+      .split("")
+      .map((char) => this.escapedChar(char))
+      .join("");
+
+    return `/${escaped}/`;
+  }
+
+  private readonly escapedChar(char: string): string {
+    if (kRegexSpecials.includes(char)) {
+      return `\\${char}`;
+    }
+
+    return char;
+  }
+
+  private readonly patternRegexText(pattern: Expr, text: string): string {
+    if (pattern.kind == ExprKind.StringLit) {
+      return this.escapedLiteral(pattern.value);
+    }
+
+    return `new RegExp(RegExp.escape(${text}))`;
+  }
+
+  private readonly functionRegexText(pattern: Expr, text: string): string {
+    if (pattern.kind == ExprKind.StringLit) {
+      const escaped = this.escapedLiteral(pattern.value);
+
+      return `${escaped}g`;
+    }
+
+    return `new RegExp(RegExp.escape(${text}), "g")`;
+  }
+
+  private readonly writtenRegex(
+    isWritten: boolean,
+    regex: string,
+    method: string,
+    suffix: string,
+  ): string {
+    if (isWritten) {
+      return `${regex}${suffix}`;
+    }
+
+    return `${method}(${regex})`;
+  }
+
+  private readonly globalSuffix(method: string): string {
+    if (method == kMatchAllName) {
+      return kGlobalFlag;
+    }
+
+    return "";
+  }
+
+  private readonly calledHint(isMethod: boolean): string {
+    if (isMethod) {
+      return kMethodsCalled;
+    }
+
+    return "";
+  }
+
+  private readonly flagsHint(hasFlags: boolean): string {
+    if (hasFlags) {
+      return kFlagsArgument;
+    }
+
+    return "";
+  }
+
+  private readonly orStringHint(isTextAllowed: boolean): string {
+    if (isTextAllowed) {
+      return kOrString;
+    }
+
+    return "";
+  }
+
+  private readonly namedGroupsHint(hasNamed: boolean): string {
+    if (hasNamed) {
+      return kNamedGroupsHint;
+    }
+
+    return "";
+  }
+
+  private readonly pluralEnd(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
+  }
+
+  private readonly isIn(found: Read<Set<int>>, group: int): boolean {
+    return group == 0 || found.has(group);
+  }
+}

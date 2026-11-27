@@ -14,7 +14,6 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
-import { ExpressionCollector } from "../../../semantic/code/expression-collector/expression-collector.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
@@ -38,15 +37,19 @@ import {
 
 partial class Lowering {
   private closureMade(frame: Frame, expr: FunctionExpr): IrValue | undefined {
-    const fn = expr.fn;
+    const tree = this.values.types.program.tree;
+
+    const fn = tree.functionOf(expr.fnId);
     const type = this.typeOf(expr);
     const shape = this.callbackShape(frame, expr);
-    const body = fn.body;
+    const body = tree.blockAt(fn.bodyId);
     const isPlain =
       !fn.isAsync &&
       !fn.isGenerator &&
-      fn.typeParams.length == 0 &&
-      fn.params.every((param) => this.isPlainParameter(param));
+      tree.typeParamsOf(fn.typeParamsList).length == 0 &&
+      tree
+        .paramsOf(fn.paramsList)
+        .every((param) => this.isPlainParameter(param));
     if (!isPlain || body == undefined || shape == undefined || shape.rest) {
       this.notLowered(frame.module, expr.loc, "this kind of function");
 
@@ -63,7 +66,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const captures = this.capturesOf(frame, fn);
+    const captures = this.capturesOf(frame, fn, this.lentClosures.has(fn.id));
     const name = this.ir.uniqueName(`tz.c${frame.module}.${fn.loc}.`);
     const code = this.ir.declare(name, result, [kPointerType, ...params]);
     const layout = this.closureLayout(name, captures, code.fn);
@@ -91,9 +94,12 @@ partial class Lowering {
     return { type: kPointerType, value: object, tz: type, owned: true };
   }
 
-  private capturesOf(frame: Read<Frame>, fn: FunctionDecl): ClosureCapture[] {
-    const collector = new ExpressionCollector();
-    const exprs = collector.functionExprs(fn, true);
+  private capturesOf(
+    frame: Read<Frame>,
+    fn: FunctionDecl,
+    isLent: boolean,
+  ): ClosureCapture[] {
+    const exprs = this.values.types.functionExprs(fn, true);
     const found: ClosureCapture[] = [];
     const seen = new Set<string>();
 
@@ -104,11 +110,24 @@ partial class Lowering {
 
       const capture = this.captureOf(frame, expr, seen, found.length);
       if (capture != undefined) {
-        found.push(capture);
+        found.push(this.lentCapture(capture, isLent));
       }
     }
 
     return found;
+  }
+
+  private readonly lentCapture(
+    capture: Read<ClosureCapture>,
+    isLent: boolean,
+  ): ClosureCapture {
+    return {
+      key: capture.key,
+      field: capture.field,
+      place: capture.place,
+      isShared: capture.isShared || isLent,
+      index: capture.index,
+    };
   }
 
   private captureOf(
@@ -158,7 +177,7 @@ partial class Lowering {
 
   private readonly capturedType(capture: Read<ClosureCapture>): Type {
     if (capture.isShared) {
-      return this.store.integer(64, false);
+      return this.values.types.store.integer(64, false);
     }
 
     return capture.place.tz;
@@ -182,31 +201,22 @@ partial class Lowering {
     const classId = this.nextClassId();
     const drop = this.dropFunction(name, struct, placed, []);
     const shape = { name: "", fields, flags: 0 };
-    const descriptor = this.layoutDescriptor(
-      shape,
-      drop,
-      placed,
-      classId,
-      [code],
-    );
+    const descriptor = this.layoutDescriptor(shape, drop, placed, classId, [
+      code,
+    ]);
 
-    return {
-      struct,
-      size,
-      fields: placed,
-      descriptor,
-      classId,
-      shape,
-      drop,
-      slots: [code],
-    };
+    this.layoutFields.set(classId, placed);
+    this.layoutShapes.set(classId, shape);
+    this.layoutSlots.set(classId, [code]);
+
+    return { struct, size, descriptor, classId, drop };
   }
 
   private readonly placedCapture(
     layout: Read<ClassLayout>,
     capture: Read<ClosureCapture>,
   ): ClosureCapture {
-    const spot = layout.fields.find((field) => field.name == capture.field);
+    const spot = this.layoutField(layout, capture.field);
 
     return {
       key: capture.key,
@@ -223,7 +233,7 @@ partial class Lowering {
     object: LLVMValue,
     capture: Read<ClosureCapture>,
   ): void {
-    const spot = layout.fields.find((field) => field.name == capture.field);
+    const spot = this.layoutField(layout, capture.field);
     if (spot == undefined) {
       return;
     }
@@ -238,6 +248,13 @@ partial class Lowering {
 
     const value = frame.made.load(place.type, place.pointer);
     const given: IrValue = { type: place.type, value, tz: place.tz };
+    if (this.isSingleOwner(given) && capture.key != kThisName) {
+      frame.made.store(value, address);
+      frame.made.store(this.ir.zero(place.type), place.pointer);
+
+      return;
+    }
+
     const owned = this.owning(frame, given);
 
     frame.made.store(owned.value, address);
@@ -308,8 +325,10 @@ partial class Lowering {
   }
 
   private closureBody(pending: Read<PendingClosure>): void {
+    const tree = this.values.types.program.tree;
+
     const fn = pending.fn;
-    const body = fn.body;
+    const body = tree.blockAt(fn.bodyId);
     const shape = pending.shape;
     const result = this.irType(shape.result);
     const params = this.parameterTypes(pending.module, fn, shape);
@@ -317,12 +336,10 @@ partial class Lowering {
       return;
     }
 
-    const made = new IrFunction(
-      this.ir,
-      pending.name,
-      result,
-      [kPointerType, ...params],
-    );
+    const made = new IrFunction(this.ir, pending.name, result, [
+      kPointerType,
+      ...params,
+    ]);
     const env = made.param(0);
     const id = this.frameId();
     let self: Place | undefined = undefined;
@@ -331,6 +348,13 @@ partial class Lowering {
       const address = made.field(pending.struct, env, capture.index);
       const tz = capture.place.tz;
       const type = capture.place.type;
+      if (capture.key == kThisName && capture.isShared) {
+        const slot = made.load(kPointerType, address);
+
+        self = { pointer: slot, type, tz, owner: id, isCaptured: true };
+
+        continue;
+      }
       if (capture.key == kThisName) {
         self = { pointer: address, type, tz, owner: id, isCaptured: true };
 
@@ -362,12 +386,20 @@ partial class Lowering {
 
     this.openScope(inner);
     this.parametersStored(inner, fn, shape, params);
-    this.statements(inner, body.body);
+    const bodyItem = tree.stmtsOf(body.bodyList);
+
+    this.statements(inner, bodyItem);
     this.closeScope(inner);
     this.finished(made, result, shape.result);
   }
 
-  private closureCall(frame: Frame, call: CallExpr, callee: Expr): IrValue | undefined {
+  private closureCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: Expr,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(callee);
     if (type == undefined || type.kind != TypeKind.Function) {
       this.notLowered(frame.module, call.loc, "a call of this function");
@@ -375,13 +407,17 @@ partial class Lowering {
       return undefined;
     }
 
-    const shape = type.shape;
+    const shape = this.values.types.store.functionShapeOf(type);
     const result = this.irType(shape.result);
     const params = this.shapeTypes(shape);
     if (result == undefined || params == undefined || shape.rest) {
       const kind = this.shapeProblem(shape);
 
-      this.notLowered(frame.module, call.loc, `a call of a function of type ${kind}`);
+      this.notLowered(
+        frame.module,
+        call.loc,
+        `a call of a function of type ${kind}`,
+      );
 
       return undefined;
     }
@@ -392,7 +428,14 @@ partial class Lowering {
     }
 
     const kept: IrValue[] = [];
-    const args = this.callArguments(frame, call.args, shape, call.loc, undefined, kept);
+    const args = this.callArguments(
+      frame,
+      tree.argumentsOf(call.argsList),
+      shape,
+      call.loc,
+      undefined,
+      kept,
+    );
     if (args == undefined) {
       return undefined;
     }
@@ -405,7 +448,7 @@ partial class Lowering {
     return { type: result, value, tz: shape.result, owned: true };
   }
 
-  private readonly codeCalled(
+  private codeCalled(
     frame: Read<Frame>,
     closure: LLVMValue,
     result: string,
@@ -421,10 +464,19 @@ partial class Lowering {
     return frame.made.indirectCall(signature, code, [closure, ...args]);
   }
 
-  private functionValue(frame: Read<Frame>, expr: NameExpr): IrValue | undefined {
+  private functionValue(
+    frame: Read<Frame>,
+    expr: NameExpr,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const target = this.values.valueTargetOf(expr, frame.module);
     const type = this.typeOf(expr);
-    if (target == undefined || type == undefined || type.kind != TypeKind.Function) {
+    if (
+      target == undefined ||
+      type == undefined ||
+      type.kind != TypeKind.Function
+    ) {
       this.notLowered(frame.module, expr.loc, "this name");
 
       return undefined;
@@ -432,10 +484,10 @@ partial class Lowering {
 
     const decl = this.values.functionDeclAt(target.module, target.loc);
     const shape = this.shapeOf(target.module, target.loc);
-    const opened = this.program.modules[target.module];
+    const opened = this.values.types.program.modules[target.module];
     const isOwn =
       decl != undefined &&
-      decl.typeParams.length == 0 &&
+      tree.typeParamsOf(decl.typeParamsList).length == 0 &&
       opened != undefined &&
       !opened.source.isLibrary;
     if (!isOwn || decl == undefined || shape == undefined || shape.rest) {
@@ -473,18 +525,18 @@ partial class Lowering {
     decl: FunctionDecl,
     shape: Read<FunctionShape>,
   ): LLVMValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.irType(shape.result);
     const params = this.shapeTypes(shape);
     if (result == undefined || params == undefined) {
       return undefined;
     }
 
-    const made = new IrFunction(
-      this.ir,
-      `${name}.thunk`,
-      result,
-      [kPointerType, ...params],
-    );
+    const made = new IrFunction(this.ir, `${name}.thunk`, result, [
+      kPointerType,
+      ...params,
+    ]);
     const frame: Frame = {
       made,
       id: this.frameId(),
@@ -499,7 +551,7 @@ partial class Lowering {
       const type = params[index] ?? kPointerType;
       const passed = shape.params[index];
       const value = made.param(index + 1);
-      const declared = decl.params[index];
+      const declared = tree.paramsOf(decl.paramsList)[index];
 
       args.push(value);
 

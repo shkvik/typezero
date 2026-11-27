@@ -19,11 +19,20 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const expected = this.arrays.jsonArrayOr(wanted);
-    const array = this.arrays.wantedArray(expected);
-    const hole = expr.elements.find((element) => element.hole);
+    const tree = this.types.program.tree;
+
+    const expected = this.types.jsonArrayOr(wanted);
+    const array = this.types.wantedArray(expected);
+    const hole = tree
+      .elementsOf(expr.elementsList)
+      .find((element) => element.hole);
     if (hole != undefined) {
-      this.report(module, hole.expr.loc, Code.ArrayHole, kNoDetails);
+      this.errors.write(
+        module,
+        tree.exprOf(hole.exprId).loc,
+        Code.ArrayHole,
+        kNoDetails,
+      );
 
       return this.looseElements(expr, module);
     }
@@ -33,40 +42,53 @@ partial class ExpressionTypes {
       return this.tupleTyped(expr, plain, module);
     }
 
-    const item = this.arrays.wantedItem(plain);
+    const item = this.types.wantedItem(plain);
 
     return this.listTyped(expr, item, module);
   }
 
   private looseElements(expr: ArrayLitExpr, module: int): Type {
-    for (const element of expr.elements) {
+    const tree = this.types.program.tree;
+
+    for (const element of tree.elementsOf(expr.elementsList)) {
       if (!element.hole) {
-        this.typed(element.expr, undefined, module);
+        const exprExpr = tree.exprOf(element.exprId);
+
+        this.typed(exprExpr, undefined, module);
       }
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private tupleTyped(expr: ArrayLitExpr, tuple: Type, module: int): Type {
+    const tree = this.types.program.tree;
+
     if (tuple.kind != TypeKind.Tuple) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const first = this.text.of(tuple);
-    const spread = expr.elements.find((element) => element.spread);
+    const first = this.types.typeText(tuple);
+    const spread = tree
+      .elementsOf(expr.elementsList)
+      .find((element) => element.spread);
     if (spread != undefined) {
-      this.report(module, spread.expr.loc, Code.TupleTakesNoSpread, {
-        first,
-      });
+      this.errors.write(
+        module,
+        tree.exprOf(spread.exprId).loc,
+        Code.TupleTakesNoSpread,
+        {
+          first,
+        },
+      );
 
       return this.looseElements(expr, module);
     }
 
-    const want = tuple.items.length;
-    const got = expr.elements.length;
+    const want = this.types.store.itemsOf(tuple).length;
+    const got = tree.elementsOf(expr.elementsList).length;
     if (want != got) {
-      this.report(module, expr.loc, Code.TupleLength, {
+      this.errors.write(module, expr.loc, Code.TupleLength, {
         first,
         word: `${want}`,
         other: `${got}`,
@@ -76,15 +98,17 @@ partial class ExpressionTypes {
     }
 
     for (let index = 0; index < want; index++) {
-      const element = expr.elements[index];
-      const item = tuple.items[index];
+      const element = tree.elementsOf(expr.elementsList)[index];
+      const item = this.types.store.itemsOf(tuple)[index];
       if (element == undefined || item == undefined) {
         continue;
       }
 
-      const place = this.arrays.elementPlace(index);
+      const place = this.types.elementPlace(index);
 
-      this.checked(element.expr, item, module, place);
+      const exprExpr = tree.exprOf(element.exprId);
+
+      this.checked(exprExpr, item, module, place);
     }
 
     return tuple;
@@ -103,16 +127,16 @@ partial class ExpressionTypes {
 
     this.firstPass(expr, item, draft, module);
 
-    const hint = this.arrays.literalHint(expr, draft);
+    const hint = this.types.literalHint(expr, draft);
 
     this.secondPass(expr, hint, draft, module);
 
     const element = item ?? this.joinedElement(expr, draft, module);
     if (element == undefined || element.kind == TypeKind.Error) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const array = this.store.arrayOf(element);
+    const array = this.types.store.arrayOf(element);
 
     this.coerceElements(expr, element, array, draft, module);
 
@@ -125,9 +149,11 @@ partial class ExpressionTypes {
     draft: ArrayDraft,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     let index = 0;
 
-    for (const element of expr.elements) {
+    for (const element of tree.elementsOf(expr.elementsList)) {
       this.firstPassElement(element, index, item, draft, module);
 
       index += 1;
@@ -141,20 +167,36 @@ partial class ExpressionTypes {
     draft: ArrayDraft,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (element.spread) {
-      return this.spreadElement(element.expr, index, item, draft, module);
+      return this.spreadElement(
+        tree.exprOf(element.exprId),
+        index,
+        item,
+        draft,
+        module,
+      );
     }
-    if (item == undefined && this.shapes.isNumberTree(element.expr)) {
+    if (
+      item == undefined &&
+      this.types.isNumberTree(tree.exprOf(element.exprId))
+    ) {
       return;
     }
 
-    const hint = this.arrays.elementHint(element.expr, item, draft.seen);
-    const type = this.typed(element.expr, hint, module);
+    const hint = this.types.elementHint(
+      tree.exprOf(element.exprId),
+      item,
+      draft.seen,
+    );
+    const expr = tree.exprOf(element.exprId);
+    const type = this.typed(expr, hint, module);
 
     draft.types.set(index, type);
-    draft.hasDecimal = draft.hasDecimal || this.arrays.isDecimalLike(type);
+    draft.hasDecimal = draft.hasDecimal || this.types.isDecimalLike(type);
 
-    this.arrays.seeElement(draft, type);
+    this.types.seeElement(draft, type);
   }
 
   private spreadElement(
@@ -164,29 +206,29 @@ partial class ExpressionTypes {
     draft: ArrayDraft,
     module: int,
   ): void {
-    const hint = this.arrays.spreadHint(item);
+    const hint = this.types.spreadHint(item);
     const type = this.typed(expr, hint, module);
 
-    const resumedError = this.functions.resumedCheck(
+    const resumedError = this.types.resumedCheck(
       expr,
       type,
       Code.SpreadResumes,
     );
 
-    this.reportFound(module, resumedError);
+    this.errors.writeFound(module, resumedError);
 
     const element = this.spreadItem(expr, type, module);
-    const source = this.arrays.spreadSource(type);
+    const source = this.types.spreadSource(type);
 
     draft.types.set(index, element);
     draft.spreads.set(index, source);
 
     if (type.kind == TypeKind.Array) {
-      draft.hasDecimal = draft.hasDecimal || this.arrays.isDecimalLike(element);
+      draft.hasDecimal = draft.hasDecimal || this.types.isDecimalLike(element);
     }
   }
 
-  private readonly spreadItem(expr: Expr, type: Type, module: int): Type {
+  private spreadItem(expr: Expr, type: Type, module: int): Type {
     const matched = this.matchItem(type);
     if (matched != undefined) {
       return matched;
@@ -194,10 +236,10 @@ partial class ExpressionTypes {
 
     const isLibrary =
       (type.kind == TypeKind.Instance &&
-        this.modules.isLibraryModule(type.module)) ||
-      this.resolver.isLibraryShape(type);
-    if (isLibrary || this.arrays.isUnsupportedSpread(type)) {
-      return this.store.plain(TypeKind.Error);
+        this.types.isLibraryModule(type.module)) ||
+      this.types.isLibraryShape(type);
+    if (isLibrary || this.types.isUnsupportedSpread(type)) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
     switch (type.kind) {
@@ -205,7 +247,7 @@ partial class ExpressionTypes {
       case TypeKind.String:
         return type;
       case TypeKind.Array:
-        return type.item;
+        return this.types.store.itemOf(type);
       case TypeKind.Tuple:
         return this.tupleItem(expr, type, module);
       case TypeKind.Dict:
@@ -215,18 +257,18 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly refusedSpread(expr: Expr, type: Type, code: Code, module: int): Type {
-    const checked = this.arrays.refusedSpread(expr, type, code);
+  private refusedSpread(expr: Expr, type: Type, code: Code, module: int): Type {
+    const checked = this.types.refusedSpread(expr, type, code);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly tupleItem(expr: Expr, tuple: Type, module: int): Type {
-    const checked = this.arrays.tupleItem(expr, tuple);
+  private tupleItem(expr: Expr, tuple: Type, module: int): Type {
+    const checked = this.types.tupleItem(expr, tuple);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -237,11 +279,14 @@ partial class ExpressionTypes {
     draft: ArrayDraft,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     let index = 0;
 
-    for (const element of expr.elements) {
+    for (const element of tree.elementsOf(expr.elementsList)) {
       if (!draft.types.has(index)) {
-        const type = this.typed(element.expr, hint, module);
+        const exprExpr = tree.exprOf(element.exprId);
+        const type = this.typed(exprExpr, hint, module);
 
         draft.types.set(index, type);
       }
@@ -250,14 +295,14 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly joinedElement(
+  private joinedElement(
     expr: ArrayLitExpr,
     draft: Read<ArrayDraft>,
     module: int,
   ): Type | undefined {
-    const checked = this.arrays.joinedElement(expr, draft);
+    const checked = this.types.joinedElement(expr, draft);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -269,28 +314,38 @@ partial class ExpressionTypes {
     draft: Read<ArrayDraft>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     let index = 0;
 
-    for (const item of expr.elements) {
-      const given = draft.types.get(index) ?? this.store.plain(TypeKind.Error);
+    for (const item of tree.elementsOf(expr.elementsList)) {
+      const given =
+        draft.types.get(index) ?? this.types.store.plain(TypeKind.Error);
       const spread = draft.spreads.get(index) ?? given;
       const source = this.matchList(spread) ?? spread;
 
       index += 1;
 
       if (!item.spread) {
-        this.coerce(item.expr, given, element, module, kNoPlace);
+        const exprExpr = tree.exprOf(item.exprId);
+
+        this.coerce(exprExpr, given, element, module, kNoPlace);
 
         continue;
       }
-      if (!this.arrays.spreadFits(source, element, array)) {
-        const first = this.text.of(source);
-        const second = this.text.of(array);
+      if (!this.types.spreadFits(source, element, array)) {
+        const first = this.types.typeText(source);
+        const second = this.types.typeText(array);
 
-        this.report(module, item.expr.loc, Code.SpreadMismatch, {
-          first,
-          second,
-        });
+        this.errors.write(
+          module,
+          tree.exprOf(item.exprId).loc,
+          Code.SpreadMismatch,
+          {
+            first,
+            second,
+          },
+        );
       }
     }
   }

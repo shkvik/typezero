@@ -1,0 +1,186 @@
+import {
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import { kFlagType, kPointerType } from "../const/lowering.const.tz";
+import {
+  ClassLayout,
+  Frame,
+  IrValue,
+  LayoutField,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private mixedSpots(type: Type, name: string): LayoutField[] {
+    const spots: LayoutField[] = [];
+    if (type.kind != TypeKind.Union) {
+      return spots;
+    }
+
+    for (const part of this.values.types.store.partsOf(type)) {
+      const partLayout = this.layoutOf(part);
+      const spot = this.layoutField(partLayout, name);
+      if (spot != undefined) {
+        spots.push(spot);
+      }
+    }
+
+    return spots;
+  }
+
+  private isMixedField(type: Type, name: string): boolean {
+    const spots = this.mixedSpots(type, name);
+    const first = spots[0];
+    if (first == undefined) {
+      return false;
+    }
+
+    return spots.some((spot) => spot.ir != first.ir);
+  }
+
+  private mixedFieldValue(
+    frame: Frame,
+    object: IrValue,
+    expr: MemberExpr,
+  ): IrValue | undefined {
+    const result = this.typeIn(frame, expr);
+    const resultIr = this.typeOrUndefined(result);
+    const type = object.tz;
+    if (result == undefined || resultIr == undefined) {
+      this.notLowered(frame.module, expr.loc, "a field of these objects");
+
+      return undefined;
+    }
+    if (type.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    const id = this.objectClassId(frame, object.value);
+    const end = frame.made.block("field.end");
+    const values: LLVMValue[] = [];
+    const blocks: LLVMBlock[] = [];
+    const isStatic = this.isStaticUnionField(object, result, expr);
+
+    for (const part of this.values.types.store.partsOf(type)) {
+      const layout = this.layoutOf(part);
+      const spot = this.layoutField(layout, expr.name);
+      if (layout == undefined || spot == undefined) {
+        continue;
+      }
+
+      const here = frame.made.block("field.here");
+      const next = frame.made.block("field.next");
+      const wanted = this.ir.integer(kFlagType, `${layout.classId}`);
+      const test = frame.made.integerCompare(IrIntPredicate.Equal, id, wanted);
+
+      frame.made.conditionalBranch(test, here, next);
+      frame.made.open(here);
+
+      const pointer = frame.made.field(layout.struct, object.value, spot.index);
+      const loaded: IrValue = {
+        type: spot.ir,
+        value: frame.made.load(spot.ir, pointer),
+        tz: spot.type,
+      };
+      const converted = this.converted(frame, loaded, result, expr.loc);
+      if (converted == undefined) {
+        return undefined;
+      }
+
+      const kept = this.keptOrStatic(frame, converted, isStatic);
+
+      values.push(kept.value);
+      blocks.push(frame.made.currentBlock());
+      frame.made.branch(end);
+      frame.made.open(next);
+    }
+
+    values.push(this.ir.zero(resultIr));
+    blocks.push(frame.made.currentBlock());
+    frame.made.branch(end);
+    frame.made.open(end);
+
+    const value = frame.made.phi(resultIr, values, blocks);
+
+    this.dropping(frame, object);
+
+    if (isStatic) {
+      return { type: resultIr, value, tz: result, isStatic: true };
+    }
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private isReshaped(source: Type, target: Type): boolean {
+    if (source.id == target.id) {
+      return false;
+    }
+    if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const from = this.layoutOf(source);
+    const to = this.layoutOf(target);
+    if (from == undefined || to == undefined) {
+      return false;
+    }
+
+    return !this.fieldsOf(to).every((field) => this.isSameSpot(from, field));
+  }
+
+  private readonly isSameSpot(
+    layout: Read<ClassLayout>,
+    field: LayoutField,
+  ): boolean {
+    const spot = this.layoutField(layout, field.name);
+    if (spot == undefined) {
+      return false;
+    }
+
+    return spot.index == field.index && spot.ir == field.ir;
+  }
+
+  private reshaped(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const from = this.layoutOf(value.tz);
+    const to = this.layoutOf(target);
+    if (from == undefined || to == undefined) {
+      return undefined;
+    }
+
+    const object = this.allocated(frame, to);
+
+    for (const field of this.fieldsOf(to)) {
+      const spot = this.layoutField(from, field.name);
+      if (spot == undefined) {
+        continue;
+      }
+
+      const pointer = frame.made.field(from.struct, value.value, spot.index);
+      const loaded: IrValue = {
+        type: spot.ir,
+        value: frame.made.load(spot.ir, pointer),
+        tz: spot.type,
+      };
+      const converted = this.converted(frame, loaded, field.type, loc);
+      if (converted == undefined) {
+        return undefined;
+      }
+
+      const place = this.fieldPlaceOf(frame, object, to, field);
+
+      this.stored(frame, place, converted);
+    }
+
+    this.dropping(frame, value);
+
+    return { type: kPointerType, value: object, tz: target, owned: true };
+  }
+}

@@ -1,9 +1,13 @@
+import { replace } from "tz:mem";
 import { LibraryExports } from "../library-exports/library-exports.tz";
 import "./partial/module-binder.partial.declared.tz";
 import "./partial/module-binder.partial.exports.tz";
 import "./partial/module-binder.partial.imports.tz";
 import { Code } from "../../../diagnostic/code.tz";
-import { Details } from "../../../diagnostic/types/message.types.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { ModulePath } from "../../../program/ast/types/ast.types.modules.tz";
 import {
   ModuleExport,
@@ -19,63 +23,116 @@ import { SourceLines } from "../../../program/source-lines/source-lines.tz";
 import { BindState, BoundModule } from "./types/module-binder.types.tz";
 
 export class ModuleBinder {
-  private readonly program: Program;
   private readonly ordered: BoundModule[];
-  private readonly byId: Map<int, BoundModule>;
+  private readonly byId: Map<int, int>;
   private readonly exports: LibraryExports;
 
-  public constructor(program: Own<Program>) {
-    this.program = program;
+  public constructor() {
     this.ordered = [];
-    this.byId = new Map<int, BoundModule>();
+    this.byId = new Map<int, int>();
     this.exports = new LibraryExports();
   }
 
-  public run(): ModuleNames[] {
-    for (const module of this.program.order) {
+  public run(program: Read<Program>): ModuleNames[] {
+    for (const module of program.order) {
       const bound = this.boundModule(module);
 
+      this.byId.set(module, this.ordered.length);
       this.ordered.push(bound);
-      this.byId.set(module.id, bound);
     }
 
-    for (const bound of this.ordered) {
-      this.declareNames(bound);
+    const count = this.ordered.length;
+
+    for (let at: int = 0; at < count; at++) {
+      this.declareNames(program, at);
+    }
+    for (let at: int = 0; at < count; at++) {
+      this.exportsOf(program, at);
+    }
+    for (let at: int = 0; at < count; at++) {
+      this.bindImports(program, at);
     }
 
-    for (const bound of this.ordered) {
-      this.exportsOf(bound);
-    }
-
-    for (const bound of this.ordered) {
-      this.bindImports(bound);
-    }
-
-    for (const bound of this.ordered) {
-      bound.names.errors.sort((first, second) => first.loc - second.loc);
-    }
-
-    return this.ordered.map((bound) => bound.names);
+    return this.frozenNames();
   }
 
-  private readonly boundModule(module: Own<Module>): BoundModule {
-    const names: ModuleNames = {
+  private readonly boundModule(module: int): BoundModule {
+    return {
       module,
       declared: new Map<string, int>(),
       exports: new Map<string, ModuleExport>(),
       imports: new Map<string, ModuleImport>(),
       errors: [],
+      state: BindState.New,
     };
-
-    return { names, state: BindState.New };
   }
 
-  private readonly linkedModule(
-    bound: Read<BoundModule>,
+  private frozenNames(): ModuleNames[] {
+    const frozen: ModuleNames[] = [];
+
+    for (const bound of this.ordered) {
+      bound.errors.sort((first, second) => first.loc - second.loc);
+
+      const declared = replace(bound.declared, new Map<string, int>());
+      const exports = replace(bound.exports, new Map<string, ModuleExport>());
+      const imports = replace(bound.imports, new Map<string, ModuleImport>());
+      const errors = replace(bound.errors, []);
+
+      frozen.push({
+        module: bound.module,
+        declared,
+        exports,
+        imports,
+        errors,
+      });
+    }
+
+    return frozen;
+  }
+
+  private readonly moduleAt(
+    program: Lent<Program>,
+    at: int,
+  ): Read<Module | undefined> {
+    const bound = this.ordered[at];
+    if (bound == undefined) {
+      return undefined;
+    }
+
+    return program.modules[bound.module];
+  }
+
+  private readonly isDeclaredAt(at: int, word: string): boolean {
+    const bound = this.ordered[at];
+
+    return bound != undefined && bound.declared.has(word);
+  }
+
+  private readonly exportAt(at: int, word: string): ModuleExport | undefined {
+    return this.ordered[at]?.exports.get(word);
+  }
+
+  private readonly exportsAt(
+    at: int,
+  ): Read<Map<string, ModuleExport>> | undefined {
+    return this.ordered[at]?.exports;
+  }
+
+  private readonly importAt(at: int, word: string): ModuleImport | undefined {
+    return this.ordered[at]?.imports.get(word);
+  }
+
+  private readonly linkedIndex(
+    program: Read<Program>,
+    at: int,
     from: ModulePath,
-  ): BoundModule | undefined {
-    const links = bound.names.module.links;
-    const link = links.find((one) => one.from.loc == from.loc);
+  ): int | undefined {
+    const module = this.moduleAt(program, at);
+    if (module == undefined) {
+      return undefined;
+    }
+
+    const link = module.links.find((one) => one.from.loc == from.loc);
     if (link == undefined || link.kind != LinkKind.Module) {
       return undefined;
     }
@@ -83,17 +140,31 @@ export class ModuleBinder {
     return this.byId.get(link.target);
   }
 
-  private readonly report(
-    bound: BoundModule,
-    loc: int,
-    code: Code,
-    details: Details,
-  ): void {
-    bound.names.errors.push({ code, loc, details });
+  private report(at: int, loc: int, code: Code, details: Details): void {
+    const bound = this.ordered[at];
+    if (bound != undefined) {
+      bound.errors.push({ code, loc, details });
+    }
   }
 
-  private readonly lineOf(bound: Read<BoundModule>, loc: int): string {
-    const lines = new SourceLines(bound.names.module.source.text);
+  private addErrors(at: int, errors: Read<SourceError[]>): void {
+    const bound = this.ordered[at];
+    if (bound == undefined) {
+      return;
+    }
+
+    for (const error of errors) {
+      bound.errors.push(error);
+    }
+  }
+
+  private readonly lineOf(program: Read<Program>, at: int, loc: int): string {
+    const module = this.moduleAt(program, at);
+    if (module == undefined) {
+      return "?";
+    }
+
+    const lines = new SourceLines(module.source.text);
     const place = lines.placeOf(loc);
 
     return `${place.line}`;

@@ -2,7 +2,7 @@ import { Span } from "../../../../program/ast/types/ast.types.span.tz";
 import {
   TypeForm,
   TypeRef,
-} from "../../../../program/ast/types/ast.types.types.tz";
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 export enum FunctionKind {
   Plain,
   Generator,

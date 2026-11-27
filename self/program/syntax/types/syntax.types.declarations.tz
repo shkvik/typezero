@@ -1,0 +1,44 @@
+import { Access } from "../../ast/types/ast.types.classes.tz";
+import {
+  DeclaredField,
+  DeclaredMemberKind,
+} from "../../ast/types/ast.types.declarations.tz";
+import { Param } from "./syntax.types.functions.tz";
+import { ExportDecl, ImportDecl } from "./syntax.types.modules.tz";
+import { Stmt } from "./syntax.types.statements.tz";
+import { TypeParamDecl, TypeRef } from "./syntax.types.types.tz";
+
+export type DeclaredSignature = {
+  readonly kind: DeclaredMemberKind.Method | DeclaredMemberKind.Constructor;
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly params: readonly Param[];
+};
+
+export type DeclaredMemberForm = DeclaredField | DeclaredSignature;
+
+export type DeclaredMember = {
+  readonly name: string;
+  readonly loc: int;
+  readonly access: Access;
+  readonly accessWritten: boolean;
+  readonly isStatic: boolean;
+  readonly form: DeclaredMemberForm;
+  readonly type?: TypeRef;
+};
+
+export type DeclaredClass = {
+  readonly name: string;
+  readonly loc: int;
+  readonly isAbstract: boolean;
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly base?: TypeRef;
+  readonly implemented: readonly TypeRef[];
+  readonly members: readonly DeclaredMember[];
+};
+
+export type DeclarationFile = {
+  readonly items: readonly Stmt[];
+  readonly classes: readonly DeclaredClass[];
+  readonly imports: readonly ImportDecl[];
+  readonly exports: readonly ExportDecl[];
+};

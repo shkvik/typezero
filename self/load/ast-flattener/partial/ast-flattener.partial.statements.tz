@@ -1,0 +1,320 @@
+import { AstFlattener } from "../ast-flattener.tz";
+import {
+  VarDeclarator,
+} from "../../../program/ast/types/ast.types.patterns.tz";
+import {
+  BlockStmt,
+  DoWhileStmt,
+  ExprStmt,
+  ForOfStmt,
+  ForStmt,
+  IfStmt,
+  JumpStmt,
+  LabeledStmt,
+  MarkerStmt,
+  ReturnStmt,
+  StmtKind,
+  SwitchCase,
+  SwitchStmt,
+  VarDeclStmt,
+  WhileStmt,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  VarDeclarator as SyntaxVarDeclarator,
+} from "../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  BlockStmt as SyntaxBlockStmt,
+  DoWhileStmt as SyntaxDoWhileStmt,
+  ExprStmt as SyntaxExprStmt,
+  ForOfStmt as SyntaxForOfStmt,
+  ForStmt as SyntaxForStmt,
+  IfStmt as SyntaxIfStmt,
+  JumpStmt as SyntaxJumpStmt,
+  LabeledStmt as SyntaxLabeledStmt,
+  MarkerStmt as SyntaxMarkerStmt,
+  ReturnStmt as SyntaxReturnStmt,
+  Stmt as SyntaxStmt,
+  SwitchCase as SyntaxSwitchCase,
+  SwitchStmt as SyntaxSwitchStmt,
+  VarDeclStmt as SyntaxVarDeclStmt,
+  WhileStmt as SyntaxWhileStmt,
+} from "../../../program/syntax/types/syntax.types.statements.tz";
+
+partial class AstFlattener {
+  private varDeclarator(node: Read<SyntaxVarDeclarator>): VarDeclarator {
+    const typeAnnId = this.typeRefAt(node.typeAnn);
+    const initId = this.exprAt(node.init);
+
+    return {
+      name: node.name,
+      origin: node.origin,
+      loc: node.loc,
+      typeAnnId,
+      initId,
+      form: node.form,
+    };
+  }
+
+  private blockStmt(node: Read<SyntaxBlockStmt>): int {
+    const bodyList = this.stmtList(node.body);
+    const id = this.stmts.length;
+    const record: BlockStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      bodyList,
+      end: node.end,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private varDeclStmt(node: Read<SyntaxVarDeclStmt>): int {
+    const declsList = this.varDeclaratorList(node.decls);
+    const id = this.stmts.length;
+    const record: VarDeclStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      isConst: node.isConst,
+      isUsing: node.isUsing,
+      declsList,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private exprStmt(node: Read<SyntaxExprStmt>): int {
+    const exprId = this.expr(node.expr);
+    const id = this.stmts.length;
+    const record: ExprStmt = { kind: node.kind, id, loc: node.loc, exprId };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private ifStmt(node: Read<SyntaxIfStmt>): int {
+    const condId = this.expr(node.cond);
+    const thenStmtId = this.stmt(node.thenStmt);
+    const elseStmtId = this.stmtAt(node.elseStmt);
+    const id = this.stmts.length;
+    const record: IfStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      condId,
+      thenStmtId,
+      elseStmtId,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private whileStmt(node: Read<SyntaxWhileStmt>): int {
+    const condId = this.expr(node.cond);
+    const bodyId = this.stmt(node.body);
+    const id = this.stmts.length;
+    const record: WhileStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      condId,
+      bodyId,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private doWhileStmt(node: Read<SyntaxDoWhileStmt>): int {
+    const bodyId = this.stmt(node.body);
+    const condId = this.expr(node.cond);
+    const id = this.stmts.length;
+    const record: DoWhileStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      bodyId,
+      condId,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private forStmt(node: Read<SyntaxForStmt>): int {
+    const initId = this.stmtAt(node.init);
+    const condId = this.exprAt(node.cond);
+    const stepId = this.exprAt(node.step);
+    const bodyId = this.stmtAt(node.body);
+    const id = this.stmts.length;
+    const record: ForStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      initId,
+      condId,
+      stepId,
+      bodyId,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private forOfStmt(node: Read<SyntaxForOfStmt>): int {
+    const bindingFlat = this.varDeclarator(node.binding);
+    const iterableId = this.expr(node.iterable);
+    const bodyId = this.stmt(node.body);
+    const id = this.stmts.length;
+    const record: ForOfStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      isConst: node.isConst,
+      isUsing: node.isUsing,
+      keys: node.keys,
+      isAwait: node.isAwait,
+      binding: bindingFlat,
+      iterableId,
+      bodyId,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private switchCase(node: Read<SyntaxSwitchCase>): SwitchCase {
+    const testId = this.exprAt(node.test);
+    const bodyList = this.stmtList(node.body);
+
+    return { loc: node.loc, testId, bodyList };
+  }
+
+  private switchStmt(node: Read<SyntaxSwitchStmt>): int {
+    const discriminantId = this.expr(node.discriminant);
+    const casesList = this.switchCaseList(node.cases);
+    const id = this.stmts.length;
+    const record: SwitchStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      discriminantId,
+      casesList,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private labeledStmt(node: Read<SyntaxLabeledStmt>): int {
+    const bodyId = this.stmt(node.body);
+    const id = this.stmts.length;
+    const record: LabeledStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      label: node.label,
+      bodyId,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private returnStmt(node: Read<SyntaxReturnStmt>): int {
+    const valueId = this.exprAt(node.value);
+    const id = this.stmts.length;
+    const record: ReturnStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      valueId,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private jumpStmt(node: Read<SyntaxJumpStmt>): int {
+    const id = this.stmts.length;
+    const record: JumpStmt = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      label: node.label,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private markerStmt(node: Read<SyntaxMarkerStmt>): int {
+    const id = this.stmts.length;
+    const record: MarkerStmt = { kind: node.kind, id, loc: node.loc };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private stmt(node: Read<SyntaxStmt>): int {
+    switch (node.kind) {
+      case StmtKind.Block:
+        return this.blockStmt(node);
+      case StmtKind.VarDecl:
+        return this.varDeclStmt(node);
+      case StmtKind.Function:
+        return this.functionDecl(node);
+      case StmtKind.Expr:
+        return this.exprStmt(node);
+      case StmtKind.If:
+        return this.ifStmt(node);
+      case StmtKind.While:
+        return this.whileStmt(node);
+      case StmtKind.DoWhile:
+        return this.doWhileStmt(node);
+      case StmtKind.For:
+        return this.forStmt(node);
+      case StmtKind.ForOf:
+        return this.forOfStmt(node);
+      case StmtKind.Switch:
+        return this.switchStmt(node);
+      case StmtKind.Labeled:
+        return this.labeledStmt(node);
+      case StmtKind.Return:
+        return this.returnStmt(node);
+      case StmtKind.Break:
+      case StmtKind.Continue:
+        return this.jumpStmt(node);
+      case StmtKind.Empty:
+      case StmtKind.Debugger:
+        return this.markerStmt(node);
+      case StmtKind.TypeAlias:
+        return this.typeAliasDecl(node);
+      case StmtKind.Enum:
+        return this.enumDecl(node);
+      case StmtKind.Class:
+        return this.classDecl(node);
+      case StmtKind.Handle:
+        return this.handleDecl(node);
+    }
+
+    return -1;
+  }
+}

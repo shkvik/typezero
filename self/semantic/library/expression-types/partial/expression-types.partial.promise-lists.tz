@@ -14,22 +14,26 @@ import {
 
 partial class ExpressionTypes {
   private promiseListCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (
-      callee.kind != ExprKind.Member ||
-      this.modules.isLibraryModule(module)
-    ) {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Member || this.types.isLibraryModule(module)) {
       return;
     }
 
-    const owner = callee.object;
+    const owner = tree.exprOf(callee.objectId);
     const isPromise =
       owner.kind == ExprKind.Name &&
       owner.name == kPromiseClass &&
       this.isGlobalUse(owner, module);
-    const list = expr.args[0]?.expr;
+    const list = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isList = kPromiseListStatics.includes(callee.name);
-    if (!isPromise || !isList || list == undefined || expr.args.length != 1) {
+    if (
+      !isPromise ||
+      !isList ||
+      list == undefined ||
+      tree.argumentsOf(expr.argsList).length != 1
+    ) {
       return;
     }
 
@@ -41,6 +45,8 @@ partial class ExpressionTypes {
     list: Expr,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const word = `${kPromiseClass}.${callee.name}`;
     const given = this.peekType(list, module);
     const base = this.types.definedType(given);
@@ -49,29 +55,35 @@ partial class ExpressionTypes {
     }
     if (base.kind != TypeKind.Array && base.kind != TypeKind.Tuple) {
       const other = this.promiseSpreadHint(word, list, base);
-      const first = this.text.of(given);
+      const first = this.types.typeText(given);
 
-      return this.report(module, list.loc, Code.PromiseListNotArray, {
+      return this.errors.write(module, list.loc, Code.PromiseListNotArray, {
         word,
         first,
         other,
       });
     }
     if (list.kind == ExprKind.ArrayLit) {
-      for (const element of list.elements) {
+      for (const element of tree.elementsOf(list.elementsList)) {
         if (!element.spread) {
-          this.promiseValueCheck(element.expr, word, module);
+          const expr = tree.exprOf(element.exprId);
+
+          this.promiseValueCheck(expr, word, module);
         }
       }
 
       return;
     }
     if (base.kind == TypeKind.Array) {
-      this.promiseItemCheck(list, base.item, word, module);
+      this.promiseItemCheck(list, this.types.store.itemOf(base), word, module);
     }
   }
 
-  private readonly promiseSpreadHint(word: string, list: Expr, base: Type): string {
+  private readonly promiseSpreadHint(
+    word: string,
+    list: Expr,
+    base: Type,
+  ): string {
     const isIterable =
       base.kind == TypeKind.Iterator || base.kind == TypeKind.Dict;
     if (!isIterable) {
@@ -97,7 +109,7 @@ partial class ExpressionTypes {
     this.promiseItemCheck(value, given, word, module);
   }
 
-  private readonly promiseItemCheck(
+  private promiseItemCheck(
     place: Expr,
     item: Type,
     word: string,
@@ -109,12 +121,15 @@ partial class ExpressionTypes {
     }
 
     const awaited = this.awaitedType(item);
-    if (awaited == item) {
+    if (awaited?.id == item.id) {
       return;
     }
 
-    const first = this.text.of(item);
+    const first = this.types.typeText(item);
 
-    this.report(module, place.loc, Code.PromiseListMayBe, { word, first });
+    this.errors.write(module, place.loc, Code.PromiseListMayBe, {
+      word,
+      first,
+    });
   }
 }

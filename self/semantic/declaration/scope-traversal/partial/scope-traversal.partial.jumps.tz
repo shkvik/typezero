@@ -10,32 +10,43 @@ import {
   SwitchCase,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { JumpKind, JumpTarget } from "../types/scope-traversal.types.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ScopeTraversal {
-  private traverseTarget(statement: Stmt, kind: JumpKind): void {
+  private traverseTarget(
+    program: Read<Program>,
+    statement: Stmt,
+    kind: JumpKind,
+  ): void {
     const labels = replace(this.pendingLabels, []);
     this.jumpTargets.push({ kind, labels });
-    this.traverseInTarget(statement);
+    this.traverseInTarget(program, statement);
     this.jumpTargets.pop();
   }
 
-  private traverseLabeled(statement: LabeledStmt, labels: Read<string[]>): void {
+  private traverseLabeled(
+    program: Read<Program>,
+    statement: LabeledStmt,
+    labels: Read<string[]>,
+  ): void {
+    const tree = program.tree;
+
     const label = statement.label;
     if (labels.includes(label) || this.hasLabel(label)) {
       this.report(statement.loc, Code.LabelDuplicate, { word: label });
     }
 
     const named = labels.concat([label]);
-    const body = statement.body;
+    const body = tree.stmtOf(statement.bodyId);
     if (body.kind == StmtKind.Labeled) {
-      return this.traverseLabeled(body, named);
+      return this.traverseLabeled(program, body, named);
     }
 
     const kind = this.targetKind(body);
     if (kind != JumpKind.Block) {
       this.pendingLabels = named;
 
-      return this.traverseTarget(body, kind);
+      return this.traverseTarget(program, body, kind);
     }
     if (this.isDeclaration(body)) {
       this.report(body.loc, Code.LabelOnDeclaration, kNoDetails);
@@ -44,7 +55,7 @@ partial class ScopeTraversal {
     }
 
     this.pendingLabels = named;
-    this.traverseTarget(body, JumpKind.Block);
+    this.traverseTarget(program, body, JumpKind.Block);
   }
 
   private readonly targetKind(statement: Stmt): JumpKind {
@@ -105,7 +116,10 @@ partial class ScopeTraversal {
     this.report(statement.loc, Code.ContinueOutside, kNoDetails);
   }
 
-  private readonly jumpTarget(label: string, isBreak: boolean): JumpTarget | undefined {
+  private readonly jumpTarget(
+    label: string,
+    isBreak: boolean,
+  ): Read<JumpTarget> | undefined {
     for (let index = this.jumpTargets.length - 1; index >= 0; index--) {
       const target = this.jumpTargets[index];
       if (target != undefined && this.isJumpingTo(target, label, isBreak)) {
@@ -131,13 +145,19 @@ partial class ScopeTraversal {
     return target.kind == JumpKind.Loop;
   }
 
-  private rememberCaseVariables(one: SwitchCase, noted: int[]): void {
-    for (const statement of one.body) {
+  private rememberCaseVariables(
+    program: Read<Program>,
+    one: SwitchCase,
+    noted: int[],
+  ): void {
+    const tree = program.tree;
+
+    for (const statement of tree.stmtsOf(one.bodyList)) {
       if (statement.kind != StmtKind.VarDecl) {
         continue;
       }
 
-      for (const decl of statement.decls) {
+      for (const decl of tree.declaratorsOf(statement.declsList)) {
         this.otherCaseVariables.add(decl.loc);
         noted.push(decl.loc);
       }

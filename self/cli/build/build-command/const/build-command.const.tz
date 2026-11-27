@@ -2,6 +2,7 @@ export const kBuildWord = "build";
 export const kOutputOption = "-o";
 export const kEmitIrOption = "--emit-llvm";
 export const kAuditOption = "--audit-counts";
+export const kCheckCountsOption = "--check-counts";
 export const kLibraryOption = "--library";
 export const kExecutableExtension = ".exe";
 export const kIrExtension = ".ll";

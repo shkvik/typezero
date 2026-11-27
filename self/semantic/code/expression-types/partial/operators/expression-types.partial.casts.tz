@@ -14,28 +14,32 @@ import {
 
 partial class ExpressionTypes {
   private castTyped(expr: CastExpr, module: int): Type {
+    const tree = this.types.program.tree;
+
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const to = this.resolver.resolve(expr.target, context);
-    const isArray = expr.operand.kind == ExprKind.ArrayLit;
-    const hint = this.operators.castHint(isArray, to);
-    const from = this.typed(expr.operand, hint, module);
+    const target = tree.typeRefOf(expr.targetId);
+    const to = this.types.resolve(target, context);
+    const isArray = tree.exprOf(expr.operandId).kind == ExprKind.ArrayLit;
+    const hint = this.types.castHint(isArray, to);
+    const operand = tree.exprOf(expr.operandId);
+    const from = this.typed(operand, hint, module);
     if (from.kind == TypeKind.Error) {
       return to;
     }
 
-    const code = this.operators.castCode(from, to, isArray);
-    const word = this.operators.castWord(expr, code, to);
-    const other = this.mismatches.conversionName(to);
+    const code = this.types.castCode(from, to, isArray);
+    const word = this.types.castWord(expr, code, to);
+    const other = this.types.conversionName(to);
 
-    this.report(module, expr.loc, code, {
+    this.errors.write(module, expr.loc, code, {
       word,
       other,
-      first: this.text.of(from),
-      second: this.text.of(to),
+      first: this.types.typeText(from),
+      second: this.types.typeText(to),
     });
 
     return to;

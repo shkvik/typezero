@@ -12,23 +12,28 @@ import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
   private childCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Name || this.types.isLibraryModule(module)) {
       return;
     }
-    if (expr.args.some((one) => one.spread) || expr.args.length == 0) {
+    if (
+      tree.argumentsOf(expr.argsList).some((one) => one.spread) ||
+      tree.argumentsOf(expr.argsList).length == 0
+    ) {
       return;
     }
 
     const target = this.targetOfName(callee, module);
-    const opened = this.program.modules[target?.module ?? -1];
+    const opened = this.types.program.modules[target?.module ?? -1];
     if (target == undefined || target.kind != SymbolKind.Function) {
       return;
     }
-    if (opened == undefined || !this.child.isChildModule(opened.name)) {
+    if (opened == undefined || !this.types.isChildModule(opened.name)) {
       return;
     }
-    if (!this.child.isRun(callee.name)) {
+    if (!this.types.isRun(callee.name)) {
       return;
     }
 
@@ -36,28 +41,40 @@ partial class ExpressionTypes {
   }
 
   private childRunCheck(expr: CallExpr, name: string, module: int): void {
-    const isExec = this.child.isExec(name);
-    const file = expr.args[0];
-    const list = expr.args[1];
+    const tree = this.types.program.tree;
+
+    const isExec = this.types.isExec(name);
+    const file = tree.argumentsOf(expr.argsList)[0];
+    const list = tree.argumentsOf(expr.argsList)[1];
     if (file == undefined) {
       return;
     }
 
-    this.childFileCheck(file.expr, isExec, module);
-    const isList =
-      !isExec && list != undefined && list.expr.kind != ExprKind.ObjectLit;
-    const later = expr.args[2];
-    if (!isExec && !isList && later != undefined) {
-      const optionsAtError = this.child.optionsAtError(later.expr.loc, name);
+    const exprExpr = tree.exprOf(file.exprId);
 
-      return this.reportFound(module, optionsAtError);
+    this.childFileCheck(exprExpr, isExec, module);
+    const isList =
+      !isExec &&
+      list != undefined &&
+      tree.exprOf(list.exprId).kind != ExprKind.ObjectLit;
+    const later = tree.argumentsOf(expr.argsList)[2];
+    if (!isExec && !isList && later != undefined) {
+      const optionsAtError = this.types.optionsAtError(
+        tree.exprOf(later.exprId).loc,
+        name,
+      );
+
+      return this.errors.writeFound(module, optionsAtError);
     }
-    if (isList && list != undefined && list.expr.kind == ExprKind.ArrayLit) {
-      this.childZeroCheck(list.expr.elements, module);
+    const listExpr = tree.exprAt(list?.exprId);
+    if (isList && listExpr != undefined && listExpr.kind == ExprKind.ArrayLit) {
+      const elements = tree.elementsOf(listExpr.elementsList);
+
+      this.childZeroCheck(elements, module);
     }
 
     const index = this.childOptionsAt(isList);
-    const options = this.child.options().slice();
+    const options = this.tables.childOptions().slice();
     const row: FsCall = {
       name,
       shape: FsShape.PathOnly,
@@ -79,17 +96,20 @@ partial class ExpressionTypes {
     return 1;
   }
 
-  private readonly childFileCheck(file: Expr, isExec: boolean, module: int): boolean {
+  private childFileCheck(file: Expr, isExec: boolean, module: int): boolean {
     if (file.kind != ExprKind.StringLit) {
       return true;
     }
     if (file.value.includes("\u0000")) {
-      this.reportFound(module, this.child.zeroFileError(file.loc, isExec));
+      this.errors.writeFound(
+        module,
+        this.types.zeroFileError(file.loc, isExec),
+      );
 
       return false;
     }
     if (file.value == "" && !isExec) {
-      this.reportFound(module, this.child.emptyNameError(file.loc));
+      this.errors.writeFound(module, this.types.emptyNameError(file.loc));
 
       return false;
     }
@@ -97,7 +117,9 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly childZeroCheck(elements: Read<ArrayElement[]>, module: int): boolean {
+  private childZeroCheck(elements: Read<ArrayElement[]>, module: int): boolean {
+    const tree = this.types.program.tree;
+
     let isFine = true;
 
     for (let index = 0; index < elements.length; index++) {
@@ -106,9 +128,12 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const value = element.expr;
+      const value = tree.exprOf(element.exprId);
       if (value.kind == ExprKind.StringLit && value.value.includes("\u0000")) {
-        this.reportFound(module, this.child.zeroArgError(value.loc, index));
+        this.errors.writeFound(
+          module,
+          this.types.zeroArgError(value.loc, index),
+        );
 
         isFine = false;
       }
@@ -134,7 +159,7 @@ partial class ExpressionTypes {
     this.childShellCheck(expr, index, name, isExec, module);
   }
 
-  private readonly childEncodingCheck(
+  private childEncodingCheck(
     encoding: Expr | undefined,
     name: string,
     module: int,
@@ -143,69 +168,83 @@ partial class ExpressionTypes {
       return true;
     }
     if (encoding.kind != ExprKind.StringLit) {
-      this.reportFound(module, this.child.encodingError(encoding.loc, name));
+      this.errors.writeFound(
+        module,
+        this.types.childEncodingError(encoding.loc, name),
+      );
 
       return false;
     }
-    if (this.child.isBufferMarker(encoding.value)) {
+    if (this.types.isBufferMarker(encoding.value)) {
       return true;
     }
 
-    const unknownError = this.byteSources.encodingError(encoding.loc, [
+    const unknownError = this.types.encodingError(encoding.loc, [
       encoding.value,
     ]);
 
-    this.reportFound(module, unknownError);
+    this.errors.writeFound(module, unknownError);
 
     return false;
   }
 
-  private readonly childStdioCheck(
+  private childStdioCheck(
     expr: CallExpr,
     index: int,
     name: string,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const stdio = this.fsOptionValue(expr, index, "stdio");
     if (stdio == undefined || stdio.kind == ExprKind.Undefined) {
       return;
     }
     if (stdio.kind == ExprKind.StringLit) {
-      const kindError = this.child.stdioKindError(stdio.loc, stdio);
+      const kindError = this.types.stdioKindError(stdio.loc, stdio);
 
-      return this.reportFound(module, kindError);
+      return this.errors.writeFound(module, kindError);
     }
     if (stdio.kind != ExprKind.ArrayLit) {
-      return this.reportFound(module, this.child.stdioError(stdio.loc, name));
+      return this.errors.writeFound(
+        module,
+        this.types.stdioError(stdio.loc, name),
+      );
     }
 
-    const fourth = stdio.elements[3];
+    const fourth = tree.elementsOf(stdio.elementsList)[3];
     if (fourth != undefined) {
-      this.reportFound(module, this.child.threeError(fourth.expr.loc));
+      this.errors.writeFound(
+        module,
+        this.types.threeError(tree.exprOf(fourth.exprId).loc),
+      );
     }
 
-    for (const element of stdio.elements.slice(0, 3)) {
-      const entryError = this.child.stdioEntryError(element);
+    for (const element of tree.elementsOf(stdio.elementsList).slice(0, 3)) {
+      const entryError = this.types.stdioEntryError(element);
       if (entryError != undefined) {
-        this.reportFound(module, entryError);
+        this.errors.writeFound(module, entryError);
       }
     }
   }
 
-  private readonly childLimitsCheck(expr: CallExpr, index: int, module: int): void {
+  private childLimitsCheck(expr: CallExpr, index: int, module: int): void {
     const directory = this.fsOptionValue(expr, index, "cwd");
     const isZero =
       directory != undefined &&
       directory.kind == ExprKind.StringLit &&
       directory.value.includes("\u0000");
     if (isZero && directory != undefined) {
-      this.reportFound(module, this.child.zeroCwdError(directory.loc));
+      this.errors.writeFound(module, this.types.zeroCwdError(directory.loc));
     }
 
     for (const limit of ["timeout", "maxBuffer"]) {
       const value = this.fsOptionValue(expr, index, limit);
       if (value != undefined && this.isNegativeNumber(value)) {
-        this.reportFound(module, this.child.negativeError(value.loc, limit));
+        this.errors.writeFound(
+          module,
+          this.types.negativeError(value.loc, limit),
+        );
       }
     }
 
@@ -213,20 +252,22 @@ partial class ExpressionTypes {
     if (signal == undefined || signal.kind != ExprKind.StringLit) {
       return;
     }
-    if (!this.child.isSignal(signal.value)) {
-      this.reportFound(
+    if (!this.types.isSignal(signal.value)) {
+      this.errors.writeFound(
         module,
-        this.child.noSignalError(signal.loc, signal.value),
+        this.types.noSignalError(signal.loc, signal.value),
       );
     }
   }
 
   private readonly isNegativeNumber(value: Expr): boolean {
+    const tree = this.types.program.tree;
+
     if (value.kind != ExprKind.Unary || value.op != UnaryOp.Neg) {
       return false;
     }
 
-    const operand = value.operand;
+    const operand = tree.exprOf(value.operandId);
 
     return operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
   }
@@ -249,20 +290,20 @@ partial class ExpressionTypes {
       return;
     }
 
-    const isText = this.intl.isTextLike(base);
-    if (!isText && !this.byteSources.isByteView(base)) {
-      const inputError = this.child.inputError(input.loc, name, given);
+    const isText = this.types.isTextLike(base);
+    if (!isText && !this.types.isByteView(base)) {
+      const inputError = this.types.inputError(input.loc, name, given);
 
-      return this.reportFound(module, inputError);
+      return this.errors.writeFound(module, inputError);
     }
 
     const encoding = this.fsOptionValue(expr, index, "encoding");
     const isMarked =
       encoding != undefined &&
       encoding.kind == ExprKind.StringLit &&
-      this.child.isBufferMarker(encoding.value);
+      this.types.isBufferMarker(encoding.value);
     if (isText && isMarked && isBuffer) {
-      this.reportFound(module, this.child.bufferTextError(input.loc));
+      this.errors.writeFound(module, this.types.bufferTextError(input.loc));
     }
   }
 
@@ -275,12 +316,15 @@ partial class ExpressionTypes {
     const given = this.peekType(signal, module);
     const base = this.types.definedType(given);
     const isFitting =
-      this.intl.isTextLike(base) ||
+      this.types.isTextLike(base) ||
       base.kind == TypeKind.Int ||
       base.kind == TypeKind.Error ||
-      this.intl.isNumberLike(base);
+      this.types.isIntlNumberLike(base);
     if (!isFitting) {
-      this.reportFound(module, this.child.killSignalError(signal.loc, given));
+      this.errors.writeFound(
+        module,
+        this.types.killSignalError(signal.loc, given),
+      );
     }
   }
 
@@ -298,27 +342,30 @@ partial class ExpressionTypes {
 
     const given = this.peekType(shell, module);
     const base = this.types.definedType(given);
-    if (this.intl.isTextLike(base) || base.kind == TypeKind.Error) {
+    if (this.types.isTextLike(base) || base.kind == TypeKind.Error) {
       return;
     }
 
-    const isFlag = this.intl.isFlagType(base);
+    const isFlag = this.types.isFlagType(base);
     const isLiteral = shell.kind == ExprKind.BoolLit;
     if (isFlag && isExec) {
       const isTrue = isLiteral && shell.kind == ExprKind.BoolLit && shell.value;
       if (!isTrue) {
-        this.reportFound(module, this.child.execShellError(shell.loc));
+        this.errors.writeFound(module, this.types.execShellError(shell.loc));
       }
 
       return;
     }
     if (isFlag && !isLiteral) {
-      this.reportFound(module, this.child.shellFlagError(shell.loc, name));
+      this.errors.writeFound(
+        module,
+        this.types.shellFlagError(shell.loc, name),
+      );
 
       return;
     }
     if (!isFlag) {
-      this.reportFound(module, this.child.shellError(shell.loc, given));
+      this.errors.writeFound(module, this.types.shellError(shell.loc, given));
     }
   }
 }

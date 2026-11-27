@@ -23,21 +23,21 @@ partial class ExpressionTypes {
       return this.thisTyped(expr, module);
     }
     if (this.legacyValueCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.isDecimalName(expr, module)) {
-      this.report(module, expr.loc, Code.DecimalNameValue, kNoDetails);
+      this.errors.write(module, expr.loc, Code.DecimalNameValue, kNoDetails);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.builtinValueCheck(expr, wanted, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.objectValueCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.nodeValueCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const forwarded = this.builtinFunctionValue(expr, wanted, module);
@@ -45,12 +45,12 @@ partial class ExpressionTypes {
       return forwarded;
     }
     if (this.notLoadedCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const target = this.targetOfName(expr, module);
     if (target == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.laterBlockCheck(expr, target, module);
@@ -74,20 +74,22 @@ partial class ExpressionTypes {
       }
       case SymbolKind.Class:
         if (this.genericClassValueCheck(expr, target, wanted, module)) {
-          return this.store.plain(TypeKind.Error);
+          return this.types.store.plain(TypeKind.Error);
         }
 
         return this.classValue(target);
       case SymbolKind.Enum:
-        if (this.statements.isRecordWanted(wanted)) {
-          return this.store.plain(TypeKind.Error);
+        if (this.types.isRecordWanted(wanted)) {
+          return this.types.store.plain(TypeKind.Error);
         }
 
-        this.report(module, expr.loc, Code.EnumAsValue, { word: expr.name });
+        this.errors.write(module, expr.loc, Code.EnumAsValue, {
+          word: expr.name,
+        });
 
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
     }
   }
 
@@ -115,15 +117,16 @@ partial class ExpressionTypes {
   private variableTyped(target: ValueTarget, wanted: Type | undefined): Type {
     const door = this.door(target.module, target.loc);
     if (door == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const texts = door.texts?.slice();
+    const key = `${target.module} ${target.loc}`;
+    const texts = this.doorTexts.get(key)?.slice();
     if (wanted == undefined || texts == undefined) {
       return door.type;
     }
 
-    return this.literals.textChoice(texts, wanted) ?? door.type;
+    return this.types.textChoice(texts, wanted) ?? door.type;
   }
 
   private parameterTyped(target: ValueTarget): Type {
@@ -135,12 +138,12 @@ partial class ExpressionTypes {
 
     const slot = this.record(target.module)?.params.get(target.loc);
     if (slot == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.functionAt(target.module, slot.fn.loc);
 
-    return this.paramTypes.get(key) ?? this.store.plain(TypeKind.Error);
+    return this.paramTypes.get(key) ?? this.types.store.plain(TypeKind.Error);
   }
 
   private readonly isLibraryName(expr: NameExpr, module: int): boolean {
@@ -154,16 +157,22 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const opened = this.program.modules[target.module];
+    const opened = this.types.program.modules[target.module];
 
     return opened != undefined && opened.source.isLibrary;
   }
 
-  public readonly valueTargetOf(expr: NameExpr, module: int): ValueTarget | undefined {
+  public readonly valueTargetOf(
+    expr: NameExpr,
+    module: int,
+  ): ValueTarget | undefined {
     return this.targetOfName(expr, module);
   }
 
-  private readonly targetOfName(expr: NameExpr, module: int): ValueTarget | undefined {
+  private readonly targetOfName(
+    expr: NameExpr,
+    module: int,
+  ): ValueTarget | undefined {
     return this.targetOfUse(expr.loc, expr.name, module);
   }
 
@@ -207,14 +216,18 @@ partial class ExpressionTypes {
   }
 
   private indexGlobalValues(): void {
-    for (const opened of this.program.globals) {
-      const module = opened.id;
+    const tree = this.types.program.tree;
 
-      for (const item of opened.file.items) {
+    for (const module of this.types.program.globals) {
+      const opened = this.types.program.modules[module];
+      const items = tree.stmtsOf(opened?.file.itemsList);
+      const classes = tree.declaredClassesOf(opened?.declaredList);
+
+      for (const item of items) {
         this.indexGlobalItem(item, module);
       }
 
-      for (const declared of opened.declared) {
+      for (const declared of classes) {
         this.keepGlobal(declared.name, {
           module,
           kind: SymbolKind.Class,
@@ -225,9 +238,11 @@ partial class ExpressionTypes {
   }
 
   private indexGlobalItem(item: Stmt, module: int): void {
+    const tree = this.types.program.tree;
+
     switch (item.kind) {
       case StmtKind.VarDecl:
-        for (const decl of item.decls) {
+        for (const decl of tree.declaratorsOf(item.declsList)) {
           this.keepGlobal(decl.name, {
             module,
             kind: SymbolKind.Variable,
@@ -255,20 +270,27 @@ partial class ExpressionTypes {
     this.globalValues.set(name, target);
   }
 
-  private readonly exportedValue(module: int, name: string): ValueTarget | undefined {
-    const opened = this.program.modules[module];
+  private readonly exportedValue(
+    module: int,
+    name: string,
+  ): ValueTarget | undefined {
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[module];
     if (module < 0 || opened == undefined) {
       return undefined;
     }
 
-    for (const item of opened.file.items) {
-      const found = this.statements.itemTarget(item, module, name);
+    for (const item of tree.stmtsOf(opened.file.itemsList)) {
+      const found = this.types.itemTarget(item, module, name);
       if (found != undefined) {
         return found;
       }
     }
 
-    const declared = opened.declared.find((one) => one.name == name);
+    const declared = tree
+      .declaredClassesOf(opened.declaredList)
+      .find((one) => one.name == name);
     if (declared == undefined) {
       return undefined;
     }
@@ -276,16 +298,16 @@ partial class ExpressionTypes {
     return { module, kind: SymbolKind.Class, loc: declared.loc };
   }
 
-  private readonly objectValueCheck(expr: NameExpr, module: int): boolean {
+  private objectValueCheck(expr: NameExpr, module: int): boolean {
     const found = kObjectExamples.find((one) => one.name == expr.name);
-    if (found == undefined || this.memberObjects.has(expr)) {
+    if (found == undefined || this.memberObjects.has(expr.id)) {
       return false;
     }
     if (!this.isGlobalUse(expr, module)) {
       return false;
     }
 
-    this.report(module, expr.loc, Code.ObjectNameValue, {
+    this.errors.write(module, expr.loc, Code.ObjectNameValue, {
       word: expr.name,
       other: found.example,
     });

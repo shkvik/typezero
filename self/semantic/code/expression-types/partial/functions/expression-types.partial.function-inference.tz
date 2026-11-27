@@ -1,0 +1,434 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  MethodKind,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  BodySource,
+  FunctionDecl,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kInferenceRounds } from "../../const/expression-types.const.tz";
+import {
+  FunctionFrame,
+  ParameterShape,
+  ReturnedValue,
+  StalledFunction,
+} from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private inferRounds(
+    key: string,
+    fn: FunctionDecl,
+    shape: Read<ParameterShape>,
+    module: int,
+  ): void {
+    let assumed: Type | undefined = undefined;
+
+    for (let round = 1; round <= kInferenceRounds; round++) {
+      const doors = this.doorOrder.length;
+      const functions = this.functionOrder.length;
+      const pending = this.recursions.length;
+      const used = this.assumedCalls.length;
+      const frame = this.inferredFrame(fn, module);
+      if (frame == undefined) {
+        const unknown = this.types.store.plain(TypeKind.Error);
+        const signature = this.types.signatureOf(shape, unknown);
+
+        this.setFunctionType(key, signature);
+
+        return;
+      }
+
+      const hits = this.recursions.slice(pending);
+      const uses = this.assumedCalls.slice(used);
+      const isOwn = hits.includes(key) || uses.includes(key);
+      if (!isOwn && hits.length > 0) {
+        const found = this.quietResult(fn, frame, module);
+
+        this.stall(fn, frame, hits, module);
+
+        const signature = this.types.signatureOf(shape, found);
+
+        this.setFunctionType(key, signature);
+
+        return;
+      }
+
+      const found = this.cycleResult(fn, frame, isOwn, assumed, module);
+      const next = this.types.widenedResult(assumed, found);
+      if (isOwn && assumed != undefined && next.kind == TypeKind.Error) {
+        const word = this.types.functionName(fn);
+
+        this.errors.write(module, fn.loc, Code.ReturnsCycleDiffer, { word });
+
+        const signature = this.types.signatureOf(shape, next);
+
+        this.setFunctionType(key, signature);
+
+        return;
+      }
+
+      const isLast = round == kInferenceRounds || next.kind == TypeKind.Error;
+      if (!isOwn || next.id == assumed?.id || isLast) {
+        const result = this.frameResult(fn, frame, module);
+        const signature = this.types.signatureOf(shape, result);
+
+        this.setFunctionType(key, signature);
+
+        return;
+      }
+
+      assumed = next;
+
+      const signature = this.types.signatureOf(shape, next);
+
+      this.assumeFunctionType(key, signature);
+      this.forgetSince(doors, functions);
+    }
+  }
+
+  private stall(
+    fn: FunctionDecl,
+    frame: Read<FunctionFrame>,
+    hits: Read<string[]>,
+    module: int,
+  ): void {
+    const isValued = frame.returns.some(
+      (one) => !this.types.isVoided(one.value),
+    );
+    if (isValued || frame.recursive.length == 0) {
+      return;
+    }
+
+    for (const hit of hits) {
+      const stall: StalledFunction = { fn, module };
+
+      if (!this.stalled.has(hit)) {
+        this.stalled.set(hit, []);
+      }
+
+      this.stalled.get(hit)?.push(stall);
+    }
+  }
+
+  private forgetSince(doors: int, functions: int): void {
+    for (const key of this.doorOrder.slice(doors)) {
+      this.doors.delete(key);
+      this.doorTexts.delete(key);
+    }
+
+    for (const key of this.functionOrder.slice(functions)) {
+      this.functionDoors.delete(key);
+    }
+  }
+
+  private cycleResult(
+    fn: FunctionDecl,
+    frame: Read<FunctionFrame>,
+    isOwn: boolean,
+    assumed: Type | undefined,
+    module: int,
+  ): Type {
+    const found = this.quietResult(fn, frame, module);
+    if (!isOwn || assumed != undefined || found.kind != TypeKind.Error) {
+      return found;
+    }
+
+    const known = frame.returns.filter(
+      (one) =>
+        !this.types.isVoided(one.value) && one.type.kind != TypeKind.Error,
+    );
+    if (known.length == 0 || known.length == frame.returns.length) {
+      return found;
+    }
+
+    this.errors.beginTrial();
+
+    const joined = this.joinedReturns(fn, known, module);
+
+    this.errors.endTrial();
+
+    return joined ?? found;
+  }
+
+  private quietResult(
+    fn: FunctionDecl,
+    frame: Read<FunctionFrame>,
+    module: int,
+  ): Type {
+    this.errors.beginTrial();
+
+    const result = this.frameResult(fn, frame, module);
+
+    this.errors.endTrial();
+
+    return result;
+  }
+
+  private usedFunction(module: int, loc: int): Type {
+    const tree = this.types.program.tree;
+
+    const fn = this.record(module)?.functions.get(loc);
+    const type = this.functionAt(module, loc);
+
+    if (fn == undefined || tree.typeParamsOf(fn.typeParamsList).length > 0) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+    if (type.kind != TypeKind.Function) {
+      return type;
+    }
+
+    const shape = this.types.store.functionShapeOf(type);
+    const isBroken =
+      shape.result.kind == TypeKind.Error ||
+      shape.params.some((param) => param.type.kind == TypeKind.Error);
+    if (isBroken) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    return type;
+  }
+
+  private readonly isBodyWalked(fn: FunctionDecl, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[module];
+    if (opened == undefined) {
+      return false;
+    }
+    if (opened.source.isLibrary && !this.types.isTypedLibrary(module)) {
+      return false;
+    }
+    if (fn.role?.method == MethodKind.Abstract) {
+      return false;
+    }
+
+    return (
+      tree.blockAt(fn.bodyId) != undefined &&
+      fn.bodySource == BodySource.Written
+    );
+  }
+
+  private walkWritten(fn: FunctionDecl, result: Type, module: int): void {
+    const tree = this.types.program.tree;
+
+    const body = tree.blockAt(fn.bodyId);
+    if (body == undefined || !this.isBodyWalked(fn, module)) {
+      return;
+    }
+    if (this.types.isAssertion(fn)) {
+      return;
+    }
+
+    const inner = this.types.innerResult(result, fn);
+    const frame = this.types.frameOf(fn, inner);
+
+    this.enterGenerator(frame, result);
+    this.initStart(fn);
+    const bodyItem = tree.stmtsOf(body.bodyList);
+
+    this.walkStatements(bodyItem, frame, module);
+    this.initEnd(fn, body, module);
+    this.leaveGenerator(frame);
+    this.rememberGuard(fn, frame, module);
+    const writtenResultError = this.types.writtenResultCheck(fn, result, frame);
+
+    this.errors.writeFound(module, writtenResultError);
+
+    const isOpen =
+      inner.kind == TypeKind.Void ||
+      inner.kind == TypeKind.Error ||
+      inner.kind == TypeKind.Unknown ||
+      inner.kind == TypeKind.Undefined ||
+      this.types.isOptional(inner);
+    if (isOpen || this.isAlwaysReturning(body, module)) {
+      return;
+    }
+
+    const word = this.types.functionLabel(fn);
+    const first = this.types.typeText(inner);
+
+    this.errors.write(module, fn.loc, Code.ReturnOnEveryPath, { word, first });
+  }
+
+  private inferredFrame(
+    fn: FunctionDecl,
+    module: int,
+  ): FunctionFrame | undefined {
+    const tree = this.types.program.tree;
+
+    const body = tree.blockAt(fn.bodyId);
+    if (body == undefined || !this.isBodyWalked(fn, module)) {
+      return undefined;
+    }
+
+    const frame = this.types.frameOf(fn, undefined);
+
+    this.facts = new Map<string, Type>();
+    this.enterGenerator(frame, undefined);
+    this.initStart(fn);
+    const bodyItem = tree.stmtsOf(body.bodyList);
+
+    this.walkStatements(bodyItem, frame, module);
+    this.initEnd(fn, body, module);
+    this.leaveGenerator(frame);
+    this.rememberGuard(fn, frame, module);
+
+    return frame;
+  }
+
+  private frameResult(
+    fn: FunctionDecl,
+    frame: Read<FunctionFrame>,
+    module: int,
+  ): Type {
+    const generator = frame.generator;
+    if (generator != undefined) {
+      return this.generatorResult(fn, frame, generator, module);
+    }
+    if (fn.isGenerator) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const value = this.commonResult(fn, frame, module);
+    if (!fn.isAsync || value.kind == TypeKind.Error) {
+      return value;
+    }
+
+    return this.types.store.promiseOf(value);
+  }
+
+  private commonResult(
+    fn: FunctionDecl,
+    frame: Read<FunctionFrame>,
+    module: int,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const returns = frame.returns;
+    const isValued = returns.some((one) => !this.types.isVoided(one.value));
+    if (!isValued && frame.recursive.length > 0) {
+      return this.reportRecursive(fn, frame, module);
+    }
+    if (!isValued) {
+      return this.types.store.plain(TypeKind.Void);
+    }
+
+    const isUnknown = returns.some((one) => one.type.kind == TypeKind.Error);
+    if (isUnknown) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const common = this.joinedReturns(fn, returns, module);
+    if (common != undefined && common.kind == TypeKind.Error) {
+      return common;
+    }
+
+    const isFallingOff = !this.isAlwaysReturning(
+      tree.blockAt(fn.bodyId),
+      module,
+    );
+    const isUndefined =
+      isFallingOff ||
+      frame.hasEmptyReturn ||
+      returns.some((one) => one.type.kind == TypeKind.Undefined);
+    if (common != undefined && isUndefined && common.kind != TypeKind.Void) {
+      return this.types.optional(common);
+    }
+    if (common != undefined) {
+      return common;
+    }
+
+    const word = this.types.functionName(fn);
+
+    this.errors.write(module, fn.loc, Code.ReturnsOnlyUndefined, { word });
+
+    return this.types.store.plain(TypeKind.Error);
+  }
+
+  private reportRecursive(
+    fn: FunctionDecl,
+    frame: Read<FunctionFrame>,
+    module: int,
+  ): Type {
+    const key = `${module} ${fn.loc}`;
+    const word = this.types.functionName(fn);
+    const isSelfOnly =
+      !this.calledBack.has(key) && frame.recursive.every((call) => call == key);
+
+    if (isSelfOnly) {
+      this.errors.write(module, fn.loc, Code.ReturnsOnlySelfCalls, { word });
+    } else {
+      this.errors.write(module, fn.loc, Code.ReturnsOnlyCalledBack, { word });
+    }
+
+    for (const one of this.stalled.get(key) ?? []) {
+      const other = this.types.functionName(one.fn);
+
+      this.errors.write(one.module, one.fn.loc, Code.ReturnsOnlyCalledBack, {
+        word: other,
+      });
+    }
+
+    return this.types.store.plain(TypeKind.Error);
+  }
+
+  private joinedReturns(
+    fn: FunctionDecl,
+    returns: Read<ReturnedValue[]>,
+    module: int,
+    code: Code = Code.ReturnsDiffer,
+  ): Type | undefined {
+    const ordered = this.literalsLast(returns, module);
+    let common: Type | undefined = undefined;
+
+    for (const one of ordered) {
+      if (common == undefined) {
+        common = one.type;
+
+        continue;
+      }
+
+      const adapted = this.literalTarget(one.value, one.type, common, module);
+      if (one.type.id != common.id && adapted != undefined) {
+        continue;
+      }
+
+      const joined = this.types.unionUnify(common, one.type);
+      if (joined == undefined || joined.kind == TypeKind.Error) {
+        const word = this.types.functionName(fn);
+        const first = this.types.typeText(one.type);
+        const second = this.types.typeText(common);
+
+        const at = this.yieldOf.get(one.value.id) ?? one.value.loc;
+
+        this.errors.write(module, at, code, { word, first, second });
+
+        return this.types.store.plain(TypeKind.Error);
+      }
+
+      common = joined;
+    }
+
+    return common;
+  }
+
+  private literalsLast(
+    returns: Read<ReturnedValue[]>,
+    module: int,
+  ): ReturnedValue[] {
+    const typed = returns.filter((one) => one.type.kind != TypeKind.Undefined);
+    const plain = typed.filter((one) => !this.isWholeReturn(one, module));
+    const wholes = typed.filter((one) => this.isWholeReturn(one, module));
+
+    return plain.concat(wholes);
+  }
+
+  private isWholeReturn(one: ReturnedValue, module: int): boolean {
+    return one.type.kind == TypeKind.Int && this.isWholeTree(one.value, module);
+  }
+}

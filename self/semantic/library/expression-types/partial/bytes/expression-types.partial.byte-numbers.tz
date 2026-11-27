@@ -26,22 +26,28 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): boolean {
-    const owner = this.byteNumbers.ownerOf(instance);
+    const tree = this.types.program.tree;
+
+    const owner = this.types.ownerOf(instance);
     if (owner == undefined) {
       return false;
     }
 
     const word = member.name;
-    const method = this.byteNumbers.methodOf(word, owner);
+    const method = this.types.methodOf(word, owner);
     if (method != undefined && method.isBigInt) {
-      this.report(module, member.loc, Code.NoBigint, { word });
-      this.looseArguments(expr.args, module);
+      this.errors.write(module, member.loc, Code.NoBigint, { word });
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return true;
     }
     if (owner == ByteOwner.Buffer && word == kSliceName) {
-      this.report(module, member.loc, Code.BufferSlice, kNoDetails);
-      this.looseArguments(expr.args, module);
+      this.errors.write(module, member.loc, Code.BufferSlice, kNoDetails);
+      const argsItem = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(argsItem, module);
 
       return true;
     }
@@ -55,12 +61,14 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): void {
-    const owner = this.byteNumbers.ownerOf(instance);
+    const tree = this.types.program.tree;
+
+    const owner = this.types.ownerOf(instance);
     if (owner == undefined) {
       return;
     }
 
-    const method = this.byteNumbers.methodOf(member.name, owner);
+    const method = this.types.methodOf(member.name, owner);
     if (method == undefined || method.isBigInt) {
       return;
     }
@@ -68,12 +76,12 @@ partial class ExpressionTypes {
       return this.variableNumberCheck(expr, member, method, module);
     }
 
-    const info = this.byteNumbers.infoOf(method);
+    const info = this.types.infoOf(method);
     if (info == undefined) {
       return;
     }
 
-    const places = this.byteNumbers.placesOf(method, owner, info.size);
+    const places = this.types.placesOf(method, owner, info.size);
     if (!this.isPlacedCall(expr, places)) {
       return;
     }
@@ -87,7 +95,12 @@ partial class ExpressionTypes {
     const offset = this.placedArgument(expr, places.offset);
     const what = `the offset of '${member.name}'`;
 
-    this.requireUpTo(offset, member.object, { what, less: info.size }, module);
+    this.requireUpTo(
+      offset,
+      tree.exprOf(member.objectId),
+      { what, less: info.size },
+      module,
+    );
   }
 
   private variableNumberCheck(
@@ -96,7 +109,9 @@ partial class ExpressionTypes {
     method: NumberMethod,
     module: int,
   ): void {
-    const places = this.byteNumbers.placesOf(method, ByteOwner.Buffer, 0);
+    const tree = this.types.program.tree;
+
+    const places = this.types.placesOf(method, ByteOwner.Buffer, 0);
     const count = this.placedArgument(expr, places.count);
     const offset = this.placedArgument(expr, places.offset);
     const isPlaced = this.isPlacedCall(expr, places);
@@ -106,35 +121,42 @@ partial class ExpressionTypes {
 
     const given = this.peekType(count, module);
     const constant = this.intConstant(count, given, module);
-    const width = this.byteNumbers.countOf(constant);
+    const width = this.types.countOf(constant);
     if (width == undefined) {
-      const countError = this.byteNumbers.countError(count.loc, member.name);
+      const countError = this.types.countError(count.loc, member.name);
 
-      return this.reportFound(module, countError);
+      return this.errors.writeFound(module, countError);
     }
 
     const what = `the offset of '${member.name}'`;
 
-    this.requireUpTo(offset, member.object, { what, less: width }, module);
+    this.requireUpTo(
+      offset,
+      tree.exprOf(member.objectId),
+      { what, less: width },
+      module,
+    );
 
     const value = this.placedArgument(expr, places.value);
     if (value == undefined) {
       return;
     }
 
-    const range = this.byteNumbers.variableRange(width, method.isSigned);
+    const range = this.types.variableRange(width, method.isSigned);
     if (this.isFittingValue(value, range, module)) {
       return;
     }
 
-    const variableError = this.byteNumbers.variableError(value.loc, range);
+    const variableError = this.types.variableError(value.loc, range);
 
-    this.reportFound(module, variableError);
+    this.errors.writeFound(module, variableError);
   }
 
   private readonly isPlacedCall(expr: CallExpr, places: NumberPlaces): boolean {
-    const count = expr.args.length;
-    const hasSpread = expr.args.some((arg) => arg.spread);
+    const tree = this.types.program.tree;
+
+    const count = tree.argumentsOf(expr.argsList).length;
+    const hasSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
 
     return !hasSpread && count >= places.least && count <= places.most;
   }
@@ -143,11 +165,13 @@ partial class ExpressionTypes {
     expr: CallExpr,
     place: int | undefined,
   ): Expr | undefined {
+    const tree = this.types.program.tree;
+
     if (place == undefined) {
       return undefined;
     }
 
-    return expr.args[place]?.expr;
+    return tree.exprAt(tree.argumentsOf(expr.argsList)[place]?.exprId);
   }
 
   private isFittingValue(value: Expr, range: ProofRange, module: int): boolean {
@@ -162,7 +186,7 @@ partial class ExpressionTypes {
 
     const constant = this.intConstant(value, given, module);
 
-    return constant != undefined && this.proofs.isInside(constant, range);
+    return constant != undefined && this.types.isInside(constant, range);
   }
 
   private byteFitCheck(
@@ -177,8 +201,8 @@ partial class ExpressionTypes {
 
     const given = this.peekType(value, module);
     const constant = this.intConstant(value, given, module);
-    const shown = this.sources.valueText(value, module);
-    const fitError = this.byteNumbers.fitError(
+    const shown = this.types.valueText(value, module);
+    const fitError = this.types.fitError(
       value.loc,
       info,
       range,
@@ -186,6 +210,6 @@ partial class ExpressionTypes {
       shown,
     );
 
-    this.reportFound(module, fitError);
+    this.errors.writeFound(module, fitError);
   }
 }

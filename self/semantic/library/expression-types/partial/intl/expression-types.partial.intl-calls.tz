@@ -35,7 +35,9 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     if (object.kind == ExprKind.Member) {
       return this.intlStaticCall(expr, member, object, module);
     }
@@ -44,7 +46,7 @@ partial class ExpressionTypes {
     }
     if (
       !this.isGlobalUse(object, module) ||
-      expr.args.some((one) => one.spread)
+      tree.argumentsOf(expr.argsList).some((one) => one.spread)
     ) {
       return undefined;
     }
@@ -60,27 +62,37 @@ partial class ExpressionTypes {
       return this.intlRefusedCall(expr, member, module);
     }
 
-    const service = this.intl.service(name);
+    const service = this.tables.intlService(name);
     if (service == undefined) {
-      const unknownError = this.intl.unknownServiceError(member.loc, name);
+      const unknownError = this.types.unknownServiceError(member.loc, name);
 
-      this.reportFound(module, unknownError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, unknownError);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
     if (!service.callable) {
-      const withNewError = this.intl.withNewError(member.loc, name);
+      const withNewError = this.types.withNewError(member.loc, name);
 
-      this.reportFound(module, withNewError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, withNewError);
+      const argsItem = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(argsItem, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const what = `${kIntlPrefix}${name}`;
 
-    this.intlArguments(expr.args, 0, service, what, module);
+    this.intlArguments(
+      tree.argumentsOf(expr.argsList),
+      0,
+      service,
+      what,
+      module,
+    );
 
     return this.namedLibraryType(what, member.loc, module);
   }
@@ -90,30 +102,40 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const refusedError = this.intlRefusedError(member);
 
-    this.reportFound(module, refusedError);
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, refusedError);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private readonly intlRefusedError(member: MemberExpr): SourceError {
     if (member.name == kLocaleClass) {
-      return this.intl.localeNewError(member.loc);
+      return this.types.localeNewError(member.loc);
     }
 
-    return this.intl.valuesOfError(member.loc);
+    return this.types.valuesOfError(member.loc);
   }
 
   private canonicalCall(expr: CallExpr, module: int): Type {
-    const list = expr.args[0];
-    const text = this.store.plain(TypeKind.String);
+    const tree = this.types.program.tree;
+
+    const list = tree.argumentsOf(expr.argsList)[0];
+    const text = this.types.store.plain(TypeKind.String);
     if (list != undefined) {
-      this.localeListCheck(list.expr, "Intl.getCanonicalLocales", module);
+      this.localeListCheck(
+        tree.exprOf(list.exprId),
+        "Intl.getCanonicalLocales",
+        module,
+      );
     }
 
-    return this.store.arrayOf(text);
+    return this.types.store.arrayOf(text);
   }
 
   private intlStaticCall(
@@ -122,7 +144,9 @@ partial class ExpressionTypes {
     owner: MemberExpr,
     module: int,
   ): Type | undefined {
-    const root = owner.object;
+    const tree = this.types.program.tree;
+
+    const root = tree.exprOf(owner.objectId);
     if (root.kind != ExprKind.Name || root.name != kIntlName) {
       return undefined;
     }
@@ -133,29 +157,41 @@ partial class ExpressionTypes {
     const what = `${kIntlPrefix}${owner.name}.${member.name}`;
     const isService =
       owner.name == kDateTimeFormatClass ||
-      this.intl.service(owner.name) != undefined;
+      this.tables.intlService(owner.name) != undefined;
     if (!isService || member.name != kSupportedName) {
-      const staticError = this.intl.staticOnlyError(member.loc, what);
+      const staticError = this.types.staticOnlyError(member.loc, what);
 
-      this.reportFound(module, staticError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, staticError);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const list = expr.args[0];
-    const options = expr.args[1];
-    const text = this.store.plain(TypeKind.String);
+    const list = tree.argumentsOf(expr.argsList)[0];
+    const options = tree.argumentsOf(expr.argsList)[1];
+    const text = this.types.store.plain(TypeKind.String);
     if (list == undefined) {
-      return this.store.arrayOf(text);
+      return this.types.store.arrayOf(text);
     }
-    if (this.localeListCheck(list.expr, what, module) && options != undefined) {
-      const service = this.intl.supportedService();
+    if (
+      this.localeListCheck(tree.exprOf(list.exprId), what, module) &&
+      options != undefined
+    ) {
+      const service = this.tables.supportedService();
 
-      this.intlOptionsCheck(options.expr, service, what, true, false, module);
+      this.intlOptionsCheck(
+        tree.exprOf(options.exprId),
+        service,
+        what,
+        true,
+        false,
+        module,
+      );
     }
 
-    return this.store.arrayOf(text);
+    return this.types.store.arrayOf(text);
   }
 
   private intlMethodCall(
@@ -164,12 +200,14 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const service = this.intlServiceOf(instance);
-    const row = this.intl.method(service ?? "", member.name);
+    const row = this.types.method(service ?? "", member.name);
     if (service == undefined || row == undefined) {
       return undefined;
     }
-    if (expr.args.some((one) => one.spread)) {
+    if (tree.argumentsOf(expr.argsList).some((one) => one.spread)) {
       return undefined;
     }
 
@@ -194,7 +232,7 @@ partial class ExpressionTypes {
   }
 
   private readonly intlServiceOf(instance: InstanceType): string | undefined {
-    const home = this.resolver.namespaceModule(kIntlName);
+    const home = this.types.namespaceModule(kIntlName);
     if (home == undefined || instance.module != home) {
       return undefined;
     }
@@ -208,12 +246,16 @@ partial class ExpressionTypes {
     isSelect: boolean,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const unsupportedError = this.intlUnsupportedError(member, isSelect);
 
-    this.reportFound(module, unsupportedError);
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, unsupportedError);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private readonly intlUnsupportedError(
@@ -221,10 +263,10 @@ partial class ExpressionTypes {
     isSelect: boolean,
   ): SourceError {
     if (isSelect) {
-      return this.intl.selectRangeError(member.loc);
+      return this.types.selectRangeError(member.loc);
     }
 
-    return this.intl.rangeUnsupportedError(member.loc, member.name);
+    return this.types.rangeUnsupportedError(member.loc, member.name);
   }
 
   private compareCall(
@@ -232,17 +274,22 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    if (expr.args.length == 2) {
+    const tree = this.types.program.tree;
+
+    const argsItem = tree.argumentsOf(expr.argsList);
+    if (argsItem.length == 2) {
       return undefined;
     }
 
-    const word = this.calls.argumentCountText(2, 2, false);
-    const other = `${expr.args.length}`;
+    const word = this.types.argumentCountText(2, 2, false);
+    const other = `${tree.argumentsOf(expr.argsList).length}`;
 
-    this.report(module, member.loc, Code.ArgumentCount, { word, other });
-    this.looseArguments(expr.args, module);
+    this.errors.write(module, member.loc, Code.ArgumentCount, { word, other });
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private intlNumberCall(
@@ -251,30 +298,33 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    const value = expr.args[0];
-    if (value == undefined || expr.args.length != 1) {
+    const tree = this.types.program.tree;
+
+    const value = tree.argumentsOf(expr.argsList)[0];
+    if (value == undefined || tree.argumentsOf(expr.argsList).length != 1) {
       return undefined;
     }
 
-    const given = this.typed(value.expr, undefined, module);
-    const notNumberError = this.intl.notNumberError(
-      value.expr.loc,
+    const exprExpr = tree.exprOf(value.exprId);
+    const given = this.typed(exprExpr, undefined, module);
+    const notNumberError = this.types.notNumberError(
+      tree.exprOf(value.exprId).loc,
       member.name,
       given,
     );
 
-    this.reportFound(module, notNumberError);
+    this.errors.writeFound(module, notNumberError);
 
     return this.intlResult(instance, member.name);
   }
 
-  private readonly intlResult(instance: InstanceType, name: string): Type {
+  private intlResult(instance: InstanceType, name: string): Type {
     const method = this.receiverMember(instance, name, true);
     if (method == undefined || method.kind != TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return method.shape.result;
+    return this.types.store.returnTypeOf(method);
   }
 
   private relativeCall(
@@ -283,26 +333,44 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    const value = expr.args[0];
-    const unit = expr.args[1];
-    if (value == undefined || unit == undefined || expr.args.length != 2) {
+    const tree = this.types.program.tree;
+
+    const value = tree.argumentsOf(expr.argsList)[0];
+    const unit = tree.argumentsOf(expr.argsList)[1];
+    if (
+      value == undefined ||
+      unit == undefined ||
+      tree.argumentsOf(expr.argsList).length != 2
+    ) {
       return undefined;
     }
 
-    this.typed(value.expr, undefined, module);
+    const exprExpr = tree.exprOf(value.exprId);
 
-    const text = this.store.plain(TypeKind.String);
-    const given = this.checked(unit.expr, text, module, "");
-    const units = this.intl.relativeUnits();
-    const written = this.textCoders.literalLabel(unit.expr);
+    this.typed(exprExpr, undefined, module);
 
-    if (written != undefined && !this.intl.isRelativeUnit(written)) {
-      const unitError = this.intl.relativeUnitError(unit.expr.loc, written);
+    const text = this.types.store.plain(TypeKind.String);
+    const unitExpr = tree.exprOf(unit.exprId);
+    const given = this.checked(unitExpr, text, module, "");
+    const units = this.tables.relativeUnits();
+    const written = this.types.literalLabel(tree.exprOf(unit.exprId));
 
-      this.reportFound(module, unitError);
+    if (written != undefined && !this.types.isRelativeUnit(written)) {
+      const unitError = this.types.relativeUnitError(
+        tree.exprOf(unit.exprId).loc,
+        written,
+      );
+
+      this.errors.writeFound(module, unitError);
     }
     if (written == undefined) {
-      this.closedTextCheck(unit.expr, given, units, "unit of time", module);
+      this.closedTextCheck(
+        tree.exprOf(unit.exprId),
+        given,
+        units,
+        "unit of time",
+        module,
+      );
     }
 
     return this.intlResult(instance, member.name);
@@ -314,12 +382,17 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    const index = expr.args[0];
-    if (expr.args.length > 1) {
+    const tree = this.types.program.tree;
+
+    const index = tree.argumentsOf(expr.argsList)[0];
+    const args = tree.argumentsOf(expr.argsList);
+    if (args.length > 1) {
       return undefined;
     }
     if (index != undefined) {
-      this.typed(index.expr, undefined, module);
+      const exprExpr = tree.exprOf(index.exprId);
+
+      this.typed(exprExpr, undefined, module);
     }
 
     return this.intlResult(instance, member.name);
@@ -332,23 +405,27 @@ partial class ExpressionTypes {
     what: string,
     module: int,
   ): void {
-    if (given.kind == TypeKind.Error || this.modules.isLibraryModule(module)) {
+    if (given.kind == TypeKind.Error || this.types.isLibraryModule(module)) {
       return;
     }
 
     const texts = this.encodingTexts(arg, given, module, 0);
     if (texts == undefined) {
-      const unknownError = this.intl.closedUnknownError(arg.loc, what, allowed);
+      const unknownError = this.types.closedUnknownError(
+        arg.loc,
+        what,
+        allowed,
+      );
 
-      return this.reportFound(module, unknownError);
+      return this.errors.writeFound(module, unknownError);
     }
 
-    const closedError = this.intl.closedError(arg.loc, what, allowed, texts);
+    const closedError = this.types.closedError(arg.loc, what, allowed, texts);
 
-    this.reportFound(module, closedError);
+    this.errors.writeFound(module, closedError);
   }
 
-  private readonly intlMemberRead(
+  private intlMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
@@ -361,19 +438,19 @@ partial class ExpressionTypes {
     const found = this.declaredNamed(instance, expr.name);
     const isMethod =
       found != undefined && found.form.kind != DeclaredMemberKind.Field;
-    if (!isMethod || this.intl.isValueMethod(service, expr.name)) {
+    if (!isMethod || this.types.isValueMethod(service, expr.name)) {
       return undefined;
     }
 
-    const onlyCalledError = this.intl.onlyCalledError(
+    const onlyCalledError = this.types.onlyCalledError(
       expr.loc,
       expr.name,
       service,
     );
 
-    this.reportFound(module, onlyCalledError);
+    this.errors.writeFound(module, onlyCalledError);
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private localeMethodCall(
@@ -382,7 +459,9 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): Type | undefined {
-    if (expr.args.some((one) => one.spread)) {
+    const tree = this.types.program.tree;
+
+    if (tree.argumentsOf(expr.argsList).some((one) => one.spread)) {
       return undefined;
     }
 
@@ -390,13 +469,25 @@ partial class ExpressionTypes {
     const name = member.name;
     const isNumber = this.types.isNumber(base) || base.kind == TypeKind.Decimal;
     const isText = base.kind == TypeKind.String;
-    if (isNumber && name == kToLocaleName && expr.args.length <= 2) {
+    if (
+      isNumber &&
+      name == kToLocaleName &&
+      tree.argumentsOf(expr.argsList).length <= 2
+    ) {
       return this.numberLocaleCall(expr, module);
     }
-    if (isText && name == kLocaleCompareName && expr.args.length >= 1) {
+    if (
+      isText &&
+      name == kLocaleCompareName &&
+      tree.argumentsOf(expr.argsList).length >= 1
+    ) {
       return this.localeCompareCall(expr, module);
     }
-    if (isText && name == kNormalizeName && expr.args.length <= 1) {
+    if (
+      isText &&
+      name == kNormalizeName &&
+      tree.argumentsOf(expr.argsList).length <= 1
+    ) {
       return this.normalizeCall(expr, module);
     }
 
@@ -404,46 +495,71 @@ partial class ExpressionTypes {
   }
 
   private numberLocaleCall(expr: CallExpr, module: int): Type {
-    const service = this.intl.service(kNumberFormatClass);
+    const tree = this.types.program.tree;
+
+    const service = this.tables.intlService(kNumberFormatClass);
     if (service != undefined) {
-      this.intlArguments(expr.args, 0, service, kToLocaleName, module);
+      this.intlArguments(
+        tree.argumentsOf(expr.argsList),
+        0,
+        service,
+        kToLocaleName,
+        module,
+      );
     }
 
-    return this.store.plain(TypeKind.String);
+    return this.types.store.plain(TypeKind.String);
   }
 
   private localeCompareCall(expr: CallExpr, module: int): Type {
-    const that = expr.args[0];
-    const text = this.store.plain(TypeKind.String);
-    const service = this.intl.service(kCollatorClass);
+    const tree = this.types.program.tree;
+
+    const that = tree.argumentsOf(expr.argsList)[0];
+    const text = this.types.store.plain(TypeKind.String);
+    const service = this.tables.intlService(kCollatorClass);
     if (that != undefined) {
-      this.checked(that.expr, text, module, "");
+      const exprExpr = tree.exprOf(that.exprId);
+
+      this.checked(exprExpr, text, module, "");
     }
     if (service != undefined) {
-      this.intlArguments(expr.args, 1, service, kLocaleCompareName, module);
+      this.intlArguments(
+        tree.argumentsOf(expr.argsList),
+        1,
+        service,
+        kLocaleCompareName,
+        module,
+      );
     }
 
-    return this.store.integer(64, false);
+    return this.types.store.integer(64, false);
   }
 
   private normalizeCall(expr: CallExpr, module: int): Type {
-    const form = expr.args[0];
-    const text = this.store.plain(TypeKind.String);
+    const tree = this.types.program.tree;
+
+    const form = tree.argumentsOf(expr.argsList)[0];
+    const text = this.types.store.plain(TypeKind.String);
     if (form == undefined) {
       return text;
     }
 
-    const given = this.checked(form.expr, text, module, "");
-    const written = this.textCoders.literalLabel(form.expr);
-    const forms = this.intl.normalizationForms();
+    const exprExpr = tree.exprOf(form.exprId);
+    const given = this.checked(exprExpr, text, module, "");
+    const formExpr = tree.exprOf(form.exprId);
+    const written = this.types.literalLabel(formExpr);
+    const forms = this.tables.normalizationForms();
     if (written != undefined && !forms.includes(written)) {
-      const badFormError = this.intl.badFormError(form.expr.loc, written);
+      const badFormError = this.types.badFormError(
+        tree.exprOf(form.exprId).loc,
+        written,
+      );
 
-      this.reportFound(module, badFormError);
+      this.errors.writeFound(module, badFormError);
     }
     if (written == undefined) {
       this.closedTextCheck(
-        form.expr,
+        tree.exprOf(form.exprId),
         given,
         forms,
         "normalization form",

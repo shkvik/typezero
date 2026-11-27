@@ -19,7 +19,7 @@ import { kThisName } from "../../../code/expression-types/const/expression-types
 import { ValueTarget } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly predicateDeclCheck(
+  private predicateDeclCheck(
     fn: FunctionDecl,
     written: TypeRef,
     module: int,
@@ -32,37 +32,39 @@ partial class ExpressionTypes {
       return this.assertsReport(fn, written, module);
     }
     if (written.name == kThisName) {
-      const thisPredicateError = this.narrowings.thisPredicateCheck(
+      const thisPredicateError = this.types.thisPredicateCheck(
         fn,
         written,
       );
 
-      return this.reportFound(module, thisPredicateError);
+      return this.errors.writeFound(module, thisPredicateError);
     }
-    if (this.narrowings.predicateParam(fn, written.name) != undefined) {
+    if (this.types.predicateParam(fn, written.name) != undefined) {
       return;
     }
 
-    this.report(module, written.loc, Code.PredicateNotParameter, {
+    this.errors.write(module, written.loc, Code.PredicateNotParameter, {
       word: written.name,
     });
   }
 
-  private readonly assertsReport(fn: FunctionDecl, written: TypeRef, module: int): void {
+  private assertsReport(fn: FunctionDecl, written: TypeRef, module: int): void {
     const guarded = this.predicateGuard(written, module);
-    const shown = this.narrowings.shownPredicate(written, guarded);
-    const other = this.narrowings.assertsAdvice(shown, guarded);
+    const shown = this.types.shownPredicate(written, guarded);
+    const other = this.types.assertsAdvice(shown, guarded);
     const place = this.assertsCall(fn);
 
-    this.report(module, written.loc, Code.AssertsRefusedCall, {
+    this.errors.write(module, written.loc, Code.AssertsRefusedCall, {
       word: shown,
       other,
       place,
     });
   }
 
-  private readonly predicateGuard(written: TypeRef, module: int): Type | undefined {
-    const ref = written.args[0];
+  private predicateGuard(written: TypeRef, module: int): Type | undefined {
+    const tree = this.types.program.tree;
+
+    const ref = tree.typeRefsOf(written.argsList)[0];
     if (ref == undefined) {
       return undefined;
     }
@@ -73,19 +75,21 @@ partial class ExpressionTypes {
       place: TypePlace.Plain,
     };
 
-    return this.resolver.resolve(ref, context);
+    return this.types.resolve(ref, context);
   }
 
   private readonly assertsCall(fn: FunctionDecl): string {
-    const names = fn.params.map((param) => param.name);
+    const tree = this.types.program.tree;
+
+    const names = tree.paramsOf(fn.paramsList).map((param) => param.name);
     const args = names.join(", ");
     const call = `${fn.name}(${args})`;
     const self = this.selves[this.selves.length - 1];
-    if (!this.narrowings.isInstanceMethod(fn) || self == undefined) {
+    if (!this.types.isInstanceMethod(fn) || self == undefined) {
       return call;
     }
 
-    const owner = this.text.of(self);
+    const owner = this.types.typeText(self);
     const first = owner.slice(0, 1);
     const rest = owner.slice(1);
     const lower = first.toLowerCase();
@@ -98,7 +102,9 @@ partial class ExpressionTypes {
     value: Expr,
     module: int,
   ): void {
-    const written = fn.returnType;
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(fn.returnTypeId);
     const form = written?.form;
     if (written == undefined || form == undefined) {
       return;
@@ -110,7 +116,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const param = this.narrowings.predicateParam(fn, written.name);
+    const param = this.types.predicateParam(fn, written.name);
     const guarded = this.predicateGuard(written, module);
     if (param == undefined || guarded == undefined) {
       return;
@@ -125,14 +131,14 @@ partial class ExpressionTypes {
       loc: param.loc,
     };
     const known = this.knownWhenTrue(value, target, module);
-    if (this.relation.converts(known, guarded)) {
+    if (this.types.converts(known, guarded)) {
       return;
     }
 
-    this.report(module, value.loc, Code.PredicateUnproven, {
-      word: this.functions.functionLabel(fn),
-      first: this.narrowings.shownPredicate(written, guarded),
-      second: this.text.of(known),
+    this.errors.write(module, value.loc, Code.PredicateUnproven, {
+      word: this.types.functionLabel(fn),
+      first: this.types.shownPredicate(written, guarded),
+      second: this.types.typeText(known),
       other: written.name,
     });
   }
@@ -145,7 +151,7 @@ partial class ExpressionTypes {
     const truthy = this.factsOf(value, true, module);
 
     this.errors.endTrial();
-    this.facts = this.narrowings.mergedFacts(before, truthy);
+    this.facts = this.types.mergedFacts(before, truthy);
 
     const known = this.factOf(target) ?? this.parameterTyped(target);
 

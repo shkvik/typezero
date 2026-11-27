@@ -3,10 +3,10 @@ import { ForOfStmt } from "../../../../../program/ast/types/ast.types.statements
 import { Type } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private readonly forInKeys(loop: ForOfStmt, iterable: Type, module: int): Type {
-    const checked = this.dictionaries.forInKeys(loop, iterable);
+  private forInKeys(loop: ForOfStmt, iterable: Type, module: int): Type {
+    const checked = this.types.forInKeys(loop, iterable);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

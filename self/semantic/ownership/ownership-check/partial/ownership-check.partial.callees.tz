@@ -1,0 +1,355 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import {
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+  NewExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  DeclaredMember,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  BuiltinMethod,
+  Callee,
+  CalleeParam,
+  LoanKind,
+  Operand,
+  OperandKind,
+  ParamMode,
+  Place,
+  ResultMode,
+} from "../types/ownership-check.types.tz";
+import {
+  kArrayMethods,
+  kChangingArrayMethods,
+  kMapMethods,
+  kMutName,
+} from "../const/ownership-check.const.tz";
+import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+
+partial class OwnershipCheck {
+  private memberCallee(callee: MemberExpr, call: Expr): Callee {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    const type = this.values.answers.typeOf(object);
+    if (type == undefined) {
+      return this.libraryCallee(call);
+    }
+
+    switch (type.kind) {
+      case TypeKind.Array:
+        return this.builtinCallee(kArrayMethods, callee.name, call);
+      case TypeKind.Dict:
+        return this.builtinCallee(kMapMethods, callee.name, call);
+      case TypeKind.Instance:
+        return this.instanceCallee(type, callee.name, call);
+      case TypeKind.Object:
+        return (
+          this.interfaceCallee(type, callee.name) ?? this.libraryCallee(call)
+        );
+      default:
+        return this.libraryCallee(call);
+    }
+  }
+
+  private instanceCallee(type: Type, name: string, call: Expr): Callee {
+    const tree = this.values.types.program.tree;
+
+    const method = this.methodNamed(type, name, 0);
+    if (method != undefined) {
+      return this.declCallee(method, false);
+    }
+
+    const member = this.declaredMethod(type, name);
+    const form = member?.form;
+    if (form == undefined || form.kind != DeclaredMemberKind.Method) {
+      return this.libraryCallee(call);
+    }
+
+    const params: CalleeParam[] = [];
+
+    for (const param of tree.paramsOf(form.paramsList)) {
+      const written = this.paramMode(param);
+      const isMarked = tree.typeRefAt(param.typeId)?.name == kMutName;
+      const mode = this.calleeMode(written, !isMarked);
+      const isRest = param.form.kind == ParamKind.Rest;
+      const isCallback =
+        tree.typeRefAt(param.typeId)?.form.kind == TypeRefKind.Function;
+
+      params.push({ mode, isRest, isCallback });
+    }
+
+    const ref = tree.typeRefAt(member?.typeId);
+    let result: ResultMode = ResultMode.Own;
+
+    if (ref != undefined) {
+      result = this.resultModeOfRef(ref);
+    }
+    if (result == ResultMode.Own && this.isCopyExpr(call)) {
+      result = ResultMode.Copy;
+    }
+
+    return { params, receiver: LoanKind.Shared, result };
+  }
+
+  private readonly declaredMethod(
+    type: Type,
+    name: string,
+  ): DeclaredMember | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (type.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const loc = type.loc;
+    const home = this.values.types.program.modules[type.module];
+    const declared = tree
+      .declaredClassesOf(home?.declaredList)
+      .find((one) => one.loc == loc);
+
+    return tree
+      .declaredMembersOf(declared?.membersList)
+      .find((one) => one.name == name && !one.isStatic);
+  }
+
+  private readonly methodNamed(
+    type: Type,
+    name: string,
+    depth: int,
+  ): FunctionDecl | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (depth > 20) {
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    if (decl == undefined) {
+      return undefined;
+    }
+
+    const own = this.values.types.classMethodNamed(decl, name);
+    if (own != undefined) {
+      return own;
+    }
+
+    for (const parent of this.values.types.store.parentsOf(type)) {
+      const found = this.methodNamed(parent, name, depth + 1);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private nameCallee(callee: NameExpr, call: Expr): Callee {
+    const target = this.values.valueTargetOf(callee, this.module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return this.valueCallee();
+    }
+
+    const key = this.keyOf(target.module, target.loc);
+    const decl = this.functions.get(key);
+    if (decl != undefined) {
+      return this.declCallee(decl, false);
+    }
+
+    const declared = this.libraryFunction(target.module, target.loc);
+    if (declared == undefined) {
+      return this.libraryCallee(call);
+    }
+
+    return this.declCallee(declared, true);
+  }
+
+  private readonly libraryFunction(
+    module: int,
+    loc: int,
+  ): FunctionDecl | undefined {
+    const tree = this.values.types.program.tree;
+
+    const opened = this.values.types.program.modules[module];
+    if (opened == undefined) {
+      return undefined;
+    }
+
+    for (const item of tree.stmtsOf(opened.file.itemsList)) {
+      if (item.kind == StmtKind.Function && item.loc == loc) {
+        return item;
+      }
+    }
+
+    return undefined;
+  }
+
+  private constructorCallee(expr: NewExpr): Callee {
+    const tree = this.values.types.program.tree;
+
+    const type = this.values.answers.typeOf(expr);
+    if (type == undefined) {
+      return this.libraryCallee(expr);
+    }
+    if (type.kind == TypeKind.Dict && type.dict != DictKind.Record) {
+      return this.collectionCallee(type);
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const made = tree.functionsOf(decl?.constructorsList)[0];
+    if (made == undefined) {
+      return this.libraryCallee(expr);
+    }
+
+    return this.declCallee(made, false);
+  }
+
+  private readonly declCallee(fn: FunctionDecl, isLibrary: boolean): Callee {
+    const tree = this.values.types.program.tree;
+
+    const params: CalleeParam[] = [];
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      const written = this.paramMode(param);
+      const isMarked = tree.typeRefAt(param.typeId)?.name == kMutName;
+      const mode = this.calleeMode(written, isLibrary && !isMarked);
+      const isRest = param.form.kind == ParamKind.Rest;
+      const isCallback =
+        tree.typeRefAt(param.typeId)?.form.kind == TypeRefKind.Function;
+
+      params.push({ mode, isRest, isCallback });
+    }
+
+    const receiver = this.receiverOf(fn);
+    const result = this.resultModeOf(fn);
+
+    return { params, receiver, result, decl: fn };
+  }
+
+  private readonly calleeMode(mode: ParamMode, isLibrary: boolean): ParamMode {
+    if (isLibrary && mode == ParamMode.Mut) {
+      return ParamMode.Read;
+    }
+
+    return mode;
+  }
+
+  private readonly receiverOf(fn: FunctionDecl): LoanKind {
+    if (fn.role?.isReadonly == true) {
+      return LoanKind.Shared;
+    }
+
+    return LoanKind.Exclusive;
+  }
+
+  private builtinCallee(
+    table: Read<BuiltinMethod[]>,
+    name: string,
+    call: Expr,
+  ): Callee {
+    const row = table.find((one) => one.name == name);
+    if (row == undefined) {
+      return this.libraryCallee(call);
+    }
+
+    const params: CalleeParam[] = row.params.map((mode) => ({
+      mode,
+      isRest: false,
+      isCallback: false,
+    }));
+
+    if (row.isRestOwn) {
+      params.push({ mode: ParamMode.Own, isRest: true, isCallback: false });
+    }
+
+    return { params, receiver: row.receiver, result: row.result };
+  }
+
+  private libraryCallee(call: Expr): Callee {
+    if (this.isLentResult(call)) {
+      const params: CalleeParam[] = [
+        { mode: ParamMode.Lent, isRest: false, isCallback: false },
+      ];
+
+      return { params, receiver: LoanKind.Shared, result: ResultMode.Read };
+    }
+
+    const isCopy = this.isCopyExpr(call);
+    let result: ResultMode = ResultMode.Own;
+
+    if (isCopy) {
+      result = ResultMode.Copy;
+    }
+
+    return { params: [], receiver: LoanKind.Shared, result };
+  }
+
+  private readonly valueCallee(): Callee {
+    const params: CalleeParam[] = [
+      { mode: ParamMode.Mut, isRest: true, isCallback: false },
+    ];
+
+    return { params, receiver: LoanKind.Shared, result: ResultMode.Own };
+  }
+
+  private readonly isChangingMethod(object: Expr, method: string): boolean {
+    const type = this.values.answers.typeOf(object);
+    if (type == undefined) {
+      return false;
+    }
+
+    switch (type.kind) {
+      case TypeKind.Array:
+        return kChangingArrayMethods.includes(method);
+      case TypeKind.Dict:
+        return this.isChangingDictMethod(method);
+      case TypeKind.Instance: {
+        const found = this.methodNamed(type, method, 0);
+
+        return found != undefined && found.role?.isReadonly != true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private readonly isChangingDictMethod(method: string): boolean {
+    const row = kMapMethods.find((one) => one.name == method);
+
+    return row != undefined && row.receiver == LoanKind.Exclusive;
+  }
+
+  private readonly isOperandPlace(operand: Read<Operand>): boolean {
+    return operand.kind == OperandKind.Place;
+  }
+
+  private readonly calleeMember(expr: Expr): MemberExpr | undefined {
+    const tree = this.values.types.program.tree;
+    if (expr.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    return callee;
+  }
+}

@@ -15,26 +15,37 @@ import {
 
 partial class ExpressionTypes {
   private printVoidCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member || !kPrintNames.includes(callee.name)) {
       return;
     }
-    if (!this.isGlobalNamed(callee.object, "console", module)) {
+    const object = tree.exprOf(callee.objectId);
+    if (!this.isGlobalNamed(object, "console", module)) {
       return;
     }
 
-    for (const arg of expr.args) {
+    for (const arg of tree.argumentsOf(expr.argsList)) {
       if (arg.spread) {
-        this.printSpreadCheck(arg.expr, module);
+        const exprExpr = tree.exprOf(arg.exprId);
+
+        this.printSpreadCheck(exprExpr, module);
         continue;
       }
-      if (arg.expr.kind != ExprKind.Call) {
+      const argExpr = tree.exprOf(arg.exprId);
+      if (argExpr.kind != ExprKind.Call) {
         continue;
       }
 
-      const given = this.peekType(arg.expr, module);
+      const given = this.peekType(tree.exprOf(arg.exprId), module);
       if (given.kind == TypeKind.Void) {
-        this.report(module, arg.expr.loc, Code.PrintVoid, kNoDetails);
+        this.errors.write(
+          module,
+          tree.exprOf(arg.exprId).loc,
+          Code.PrintVoid,
+          kNoDetails,
+        );
       }
     }
   }
@@ -48,15 +59,17 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Error ||
       base.kind == TypeKind.TypeParameter;
     if (!isList) {
-      this.report(module, value.loc, Code.PrintSpread, {
-        word: this.text.of(given),
+      this.errors.write(module, value.loc, Code.PrintSpread, {
+        word: this.types.typeText(given),
       });
     }
   }
 
-  private readonly performanceRead(expr: MemberExpr, module: int): Type | undefined {
+  private performanceRead(expr: MemberExpr, module: int): Type | undefined {
+    const tree = this.types.program.tree;
+
     const isPerformance = this.isGlobalNamed(
-      expr.object,
+      tree.exprOf(expr.objectId),
       kPerformanceName,
       module,
     );
@@ -64,13 +77,17 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    this.report(module, expr.loc, Code.PerformanceOther, { word: expr.name });
+    this.errors.write(module, expr.loc, Code.PerformanceOther, {
+      word: expr.name,
+    });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private performanceCallCheck(expr: CallExpr, module: int): boolean {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return false;
     }
@@ -80,12 +97,18 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
 
-  private readonly isGlobalNamed(object: Expr, name: string, module: int): boolean {
+  private readonly isGlobalNamed(
+    object: Expr,
+    name: string,
+    module: int,
+  ): boolean {
     return (
       object.kind == ExprKind.Name &&
       object.name == name &&
@@ -94,13 +117,15 @@ partial class ExpressionTypes {
   }
 
   private isJsonKnownCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    const value = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    const value = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (callee.kind != ExprKind.Member || callee.name != "isJson") {
       return;
     }
     if (
-      !this.isGlobalNamed(callee.object, "Json", module) ||
+      !this.isGlobalNamed(tree.exprOf(callee.objectId), "Json", module) ||
       value == undefined
     ) {
       return;
@@ -118,8 +143,8 @@ partial class ExpressionTypes {
 
     const other = this.jsonAlreadyHint(base.kind == TypeKind.Json);
 
-    this.report(module, value.loc, Code.JsonIsJsonKnown, {
-      word: this.text.of(given),
+    this.errors.write(module, value.loc, Code.JsonIsJsonKnown, {
+      word: this.types.typeText(given),
       other,
     });
   }

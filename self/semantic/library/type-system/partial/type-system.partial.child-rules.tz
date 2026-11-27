@@ -1,0 +1,167 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  ArrayElement,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+import {
+  kBufferMarker,
+  kChildModule,
+  kChildOptions,
+  kExecName,
+  kIpcKind,
+  kMostDescriptor,
+  kRunNames,
+  kSignals,
+  kStdioKinds,
+} from "../../child-rules/const/child-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly isChildModule(name: string): boolean {
+    return name == kChildModule;
+  }
+
+  public readonly isRun(name: string): boolean {
+    return kRunNames.includes(name);
+  }
+
+  public readonly isExec(name: string): boolean {
+    return name == kExecName;
+  }
+
+  public readonly isBufferMarker(text: string): boolean {
+    return text == kBufferMarker;
+  }
+
+  public readonly isSignal(name: string): boolean {
+    return kSignals.includes(name);
+  }
+
+  public readonly optionsAtError(loc: int, name: string): SourceError {
+    return { code: Code.ChildOptionsAt, loc, details: { word: name } };
+  }
+
+  public readonly zeroFileError(loc: int, isExec: boolean): SourceError {
+    const word = this.fileWord(isExec);
+
+    return { code: Code.ChildZeroFile, loc, details: { word } };
+  }
+
+  public readonly emptyNameError(loc: int): SourceError {
+    return { code: Code.ChildEmptyName, loc, details: kNoDetails };
+  }
+
+  public readonly zeroArgError(loc: int, index: int): SourceError {
+    return { code: Code.ChildZeroArg, loc, details: { word: `${index}` } };
+  }
+
+  public readonly childEncodingError(loc: int, name: string): SourceError {
+    return { code: Code.ChildEncoding, loc, details: { word: name } };
+  }
+
+  public readonly stdioError(loc: int, name: string): SourceError {
+    return { code: Code.ChildStdio, loc, details: { word: name } };
+  }
+
+  public readonly threeError(loc: int): SourceError {
+    return { code: Code.ChildStdioThree, loc, details: kNoDetails };
+  }
+
+  public readonly stdioKindError(
+    loc: int,
+    value: Expr,
+  ): SourceError | undefined {
+    if (value.kind != ExprKind.StringLit) {
+      return { code: Code.ChildStdioLiteral, loc, details: kNoDetails };
+    }
+
+    const text = value.value;
+    if (kStdioKinds.includes(text)) {
+      return undefined;
+    }
+    if (text == kIpcKind) {
+      return { code: Code.ChildStdioIpc, loc, details: kNoDetails };
+    }
+
+    return { code: Code.ChildStdioUnknown, loc, details: { word: text } };
+  }
+
+  public readonly stdioEntryError(
+    element: ArrayElement,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const value = tree.exprOf(element.exprId);
+    const loc = value.loc;
+    if (element.spread) {
+      return { code: Code.ChildStdioSpread, loc, details: kNoDetails };
+    }
+    if (value.kind == ExprKind.Undefined) {
+      return undefined;
+    }
+    if (value.kind == ExprKind.IntLit && value.value > kMostDescriptor) {
+      const word = `${value.value}`;
+
+      return { code: Code.ChildStdioNoFd, loc, details: { word } };
+    }
+    if (value.kind == ExprKind.IntLit) {
+      return undefined;
+    }
+
+    return this.stdioKindError(loc, value);
+  }
+
+  public readonly zeroCwdError(loc: int): SourceError {
+    return { code: Code.ChildZeroCwd, loc, details: kNoDetails };
+  }
+
+  public readonly negativeError(loc: int, limit: string): SourceError {
+    return { code: Code.ChildNegative, loc, details: { word: limit } };
+  }
+
+  public readonly noSignalError(loc: int, signal: string): SourceError {
+    return { code: Code.ChildNoSignal, loc, details: { word: signal } };
+  }
+
+  public readonly inputError(loc: int, name: string, found: Type): SourceError {
+    const first = this.typeText(found);
+
+    return { code: Code.ChildInput, loc, details: { word: name, first } };
+  }
+
+  public readonly bufferTextError(loc: int): SourceError {
+    return { code: Code.ChildBufferText, loc, details: kNoDetails };
+  }
+
+  public readonly killSignalError(loc: int, found: Type): SourceError {
+    const first = this.typeText(found);
+
+    return { code: Code.ChildKillSignal, loc, details: { first } };
+  }
+
+  public readonly execShellError(loc: int): SourceError {
+    return { code: Code.ChildExecShell, loc, details: kNoDetails };
+  }
+
+  public readonly shellFlagError(loc: int, name: string): SourceError {
+    return { code: Code.ChildShellFlag, loc, details: { word: name } };
+  }
+
+  public readonly shellError(loc: int, found: Type): SourceError {
+    const first = this.typeText(found);
+
+    return { code: Code.ChildShell, loc, details: { first } };
+  }
+
+  private readonly fileWord(isExec: boolean): string {
+    if (isExec) {
+      return "command";
+    }
+
+    return "program name";
+  }
+}

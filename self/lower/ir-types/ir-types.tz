@@ -1,0 +1,137 @@
+import {
+  LLVMArrayType2,
+  LLVMContext,
+  LLVMDoubleTypeInContext,
+  LLVMIntTypeInContext,
+  LLVMPointerTypeInContext,
+  LLVMStructTypeInContext,
+  LLVMType,
+  LLVMVoidTypeInContext,
+} from "../llvm-api/llvm-api.tz";
+import {
+  kCloseBrace,
+  kCloseBracket,
+  kComma,
+  kDigitZero,
+  kOpenBrace,
+  kOpenBracket,
+} from "./const/ir-types.const.tz";
+
+export class IrTypes {
+  private readonly context: LLVMContext;
+  private readonly pointer: LLVMType;
+  private readonly word: LLVMType;
+  private readonly half: LLVMType;
+  private readonly byte: LLVMType;
+  private readonly bit: LLVMType;
+  private readonly real: LLVMType;
+  private readonly nothing: LLVMType;
+  private readonly text: LLVMType;
+  private readonly pair: LLVMType;
+
+  public constructor(context: LLVMContext) {
+    const pointer = LLVMPointerTypeInContext(context, 0);
+    const word = LLVMIntTypeInContext(context, 64);
+
+    this.context = context;
+    this.pointer = pointer;
+    this.word = word;
+    this.half = LLVMIntTypeInContext(context, 32);
+    this.byte = LLVMIntTypeInContext(context, 8);
+    this.bit = LLVMIntTypeInContext(context, 1);
+    this.real = LLVMDoubleTypeInContext(context);
+    this.nothing = LLVMVoidTypeInContext(context);
+    this.text = LLVMStructTypeInContext(context, [pointer, word], 2, 0);
+    this.pair = LLVMStructTypeInContext(context, [word, word], 2, 0);
+  }
+
+  public readonly parsed(key: string): LLVMType {
+    switch (key) {
+      case "ptr":
+        return this.pointer;
+      case "i64":
+        return this.word;
+      case "i32":
+        return this.half;
+      case "i8":
+        return this.byte;
+      case "i1":
+        return this.bit;
+      case "double":
+        return this.real;
+      case "void":
+        return this.nothing;
+      case "{ ptr, i64 }":
+        return this.text;
+      case "{ i64, i64 }":
+        return this.pair;
+      default:
+        return this.composed(key);
+    }
+  }
+
+  private readonly composed(key: string): LLVMType {
+    if (key.startsWith("{")) {
+      const inner = key.slice(1, key.length - 1);
+      const parts = this.topLevelParts(inner);
+      const elements = parts.map((part) => this.parsed(part));
+
+      return LLVMStructTypeInContext(
+        this.context,
+        elements,
+        elements.length.toUint32(),
+        0,
+      );
+    }
+    if (key.startsWith("[")) {
+      const inner = key.slice(1, key.length - 1);
+      const at = inner.indexOf(" x ");
+      const count = this.digits(inner.slice(0, at));
+      const element = this.parsed(inner.slice(at + 3).trim());
+
+      return LLVMArrayType2(element, count.toUint64());
+    }
+
+    const bits = this.digits(key.slice(1));
+
+    return LLVMIntTypeInContext(this.context, bits.toUint32());
+  }
+
+  private readonly topLevelParts(text: string): string[] {
+    const parts: string[] = [];
+    let depth: int = 0;
+    let start: int = 0;
+
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index) ?? 0;
+      if (code == kOpenBrace || code == kOpenBracket) {
+        depth += 1;
+      } else if (code == kCloseBrace || code == kCloseBracket) {
+        depth -= 1;
+      } else if (code == kComma && depth == 0) {
+        parts.push(text.slice(start, index).trim());
+        start = index + 1;
+      }
+    }
+
+    const last = text.slice(start).trim();
+    if (last.length > 0) {
+      parts.push(last);
+    }
+
+    return parts;
+  }
+
+  private readonly digits(text: string): int {
+    let value: int = 0;
+
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index) ?? kDigitZero;
+      if (code >= kDigitZero && code <= kDigitZero + 9) {
+        value = value * 10 + code - kDigitZero;
+      }
+    }
+
+    return value;
+  }
+}

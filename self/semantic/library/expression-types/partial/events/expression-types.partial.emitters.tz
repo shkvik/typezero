@@ -38,13 +38,13 @@ import {
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 
 partial class ExpressionTypes {
-  private readonly emitterMapCheck(expr: NewExpr, made: Type, module: int): void {
+  private emitterMapCheck(expr: NewExpr, made: Type, module: int): void {
     const events = this.eventMapOf(made);
-    if (events == undefined || this.modules.isLibraryModule(module)) {
+    if (events == undefined || this.types.isLibraryModule(module)) {
       return;
     }
 
-    this.reportFound(module, this.events.mapError(expr.loc, events));
+    this.errors.writeFound(module, this.types.mapError(expr.loc, events));
   }
 
   private emitterCall(
@@ -53,20 +53,25 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    const isListening = this.events.isListenerMethod(member.name);
+    const tree = this.types.program.tree;
+
+    const isListening = this.types.isListenerMethod(member.name);
     const isEmitting = member.name == kEmitName;
     const isQuery = kListenerQueries.includes(member.name);
     if (!isListening && !isEmitting && !isQuery) {
       return undefined;
     }
-    if (!this.isEmitter(instance) || this.modules.isLibraryModule(module)) {
+    if (!this.isEmitter(instance) || this.types.isLibraryModule(module)) {
       return undefined;
     }
     if (!this.isPlainEmitter(instance)) {
       return undefined;
     }
-    if (member.typeArgs.length > 0) {
-      this.report(module, member.loc, Code.EmitTypeArgs, { word: member.name });
+    const typeArgs = tree.typeRefsOf(member.typeArgsList);
+    if (typeArgs.length > 0) {
+      this.errors.write(module, member.loc, Code.EmitTypeArgs, {
+        word: member.name,
+      });
     }
     if (isListening) {
       this.listenerLife(expr, member, module);
@@ -107,12 +112,14 @@ partial class ExpressionTypes {
     events: Type | undefined,
     module: int,
   ): Type | undefined {
-    const name = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (name == undefined) {
       return undefined;
     }
 
-    const text = this.store.plain(TypeKind.String);
+    const text = this.types.store.plain(TypeKind.String);
 
     this.checked(name, text, module, kNoPlace);
 
@@ -120,37 +127,40 @@ partial class ExpressionTypes {
       return undefined;
     }
     if (events.kind == TypeKind.Dict) {
-      return events.value;
+      return this.types.store.valueOf(events);
     }
 
     const key = this.constantKey(name, module);
     if (key == undefined) {
-      this.report(module, name.loc, Code.EventNameUnknown, {
+      this.errors.write(module, name.loc, Code.EventNameUnknown, {
         word: member.name,
       });
 
       return undefined;
     }
 
-    const args = this.events.eventArgs(events, key);
+    const args = this.types.eventArgs(events, key);
     if (args == undefined) {
-      this.reportFound(module, this.events.noEventError(name.loc, events, key));
+      this.errors.writeFound(
+        module,
+        this.types.noEventError(name.loc, events, key),
+      );
     }
 
     return args;
   }
 
-  private readonly listenersOf(args: Type | undefined): Type {
-    const nothing = this.store.plain(TypeKind.Void);
+  private listenersOf(args: Type | undefined): Type {
+    const nothing = this.types.store.plain(TypeKind.Void);
     if (args == undefined) {
-      const unknown = this.store.plain(TypeKind.Error);
+      const unknown = this.types.store.plain(TypeKind.Error);
 
-      return this.store.arrayOf(unknown);
+      return this.types.store.arrayOf(unknown);
     }
 
-    const listener = this.events.listenerType(args, nothing, undefined);
+    const listener = this.types.listenerType(args, nothing, undefined);
 
-    return this.store.arrayOf(listener);
+    return this.types.store.arrayOf(listener);
   }
 
   private emitChecked(
@@ -158,29 +168,36 @@ partial class ExpressionTypes {
     args: Type | undefined,
     module: int,
   ): Type {
-    const given = expr.args.slice(1);
-    const boolean = this.store.plain(TypeKind.Boolean);
+    const tree = this.types.program.tree;
+
+    const given = tree.argumentsOf(expr.argsList).slice(1);
+    const boolean = this.types.store.plain(TypeKind.Boolean);
     if (args == undefined || args.kind != TypeKind.Tuple) {
       this.looseArguments(given, module);
 
       return boolean;
     }
 
-    const name = expr.args[0]?.expr;
-    const event = this.constantKey(name ?? expr.callee, module) ?? "";
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const event =
+      this.constantKey(name ?? tree.exprOf(expr.calleeId), module) ?? "";
     const isFitting =
       given.length >= args.required &&
-      (args.rest >= 0 || given.length <= args.items.length);
-    if (!isFitting && args.items.length == 1 && given.length > 1) {
-      this.report(module, expr.loc, Code.EmitOneValue, { word: event });
+      (args.rest >= 0 || given.length <= this.types.store.itemsOf(args).length);
+    if (
+      !isFitting &&
+      this.types.store.itemsOf(args).length == 1 &&
+      given.length > 1
+    ) {
+      this.errors.write(module, expr.loc, Code.EmitOneValue, { word: event });
       this.looseArguments(given, module);
 
       return boolean;
     }
     if (!isFitting) {
-      const most = args.items.length;
-      const wanted = this.calls.argumentCountText(args.required, most, false);
-      const error = this.events.arityError(
+      const most = this.types.store.itemsOf(args).length;
+      const wanted = this.types.argumentCountText(args.required, most, false);
+      const error = this.types.arityError(
         expr.loc,
         event,
         args,
@@ -188,7 +205,7 @@ partial class ExpressionTypes {
         given.length,
       );
 
-      this.reportFound(module, error);
+      this.errors.writeFound(module, error);
       this.looseArguments(given, module);
 
       return boolean;
@@ -199,19 +216,31 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private emittedChecked(given: Read<CallArgument[]>, args: Type, module: int): void {
+  private emittedChecked(
+    given: Read<CallArgument[]>,
+    args: Type,
+    module: int,
+  ): void {
+    const tree = this.types.program.tree;
+
     if (args.kind != TypeKind.Tuple) {
       return;
     }
 
     for (let index = 0; index < given.length; index++) {
       const arg = given[index];
-      const item = args.items[index] ?? args.items[args.items.length - 1];
+      const item =
+        this.types.store.itemsOf(args)[index] ??
+        this.types.store.itemsOf(args)[
+          this.types.store.itemsOf(args).length - 1
+        ];
       if (arg == undefined || item == undefined) {
         continue;
       }
 
-      this.checked(arg.expr, item, module, kNoPlace);
+      const expr = tree.exprOf(arg.exprId);
+
+      this.checked(expr, item, module, kNoPlace);
     }
   }
 
@@ -221,8 +250,10 @@ partial class ExpressionTypes {
     args: Type | undefined,
     module: int,
   ): void {
-    const listener = expr.args[1]?.expr;
-    const rest = expr.args.slice(2);
+    const tree = this.types.program.tree;
+
+    const listener = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
+    const rest = tree.argumentsOf(expr.argsList).slice(2);
     if (listener == undefined) {
       return this.looseArguments(rest, module);
     }
@@ -232,8 +263,9 @@ partial class ExpressionTypes {
       return this.looseArguments(rest, module);
     }
 
-    const name = expr.args[0]?.expr;
-    const event = this.constantKey(name ?? expr.callee, module) ?? "";
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const event =
+      this.constantKey(name ?? tree.exprOf(expr.calleeId), module) ?? "";
 
     if (listener.kind == ExprKind.Function) {
       this.listenerLiteral(listener, instance, args, module);
@@ -245,18 +277,22 @@ partial class ExpressionTypes {
   }
 
   private listenerLoose(listener: Expr, module: int): void {
+    const tree = this.types.program.tree;
+
     if (listener.kind != ExprKind.Function) {
       this.typed(listener, undefined, module);
 
       return;
     }
 
-    const params = listener.fn.params.map(() => ({
-      type: this.store.plain(TypeKind.Error),
-      optional: false,
-    }));
-    const result = this.store.plain(TypeKind.Void);
-    const wanted = this.store.functionOf({ params, rest: false, result });
+    const params = tree
+      .paramsOf(tree.functionOf(listener.fnId).paramsList)
+      .map(() => ({
+        type: this.types.store.plain(TypeKind.Error),
+        optional: false,
+      }));
+    const result = this.types.store.plain(TypeKind.Void);
+    const wanted = this.types.store.functionOf({ params, rest: false, result });
 
     this.typed(listener, wanted, module);
   }
@@ -267,29 +303,34 @@ partial class ExpressionTypes {
     args: Type,
     module: int,
   ): void {
-    const fn = listener.fn;
-    const first = fn.params[0];
+    const tree = this.types.program.tree;
+
+    const fn = tree.functionOf(listener.fnId);
+    const first = tree.paramsOf(fn.paramsList)[0];
     if (first != undefined && first.name == kThisParam) {
       if (fn.isAsync) {
-        this.reportFound(module, this.events.asyncThisError(listener.loc));
+        this.errors.writeFound(module, this.types.asyncThisError(listener.loc));
 
         return;
       }
 
       const self = this.peekType(listener, module);
       const own = this.listenerSelf(self);
-      if (own != undefined && !this.relation.converts(instance, own)) {
-        const error = this.events.thisTypeError(listener.loc, own, instance);
+      if (own != undefined && !this.types.converts(instance, own)) {
+        const error = this.types.thisTypeError(listener.loc, own, instance);
 
-        this.reportFound(module, error);
+        this.errors.writeFound(module, error);
 
         return;
       }
     }
 
     const result = this.listenerResult(fn.isAsync);
-    const self = this.listenerReceiver(fn.params[0]?.name, instance);
-    const wanted = this.events.listenerType(args, result, self);
+    const self = this.listenerReceiver(
+      tree.paramsOf(fn.paramsList)[0]?.name,
+      instance,
+    );
+    const wanted = this.types.listenerType(args, result, self);
 
     this.checked(listener, wanted, module, kNoPlace);
   }
@@ -310,13 +351,13 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return type.shape.self;
+    return this.types.store.selfTypeOf(type);
   }
 
-  private readonly listenerResult(isAsync: boolean): Type {
-    const nothing = this.store.plain(TypeKind.Void);
+  private listenerResult(isAsync: boolean): Type {
+    const nothing = this.types.store.plain(TypeKind.Void);
     if (isAsync) {
-      return this.store.promiseOf(nothing);
+      return this.types.store.promiseOf(nothing);
     }
 
     return nothing;
@@ -333,49 +374,52 @@ partial class ExpressionTypes {
       return;
     }
     if (given.kind != TypeKind.Function) {
-      return this.reportFound(
+      return this.errors.writeFound(
         module,
-        this.events.notFunctionError(listener.loc, given),
+        this.types.notFunctionError(listener.loc, given),
       );
     }
 
-    const result = given.shape.result;
+    const result = this.types.store.returnTypeOf(given);
     const isDropped =
-      result.kind == TypeKind.Promise && result.value.kind != TypeKind.Void;
+      result.kind == TypeKind.Promise &&
+      this.types.store.valueOf(result).kind != TypeKind.Void;
     if (isDropped) {
-      return this.reportFound(
+      return this.errors.writeFound(
         module,
-        this.events.asyncResultError(listener.loc, result),
+        this.types.asyncResultError(listener.loc, result),
       );
     }
 
-    const nothing = this.store.plain(TypeKind.Void);
-    const wanted = this.events.listenerType(args, nothing, undefined);
+    const nothing = this.types.store.plain(TypeKind.Void);
+    const wanted = this.types.listenerType(args, nothing, undefined);
     const isFitting =
-      this.relation.converts(given, wanted) ||
-      this.functions.isFunctionAdapting(listener, given, wanted, module);
+      this.types.converts(given, wanted) ||
+      this.types.isFunctionAdapting(listener, given, wanted, module);
     if (!isFitting) {
-      const error = this.events.getsError(listener.loc, event, args, given);
+      const error = this.types.getsError(listener.loc, event, args, given);
 
-      this.reportFound(module, error);
+      this.errors.writeFound(module, error);
     }
   }
 
-  private readonly emitterMethodValueCheck(
+  private emitterMethodValueCheck(
     expr: MemberExpr,
     object: Type,
     module: int,
   ): boolean {
     const isMethod =
-      this.events.isListenerMethod(expr.name) || expr.name == kEmitName;
+      this.types.isListenerMethod(expr.name) || expr.name == kEmitName;
     if (!isMethod || object.kind != TypeKind.Instance) {
       return false;
     }
-    if (!this.isEmitter(object) || this.modules.isLibraryModule(module)) {
+    if (!this.isEmitter(object) || this.types.isLibraryModule(module)) {
       return false;
     }
 
-    this.report(module, expr.loc, Code.EmitterMethodValue, { word: expr.name });
+    this.errors.write(module, expr.loc, Code.EmitterMethodValue, {
+      word: expr.name,
+    });
 
     return true;
   }
@@ -386,15 +430,17 @@ partial class ExpressionTypes {
     home: int,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const isEmitter =
       decl.name == kEmitterName &&
-      this.program.modules[home]?.name == kEventsModule;
-    if (!isEmitter || expr.typeArgs.length > 0) {
+      this.types.program.modules[home]?.name == kEventsModule;
+    if (!isEmitter || tree.typeRefsOf(expr.typeArgsList).length > 0) {
       return undefined;
     }
 
-    const unknown = this.store.plain(TypeKind.Error);
-    const instance = this.resolver.classInstance(home, decl, [unknown]);
+    const unknown = this.types.store.plain(TypeKind.Error);
+    const instance = this.types.classInstance(home, decl, [unknown]);
     if (instance.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -416,7 +462,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return this.program.modules[type.module]?.name == kStreamModule;
+    return this.types.program.modules[type.module]?.name == kStreamModule;
   }
 
   private readonly isEmitter(type: Type): boolean {
@@ -431,7 +477,7 @@ partial class ExpressionTypes {
         one.kind == TypeKind.Instance &&
         (this.isEventsClass(one, kEmitterName) || this.isStreamEmitter(one));
       if (isMap && one.kind == TypeKind.Instance) {
-        return this.knownMap(one.args[0]);
+        return this.knownMap(this.types.store.argsOf(one)[0]);
       }
     }
 
@@ -451,7 +497,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return this.program.modules[type.module]?.name == kEventsModule;
+    return this.types.program.modules[type.module]?.name == kEventsModule;
   }
 
   private encodedArgs(
@@ -460,8 +506,11 @@ partial class ExpressionTypes {
     args: Type | undefined,
     module: int,
   ): Type | undefined {
-    const name = expr.args[0]?.expr;
-    const key = this.emitterKey(member.object, module);
+    const tree = this.types.program.tree;
+
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const object = tree.exprOf(member.objectId);
+    const key = this.emitterKey(object, module);
     const isData =
       name != undefined && this.constantKey(name, module) == kDataEvent;
     if (
@@ -472,9 +521,9 @@ partial class ExpressionTypes {
       return args;
     }
 
-    const text = this.store.plain(TypeKind.String);
+    const text = this.types.store.plain(TypeKind.String);
 
-    return this.store.tupleOf({
+    return this.types.store.tupleOf({
       items: [text],
       readonly: false,
       required: 1,
@@ -487,7 +536,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return this.program.modules[type.module]?.name == kWebModule;
+    return this.types.program.modules[type.module]?.name == kWebModule;
   }
 
   private targetCall(
@@ -496,6 +545,8 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const isListening = kTargetListenerMethods.includes(member.name);
     const isTarget = this.types
       .ancestorsOf(instance)
@@ -504,9 +555,9 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const name = expr.args[0]?.expr;
-    const listener = expr.args[1]?.expr;
-    const text = this.store.plain(TypeKind.String);
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const listener = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
+    const text = this.types.store.plain(TypeKind.String);
 
     if (name != undefined) {
       this.checked(name, text, module, kNoPlace);
@@ -515,12 +566,16 @@ partial class ExpressionTypes {
       this.targetListenerCheck(listener, instance.module, module);
     }
 
-    this.looseArguments(expr.args.slice(2), module);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Undefined);
+    this.looseArguments(args.slice(2), module);
+
+    return this.types.store.plain(TypeKind.Undefined);
   }
 
   private targetListenerCheck(listener: Expr, home: int, module: int): void {
+    const tree = this.types.program.tree;
+
     const event = this.webEventType(home);
     if (event == undefined) {
       this.typed(listener, undefined, module);
@@ -530,14 +585,24 @@ partial class ExpressionTypes {
 
     const isWritten =
       listener.kind == ExprKind.Function &&
-      listener.fn.params.some((param) => param.type != undefined);
+      tree
+        .paramsOf(tree.functionOf(listener.fnId).paramsList)
+        .some((param) => tree.typeRefAt(param.typeId) != undefined);
     if (listener.kind == ExprKind.Function && !isWritten) {
-      const result = this.listenerResult(listener.fn.isAsync);
-      const params: FunctionParameter[] = listener.fn.params.map(() => ({
-        type: event,
-        optional: false,
-      }));
-      const wanted = this.store.functionOf({ params, rest: false, result });
+      const result = this.listenerResult(
+        tree.functionOf(listener.fnId).isAsync,
+      );
+      const params: FunctionParameter[] = tree
+        .paramsOf(tree.functionOf(listener.fnId).paramsList)
+        .map(() => ({
+          type: event,
+          optional: false,
+        }));
+      const wanted = this.types.store.functionOf({
+        params,
+        rest: false,
+        result,
+      });
 
       this.typed(listener, wanted, module);
 
@@ -549,13 +614,13 @@ partial class ExpressionTypes {
       return;
     }
 
-    const first = given.shape.params[0]?.type;
+    const first = this.types.store.paramsOf(given)[0]?.type;
     if (first == undefined || this.isEventKind(first, event)) {
       return;
     }
 
-    this.report(module, listener.loc, Code.TargetListenerEvent, {
-      first: this.text.of(first),
+    this.errors.write(module, listener.loc, Code.TargetListenerEvent, {
+      first: this.types.typeText(first),
     });
   }
 
@@ -564,18 +629,18 @@ partial class ExpressionTypes {
       return true;
     }
 
-    return this.types.ancestorsOf(type).some((one) => one == event);
+    return this.types.ancestorsOf(type).some((one) => one.id == event.id);
   }
 
-  private readonly webEventType(home: int): Type | undefined {
-    const classes = this.record(home)?.classes;
+  private webEventType(home: int): Type | undefined {
+    const classes = this.records.get(home)?.classes;
     if (classes == undefined) {
       return undefined;
     }
 
     for (const decl of classes.values()) {
       if (decl.name == kEventName) {
-        return this.resolver.classInstance(home, decl, []);
+        return this.types.classInstance(home, decl, []);
       }
     }
 
@@ -588,10 +653,13 @@ partial class ExpressionTypes {
     isEmitting: boolean,
     module: int,
   ): void {
-    const name = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isError =
       name != undefined && this.constantKey(name, module) == kErrorEvent;
-    const key = this.emitterKey(member.object, module);
+    const object = tree.exprOf(member.objectId);
+    const key = this.emitterKey(object, module);
     if (!isError || key == undefined) {
       return;
     }
@@ -618,11 +686,11 @@ partial class ExpressionTypes {
     return `${target.module} ${target.loc}`;
   }
 
-  private readonly unheardErrorsCheck(module: int): void {
+  private unheardErrorsCheck(module: int): void {
     for (const emit of this.eventMarks.errorEmits) {
       const isHeard = this.eventMarks.errorListened.has(emit.key);
       if (emit.module == module && !isHeard) {
-        this.report(module, emit.loc, Code.EventErrorUnheard, kNoDetails);
+        this.errors.write(module, emit.loc, Code.EventErrorUnheard, kNoDetails);
       }
     }
   }

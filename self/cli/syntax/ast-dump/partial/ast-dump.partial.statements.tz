@@ -36,20 +36,24 @@ partial class Dumper {
       case StmtKind.Block: {
         const end = stmt.end ?? kNoLocation;
 
-        this.line(`Block ${loc} end=${end} n=${stmt.body.length}`);
+        this.line(
+          `Block ${loc} end=${end} n=${this.tree.stmtsOf(stmt.bodyList).length}`,
+        );
 
-        return this.dumpStmts(stmt.body);
+        const body = this.tree.stmtsOf(stmt.bodyList);
+
+        return this.dumpStmts(body);
       }
       case StmtKind.VarDecl: {
         const isConst = this.flag(stmt.isConst);
         const isUsing = this.flag(stmt.isUsing);
 
         this.line(
-          `VarDecl ${loc} const=${isConst} using=${isUsing} n=${stmt.decls.length}`,
+          `VarDecl ${loc} const=${isConst} using=${isUsing} n=${this.tree.declaratorsOf(stmt.declsList).length}`,
         );
         this.nested();
 
-        for (const declarator of stmt.decls) {
+        for (const declarator of this.tree.declaratorsOf(stmt.declsList)) {
           this.dumpDeclarator(declarator);
         }
 
@@ -59,33 +63,53 @@ partial class Dumper {
         return this.dumpFunction(stmt);
       case StmtKind.Expr:
         this.line(`ExprStmt ${loc}`);
-        return this.dumpChildren([stmt.expr]);
+        const expr = this.tree.exprOf(stmt.exprId);
+
+        return this.dumpChildren([expr]);
       case StmtKind.If:
         this.line(`If ${loc}`);
         this.nested();
-        this.dumpExpr(stmt.cond);
-        this.dumpStmt(stmt.thenStmt);
-        this.dumpOptionalStmt(stmt.elseStmt);
+        const cond = this.tree.exprOf(stmt.condId);
+
+        this.dumpExpr(cond);
+        const thenStmt = this.tree.stmtOf(stmt.thenStmtId);
+
+        this.dumpStmt(thenStmt);
+        const elseStmt = this.tree.stmtAt(stmt.elseStmtId);
+
+        this.dumpOptionalStmt(elseStmt);
         return this.back();
       case StmtKind.While:
         this.line(`While ${loc}`);
         this.nested();
-        this.dumpExpr(stmt.cond);
-        this.dumpStmt(stmt.body);
+        const condExpr = this.tree.exprOf(stmt.condId);
+
+        this.dumpExpr(condExpr);
+        const bodyStmt = this.tree.stmtOf(stmt.bodyId);
+
+        this.dumpStmt(bodyStmt);
         return this.back();
       case StmtKind.DoWhile:
         this.line(`DoWhile ${loc}`);
         this.nested();
-        this.dumpStmt(stmt.body);
-        this.dumpExpr(stmt.cond);
+        const stmtBody = this.tree.stmtOf(stmt.bodyId);
+
+        this.dumpStmt(stmtBody);
+        const stmtCond = this.tree.exprOf(stmt.condId);
+
+        this.dumpExpr(stmtCond);
         return this.back();
       case StmtKind.For:
         this.line(`For ${loc}`);
         this.nested();
-        this.dumpOptionalStmt(stmt.init);
-        this.dumpOptionalExpr(stmt.cond);
-        this.dumpOptionalExpr(stmt.step);
-        this.dumpOptionalStmt(stmt.body);
+        const init = this.tree.stmtAt(stmt.initId);
+
+        this.dumpOptionalStmt(init);
+        this.dumpOptionalExpr(this.tree.exprAt(stmt.condId));
+        const step = this.tree.exprAt(stmt.stepId);
+
+        this.dumpOptionalExpr(step);
+        this.dumpOptionalStmt(this.tree.stmtAt(stmt.bodyId));
         return this.back();
       case StmtKind.ForOf: {
         const isConst = this.flag(stmt.isConst);
@@ -97,21 +121,33 @@ partial class Dumper {
         this.line(`ForOf ${loc} ${words} keys=${keys} await=${isAwait}`);
         this.nested();
         this.dumpDeclarator(stmt.binding);
-        this.dumpExpr(stmt.iterable);
-        this.dumpStmt(stmt.body);
+        const iterable = this.tree.exprOf(stmt.iterableId);
+
+        this.dumpExpr(iterable);
+        this.dumpStmt(this.tree.stmtOf(stmt.bodyId));
 
         return this.back();
       }
       case StmtKind.Switch:
-        this.line(`Switch ${loc} n=${stmt.cases.length}`);
+        this.line(
+          `Switch ${loc} n=${this.tree.casesOf(stmt.casesList).length}`,
+        );
         this.nested();
-        this.dumpExpr(stmt.discriminant);
-        for (const switchCase of stmt.cases) {
-          this.line(`Case ${switchCase.loc} n=${switchCase.body.length}`);
+        const discriminant = this.tree.exprOf(stmt.discriminantId);
+
+        this.dumpExpr(discriminant);
+        for (const switchCase of this.tree.casesOf(stmt.casesList)) {
+          this.line(
+            `Case ${switchCase.loc} n=${this.tree.stmtsOf(switchCase.bodyList).length}`,
+          );
           this.nested();
-          this.dumpOptionalExpr(switchCase.test);
+          const test = this.tree.exprAt(switchCase.testId);
+
+          this.dumpOptionalExpr(test);
           this.back();
-          this.dumpStmts(switchCase.body);
+          const bodyItem = this.tree.stmtsOf(switchCase.bodyList);
+
+          this.dumpStmts(bodyItem);
         }
         return this.back();
       case StmtKind.Labeled: {
@@ -119,12 +155,14 @@ partial class Dumper {
 
         this.line(`Labeled ${loc} ${label}`);
 
-        return this.dumpStmts([stmt.body]);
+        return this.dumpStmts([this.tree.stmtOf(stmt.bodyId)]);
       }
       case StmtKind.Return:
         this.line(`Return ${loc}`);
         this.nested();
-        this.dumpOptionalExpr(stmt.value);
+        const value = this.tree.exprAt(stmt.valueId);
+
+        this.dumpOptionalExpr(value);
         return this.back();
       case StmtKind.Break: {
         const label = this.quote(stmt.label);
@@ -145,12 +183,18 @@ partial class Dumper {
 
         this.line(
           `TypeAlias ${loc} ${name} ` +
-            `tp=${stmt.typeParams.length} bases=${stmt.bases.length}`,
+            `tp=${this.tree.typeParamsOf(stmt.typeParamsList).length} bases=${this.tree.typeRefsOf(stmt.basesList).length}`,
         );
         this.nested();
-        this.dumpTypeParams(stmt.typeParams);
-        this.dumpType(stmt.type);
-        this.dumpTypes(stmt.bases);
+        const typeParams = this.tree.typeParamsOf(stmt.typeParamsList);
+
+        this.dumpTypeParams(typeParams);
+        const typeRef = this.tree.typeRefOf(stmt.typeId);
+
+        this.dumpType(typeRef);
+        const basesItem = this.tree.typeRefsOf(stmt.basesList);
+
+        this.dumpTypes(basesItem);
 
         return this.back();
       }
@@ -162,15 +206,19 @@ partial class Dumper {
       case StmtKind.Enum: {
         const name = this.quote(stmt.name);
 
-        this.line(`Enum ${loc} ${name} n=${stmt.members.length}`);
+        this.line(
+          `Enum ${loc} ${name} n=${this.tree.enumMembersOf(stmt.membersList).length}`,
+        );
         this.nested();
 
-        for (const member of stmt.members) {
+        for (const member of this.tree.enumMembersOf(stmt.membersList)) {
           const memberName = this.quote(member.name);
 
           this.line(`EnumMember ${member.loc} ${memberName}`);
           this.nested();
-          this.dumpOptionalExpr(member.init);
+          const initExpr = this.tree.exprAt(member.initId);
+
+          this.dumpOptionalExpr(initExpr);
           this.back();
         }
 
@@ -187,8 +235,12 @@ partial class Dumper {
 
     this.line(`Declarator ${declarator.loc} ${name} ${shape}`);
     this.nested();
-    this.dumpOptionalType(declarator.typeAnn);
-    this.dumpOptionalExpr(declarator.init);
+    const typeAnn = this.tree.typeRefAt(declarator.typeAnnId);
+
+    this.dumpOptionalType(typeAnn);
+    const init = this.tree.exprAt(declarator.initId);
+
+    this.dumpOptionalExpr(init);
     this.back();
   }
 

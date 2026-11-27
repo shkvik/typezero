@@ -19,8 +19,12 @@ import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private readonly isBitHolder(frame: Frame, expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
     if (expr.kind == ExprKind.Member) {
-      return this.isBitHolder(frame, expr.object);
+      const object = tree.exprOf(expr.objectId);
+
+      return this.isBitHolder(frame, object);
     }
     if (expr.kind != ExprKind.Name || expr.name != kBitName) {
       return false;
@@ -34,13 +38,16 @@ partial class Lowering {
     call: CallExpr,
     callee: MemberExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeOf(call);
     const values = this.bitArguments(frame, call);
     const first = values?.[0];
     if (result == undefined || values == undefined || first == undefined) {
       return undefined;
     }
-    if (callee.object.kind == ExprKind.Member) {
+    const object = tree.exprOf(callee.objectId);
+    if (object.kind == ExprKind.Member) {
       return this.wrappedFrom(frame, first, result);
     }
 
@@ -79,27 +86,33 @@ partial class Lowering {
     expr: MemberExpr,
     object: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     if (object.kind != TypeKind.Int || !object.wraps || expr.name != "value") {
       this.notLowered(frame.module, expr.loc, "a member of this number");
 
       return undefined;
     }
 
-    const given = this.value(frame, expr.object);
+    const objectExpr = tree.exprOf(expr.objectId);
+    const given = this.value(frame, objectExpr);
     if (given == undefined) {
       return undefined;
     }
 
-    const tz = this.store.integer(object.bits, true);
+    const tz = this.values.types.store.integer(object.bits, true);
 
     return { type: given.type, value: given.value, tz };
   }
 
   private bitArguments(frame: Frame, call: CallExpr): IrValue[] | undefined {
+    const tree = this.values.types.program.tree;
+
     const values: IrValue[] = [];
 
-    for (const argument of call.args) {
-      const given = this.value(frame, argument.expr);
+    for (const argument of tree.argumentsOf(call.argsList)) {
+      const expr = tree.exprOf(argument.exprId);
+      const given = this.value(frame, expr);
       if (given == undefined || argument.spread) {
         return undefined;
       }
@@ -181,26 +194,33 @@ partial class Lowering {
     let high: LLVMValue = frame.made.cast(IrOpcode.Trunc, top, kIntType);
 
     if (name != "mul64") {
-      high = frame.made.binary(IrOpcode.And, high, this.ir.integer(kIntType, "1"));
+      high = frame.made.binary(
+        IrOpcode.And,
+        high,
+        this.ir.integer(kIntType, "1"),
+      );
     }
 
     const object = this.allocated(frame, layout);
     const names = this.halfNames(name);
 
-    for (const field of layout.fields) {
+    for (const field of this.fieldsOf(layout)) {
       let value: LLVMValue = high;
 
       if (field.name == names[1]) {
         value = low;
       }
 
-      frame.made.store(value, frame.made.field(layout.struct, object, field.index));
+      frame.made.store(
+        value,
+        frame.made.field(layout.struct, object, field.index),
+      );
     }
 
     return { type: kPointerType, value: object, tz: result, owned: true };
   }
 
-  private readonly summed(
+  private summed(
     frame: Read<Frame>,
     opcode: IrOpcode,
     wide: Read<LLVMValue[]>,
@@ -278,7 +298,7 @@ partial class Lowering {
     const bits = this.bitsOf(given.tz);
     const value = this.resizedBits(
       frame,
-      { type, value: counted, tz: this.store.integer(bits, true) },
+      { type, value: counted, tz: this.values.types.store.integer(bits, true) },
       bits,
       this.bitsOf(result),
     );

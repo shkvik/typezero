@@ -20,23 +20,26 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private readonly optionalInner(type: Type): Type | undefined {
+  private optionalInner(type: Type): Type | undefined {
     if (type.kind != TypeKind.Union) {
       return undefined;
     }
 
-    const defined = type.parts.filter(
-      (part) => part.kind != TypeKind.Undefined,
-    );
+    const defined = this.values.types.store
+      .partsOf(type)
+      .filter((part) => part.kind != TypeKind.Undefined);
     const inner = defined[0];
-    if (defined.length == type.parts.length || inner == undefined) {
+    if (
+      defined.length == this.values.types.store.partsOf(type).length ||
+      inner == undefined
+    ) {
       return undefined;
     }
     if (defined.length == 1) {
       return inner;
     }
 
-    return this.store.unionOf(defined);
+    return this.values.types.store.unionOf(defined);
   }
 
   private isReferenceLike(type: Type): boolean {
@@ -71,7 +74,11 @@ partial class Lowering {
     return { type, value: placed, tz: target, owned: value.owned };
   }
 
-  private insideValue(frame: Read<Frame>, value: IrValue, inner: Type): IrValue {
+  private insideValue(
+    frame: Read<Frame>,
+    value: IrValue,
+    inner: Type,
+  ): IrValue {
     const type = this.irType(inner) ?? kPointerType;
     if (type == value.type) {
       return this.retyped(value, type, inner);
@@ -79,7 +86,9 @@ partial class Lowering {
 
     const made = frame.made.extract(value.value, 0);
 
-    return { type, value: made, tz: inner, owned: value.owned };
+    const { owned, isStatic } = value;
+
+    return { type, value: made, tz: inner, owned, isStatic };
   }
 
   private proven(frame: Read<Frame>, value: IrValue): IrValue {
@@ -135,7 +144,7 @@ partial class Lowering {
     }
 
     const has = this.hasValue(frame, value);
-    const tz = this.store.plain(TypeKind.Boolean);
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     this.dropping(frame, value);
 
@@ -164,11 +173,14 @@ partial class Lowering {
   }
 
   private readonly definedSide(expr: BinaryExpr): Expr {
-    if (expr.lhs.kind == ExprKind.Undefined) {
-      return expr.rhs;
+    const tree = this.values.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    if (lhs.kind == ExprKind.Undefined) {
+      return tree.exprOf(expr.rhsId);
     }
 
-    return expr.lhs;
+    return tree.exprOf(expr.lhsId);
   }
 
   private nullish(frame: Frame, expr: BinaryExpr): IrValue | undefined {
@@ -180,9 +192,12 @@ partial class Lowering {
     expr: BinaryExpr,
     isFlagWanted: boolean,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.nullishResult(frame, expr);
     const type = this.typeOrUndefined(result);
-    const left = this.value(frame, expr.lhs);
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.value(frame, lhs);
     if (result == undefined || type == undefined || left == undefined) {
       this.notLowered(frame.module, expr.loc, "this operator");
 
@@ -194,7 +209,8 @@ partial class Lowering {
       return this.converted(frame, left, result, expr.loc);
     }
 
-    const isFlagged = isFlagWanted && left.owned != true && this.isManaged(result);
+    const isFlagged =
+      isFlagWanted && left.owned != true && this.isManaged(result);
     if (isFlagged) {
       return this.flaggedNullish(frame, expr, left, inner, result);
     }
@@ -214,7 +230,8 @@ partial class Lowering {
     this.jumpTo(frame, end);
     frame.made.open(other);
 
-    const second = this.branchValue(frame, expr.rhs, result);
+    const rhs = tree.exprOf(expr.rhsId);
+    const second = this.branchValue(frame, rhs, result);
     const secondBlock = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
@@ -252,14 +269,20 @@ partial class Lowering {
   }
 
   private nullishResult(frame: Frame, expr: BinaryExpr): Type | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeIn(frame, expr);
-    const left = this.typeIn(frame, expr.lhs);
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.typeIn(frame, lhs);
     if (result == undefined || left == undefined) {
       return result;
     }
 
     const defined = this.definedOf(left);
-    if (this.isCString(defined) && expr.rhs.kind == ExprKind.StringLit) {
+    if (
+      this.isCString(defined) &&
+      tree.exprOf(expr.rhsId).kind == ExprKind.StringLit
+    ) {
       return defined;
     }
 
@@ -273,6 +296,8 @@ partial class Lowering {
     inner: Type,
     result: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.irType(result) ?? kPointerType;
     const has = this.hasValue(frame, left);
     const given = frame.made.block("nullish.given");
@@ -289,8 +314,14 @@ partial class Lowering {
     this.jumpTo(frame, end);
     frame.made.open(other);
 
-    const wanted = this.wantedValue(frame, expr.rhs, result);
-    const second = this.convertedOrNone(frame, wanted, result, expr.rhs.loc);
+    const rhs = tree.exprOf(expr.rhsId);
+    const wanted = this.wantedValue(frame, rhs, result);
+    const second = this.convertedOrNone(
+      frame,
+      wanted,
+      result,
+      tree.exprOf(expr.rhsId).loc,
+    );
     const secondBlock = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
@@ -316,8 +347,8 @@ partial class Lowering {
     return { type, value, tz: result, owned: false, ownedFlag };
   }
 
-  private readonly ownedBit(value: Read<IrValue>): LLVMValue {
-    if (value.owned == true) {
+  private ownedBit(value: Read<IrValue>): LLVMValue {
+    if (value.owned == true || value.isStatic == true) {
       return this.ir.integer(kBooleanType, "1");
     }
 
@@ -337,12 +368,21 @@ partial class Lowering {
     return this.wantedValue(frame, expr, wanted);
   }
 
-  private readonly withOwnedFlag(value: IrValue, ownedFlag: LLVMValue | undefined): IrValue {
+  private readonly withOwnedFlag(
+    value: IrValue,
+    ownedFlag: LLVMValue | undefined,
+  ): IrValue {
     if (ownedFlag == undefined) {
       return value;
     }
 
-    return { type: value.type, value: value.value, tz: value.tz, owned: false, ownedFlag };
+    return {
+      type: value.type,
+      value: value.value,
+      tz: value.tz,
+      owned: false,
+      ownedFlag,
+    };
   }
 
   private loopSourceValue(frame: Frame, expr: Expr): IrValue | undefined {

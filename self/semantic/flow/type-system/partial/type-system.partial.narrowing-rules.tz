@@ -1,0 +1,343 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kDot } from "../../../code/source-texts/const/source-texts.const.tz";
+import {
+  kDictTexts,
+} from "../../../types/type-questions/const/type-questions.const.tz";
+import { MethodKind } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  kArrayTypeOf,
+  kTypeOfTypes,
+} from "../../narrowing-rules/const/narrowing-rules.const.tz";
+
+partial class TypeSystem {
+  public joinedSide(
+    side: Read<Map<string, Type> | undefined>,
+    facts: Own<Map<string, Type>>,
+  ): Map<string, Type> {
+    if (side == undefined) {
+      return facts;
+    }
+
+    return this.joinedFacts(side, facts);
+  }
+
+  public readonly isParamPath(key: string, param: string): boolean {
+    return key == param || key.startsWith(param + kDot);
+  }
+
+  public readonly isBooleanFunction(type: Type): boolean {
+    if (type.kind != TypeKind.Function) {
+      return false;
+    }
+
+    const result = this.apparent(this.store.returnTypeOf(type));
+
+    return result.kind == TypeKind.Boolean;
+  }
+
+  public readonly isListType(type: Type): boolean {
+    return type.kind == TypeKind.Array || type.kind == TypeKind.Tuple;
+  }
+
+  public readonly isOwnReceiver(type: Type): boolean {
+    const parts = this.unionMembers(type);
+
+    return parts.some(
+      (part) =>
+        part.kind == TypeKind.Instance && !this.isLibraryModule(part.module),
+    );
+  }
+
+  public readonly unknownFields(
+    key: string,
+    fields: Read<ObjectField[]>,
+    facts: Map<string, Type>,
+  ): void {
+    const unknown = this.store.plain(TypeKind.Error);
+
+    for (const field of fields) {
+      if (field.optional || this.isOptional(field.type)) {
+        facts.set(key + kDot + field.name, unknown);
+      }
+    }
+  }
+
+  public readonly isGuardable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Union:
+        return true;
+      case TypeKind.Instance:
+        return this.store.isBase(type);
+      default:
+        return false;
+    }
+  }
+
+  public readonly mergedFacts(
+    first: Read<Map<string, Type>>,
+    second: Read<Map<string, Type>>,
+  ): Map<string, Type> {
+    const merged = new Map<string, Type>();
+
+    for (const [key, type] of first) {
+      merged.set(key, type);
+    }
+
+    for (const [key, type] of second) {
+      merged.set(key, type);
+    }
+
+    return merged;
+  }
+
+  public joinedFacts(
+    first: Read<Map<string, Type>>,
+    second: Read<Map<string, Type>>,
+  ): Map<string, Type> {
+    const joined = new Map<string, Type>();
+
+    for (const [key, type] of first) {
+      const other = second.get(key);
+      if (other != undefined) {
+        const union = this.store.unionOf([type, other]);
+
+        joined.set(key, union);
+      }
+    }
+
+    return joined;
+  }
+
+  public readonly comparedPath(expr: Expr): Expr {
+    const tree = this.program.tree;
+
+    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
+      return tree.exprOf(expr.targetId);
+    }
+
+    return expr;
+  }
+
+  public readonly tagOf(expr: Expr): MemberExpr | undefined {
+    const tree = this.program.tree;
+
+    if (expr.kind == ExprKind.OptionalChain) {
+      const chain = tree.exprOf(expr.chainId);
+
+      return this.tagOf(chain);
+    }
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    return expr;
+  }
+
+  public readonly flatMembers(type: Type): Type[] {
+    if (type.kind != TypeKind.Union) {
+      return [type];
+    }
+
+    const flat: Type[] = [];
+
+    for (const part of this.store.partsOf(type)) {
+      for (const member of this.flatMembers(part)) {
+        flat.push(member);
+      }
+    }
+
+    return flat;
+  }
+
+  public readonly sideOf(isFirst: boolean, first: Expr, second: Expr): Expr {
+    if (isFirst) {
+      return first;
+    }
+
+    return second;
+  }
+
+  public undefinedCompared(type: Type, isEqual: boolean): Type | undefined {
+    if (!this.isOptional(type)) {
+      return undefined;
+    }
+    if (isEqual) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return this.definedType(type);
+  }
+
+  public readonly literalPart(type: Type, literal: Type): Type | undefined {
+    const parts = this.unionMembers(type);
+    if (parts.some((one) => one.id == literal.id)) {
+      return literal;
+    }
+
+    const base = this.baseOf(literal);
+    if (base != undefined && parts.some((one) => one.id == base.id)) {
+      return literal;
+    }
+
+    return undefined;
+  }
+
+  public withoutPart(type: Type, literal: Type): Type | undefined {
+    const parts = this.unionMembers(type);
+    if (!parts.some((one) => one.id == literal.id)) {
+      return undefined;
+    }
+
+    const kept = parts.filter((part) => part.id != literal.id);
+    if (kept.length == 0) {
+      return this.store.plain(TypeKind.Never);
+    }
+
+    return this.store.unionOf(kept);
+  }
+
+  public typeofType(
+    type: Type,
+    name: string,
+    isEqual: boolean,
+  ): Type | undefined {
+    const kept: Type[] = [];
+
+    for (const part of this.unionMembers(type)) {
+      const isOpen =
+        part.kind == TypeKind.Unknown ||
+        part.kind == TypeKind.Json ||
+        part.kind == TypeKind.TypeParameter;
+      if (isOpen) {
+        const open = this.openPart(part, name, isEqual);
+
+        kept.push(open);
+
+        continue;
+      }
+
+      const isNamed = this.typeOfNames(part).includes(name);
+      if (isNamed == isEqual) {
+        kept.push(part);
+      }
+    }
+
+    if (kept.length == 0) {
+      return undefined;
+    }
+
+    return this.store.unionOf(kept);
+  }
+
+  public readonly isInstanceOf(part: Type, name: string): boolean {
+    switch (part.kind) {
+      case TypeKind.Instance:
+        return part.name == name;
+      case TypeKind.Dict: {
+        const dict = part.dict;
+        const row = kDictTexts.find((one) => one.dict == dict);
+
+        return row != undefined && row.kind == name;
+      }
+      default:
+        return false;
+    }
+  }
+
+  public readonly isInstanceMethod(fn: FunctionDecl): boolean {
+    const method = fn.role?.method;
+
+    return method == MethodKind.Instance || method == MethodKind.Abstract;
+  }
+
+  public readonly predicateParam(
+    fn: FunctionDecl,
+    name: string,
+  ): Param | undefined {
+    const tree = this.program.tree;
+
+    let found: Param | undefined = undefined;
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      if (param.name == name) {
+        found = param;
+      }
+    }
+
+    return found;
+  }
+
+  public readonly shownPredicate(
+    written: TypeRef,
+    guarded: Type | undefined,
+  ): string {
+    if (guarded == undefined) {
+      return written.name;
+    }
+
+    const type = this.typeText(guarded);
+
+    return `${written.name} is ${type}`;
+  }
+
+  public readonly assertsAdvice(
+    shown: string,
+    guarded: Type | undefined,
+  ): string {
+    if (guarded == undefined) {
+      return "boolean";
+    }
+
+    return shown;
+  }
+
+  public readonly thisPredicateCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+  ): SourceError | undefined {
+    if (this.isInstanceMethod(fn)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.PredicateThisOutside,
+      loc: written.loc,
+      details: kNoDetails,
+    };
+  }
+
+  private openPart(part: Type, name: string, isEqual: boolean): Type {
+    const row = kTypeOfTypes.find((one) => one.name == name);
+    if (isEqual && name == kArrayTypeOf && part.kind == TypeKind.Unknown) {
+      return this.store.arrayOf(part);
+    }
+    if (!isEqual || row == undefined) {
+      return part;
+    }
+
+    const kind = row.kind;
+    if (kind != TypeKind.Int) {
+      return this.store.plain(kind);
+    }
+
+    return this.store.integer(row.bits, row.unsigned);
+  }
+}

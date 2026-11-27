@@ -1,8 +1,6 @@
-import { Span } from "./ast.types.span.tz";
-import { TypeParamDecl, TypeRef } from "./ast.types.types.tz";
-import { Expr } from "./ast.types.expressions.tz";
-import { BlockStmt, StmtKind } from "./ast.types.statements.tz";
-import { Access, ClassMember, Decorator } from "./ast.types.classes.tz";
+import { Access, ClassMember } from "./ast.types.classes.tz";
+import { AstList, Span } from "./ast.types.span.tz";
+import { StmtKind } from "./ast.types.statements.tz";
 
 export enum FunctionPlace {
   Declared,
@@ -35,7 +33,7 @@ export type PlainParam = {
 
 export type DefaultedParam = {
   readonly kind: ParamKind.Defaulted;
-  readonly defaultValue: Expr;
+  readonly defaultValueId: int;
 };
 
 export type ParamForm = PlainParam | DefaultedParam;
@@ -43,26 +41,24 @@ export type ParamForm = PlainParam | DefaultedParam;
 export type Param = {
   readonly name: string;
   readonly loc: int;
-  readonly type?: TypeRef;
+  readonly typeId?: int;
   readonly form: ParamForm;
   readonly property?: ParamProperty;
   readonly pattern?: Span;
-  readonly decorators: readonly Decorator[];
+  readonly decoratorsList: AstList;
 };
 
-export type UnsafeMark = {
-  readonly loc: int;
-  readonly options?: Expr;
-};
+export type UnsafeMark = { readonly loc: int; readonly optionsId?: int };
 
 export type FunctionDecl = {
   readonly kind: StmtKind.Function;
+  readonly id: int;
   readonly loc: int;
   readonly name: string;
-  readonly typeParams: readonly TypeParamDecl[];
-  readonly params: readonly Param[];
-  readonly returnType?: TypeRef;
-  readonly body?: BlockStmt;
+  readonly typeParamsList: AstList;
+  readonly paramsList: AstList;
+  readonly returnTypeId?: int;
+  readonly bodyId?: int;
   readonly source?: Span;
   readonly isArrow: boolean;
   readonly concise: boolean;

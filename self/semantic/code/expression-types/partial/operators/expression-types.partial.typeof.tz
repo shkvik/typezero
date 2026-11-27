@@ -12,20 +12,24 @@ import { ComparedSide } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private typeofTyped(expr: UnaryExpr, module: int): Type {
-    this.typed(expr.operand, undefined, module);
+    const tree = this.types.program.tree;
 
-    return this.store.plain(TypeKind.String);
+    const operand = tree.exprOf(expr.operandId);
+
+    this.typed(operand, undefined, module);
+
+    return this.types.store.plain(TypeKind.String);
   }
 
-  private readonly typeOfCheck(side: ComparedSide, other: Expr, module: int): void {
+  private typeOfCheck(side: ComparedSide, other: Expr, module: int): void {
     const tested = side.tested;
     if (tested == undefined || other.kind != ExprKind.StringLit) {
       return;
     }
 
-    const answer = this.typeOfs.answerOf(tested, other.value);
+    const answer = this.types.typeOfAnswerOf(tested, other.value);
     if (answer != undefined) {
-      this.report(module, other.loc, answer.code, answer.details);
+      this.errors.write(module, other.loc, answer.code, answer.details);
     }
   }
 }

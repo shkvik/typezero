@@ -1,0 +1,185 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  ProofRange,
+} from "../../../flow/proof-rules/types/proof-rules.types.tz";
+import {
+  ByteKindInfo,
+} from "../../byte-number-rules/types/byte-number-rules.types.tz";
+import {
+  kBufferClass,
+  kBufferIndexHint,
+  kUint8Class,
+  kByteLengthName,
+  kLengthName,
+  kViewOnlyNames,
+  kBufferTextHint,
+  kDataViewClass,
+  kNoElementsHint,
+  kViewIndexHint,
+  kViewHint,
+  kStringBytesHint,
+  kValuePlaceholder,
+} from "../../byte-source-rules/const/byte-source-rules.const.tz";
+import {
+  SourceShape,
+} from "../../byte-source-rules/types/byte-source-rules.types.tz";
+
+partial class TypeSystem {
+  private readonly rangeError(
+    loc: int,
+    info: ByteKindInfo,
+    range: ProofRange,
+    shape: SourceShape,
+    word: string,
+    first: string,
+    shown: string,
+  ): SourceError | undefined {
+    const place = this.byteSourceRangeText(range);
+    const wrap = this.wrapHint(info, kValuePlaceholder);
+    const other = `${word}.from(${shown}, ${kValuePlaceholder} => ${wrap})`;
+    const element = shape.element;
+    if (!shape.isTyped || element == undefined) {
+      const details: Details = { word, first, place, other };
+
+      return { code: Code.BytesSourceUnproven, loc, details };
+    }
+
+    const held = this.infoOfElement(element)?.range;
+    if (held == undefined) {
+      return undefined;
+    }
+
+    const high = range.high ?? 0;
+    const heldHigh = held.high ?? 0;
+    if (held.low >= range.low && heldHigh <= high) {
+      return undefined;
+    }
+
+    const second = this.byteSourceRangeText(held);
+    const details: Details = { word, first, second, place, other };
+
+    return { code: Code.BytesSourceMayNotFit, loc, details };
+  }
+
+  private readonly byteSourceRangeText(range: ProofRange): string {
+    const high = range.high ?? 0;
+
+    return `${range.low} to ${high}`;
+  }
+
+  private readonly stringHint(isString: boolean): string {
+    if (isString) {
+      return kStringBytesHint;
+    }
+
+    return "";
+  }
+
+  private readonly startText(offset: string | undefined): string {
+    if (offset == undefined) {
+      return "";
+    }
+
+    return `${offset} + `;
+  }
+
+  private readonly timesText(size: decimal): string {
+    if (size > 1) {
+      return ` * ${size}`;
+    }
+
+    return "";
+  }
+
+  private readonly viewHint(isTyped: boolean): string {
+    if (isTyped) {
+      return kViewHint;
+    }
+
+    return "";
+  }
+
+  private indexHint(base: Type): string {
+    if (this.isArrayBuffer(base)) {
+      return kBufferIndexHint;
+    }
+    if (base.kind == TypeKind.Instance && base.name == kDataViewClass) {
+      return kViewIndexHint;
+    }
+
+    return kNoElementsHint;
+  }
+
+  private textHint(base: Type): string {
+    if (this.isArrayBuffer(base)) {
+      return kBufferTextHint;
+    }
+
+    return "";
+  }
+
+  private hasUnionMember(name: string, part: Type): boolean {
+    if (name == kByteLengthName) {
+      return this.isByteView(part) || this.isArrayBuffer(part);
+    }
+    if (kViewOnlyNames.includes(name)) {
+      return this.isByteView(part);
+    }
+
+    return name == kLengthName && this.typedName(part) != undefined;
+  }
+
+  private readonly narrowHint(holder: Type | undefined): string {
+    if (holder == undefined) {
+      return "";
+    }
+
+    return `, e.g. 'if (x instanceof ${this.typeText(holder)})'`;
+  }
+
+  private unionInstanceofError(
+    loc: int,
+    left: Type,
+    parts: Read<Type[]>,
+    kind: string,
+  ): SourceError | undefined {
+    const base = this.definedType(left);
+    const first = this.typeText(base);
+    const word = kind;
+    const matching = parts.filter((part) => this.isKind(kind, part));
+    const isMaybe = parts.some((part) => this.canBeBuffer(kind, part));
+    if (matching.length == 0 && !isMaybe) {
+      return {
+        code: Code.InstanceOfNoneBuiltin,
+        loc,
+        details: { word, first },
+      };
+    }
+
+    const isAll = matching.length == parts.length;
+    if (isAll && !this.isOptional(left)) {
+      return { code: Code.InstanceOfAllBuiltin, loc, details: { word, first } };
+    }
+
+    return undefined;
+  }
+
+  private isKind(kind: string, type: Type): boolean {
+    const found = this.byteSourceKindOf(type);
+    if (found == undefined) {
+      return false;
+    }
+
+    return found == kind || (kind == kUint8Class && found == kBufferClass);
+  }
+
+  private canBeBuffer(kind: string, type: Type): boolean {
+    return kind == kBufferClass && this.byteSourceKindOf(type) == kUint8Class;
+  }
+}

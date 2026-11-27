@@ -13,18 +13,18 @@ import { ExpressionTypes } from "../../../../code/expression-types/expression-ty
 import { kMatchArrayName } from "../../../regex-rules/const/regex-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly matchShape(): Type {
+  private matchShape(): Type {
     return this.namedLibraryType(kMatchArrayName, 0, 0);
   }
 
-  private readonly foundMatch(): Type {
+  private foundMatch(): Type {
     return this.types.optional(this.matchShape());
   }
 
-  private readonly allMatches(): Type {
-    const nothing = this.store.plain(TypeKind.Void);
+  private allMatches(): Type {
+    const nothing = this.types.store.plain(TypeKind.Void);
 
-    return this.store.iteratorOf({
+    return this.types.store.iteratorOf({
       yielded: this.matchShape(),
       returned: nothing,
       sent: nothing,
@@ -32,38 +32,38 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly matchItem(type: Type): Type | undefined {
-    if (type.kind != TypeKind.Object || type != this.matchShape()) {
+  private matchItem(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Object || type.id != this.matchShape().id) {
       return undefined;
     }
 
-    const text = this.store.plain(TypeKind.String);
+    const text = this.types.store.plain(TypeKind.String);
 
     return this.types.optional(text);
   }
 
-  private readonly matchList(type: Type): Type | undefined {
+  private matchList(type: Type): Type | undefined {
     const item = this.matchItem(type);
     if (item == undefined) {
       return undefined;
     }
 
-    return this.store.arrayOf(item);
+    return this.types.store.arrayOf(item);
   }
 
-  private readonly matchListFor(type: Type, name: string): Type | undefined {
+  private matchListFor(type: Type, name: string): Type | undefined {
     const list = this.matchList(type);
     if (list == undefined || type.kind != TypeKind.Object) {
       return undefined;
     }
-    if (type.fields.some((field) => field.name == name)) {
+    if (this.types.store.fieldsOf(type).some((field) => field.name == name)) {
       return undefined;
     }
 
     return list;
   }
 
-  private readonly matchBeforeList(given: Type, other: Expr): Type {
+  private matchBeforeList(given: Type, other: Expr): Type {
     const list = this.matchList(this.types.definedType(given));
     if (list == undefined || other.kind != ExprKind.ArrayLit) {
       return given;
@@ -80,20 +80,22 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const list = this.matchList(object);
     if (list == undefined) {
       return undefined;
     }
 
-    const index = expr.index;
+    const index = tree.exprOf(expr.indexId);
     if (index.kind == ExprKind.IntLit && index.value == 0) {
-      return this.store.plain(TypeKind.String);
+      return this.types.store.plain(TypeKind.String);
     }
 
     return this.listIndexed(expr, list, module);
   }
 
-  private readonly matchMemberRead(
+  private matchMemberRead(
     expr: MemberExpr,
     object: Type,
     module: int,

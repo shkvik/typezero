@@ -14,7 +14,10 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
-import { IrIntPredicate, IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
@@ -33,11 +36,14 @@ import {
 
 partial class Lowering {
   private mapLoopOf(frame: Frame, statement: ForOfStmt): MapLoop | undefined {
+    const tree = this.values.types.program.tree;
+
     if (statement.isAwait || statement.keys) {
       return undefined;
     }
 
-    const loop = this.mapLoopSource(frame, statement.iterable);
+    const iterable = tree.exprOf(statement.iterableId);
+    const loop = this.mapLoopSource(frame, iterable);
     if (loop == undefined) {
       return undefined;
     }
@@ -55,7 +61,11 @@ partial class Lowering {
     }
 
     const type = this.typeIn(frame, iterable);
-    if (type == undefined || type.kind != TypeKind.Dict || !this.isTzMap(type)) {
+    if (
+      type == undefined ||
+      type.kind != TypeKind.Dict ||
+      !this.isTzMap(type)
+    ) {
       return undefined;
     }
     if (type.dict == DictKind.Set) {
@@ -66,18 +76,26 @@ partial class Lowering {
   }
 
   private listedMap(frame: Frame, iterable: Expr): MapLoop | undefined {
-    if (iterable.kind != ExprKind.Call || iterable.args.length != 0) {
+    const tree = this.values.types.program.tree;
+
+    if (
+      iterable.kind != ExprKind.Call ||
+      tree.argumentsOf(iterable.argsList).length != 0
+    ) {
       return undefined;
     }
 
-    const callee = iterable.callee;
+    const callee = tree.exprOf(iterable.calleeId);
     if (callee.kind != ExprKind.Member) {
       return undefined;
     }
 
-    const type = this.typeIn(frame, callee.object);
+    const object = tree.exprOf(callee.objectId);
+    const type = this.typeIn(frame, object);
     const isListing =
-      callee.name == kKeysLoop || callee.name == kValuesLoop || callee.name == kEntriesLoop;
+      callee.name == kKeysLoop ||
+      callee.name == kValuesLoop ||
+      callee.name == kEntriesLoop;
     if (type == undefined || type.kind != TypeKind.Dict || !isListing) {
       return undefined;
     }
@@ -85,38 +103,50 @@ partial class Lowering {
       return undefined;
     }
 
-    return { map: callee.object, type, kind: callee.name };
+    return { map: tree.exprOf(callee.objectId), type, kind: callee.name };
   }
 
-  private readonly pairNames(statement: ForOfStmt): VarDeclarator[] | undefined {
-    const body = statement.body;
+  private readonly pairNames(
+    statement: ForOfStmt,
+  ): VarDeclarator[] | undefined {
+    const tree = this.values.types.program.tree;
+
+    const body = tree.stmtOf(statement.bodyId);
     const isGenerated = statement.binding.name.startsWith("%");
     if (!isGenerated || body.kind != StmtKind.Block) {
       return undefined;
     }
 
-    const first = body.body[0];
+    const first = tree.stmtsOf(body.bodyList)[0];
     if (first == undefined || first.kind != StmtKind.VarDecl) {
       return undefined;
     }
 
-    const isPair = first.decls.every((decl) => this.pairIndex(decl, statement) != undefined);
+    const isPair = tree
+      .declaratorsOf(first.declsList)
+      .every((decl) => this.pairIndex(decl, statement) != undefined);
     if (!isPair) {
       return undefined;
     }
 
-    return first.decls.slice();
+    return tree.declaratorsOf(first.declsList).slice();
   }
 
-  private readonly pairIndex(decl: VarDeclarator, statement: ForOfStmt): int | undefined {
-    const init = decl.init;
+  private readonly pairIndex(
+    decl: VarDeclarator,
+    statement: ForOfStmt,
+  ): int | undefined {
+    const tree = this.values.types.program.tree;
+
+    const init = tree.exprAt(decl.initId);
     if (init == undefined || init.kind != ExprKind.Index) {
       return undefined;
     }
 
-    const object = init.object;
-    const index = init.index;
-    const isBinding = object.kind == ExprKind.Name && object.name == statement.binding.name;
+    const object = tree.exprOf(init.objectId);
+    const index = tree.exprOf(init.indexId);
+    const isBinding =
+      object.kind == ExprKind.Name && object.name == statement.binding.name;
     if (!isBinding || index.kind != ExprKind.IntLit) {
       return undefined;
     }
@@ -140,7 +170,12 @@ partial class Lowering {
     const keyAt = this.mapMember(instance, decl, "keyAt");
     const valueAt = this.mapMember(instance, decl, "valueAt");
     const map = this.value(frame, loop.map);
-    if (next == undefined || keyAt == undefined || valueAt == undefined || map == undefined) {
+    if (
+      next == undefined ||
+      keyAt == undefined ||
+      valueAt == undefined ||
+      map == undefined
+    ) {
       return this.notLowered(frame.module, statement.loc, "this loop");
     }
 
@@ -157,10 +192,17 @@ partial class Lowering {
     frame.made.open(cond);
 
     const at = frame.made.load(kIntType, position);
-    const nextCallee = this.ir.declare(next.name, kIntType, [kPointerType, kIntType]);
+    const nextCallee = this.ir.declare(next.name, kIntType, [
+      kPointerType,
+      kIntType,
+    ]);
     const entry = frame.made.call(nextCallee, [map.value, at]);
     const zero = this.ir.zero(kIntType);
-    const isDone = frame.made.integerCompare(IrIntPredicate.SignedLess, entry, zero);
+    const isDone = frame.made.integerCompare(
+      IrIntPredicate.SignedLess,
+      entry,
+      zero,
+    );
 
     frame.made.conditionalBranch(isDone, end, body);
     frame.made.open(body);
@@ -171,7 +213,15 @@ partial class Lowering {
 
     frame.made.store(following, position);
 
-    const rest = this.mapLoopBound(frame, statement, loop, map.value, entry, keyAt, valueAt);
+    const rest = this.mapLoopBound(
+      frame,
+      statement,
+      loop,
+      map.value,
+      entry,
+      keyAt,
+      valueAt,
+    );
 
     frame.loops.push(target);
     this.statements(frame, rest);
@@ -192,18 +242,27 @@ partial class Lowering {
     keyAt: Read<MethodTarget>,
     valueAt: Read<MethodTarget>,
   ): Stmt[] {
-    const body = statement.body;
+    const tree = this.values.types.program.tree;
+
+    const body = tree.stmtOf(statement.bodyId);
     const all: Stmt[] = [];
 
     if (body.kind == StmtKind.Block) {
-      for (const one of body.body) {
+      for (const one of tree.stmtsOf(body.bodyList)) {
         all.push(one);
       }
     } else {
       all.push(body);
     }
     if (loop.kind != kEntriesLoop) {
-      const item = this.mapCell(frame, map, entry, loop.kind == kKeysLoop, keyAt, valueAt);
+      const item = this.mapCell(
+        frame,
+        map,
+        entry,
+        loop.kind == kKeysLoop,
+        keyAt,
+        valueAt,
+      );
 
       this.loopItem(frame, statement, item);
 
@@ -235,7 +294,10 @@ partial class Lowering {
     }
 
     const result = this.irType(target.shape.result) ?? kPointerType;
-    const callee = this.ir.declare(target.name, result, [kPointerType, kIntType]);
+    const callee = this.ir.declare(target.name, result, [
+      kPointerType,
+      kIntType,
+    ]);
     const value = frame.made.call(callee, [map, entry]);
 
     return { type: result, value, tz: target.shape.result };
@@ -253,8 +315,14 @@ partial class Lowering {
     }
   }
 
-  private mapMember(instance: Type, decl: ClassDecl, name: string): MethodTarget | undefined {
-    const fn = decl.methods.find((one) => one.name == name);
+  private mapMember(
+    instance: Type,
+    decl: ClassDecl,
+    name: string,
+  ): MethodTarget | undefined {
+    const tree = this.values.types.program.tree;
+
+    const fn = this.values.types.classMethodNamed(decl, name);
     if (fn == undefined) {
       return undefined;
     }

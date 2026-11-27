@@ -18,12 +18,15 @@ import { OperandPair } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private listInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
+    const tree = this.types.program.tree;
+
     const right = this.types.definedType(object);
     if (right.kind != TypeKind.Array && right.kind != TypeKind.String) {
       return false;
     }
 
-    const left = this.peekType(expr.lhs, module);
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.peekType(lhs, module);
 
     if (left.kind == TypeKind.Error || object.kind == TypeKind.Error) {
       return true;
@@ -31,25 +34,27 @@ partial class ExpressionTypes {
     if (right.kind == TypeKind.String) {
       const pair: OperandPair = { left, right: object };
 
-      const operandsError = this.operators.operandsError(expr, pair);
+      const operandsError = this.types.operandsError(expr, pair);
 
-      this.reportFound(module, operandsError);
+      this.errors.writeFound(module, operandsError);
 
       return true;
     }
 
-    const key = this.statements.simpleText(expr.lhs);
+    const lhsExpr = tree.exprOf(expr.lhsId);
+    const key = this.types.simpleText(lhsExpr);
     const isKnown = this.types.apparent(left).kind == TypeKind.Int && key != "";
-    const index = this.statements.knownOr(isKnown, key, "i");
-    const array = this.statements.simpleOr(expr.rhs, "a");
+    const index = this.types.knownOr(isKnown, key, "i");
+    const rhs = tree.exprOf(expr.rhsId);
+    const array = this.types.simpleOr(rhs, "a");
     const below = `${index} < ${array}.length`;
-    const word = this.statements.boundsText(
-      expr.lhs.kind == ExprKind.IntLit,
+    const word = this.types.boundsText(
+      tree.exprOf(expr.lhsId).kind == ExprKind.IntLit,
       index,
       below,
     );
 
-    this.report(module, expr.loc, Code.ArrayIn, { word });
+    this.errors.write(module, expr.loc, Code.ArrayIn, { word });
 
     return true;
   }
@@ -59,27 +64,36 @@ partial class ExpressionTypes {
     target: IndexExpr,
     module: int,
   ): boolean {
-    const object = this.typed(target.object, undefined, module);
+    const tree = this.types.program.tree;
+
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.typed(objectExpr, undefined, module);
     const base = this.types.definedType(object);
 
     switch (base.kind) {
       case TypeKind.Array:
-        this.typed(target.index, undefined, module);
-        this.report(module, expr.loc, Code.DeleteArrayHole, {
-          word: this.statements.simpleOr(target.object, "a"),
-          other: this.statements.simpleOr(target.index, "i"),
+        const index = tree.exprOf(target.indexId);
+
+        this.typed(index, undefined, module);
+        this.errors.write(module, expr.loc, Code.DeleteArrayHole, {
+          word: this.types.simpleOr(tree.exprOf(target.objectId), "a"),
+          other: this.types.simpleOr(tree.exprOf(target.indexId), "i"),
         });
 
         return true;
       case TypeKind.String:
       case TypeKind.Template:
-        this.typed(target.index, undefined, module);
-        this.report(module, expr.loc, Code.DeleteCharacter, kNoDetails);
+        const indexExpr = tree.exprOf(target.indexId);
+
+        this.typed(indexExpr, undefined, module);
+        this.errors.write(module, expr.loc, Code.DeleteCharacter, kNoDetails);
 
         return true;
       case TypeKind.Tuple:
-        this.typed(target.index, undefined, module);
-        this.report(module, expr.loc, Code.DeleteTupleHole, kNoDetails);
+        const targetIndex = tree.exprOf(target.indexId);
+
+        this.typed(targetIndex, undefined, module);
+        this.errors.write(module, expr.loc, Code.DeleteTupleHole, kNoDetails);
 
         return true;
       default:
@@ -96,16 +110,16 @@ partial class ExpressionTypes {
 
     const type = this.typed(target, undefined, module);
     if (type.kind != TypeKind.Error) {
-      this.report(module, expr.loc, Code.DeleteNotField, kNoDetails);
+      this.errors.write(module, expr.loc, Code.DeleteNotField, kNoDetails);
     }
 
     return true;
   }
 
-  private readonly rawTextsCheck(expr: MemberExpr, object: Type, module: int): boolean {
-    const checked = this.statements.rawTextsCheck(expr, object);
+  private rawTextsCheck(expr: MemberExpr, object: Type, module: int): boolean {
+    const checked = this.types.rawTextsCheck(expr, object);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -115,7 +129,9 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     const isRaw =
       member.name == "raw" &&
       object.kind == ExprKind.Name &&
@@ -125,10 +141,12 @@ partial class ExpressionTypes {
       return false;
     }
     if (!expr.tagged) {
-      this.report(module, member.loc, Code.StringRawCall, kNoDetails);
+      this.errors.write(module, member.loc, Code.StringRawCall, kNoDetails);
     }
 
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }

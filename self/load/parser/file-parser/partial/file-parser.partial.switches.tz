@@ -1,0 +1,142 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  Stmt,
+  SwitchCase,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+
+partial class FileParser {
+  private switchStatement(): Stmt {
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
+
+    this.cursor.expect(TokenKind.LParen, Code.ExpectedAfterSwitch);
+    const discriminant = this.sequence();
+
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedAfterSwitchValue);
+    const cases: SwitchCase[] = [];
+    const opened = this.cursor.expect(
+      TokenKind.LBrace,
+      Code.ExpectedSwitchCasesStart,
+    );
+    if (!opened) {
+      return { kind: StmtKind.Switch, loc, discriminant, cases };
+    }
+
+    let hasDefault = false;
+
+    while (
+      this.cursor.is(TokenKind.Case) ||
+      this.cursor.is(TokenKind.Default)
+    ) {
+      const label = this.cursor.peek();
+      const isDefault = label.kind == TokenKind.Default;
+      if (isDefault && hasDefault) {
+        this.cursor.report(label.start, Code.OneDefaultInSwitch);
+      }
+      if (isDefault) {
+        hasDefault = true;
+      }
+
+      const clause = this.switchCase();
+
+      cases.push(clause);
+    }
+
+    this.closeSwitch();
+
+    return { kind: StmtKind.Switch, loc, discriminant, cases };
+  }
+
+  private closeSwitch(): void {
+    if (this.cursor.insideList(TokenKind.RBrace)) {
+      const token = this.cursor.peek();
+
+      return this.skipBraced(token.start, Code.ExpectedCaseOrDefault, {
+        found: token.kind,
+      });
+    }
+
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedSwitchClose);
+  }
+
+  private switchCase(): SwitchCase {
+    const label = this.cursor.next();
+    const loc = label.start;
+
+    if (label.kind == TokenKind.Default) {
+      this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterDefault);
+      const body = this.caseBody();
+
+      return { loc, test: undefined, body };
+    }
+
+    const first = this.cursor.peek();
+    const test = this.expression();
+
+    this.rejectCaseList(first.start);
+    this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterCaseValue);
+    const body = this.caseBody();
+
+    return { loc, test, body };
+  }
+
+  private rejectCaseList(start: int): void {
+    const comma = this.cursor.peek();
+    if (comma.kind != TokenKind.Comma) {
+      return;
+    }
+
+    const word = this.writtenFrom(start);
+
+    this.cursor.next();
+    const second = this.cursor.peek();
+
+    this.expression();
+    const other = this.writtenFrom(second.start);
+
+    this.cursor.report(comma.start, Code.CaseValueList, { word, other });
+
+    while (this.cursor.accept(TokenKind.Comma)) {
+      this.expression();
+    }
+  }
+
+  private readonly writtenFrom(start: int): string {
+    const span = this.cursor.spanFrom(start);
+
+    return this.written(span.start, span.end);
+  }
+
+  private statementWithRecovery(topLevel: boolean): Stmt {
+    const start = this.cursor.mark();
+    const statement = this.statement(topLevel);
+
+    if (this.cursor.isRecovering()) {
+      this.cursor.recoverStatement(start);
+    }
+
+    return statement;
+  }
+
+  private caseBody(): Stmt[] {
+    const body: Stmt[] = [];
+
+    while (
+      !this.cursor.is(TokenKind.Case) &&
+      !this.cursor.is(TokenKind.Default) &&
+      !this.cursor.is(TokenKind.RBrace) &&
+      !this.cursor.is(TokenKind.End)
+    ) {
+      const statement = this.statementWithRecovery(false);
+
+      body.push(statement);
+    }
+
+    return body;
+  }
+}

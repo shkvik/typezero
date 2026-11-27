@@ -1,0 +1,220 @@
+import { TypeStore } from "../type-store.tz";
+import {
+  Change,
+  FunctionParameter,
+  FunctionShape,
+  IteratorShape,
+  ObjectField,
+  OperationKind,
+  OperationShape,
+  Type,
+  TypeKind,
+} from "../../types/type.types.tz";
+
+partial class TypeStore {
+  public readonly itemOf(type: Type | undefined): Type {
+    if (type == undefined || type.kind != TypeKind.Array) {
+      return this.errorPlain;
+    }
+
+    return this.typeOf(type.itemId);
+  }
+
+  public readonly valueOf(type: Type | undefined): Type {
+    if (type == undefined) {
+      return this.errorPlain;
+    }
+
+    switch (type.kind) {
+      case TypeKind.Result:
+      case TypeKind.Promise:
+      case TypeKind.Dict:
+        return this.typeOf(type.valueId);
+      default:
+        return this.errorPlain;
+    }
+  }
+
+  public readonly errorOf(type: Type | undefined): Type {
+    if (type == undefined || type.kind != TypeKind.Result) {
+      return this.errorPlain;
+    }
+
+    return this.typeOf(type.errorId);
+  }
+
+  public readonly keyOf(type: Type | undefined): Type {
+    if (type == undefined || type.kind != TypeKind.Dict) {
+      return this.errorPlain;
+    }
+
+    return this.typeOf(type.keyId);
+  }
+
+  public readonly classInstanceOf(type: Type | undefined): Type {
+    if (type == undefined || type.kind != TypeKind.Class) {
+      return this.errorPlain;
+    }
+
+    return this.typeOf(type.instanceId);
+  }
+
+  public readonly partsOf(type: Type | undefined): Type[] {
+    const parts = this.partTable.get(type?.id ?? -1);
+    if (parts == undefined) {
+      return [];
+    }
+
+    return parts.slice();
+  }
+
+  public readonly partCount(type: Type | undefined): int {
+    return this.partTable.get(type?.id ?? -1)?.length ?? 0;
+  }
+
+  public readonly itemsOf(type: Type | undefined): Type[] {
+    const items = this.itemTable.get(type?.id ?? -1);
+    if (items == undefined) {
+      return [];
+    }
+
+    return items.slice();
+  }
+
+  public readonly argsOf(type: Type | undefined): Type[] {
+    const args = this.argTable.get(type?.id ?? -1);
+    if (args == undefined) {
+      return [];
+    }
+
+    return args.slice();
+  }
+
+  public readonly fieldsOf(type: Type | undefined): ObjectField[] {
+    const fields = this.fieldTable.get(type?.id ?? -1);
+    if (fields == undefined) {
+      return [];
+    }
+
+    return fields.slice();
+  }
+
+  public readonly fieldNamed(
+    type: Type | undefined,
+    name: string,
+  ): ObjectField | undefined {
+    const fields = this.fieldTable.get(type?.id ?? -1);
+    if (fields == undefined) {
+      return undefined;
+    }
+
+    return fields.find((field) => field.name == name);
+  }
+
+  public readonly textsOf(type: Type | undefined): string[] {
+    const texts = this.textTable.get(type?.id ?? -1);
+    if (texts == undefined) {
+      return [];
+    }
+
+    return texts.slice();
+  }
+
+  public readonly functionShapeOf(type: Type | undefined): FunctionShape {
+    const shape = this.functionTable.get(type?.id ?? -1);
+    if (shape == undefined) {
+      return this.emptyFunction();
+    }
+
+    const params = shape.params.slice();
+
+    return { params, rest: shape.rest, self: shape.self, result: shape.result };
+  }
+
+  public readonly paramsOf(type: Type | undefined): FunctionParameter[] {
+    const shape = this.functionTable.get(type?.id ?? -1);
+    if (shape == undefined) {
+      return [];
+    }
+
+    return shape.params.slice();
+  }
+
+  public readonly paramCount(type: Type | undefined): int {
+    return this.functionTable.get(type?.id ?? -1)?.params.length ?? 0;
+  }
+
+  public readonly returnTypeOf(type: Type | undefined): Type {
+    const shape = this.functionTable.get(type?.id ?? -1);
+    if (shape == undefined) {
+      return this.errorPlain;
+    }
+
+    return shape.result;
+  }
+
+  public readonly selfTypeOf(type: Type | undefined): Type | undefined {
+    return this.functionTable.get(type?.id ?? -1)?.self;
+  }
+
+  public readonly hasRest(type: Type | undefined): boolean {
+    return this.functionTable.get(type?.id ?? -1)?.rest == true;
+  }
+
+  public readonly operandsOf(type: Type | undefined): Type[] {
+    const shape = this.operationTable.get(type?.id ?? -1);
+    if (shape == undefined) {
+      return [];
+    }
+
+    return shape.operands.slice();
+  }
+
+  public readonly iteratorShapeOf(type: Type | undefined): IteratorShape {
+    const shape = this.iteratorTable.get(type?.id ?? -1);
+    if (shape == undefined) {
+      return this.emptyIterator();
+    }
+
+    return shape;
+  }
+
+  public readonly operationShapeOf(type: Type | undefined): OperationShape {
+    const shape = this.operationTable.get(type?.id ?? -1);
+    if (shape == undefined) {
+      return this.emptyOperation();
+    }
+
+    const operands = shape.operands.slice();
+
+    return {
+      op: shape.op,
+      operands,
+      word: shape.word,
+      optional: shape.optional,
+      readonly: shape.readonly,
+    };
+  }
+
+  private readonly emptyFunction(): FunctionShape {
+    const error = this.errorPlain;
+
+    return { params: [], rest: false, result: error };
+  }
+
+  private readonly emptyIterator(): IteratorShape {
+    const error = this.errorPlain;
+
+    return { yielded: error, returned: error, sent: error, async: false };
+  }
+
+  private readonly emptyOperation(): OperationShape {
+    return {
+      op: OperationKind.Alias,
+      operands: [],
+      word: "",
+      optional: Change.None,
+      readonly: Change.None,
+    };
+  }
+}

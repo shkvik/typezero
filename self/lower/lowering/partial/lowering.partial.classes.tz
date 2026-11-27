@@ -1,40 +1,23 @@
 import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
-import { DeclaredMemberKind } from "../../../program/ast/types/ast.types.declarations.tz";
 import {
   CallExpr,
-  Expr,
   MemberExpr,
-  NewExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
-import { InstanceField } from "../../../program/expression-answers/types/expression-answers.types.tz";
+import {
+  FunctionDecl,
+} from "../../../program/ast/types/ast.types.functions.tz";
 import {
   FunctionShape,
-  ObjectField,
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
+import { kPointerType } from "../const/lowering.const.tz";
 import {
-  kFlagType,
-  kIntType,
-  kLayoutHead,
-  kObjectAllocate,
-  kObjectFree,
-  kObjectHeader,
-  kTupleFlag,
-  kPointerType,
-  kVoidType,
-  kDisposeName,
-} from "../const/lowering.const.tz";
-import {
-  ClassLayout,
   Frame,
   IrValue,
-  LayoutField,
-  LayoutShape,
   MethodCallSite,
   MethodTarget,
   Place,
@@ -42,23 +25,29 @@ import {
 
 partial class Lowering {
   private classDeclared(frame: Read<Frame>, decl: ClassDecl): void {
+    const tree = this.values.types.program.tree;
+
     if (!this.isPlainClass(decl)) {
       return this.notLowered(frame.module, decl.loc, "this class");
     }
-    if (decl.typeParams.length > 0) {
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
+    if (typeParams.length > 0) {
       return;
     }
 
-    const self = this.resolver.classInstance(frame.module, decl, []);
+    const self = this.values.types.classInstance(frame.module, decl, []);
 
-    for (const fn of decl.constructors) {
+    for (const fn of tree.functionsOf(decl.constructorsList)) {
       const name = this.methodName(frame.module, decl, fn);
 
       this.methodLowered(frame.module, decl, fn, name, self);
     }
 
-    for (const fn of decl.methods) {
-      if (fn.body != undefined && fn.typeParams.length == 0) {
+    for (const fn of tree.functionsOf(decl.methodsList)) {
+      if (
+        tree.blockAt(fn.bodyId) != undefined &&
+        tree.typeParamsOf(fn.typeParamsList).length == 0
+      ) {
         const name = this.methodName(frame.module, decl, fn);
 
         this.methodLowered(frame.module, decl, fn, name, self);
@@ -67,12 +56,16 @@ partial class Lowering {
   }
 
   private readonly isPlainClass(decl: ClassDecl): boolean {
-    const isSimpleBase = decl.base == undefined || decl.typeParams.length == 0;
+    const tree = this.values.types.program.tree;
+
+    const isSimpleBase =
+      tree.typeRefAt(decl.baseId) == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length == 0;
 
     return (
       isSimpleBase &&
-      decl.baseExpr == undefined &&
-      decl.decorators.length == 0 &&
+      tree.exprAt(decl.baseExprId) == undefined &&
+      tree.decoratorsOf(decl.decoratorsList).length == 0 &&
       !decl.isPartial
     );
   }
@@ -83,6 +76,8 @@ partial class Lowering {
     fn: FunctionDecl,
     call?: MethodCallSite,
   ): MethodTarget | undefined {
+    const tree = this.values.types.program.tree;
+
     if (object.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -92,23 +87,29 @@ partial class Lowering {
     if (shape == undefined) {
       return undefined;
     }
-    if (decl.typeParams.length == 0 && fn.typeParams.length == 0) {
+    if (
+      tree.typeParamsOf(decl.typeParamsList).length == 0 &&
+      tree.typeParamsOf(fn.typeParamsList).length == 0
+    ) {
       return { name, shape };
     }
 
     const home = this.methodHome(object.module, decl, fn);
-    const classParams = this.resolver.parameterTypes(
+    const classParams = this.values.types.parameterTypes(
       object.module,
-      decl.typeParams,
+      tree.typeParamsOf(decl.typeParamsList),
     );
-    const ownParams = this.resolver.parameterTypes(home, fn.typeParams);
+    const ownParams = this.values.types.parameterTypes(
+      home,
+      tree.typeParamsOf(fn.typeParamsList),
+    );
     const ownArgs = this.methodTypeArguments(fn, call);
     if (ownArgs == undefined) {
       return undefined;
     }
 
     const params = classParams.concat(ownParams);
-    const args = object.args.concat(ownArgs);
+    const args = this.values.types.store.argsOf(object).concat(ownArgs);
     const binding = this.bindingOf(params, args);
     const bound = this.shapeWith(shape, binding);
     const ids = args.map((type) => `${type.id}`);
@@ -127,11 +128,14 @@ partial class Lowering {
     return { name: instance, shape: bound };
   }
 
-  private readonly methodTypeArguments(
+  private methodTypeArguments(
     fn: FunctionDecl,
     call: MethodCallSite | undefined,
   ): Type[] | undefined {
-    if (fn.typeParams.length == 0) {
+    const tree = this.values.types.program.tree;
+
+    const typeParams = tree.typeParamsOf(fn.typeParamsList);
+    if (typeParams.length == 0) {
       return [];
     }
     if (call == undefined) {
@@ -152,26 +156,51 @@ partial class Lowering {
     fn: FunctionDecl,
     self: IrValue,
     args: Read<LLVMValue[]>,
-    target: MethodTarget,
+    target: Read<MethodTarget>,
   ): LLVMValue | undefined {
-    if (!this.isInHierarchy(object) || fn.typeParams.length > 0) {
+    const tree = this.values.types.program.tree;
+
+    if (
+      !this.isInHierarchy(object) ||
+      tree.typeParamsOf(fn.typeParamsList).length > 0
+    ) {
       return undefined;
     }
 
-    return this.dispatchedCall(frame, object, fn.name, self, args.slice(), target);
+    return this.dispatchedCall(
+      frame,
+      object,
+      fn.name,
+      self,
+      args.slice(),
+      target,
+    );
   }
 
-  private readonly methodName(module: int, decl: ClassDecl, fn: FunctionDecl): string {
+  private readonly methodName(
+    module: int,
+    decl: ClassDecl,
+    fn: FunctionDecl,
+  ): string {
     const home = this.methodHome(module, decl, fn);
 
     return `tz.k${module}.${decl.loc}.${fn.name}.${home}.${fn.loc}`;
   }
 
-  private readonly methodHome(module: int, decl: ClassDecl, fn: FunctionDecl): int {
-    for (const opened of this.program.modules) {
-      const part = opened.parts.find(
-        (one) => one.name == decl.name && one.methods.includes(fn),
-      );
+  private readonly methodHome(
+    module: int,
+    decl: ClassDecl,
+    fn: FunctionDecl,
+  ): int {
+    const tree = this.values.types.program.tree;
+
+    for (const opened of this.values.types.program.modules) {
+      const part = tree
+        .classesOf(opened.partsList)
+        .find(
+          (one) =>
+            one.name == decl.name && tree.holdsStmt(one.methodsList, fn.id),
+        );
       if (part != undefined) {
         return opened.id;
       }
@@ -181,15 +210,17 @@ partial class Lowering {
   }
 
   private readonly methodTitle(decl: ClassDecl, fn: FunctionDecl): string {
+    const tree = this.values.types.program.tree;
+
     const name = decl.name ?? "";
-    if (decl.constructors.includes(fn)) {
+    if (tree.holdsStmt(decl.constructorsList, fn.id)) {
       return `new ${name}`;
     }
 
     return `${name}.${fn.name}`;
   }
 
-  private readonly methodShape(
+  private methodShape(
     module: int,
     decl: ClassDecl,
     fn: FunctionDecl,
@@ -206,7 +237,9 @@ partial class Lowering {
     name: string,
     self: Type,
   ): void {
-    const body = fn.body;
+    const tree = this.values.types.program.tree;
+
+    const body = tree.blockAt(fn.bodyId);
     const module = this.methodHome(classModule, decl, fn);
     const shape = this.shapeOf(module, fn.loc);
     if (body == undefined || shape == undefined) {
@@ -217,7 +250,9 @@ partial class Lowering {
       !fn.isAsync &&
       !fn.isGenerator &&
       !shape.rest &&
-      fn.params.every((param) => this.isPlainParameter(param));
+      tree
+        .paramsOf(fn.paramsList)
+        .every((param) => this.isPlainParameter(param));
     if (!isPlain) {
       return this.notLowered(module, fn.loc, "this kind of method");
     }
@@ -253,444 +288,16 @@ partial class Lowering {
     made.store(made.param(0), selfPlace.pointer);
     this.openScope(inner);
     this.parametersStored(inner, fn, shape, params);
-    this.statements(inner, body.body);
+    const bodyItem = tree.stmtsOf(body.bodyList);
+
+    this.statements(inner, bodyItem);
     this.closeScope(inner);
     this.finished(made, result, shape.result);
   }
 
-  private layoutOf(type: Type): ClassLayout | undefined {
-    const known = this.layouts.get(type.id);
-    if (known != undefined) {
-      return known;
-    }
-
-    const shape = this.layoutShape(type);
-    if (shape == undefined) {
-      return undefined;
-    }
-
-    const parent = this.classParent(type);
-    const base = this.baseLayoutOf(parent);
-    if (parent != undefined && base == undefined) {
-      return undefined;
-    }
-
-    const own = this.ownShapeFields(shape, base);
-    const placed = this.placedAfter(own, base);
-    if (placed == undefined) {
-      return undefined;
-    }
-
-    const types = [kIntType, kPointerType].concat(
-      placed.map((field) => field.ir),
-    );
-    const struct = `{ ${types.join(", ")} }`;
-    const size = this.structSize(placed);
-    const name = shape.name;
-    const classId = this.nextClassId();
-    const disposers = this.disposeChain(type);
-    const title = this.layoutTitle(name);
-    const drop = this.dropFunction(title, struct, placed, disposers);
-    const slots = this.slotsOf(type);
-    const fullShape = this.shapeWithBase(shape, base);
-    const descriptor = this.layoutDescriptor(
-      fullShape,
-      drop,
-      placed,
-      classId,
-      slots,
-    );
-    const layout: ClassLayout = {
-      struct,
-      size,
-      fields: placed,
-      descriptor,
-      classId,
-      shape: fullShape,
-      drop,
-      slots,
-    };
-
-    this.layouts.set(type.id, layout);
-
-    return layout;
-  }
-
-  private readonly layoutShape(type: Type): LayoutShape | undefined {
-    if (type.kind == TypeKind.Object) {
-      const fields = type.fields.map((field) => this.objectField(field));
-
-      return { name: "", fields, flags: 0 };
-    }
-    if (type.kind == TypeKind.Tuple) {
-      const fields = type.items.map((item, index) => ({
-        name: `${index}`,
-        loc: 0,
-        type: item,
-      }));
-
-      return { name: "", fields, flags: kTupleFlag };
-    }
-
-    const declared = this.libraryShape(type);
-    if (declared != undefined) {
-      return declared;
-    }
-
-    const decl = this.values.classDeclOf(type);
-    const fields = this.values.instanceFields(type);
-    if (decl == undefined || fields == undefined || !this.isPlainClass(decl)) {
-      return undefined;
-    }
-
-    return { name: decl.name ?? "", fields, flags: 0 };
-  }
-
-  private readonly libraryShape(type: Type): LayoutShape | undefined {
-    if (type.kind != TypeKind.Instance) {
-      return undefined;
-    }
-
-    const opened = this.program.modules[type.module];
-    const loc = type.loc;
-    const decl = opened?.declared.find((one) => one.loc == loc);
-    if (opened == undefined || decl == undefined || !opened.source.isLibrary) {
-      return undefined;
-    }
-
-    const context = this.resolver.classContext(
-      type,
-      decl.typeParams,
-      type.module,
-    );
-    const fields: InstanceField[] = [];
-
-    for (const member of decl.members) {
-      const written = member.type;
-      const isField = member.form.kind == DeclaredMemberKind.Field;
-      if (!isField || member.isStatic || written == undefined) {
-        continue;
-      }
-
-      const resolved = this.resolver.resolve(written, context);
-
-      fields.push({ name: member.name, loc: member.loc, type: resolved });
-    }
-
-    return { name: decl.name ?? "", fields, flags: 0 };
-  }
-
-  private layoutProblem(type: Type): string {
-    const shape = this.layoutShape(type);
-    if (shape == undefined) {
-      return `a ${this.kindName(type)} of this form`;
-    }
-
-    const failed = shape.fields.find(
-      (field) => this.irType(field.type) == undefined,
-    );
-    if (failed == undefined) {
-      return "a missing field";
-    }
-
-    return `type ${this.kindName(failed.type)}`;
-  }
-
-  private readonly objectField(field: ObjectField): InstanceField {
-    const type = field.type;
-    const empty = this.store.plain(TypeKind.Undefined);
-    const isBare = this.optionalInner(type) == undefined;
-    if (field.optional && isBare) {
-      const optional = this.store.unionOf([type, empty]);
-
-      return { name: field.name, loc: 0, type: optional };
-    }
-
-    return { name: field.name, loc: 0, type };
-  }
-
-  private baseLayoutOf(parent: Type | undefined): ClassLayout | undefined {
-    if (parent == undefined) {
-      return undefined;
-    }
-
-    return this.layoutOf(parent);
-  }
-
-  private readonly ownShapeFields(
-    shape: Read<LayoutShape>,
-    base: Read<ClassLayout | undefined>,
-  ): InstanceField[] {
-    if (base == undefined) {
-      return shape.fields.slice();
-    }
-
-    const inherited = base.shape.fields.map((field) => field.name);
-
-    return shape.fields.filter((field) => !inherited.includes(field.name));
-  }
-
-  private readonly shapeWithBase(
-    shape: Read<LayoutShape>,
-    base: Read<ClassLayout | undefined>,
-  ): LayoutShape {
-    if (base == undefined) {
-      return { name: shape.name, fields: shape.fields, flags: shape.flags };
-    }
-
-    const own = this.ownShapeFields(shape, base);
-    const fields = base.shape.fields.concat(own);
-
-    return { name: shape.name, fields, flags: shape.flags };
-  }
-
-  private placedAfter(
-    fields: Read<InstanceField[]>,
-    base: Read<ClassLayout | undefined>,
-  ): LayoutField[] | undefined {
-    if (base == undefined) {
-      return this.placedFields(fields, 16, 0);
-    }
-
-    const end = this.structSize(base.fields);
-    const own = this.placedFields(fields, end, base.fields.length);
-    if (own == undefined) {
-      return undefined;
-    }
-
-    return base.fields.concat(own);
-  }
-
-  private slotsOf(type: Type): LLVMValue[] {
-    if (!this.isInHierarchy(type)) {
-      return [];
-    }
-
-    return this.slotTable(type);
-  }
-
-  private placedFields(
-    fields: Read<InstanceField[]>,
-    start: int,
-    first: int,
-  ): LayoutField[] | undefined {
-    const order = fields.slice();
-
-    order.sort((one, other) => this.fieldOrder(one, other));
-
-    const placed: LayoutField[] = [];
-    let offset: int = start;
-
-    for (let index = 0; index < order.length; index++) {
-      const field = order[index];
-      if (field == undefined) {
-        return undefined;
-      }
-
-      const ir = this.irType(field.type);
-      if (ir == undefined || ir == kVoidType) {
-        return undefined;
-      }
-
-      const align = this.alignOf(field.type);
-
-      offset = this.aligned(offset, align);
-      placed.push({
-        name: field.name,
-        index: first + index + 2,
-        offset,
-        type: field.type,
-        ir,
-      });
-      offset += this.sizeOf(field.type);
-    }
-
-    return placed;
-  }
-
-  private fieldOrder(first: InstanceField, second: InstanceField): int {
-    const isFirstTag = first.type.kind == TypeKind.Literal;
-    const isSecondTag = second.type.kind == TypeKind.Literal;
-    if (isFirstTag != isSecondTag) {
-      return this.choose(isFirstTag, -1, 1);
-    }
-
-    const isFirstCode = first.type.kind == TypeKind.Function;
-    const isSecondCode = second.type.kind == TypeKind.Function;
-    if (isFirstCode != isSecondCode) {
-      return this.choose(isSecondCode, -1, 1);
-    }
-
-    const firstAlign = this.alignOf(first.type);
-    const secondAlign = this.alignOf(second.type);
-    if (firstAlign != secondAlign) {
-      return secondAlign - firstAlign;
-    }
-    if (first.name < second.name) {
-      return -1;
-    }
-    if (first.name > second.name) {
-      return 1;
-    }
-
-    return 0;
-  }
-
-  private structSize(fields: Read<LayoutField[]>): int {
-    let end: int = 16;
-
-    for (const field of fields) {
-      end = field.offset + this.sizeOf(field.type);
-    }
-
-    return this.aligned(end, 8);
-  }
-
-  private readonly aligned(offset: int, align: int): int {
-    const rest = offset % align;
-    if (rest == 0) {
-      return offset;
-    }
-
-    return offset + align - rest;
-  }
-
-  private dropFunction(
-    name: string,
-    struct: string,
-    fields: Read<LayoutField[]>,
-    disposers: Read<MethodTarget[]>,
-  ): LLVMValue {
-    const dropName = this.ir.uniqueName(`tz.drop.${name}.`);
-    const made = new IrFunction(this.ir, dropName, kVoidType, [kPointerType]);
-    const object = made.param(0);
-
-    for (const disposer of disposers) {
-      const disposing = this.ir.declare(disposer.name, kVoidType, [kPointerType]);
-
-      made.call(disposing, [object]);
-    }
-
-    const frame: Frame = {
-      made,
-      id: this.frameId(),
-      module: 0,
-      loops: [],
-      scopes: [],
-    };
-    const held: IrValue[] = [];
-
-    for (const field of fields) {
-      if (!this.isManaged(field.type)) {
-        continue;
-      }
-
-      const address = made.field(struct, object, field.index);
-      const value = made.load(field.ir, address);
-
-      held.push({ type: field.ir, value, tz: field.type, owned: true });
-    }
-
-    const freeing = this.ir.declare(kObjectFree, kVoidType, [kPointerType]);
-
-    made.call(freeing, [object]);
-
-    for (const value of held) {
-      this.dropping(frame, value);
-    }
-
-    made.finishVoid();
-
-    return made.callee.fn;
-  }
-
-  private layoutDescriptor(
-    shape: Read<LayoutShape>,
-    drop: LLVMValue,
-    placed: Read<LayoutField[]>,
-    classId: int,
-    methods: Read<LLVMValue[]>,
-  ): LLVMValue {
-    const entries: LLVMValue[] = [];
-    const name = shape.name;
-    const title = this.layoutTitle(name);
-
-    for (const field of shape.fields) {
-      const spot = placed.find((one) => one.name == field.name);
-      const type = this.descriptor(field.type) ?? this.ir.zero(kPointerType);
-      const offset = spot?.offset ?? 0;
-
-      entries.push(
-        this.ir.constStruct([
-          this.cText(field.name),
-          this.ir.integer(kFlagType, `${field.name.length}`),
-          this.ir.integer(kFlagType, `${offset}`),
-          type,
-        ]),
-      );
-    }
-
-    const entry = "{ ptr, i32, i32, ptr }";
-    const count = entries.length;
-    const tableName = this.ir.uniqueName(`tz.fields.${title}.`);
-    const tableType = `[${count} x ${entry}]`;
-    const values = this.ir.constArray(entry, entries);
-    const table = this.ir.global(tableName, tableType, values, true);
-    const head = this.ir.constStruct([
-      drop,
-      table,
-      this.ir.integer(kFlagType, `${count}`),
-      this.ir.integer(kFlagType, `${shape.flags}`),
-      this.nameText(name),
-      this.ir.integer(kFlagType, `${name.length}`),
-      this.ir.integer(kFlagType, `${classId}`),
-    ]);
-    const slots = this.ir.constArray(kPointerType, methods);
-    const descriptor = this.ir.constStruct([
-      head,
-      this.ir.zero(kPointerType),
-      slots,
-    ]);
-    const globalName = this.ir.uniqueName(`tz.layout.${title}.`);
-    const globalType = `{ ${kLayoutHead}, ptr, [${methods.length} x ptr] }`;
-
-    return this.ir.global(globalName, globalType, descriptor, true);
-  }
-
-  private readonly layoutTitle(name: string): string {
-    if (name.length == 0) {
-      return "object";
-    }
-
-    return name;
-  }
-
-  private nameText(name: string): LLVMValue {
-    if (name.length == 0) {
-      return this.ir.zero(kPointerType);
-    }
-
-    return this.cText(name);
-  }
-
-  private cText(text: string): LLVMValue {
-    const known = this.cTexts.get(text);
-    if (known != undefined) {
-      return known;
-    }
-
-    const bytes = Buffer.from(text, "utf8");
-    const name = this.ir.uniqueName(".name.");
-    const data = this.ir.bytes(bytes, true);
-    const array = `[${bytes.length + 1} x i8]`;
-    const global = this.ir.global(name, array, data, true);
-
-    this.cTexts.set(text, global);
-
-    return global;
-  }
-
-  private resultType(shape: Read<FunctionShape | undefined>): string | undefined {
+  private resultType(
+    shape: Read<FunctionShape | undefined>,
+  ): string | undefined {
     if (shape == undefined) {
       return undefined;
     }
@@ -698,7 +305,9 @@ partial class Lowering {
     return this.irType(shape.result);
   }
 
-  private shapeTypesOf(shape: Read<FunctionShape | undefined>): string[] | undefined {
+  private shapeTypesOf(
+    shape: Read<FunctionShape | undefined>,
+  ): string[] | undefined {
     if (shape == undefined) {
       return undefined;
     }
@@ -722,271 +331,14 @@ partial class Lowering {
     return id;
   }
 
-  private newValue(frame: Frame, expr: NewExpr): IrValue | undefined {
-    const type = this.typeOf(expr);
-    if (type != undefined && type.kind == TypeKind.Dict) {
-      return this.newDictFrom(frame, expr, type);
-    }
-    const array = this.madeArrayType(type) ?? this.writtenArrayType(frame, expr);
-    if (array != undefined) {
-      return this.arrayOfLength(frame, expr, array);
-    }
-    if (type == undefined || type.kind != TypeKind.Instance) {
-      const kind = this.kindName(type);
-
-      this.notLowered(frame.module, expr.loc, `a new ${kind}`);
-
-      return undefined;
-    }
-
-    const decl = this.values.classDeclOf(type);
-    const layout = this.layoutOf(type);
-    if (decl == undefined || layout == undefined) {
-      this.notLowered(frame.module, expr.loc, "this new");
-
-      return undefined;
-    }
-
-    const object = this.allocated(frame, layout);
-
-    this.fieldsInitialized(frame, type, object);
-
-    const value: IrValue = {
-      type: kPointerType,
-      value: object,
-      tz: type,
-      owned: true,
-    };
-    const owned = this.ownConstructor(type);
-    if (owned == undefined) {
-      return value;
-    }
-
-    const ctor = owned.fn;
-    const target = this.methodTarget(owned.owner, owned.decl, ctor);
-    const params = this.shapeTypesOf(target?.shape);
-    if (target == undefined || params == undefined) {
-      this.notLowered(frame.module, expr.loc, "this new");
-
-      return undefined;
-    }
-
-    const kept: IrValue[] = [];
-    const args = this.callArguments(
-      frame,
-      expr.args,
-      target.shape,
-      expr.loc,
-      ctor,
-      kept,
-    );
-    if (args == undefined) {
-      return undefined;
-    }
-
-    const all = [kPointerType].concat(params);
-    const callee = this.ir.declare(target.name, kVoidType, all);
-
-    frame.made.call(callee, [object].concat(args));
-    this.droppedAll(frame, kept);
-
-    return value;
-  }
-
-  private orderedDescriptor(layout: Read<ClassLayout>, names: Read<string[]>): LLVMValue {
-    const fields = layout.shape.fields;
-    const isSame = names.every((name, index) => fields[index]?.name == name);
-    if (isSame) {
-      return layout.descriptor;
-    }
-
-    const key = `${layout.classId} ${names.join(" ")}`;
-    const known = this.orderedDescriptors.get(key);
-    if (known != undefined) {
-      return known;
-    }
-
-    const ordered: InstanceField[] = [];
-
-    for (const name of names) {
-      const field = fields.find((one) => one.name == name);
-      if (field != undefined) {
-        ordered.push(field);
-      }
-    }
-
-    const rest = fields.filter((field) => !names.includes(field.name));
-    const shape: LayoutShape = {
-      name: layout.shape.name,
-      fields: ordered.concat(rest),
-      flags: layout.shape.flags,
-    };
-    const descriptor = this.layoutDescriptor(
-      shape,
-      layout.drop,
-      layout.fields,
-      layout.classId,
-      layout.slots,
-    );
-
-    this.orderedDescriptors.set(key, descriptor);
-
-    return descriptor;
-  }
-
-  private readonly allocated(frame: Read<Frame>, layout: Read<ClassLayout>): LLVMValue {
-    const tz = this.store.integer(64, false);
-    const size = this.ir.integer(kIntType, `${layout.size}`);
-    const sizeValue: IrValue = { type: kIntType, value: size, tz };
-    const object = this.runtimeValue(frame, kObjectAllocate, kPointerType, [
-      sizeValue,
-    ]);
-    const count = frame.made.field(kObjectHeader, object, 0);
-    const kind = frame.made.field(kObjectHeader, object, 1);
-
-    frame.made.store(this.ir.integer(kIntType, "1"), count);
-    frame.made.store(layout.descriptor, kind);
-    this.zeroFields(frame, object, layout);
-
-    return object;
-  }
-
-  private readonly zeroFields(
-    frame: Read<Frame>,
-    object: LLVMValue,
-    layout: Read<ClassLayout>,
-  ): void {
-    for (const field of layout.fields) {
-      const address = frame.made.field(layout.struct, object, field.index);
-
-      frame.made.store(this.ir.zero(field.ir), address);
-    }
-  }
-
-  private fieldPlace(
-    frame: Frame,
-    object: Place,
-    name: string,
-    loc: int,
-  ): Place | undefined {
-    const pointer = frame.made.load(kPointerType, object.pointer);
-
-    return this.fieldAt(frame, pointer, object.tz, name, loc);
-  }
-
-  private fieldAt(
-    frame: Frame,
-    object: LLVMValue,
-    type: Type,
-    name: string,
-    loc: int,
-  ): Place | undefined {
-    if (type.kind == TypeKind.Union) {
-      const parts = type.parts.filter(
-        (part) => part.kind != TypeKind.Undefined,
-      );
-      const single = parts[0];
-      if (parts.length == 1 && single != undefined) {
-        return this.fieldAt(frame, object, single, name, loc);
-      }
-
-      return this.unionFieldAt(frame, object, parts, name, loc);
-    }
-
-    const layout = this.layoutOf(type);
-    const field = layout?.fields.find((one) => one.name == name);
-    if (layout == undefined || field == undefined) {
-      const problem = this.layoutProblem(type);
-
-      this.notLowered(frame.module, loc, `a field of ${problem}`);
-
-      return undefined;
-    }
-
-    const pointer = frame.made.field(layout.struct, object, field.index);
-
-    return { pointer, type: field.ir, tz: field.type, owner: -1 };
-  }
-
-  private fieldValue(frame: Frame, expr: MemberExpr): IrValue | undefined {
-    const object = this.value(frame, expr.object);
-    if (object == undefined) {
-      return undefined;
-    }
-    if (this.isMixedField(object.tz, expr.name)) {
-      return this.mixedFieldValue(frame, object, expr);
-    }
-
-    const place = this.fieldAt(
-      frame,
-      object.value,
-      object.tz,
-      expr.name,
-      expr.loc,
-    );
-    if (place == undefined) {
-      return undefined;
-    }
-
-    const loaded = this.seenAs(frame, this.loaded(frame, place), expr);
-    const isLooked = object.owned != true || !this.isManaged(object.tz);
-    if (isLooked && this.isStaticField(object, expr)) {
-      return this.staticValue(loaded);
-    }
-    if (object.owned != true && this.isMovedField(frame, expr, place)) {
-      frame.made.store(this.ir.zero(place.type), place.pointer);
-
-      return { type: loaded.type, value: loaded.value, tz: loaded.tz, owned: true };
-    }
-    if (object.owned != true || !this.isManaged(object.tz)) {
-      return loaded;
-    }
-
-    const kept = this.owning(frame, loaded);
-
-    this.dropping(frame, object);
-
-    return kept;
-  }
-
-  private isMovedField(
-    frame: Read<Frame>,
-    expr: Expr,
-    place: Read<Place>,
-  ): boolean {
-    return (
-      this.moves.has(expr) &&
-      frame.inline == undefined &&
-      place.type == kPointerType &&
-      this.isManaged(place.tz)
-    );
-  }
-
-  private seenAs(frame: Frame, loaded: IrValue, expr: Expr): IrValue {
-    const seen = this.typeOf(expr);
-    if (seen == undefined || seen.kind == TypeKind.Error) {
-      return loaded;
-    }
-    if (this.irType(seen) == undefined) {
-      return loaded;
-    }
-
-    const isNarrowed =
-      this.optionalInner(loaded.tz) != undefined &&
-      this.optionalInner(seen) == undefined;
-    if (!isNarrowed) {
-      return loaded;
-    }
-
-    return this.converted(frame, loaded, seen, expr.loc) ?? loaded;
-  }
-
   private methodCall(
     frame: Frame,
     call: CallExpr,
     member: MemberExpr,
     object: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const found = this.ownedMethod(object, member.name);
     const decl = found?.decl;
     const fn = found?.fn;
@@ -1021,13 +373,21 @@ partial class Lowering {
       return undefined;
     }
 
-    const self = this.value(frame, member.object);
+    const objectExpr = tree.exprOf(member.objectId);
+    const self = this.value(frame, objectExpr);
     if (self == undefined) {
       return undefined;
     }
 
     const kept: IrValue[] = [];
-    const args = this.callArguments(frame, call.args, shape, call.loc, fn, kept);
+    const args = this.callArguments(
+      frame,
+      tree.argumentsOf(call.argsList),
+      shape,
+      call.loc,
+      fn,
+      kept,
+    );
     if (args == undefined) {
       return undefined;
     }
@@ -1035,10 +395,11 @@ partial class Lowering {
     const all = [kPointerType].concat(params);
     const callee = this.ir.declare(target.name, result, all);
     const dispatched = this.virtualCall(frame, object, fn, self, args, target);
-    const made = dispatched ?? frame.made.call(callee, [self.value].concat(args));
+    const made =
+      dispatched ?? frame.made.call(callee, [self.value].concat(args));
     const answer: IrValue = { type: result, value: made, tz: shape.result };
     const temporaries = kept.concat([self]);
-    const given = this.callResult(frame, answer, fn, temporaries);
+    const given = this.receiverResult(frame, answer, fn, temporaries, self);
 
     this.droppedAll(frame, kept);
     this.dropping(frame, self);

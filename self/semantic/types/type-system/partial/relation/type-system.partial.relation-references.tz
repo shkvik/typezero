@@ -1,0 +1,178 @@
+import { TypeSystem } from "../../type-system.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ValueSlot } from "../../../type-relation/types/type-relation.types.tz";
+
+partial class TypeSystem {
+  public readonly isTagged(parts: Read<Type[]>): boolean {
+    const first = parts[0];
+    if (first == undefined) {
+      return false;
+    }
+
+    return parts.some((part) => !this.sameSlot(first, part));
+  }
+
+  private readonly sameSlot(first: Type, second: Type): boolean {
+    const slot = this.slotOf(first);
+    if (slot != this.slotOf(second)) {
+      return false;
+    }
+    if (slot != ValueSlot.Int) {
+      return true;
+    }
+
+    return this.numberOf(first).id == this.numberOf(second).id;
+  }
+
+  private readonly numberOf(type: Type): Type {
+    return this.baseOf(type) ?? type;
+  }
+
+  private readonly slotOf(type: Type): ValueSlot {
+    switch (type.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+        return ValueSlot.String;
+      case TypeKind.Int:
+        return ValueSlot.Int;
+      case TypeKind.Json:
+        return ValueSlot.Json;
+      case TypeKind.Double:
+        return ValueSlot.Double;
+      case TypeKind.Boolean:
+        return ValueSlot.Boolean;
+      case TypeKind.Decimal:
+        return ValueSlot.Decimal;
+      case TypeKind.Object:
+      case TypeKind.AnyObject:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+        return ValueSlot.Object;
+      case TypeKind.Array:
+        return ValueSlot.Array;
+      case TypeKind.Function:
+        return ValueSlot.Function;
+      case TypeKind.Iterator:
+        return ValueSlot.Iterator;
+      case TypeKind.TypeParameter:
+        return ValueSlot.Parameter;
+      case TypeKind.Literal:
+        return this.literalSlot(type.literal);
+      default:
+        return ValueSlot.Other;
+    }
+  }
+
+  private readonly literalSlot(literal: LiteralKind): ValueSlot {
+    switch (literal) {
+      case LiteralKind.String:
+        return ValueSlot.Atom;
+      case LiteralKind.Boolean:
+        return ValueSlot.Boolean;
+      case LiteralKind.Double:
+        return ValueSlot.Double;
+      default:
+        return ValueSlot.Int;
+    }
+  }
+
+  private readonly isSameUnion(own: Type, wide: Type): boolean {
+    if (own.kind != TypeKind.Union || wide.kind != TypeKind.Union) {
+      return false;
+    }
+
+    const theirs = this.store.partsOf(wide);
+    if (this.store.partsOf(own).length != theirs.length) {
+      return false;
+    }
+
+    return this.store
+      .partsOf(own)
+      .every((part) => theirs.some((one) => one.id == part.id));
+  }
+
+  private sameReference(from: Type, to: Type): boolean {
+    let own = from;
+    let wide = to;
+
+    while (own.id != wide.id && this.goesDeeper(own, wide)) {
+      if (own.kind == TypeKind.Array && wide.kind == TypeKind.Array) {
+        own = this.store.itemOf(own);
+        wide = this.store.itemOf(wide);
+
+        continue;
+      }
+
+      const inner = this.defined(wide);
+      if (!this.isReference(inner)) {
+        return false;
+      }
+
+      own = this.defined(own);
+      wide = inner;
+    }
+
+    if (own.id == wide.id || this.isSameUnion(own, wide)) {
+      return true;
+    }
+    if (own.kind != TypeKind.Union) {
+      return this.objectsShare(own, wide);
+    }
+    if (
+      this.isRelationOptional(own) ||
+      this.isTagged(this.store.partsOf(own))
+    ) {
+      return false;
+    }
+
+    return this.store.partsOf(own).every(
+      (part) => part.id == wide.id || this.objectsShare(part, wide),
+    );
+  }
+
+  private readonly goesDeeper(own: Type, wide: Type): boolean {
+    const arrays = own.kind == TypeKind.Array && wide.kind == TypeKind.Array;
+
+    return arrays || this.isRelationOptional(wide);
+  }
+
+  private readonly isRelationOptional(type: Type): boolean {
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return this.store
+      .partsOf(type)
+      .some((part) => part.kind == TypeKind.Undefined);
+  }
+
+  private readonly isReference(type: Type): boolean {
+    return type.kind == TypeKind.Array || this.isObjectLike(type);
+  }
+
+  private readonly isObjectLike(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.AnyObject:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private objectsShare(from: Type, to: Type): boolean {
+    if (!this.isObjectLike(from) || !this.isObjectLike(to)) {
+      return false;
+    }
+
+    return this.descends(from, to) || this.plainConverts(from, to);
+  }
+}

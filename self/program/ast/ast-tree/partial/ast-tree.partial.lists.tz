@@ -1,0 +1,316 @@
+import { AstTree } from "../ast-tree.tz";
+import {
+  ClassDecl,
+  ClassField,
+  Decorator,
+  EnumMember,
+} from "../../types/ast.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+} from "../../types/ast.types.declarations.tz";
+import {
+  ArrayElement,
+  CallArgument,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  Property,
+} from "../../types/ast.types.expressions.tz";
+import { FunctionDecl, Param } from "../../types/ast.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+  ModuleName,
+} from "../../types/ast.types.modules.tz";
+import { VarDeclarator } from "../../types/ast.types.patterns.tz";
+import { AstList } from "../../types/ast.types.span.tz";
+import { Stmt, SwitchCase } from "../../types/ast.types.statements.tz";
+import {
+  FunctionTypeParam,
+  ObjectTypeField,
+  TupleElement,
+  TypeParamDecl,
+  TypeRef,
+} from "../../types/ast.types.types.tz";
+
+partial class AstTree {
+  public readonly exprsOf(list: AstList | undefined): Expr[] {
+    const found: Expr[] = [];
+    if (list == undefined) {
+      return found;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const id = this.tables.exprIds[index] ?? -1;
+      const expr = this.exprOf(id);
+
+      found.push(expr);
+    }
+
+    return found;
+  }
+
+  public readonly stmtsOf(list: AstList | undefined): Stmt[] {
+    const found: Stmt[] = [];
+    if (list == undefined) {
+      return found;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const id = this.tables.stmtIds[index] ?? -1;
+      const stmt = this.stmtOf(id);
+
+      found.push(stmt);
+    }
+
+    return found;
+  }
+
+  public readonly typeRefsOf(list: AstList | undefined): TypeRef[] {
+    const found: TypeRef[] = [];
+    if (list == undefined) {
+      return found;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const id = this.tables.typeRefIds[index] ?? -1;
+      const typeRef = this.typeRefOf(id);
+
+      found.push(typeRef);
+    }
+
+    return found;
+  }
+
+  public readonly functionsOf(list: AstList | undefined): FunctionDecl[] {
+    const found: FunctionDecl[] = [];
+    if (list == undefined) {
+      return found;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const id = this.tables.stmtIds[index] ?? -1;
+      const functionDecl = this.functionOf(id);
+
+      found.push(functionDecl);
+    }
+
+    return found;
+  }
+
+  public readonly indexExprsOf(list: AstList | undefined): IndexExpr[] {
+    const found: IndexExpr[] = [];
+    if (list == undefined) {
+      return found;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const id = this.tables.exprIds[index] ?? -1;
+      const expr = this.exprOf(id);
+      if (expr.kind == ExprKind.Index) {
+        found.push(expr);
+      }
+    }
+
+    return found;
+  }
+
+  public readonly classesOf(list: AstList | undefined): ClassDecl[] {
+    const found: ClassDecl[] = [];
+    if (list == undefined) {
+      return found;
+    }
+
+    for (let index = list.start; index < list.end; index++) {
+      const id = this.tables.stmtIds[index] ?? -1;
+      const classDecl = this.classOf(id);
+
+      found.push(classDecl);
+    }
+
+    return found;
+  }
+
+  public readonly exprIdsOf(list: AstList | undefined): int[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.exprIds.slice(list.start, list.end);
+  }
+
+  public readonly stmtIdsOf(list: AstList | undefined): int[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.stmtIds.slice(list.start, list.end);
+  }
+
+  public readonly typeRefIdsOf(list: AstList | undefined): int[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.typeRefIds.slice(list.start, list.end);
+  }
+
+  public readonly textsOf(list: AstList | undefined): string[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.texts.slice(list.start, list.end);
+  }
+
+  public readonly elementsOf(list: AstList | undefined): ArrayElement[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.arrayElements.slice(list.start, list.end);
+  }
+
+  public readonly argumentsOf(list: AstList | undefined): CallArgument[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.arrayElements.slice(list.start, list.end);
+  }
+
+  public readonly fieldsOf(list: AstList | undefined): ClassField[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.classFields.slice(list.start, list.end);
+  }
+
+  public readonly declaredClassesOf(
+    list: AstList | undefined,
+  ): DeclaredClass[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.declaredClasses.slice(list.start, list.end);
+  }
+
+  public readonly declaredMembersOf(
+    list: AstList | undefined,
+  ): DeclaredMember[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.declaredMembers.slice(list.start, list.end);
+  }
+
+  public readonly decoratorsOf(list: AstList | undefined): Decorator[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.decorators.slice(list.start, list.end);
+  }
+
+  public readonly enumMembersOf(list: AstList | undefined): EnumMember[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.enumMembers.slice(list.start, list.end);
+  }
+
+  public readonly exportsOf(list: AstList | undefined): ExportDecl[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.exportDecls.slice(list.start, list.end);
+  }
+
+  public readonly functionTypeParamsOf(
+    list: AstList | undefined,
+  ): FunctionTypeParam[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.functionTypeParams.slice(list.start, list.end);
+  }
+
+  public readonly importsOf(list: AstList | undefined): ImportDecl[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.importDecls.slice(list.start, list.end);
+  }
+
+  public readonly namesOf(list: AstList | undefined): ModuleName[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.moduleNames.slice(list.start, list.end);
+  }
+
+  public readonly objectFieldsOf(list: AstList | undefined): ObjectTypeField[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.objectTypeFields.slice(list.start, list.end);
+  }
+
+  public readonly paramsOf(list: AstList | undefined): Param[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.params.slice(list.start, list.end);
+  }
+
+  public readonly propertiesOf(list: AstList | undefined): Property[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.properties.slice(list.start, list.end);
+  }
+
+  public readonly casesOf(list: AstList | undefined): SwitchCase[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.switchCases.slice(list.start, list.end);
+  }
+
+  public readonly tupleElementsOf(list: AstList | undefined): TupleElement[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.tupleElements.slice(list.start, list.end);
+  }
+
+  public readonly typeParamsOf(list: AstList | undefined): TypeParamDecl[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.typeParamDecls.slice(list.start, list.end);
+  }
+
+  public readonly declaratorsOf(list: AstList | undefined): VarDeclarator[] {
+    if (list == undefined) {
+      return [];
+    }
+
+    return this.tables.varDeclarators.slice(list.start, list.end);
+  }
+}

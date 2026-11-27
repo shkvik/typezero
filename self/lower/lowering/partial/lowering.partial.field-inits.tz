@@ -21,7 +21,11 @@ import {
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private fieldsInitialized(frame: Read<Frame>, type: Type, object: LLVMValue): void {
+  private fieldsInitialized(
+    frame: Read<Frame>,
+    type: Type,
+    object: LLVMValue,
+  ): void {
     const init = this.initFunction(type);
     if (init != undefined) {
       frame.made.call(init, [object]);
@@ -47,18 +51,23 @@ partial class Lowering {
   }
 
   private initMade(type: Type): IrCallee | undefined {
+    const tree = this.values.types.program.tree;
+
     const decl = this.values.classDeclOf(type);
     if (type.kind != TypeKind.Instance || decl == undefined) {
       return undefined;
     }
-    if (decl.typeParams.length > 0) {
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
+    if (typeParams.length > 0) {
       return undefined;
     }
 
     const parent = this.classParent(type);
     const parentInit = this.parentInit(parent);
     const isBare = this.ownConstructor(type) == undefined;
-    const fields = decl.fields.filter((field) => this.isInitialized(field, isBare));
+    const fields = tree
+      .fieldsOf(decl.fieldsList)
+      .filter((field) => this.isInitialized(field, isBare));
     if (fields.length == 0 && parentInit == undefined) {
       return undefined;
     }
@@ -105,10 +114,13 @@ partial class Lowering {
   }
 
   private readonly isInitialized(field: ClassField, isBare: boolean): boolean {
+    const tree = this.values.types.program.tree;
+
     if (field.form != FieldKind.Instance) {
       return false;
     }
-    if (field.init != undefined) {
+    const init = tree.exprAt(field.initId);
+    if (init != undefined) {
       return true;
     }
 
@@ -136,8 +148,14 @@ partial class Lowering {
     frame.made.store(owned.value, place.pointer);
   }
 
-  private fieldStart(frame: Frame, field: ClassField, type: Type): IrValue | undefined {
-    const init = field.init;
+  private fieldStart(
+    frame: Frame,
+    field: ClassField,
+    type: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const init = tree.exprAt(field.initId);
     if (init == undefined) {
       return this.emptyFieldValue(frame, type, field.loc);
     }
@@ -150,7 +168,11 @@ partial class Lowering {
     return this.converted(frame, given, type, init.loc);
   }
 
-  private emptyFieldValue(frame: Frame, type: Type, loc: int): IrValue | undefined {
+  private emptyFieldValue(
+    frame: Frame,
+    type: Type,
+    loc: int,
+  ): IrValue | undefined {
     const first = this.firstLiteral(type);
     if (first != undefined) {
       return this.literalValue(type, first);
@@ -179,8 +201,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const first = type.parts[0];
-    const isLiterals = type.parts.every((part) => part.kind == TypeKind.Literal);
+    const first = this.values.types.store.partsOf(type)[0];
+    const isLiterals = this.values.types.store
+      .partsOf(type)
+      .every((part) => part.kind == TypeKind.Literal);
     if (!isLiterals) {
       return undefined;
     }
@@ -211,7 +235,11 @@ partial class Lowering {
     }
   }
 
-  private emptyInstance(frame: Frame, type: Type, loc: int): IrValue | undefined {
+  private emptyInstance(
+    frame: Frame,
+    type: Type,
+    loc: int,
+  ): IrValue | undefined {
     const layout = this.layoutOf(type);
     if (layout == undefined || this.ownConstructor(type) != undefined) {
       this.notLowered(frame.module, loc, "an empty value of this class");
@@ -236,7 +264,7 @@ partial class Lowering {
 
     const object = this.allocated(frame, layout);
 
-    for (const field of layout.shape.fields) {
+    for (const field of this.shapeFieldsOf(layout)) {
       this.emptyFieldStored(frame, type, object, field, loc);
     }
 

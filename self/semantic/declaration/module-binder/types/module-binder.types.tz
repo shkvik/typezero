@@ -1,8 +1,13 @@
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
   ImportDecl,
   ModuleName,
 } from "../../../../program/ast/types/ast.types.modules.tz";
-import { ModuleNames } from "../../../../program/module-names/types/module-names.types.tz";
+import {
+  ModuleExport,
+  ModuleImport,
+} from "../../../../program/module-names/types/module-names.types.tz";
+import { Module } from "../../../../program/module/types/module.types.tz";
 
 export enum BindState {
   New,
@@ -11,11 +16,13 @@ export enum BindState {
 }
 
 export type BoundModule = {
-  readonly names: ModuleNames;
-  state: Cell<BindState>;
+  readonly module: int;
+  declared: Map<string, int>;
+  exports: Map<string, ModuleExport>;
+  imports: Map<string, ModuleImport>;
+  errors: SourceError[];
+  state: BindState;
 };
-
-export type InternedBound = Interned<BoundModule>;
 
 export type ImportedName = {
   readonly decl: ImportDecl;

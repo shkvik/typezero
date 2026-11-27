@@ -40,7 +40,7 @@ partial class Lowering {
       return true;
     }
 
-    const opened = this.program.modules[target.module];
+    const opened = this.values.types.program.modules[target.module];
 
     return opened != undefined && opened.source.isLibrary;
   }
@@ -50,7 +50,9 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const holder = member.object;
+    const tree = this.values.types.program.tree;
+
+    const holder = tree.exprOf(member.objectId);
     const holderName = this.nameOf(holder);
     const key = `${holderName}.${member.name}`;
 
@@ -72,14 +74,14 @@ partial class Lowering {
       case "performance.now": {
         const callee = this.ir.declare(kPerformanceNow, kDoubleType, []);
         const value = frame.made.call(callee, []);
-        const tz = this.store.plain(TypeKind.Double);
+        const tz = this.values.types.store.plain(TypeKind.Double);
 
         return { type: kDoubleType, value, tz };
       }
       case "Date.now": {
         const callee = this.ir.declare(kDateNow, kIntType, []);
         const value = frame.made.call(callee, []);
-        const tz = this.store.integer(64, false);
+        const tz = this.values.types.store.integer(64, false);
 
         return { type: kIntType, value, tz };
       }
@@ -103,10 +105,13 @@ partial class Lowering {
     call: CallExpr,
     type: Type,
   ): LLVMValue[] | undefined {
+    const tree = this.values.types.program.tree;
+
     const values: LLVMValue[] = [];
 
-    for (const argument of call.args) {
-      const given = this.value(frame, argument.expr);
+    for (const argument of tree.argumentsOf(call.argsList)) {
+      const expr = tree.exprOf(argument.exprId);
+      const given = this.value(frame, expr);
       if (given == undefined || argument.spread) {
         this.notLowered(frame.module, call.loc, "these arguments");
 
@@ -114,7 +119,12 @@ partial class Lowering {
       }
 
       const inside = this.proven(frame, given);
-      const value = this.converted(frame, inside, type, argument.expr.loc);
+      const value = this.converted(
+        frame,
+        inside,
+        type,
+        tree.exprOf(argument.exprId).loc,
+      );
       if (value == undefined) {
         return undefined;
       }
@@ -166,7 +176,11 @@ partial class Lowering {
       return frame.made.realCompare(IrRealPredicate.OrderedLess, left, right);
     }
     if (this.isUnsigned(type)) {
-      return frame.made.integerCompare(IrIntPredicate.UnsignedLess, left, right);
+      return frame.made.integerCompare(
+        IrIntPredicate.UnsignedLess,
+        left,
+        right,
+      );
     }
 
     return frame.made.integerCompare(IrIntPredicate.SignedLess, left, right);
@@ -212,14 +226,17 @@ partial class Lowering {
     call: CallExpr,
     name: string,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeOf(call);
-    const argument = call.args[0];
+    const argument = tree.argumentsOf(call.argsList)[0];
     const type = this.typeOrUndefined(result);
     if (result == undefined || type == undefined || argument == undefined) {
       return undefined;
     }
 
-    const given = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
     if (given == undefined) {
       return undefined;
     }
@@ -232,7 +249,7 @@ partial class Lowering {
     const runtime = this.roundingRuntime(name);
     const callee = this.ir.declare(runtime, kDoubleType, [kDoubleType]);
     const rounded = frame.made.call(callee, [inside.value]);
-    const double = this.store.plain(TypeKind.Double);
+    const double = this.values.types.store.plain(TypeKind.Double);
     if (this.isDouble(result)) {
       return { type, value: rounded, tz: result };
     }
@@ -256,7 +273,7 @@ partial class Lowering {
   }
 
   private charCodesText(frame: Frame, call: CallExpr): IrValue | undefined {
-    const int32 = this.store.integer(32, false);
+    const int32 = this.values.types.store.integer(32, false);
     const values = this.mathArguments(frame, call, int32);
     if (values == undefined) {
       return undefined;
@@ -280,7 +297,7 @@ partial class Lowering {
   }
 
   private codePointsText(frame: Frame, call: CallExpr): IrValue | undefined {
-    const double = this.store.plain(TypeKind.Double);
+    const double = this.values.types.store.plain(TypeKind.Double);
     const values = this.mathArguments(frame, call, double);
     if (values == undefined) {
       return undefined;

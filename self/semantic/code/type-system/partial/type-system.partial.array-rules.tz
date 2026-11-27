@@ -1,0 +1,388 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ArrayLitExpr,
+  Expr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  ArrayDraft,
+} from "../../expression-types/types/expression-types.types.tz";
+import {
+  kIteratorKey,
+} from "../../../types/type-questions/const/type-questions.const.tz";
+import { kTypeSeparator } from "../../array-rules/const/array-rules.const.tz";
+
+partial class TypeSystem {
+  public jsonArrayOr(wanted: Type | undefined): Type | undefined {
+    const target = this.wantedPart(wanted);
+    if (target == undefined || target.kind != TypeKind.Json) {
+      return wanted;
+    }
+
+    return this.store.arrayOf(target);
+  }
+
+  public wantedArray(expected: Type | undefined): Type | undefined {
+    if (expected == undefined) {
+      return undefined;
+    }
+    if (expected.kind == TypeKind.Unknown) {
+      return this.store.arrayOf(expected);
+    }
+
+    const plain = this.definedType(expected);
+    if (plain.kind != TypeKind.Union) {
+      return expected;
+    }
+
+    const array = this.store
+      .partsOf(plain)
+      .find((part) => part.kind == TypeKind.Array);
+
+    return array ?? expected;
+  }
+
+  public readonly wantedItem(plain: Type | undefined): Type | undefined {
+    if (plain == undefined || plain.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    return this.store.itemOf(plain);
+  }
+
+  public readonly elementPlace(index: int): string {
+    return ` of element ${index}`;
+  }
+
+  public elementHint(
+    expr: Expr,
+    item: Type | undefined,
+    seen: Type | undefined,
+  ): Type | undefined {
+    if (item != undefined) {
+      return item;
+    }
+    if (seen == undefined || !this.holdsObjects(seen)) {
+      return undefined;
+    }
+    if (!this.isLiteralShaped(expr)) {
+      return undefined;
+    }
+
+    return seen;
+  }
+
+  public seeElement(draft: ArrayDraft, type: Type): void {
+    const seen = draft.seen;
+    const isBroken = seen != undefined && seen.kind == TypeKind.Error;
+    if (type.kind != TypeKind.Error && !isBroken) {
+      draft.seen = this.seenJoined(seen, type);
+    }
+    if (draft.seen == undefined) {
+      draft.seen = this.store.plain(TypeKind.Error);
+    }
+  }
+
+  public spreadHint(item: Type | undefined): Type | undefined {
+    if (item == undefined) {
+      return undefined;
+    }
+
+    return this.store.arrayOf(item);
+  }
+
+  public readonly isUnsupportedSpread(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Iterator:
+      case TypeKind.Instance:
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+      case TypeKind.Template:
+        return true;
+      case TypeKind.Dict:
+        return type.dict != DictKind.Record;
+      case TypeKind.Literal:
+        return type.literal == LiteralKind.String;
+      case TypeKind.Object:
+        return this.store
+          .fieldsOf(type)
+          .some((field) => field.name == kIteratorKey);
+      default:
+        return false;
+    }
+  }
+
+  public readonly spreadSource(type: Type): Type {
+    if (this.isUnsupportedSpread(type)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return type;
+  }
+
+  public joinedItem(element: Type | undefined, part: Type): Type | undefined {
+    if (element == undefined) {
+      return part;
+    }
+
+    return this.unionUnify(element, part);
+  }
+
+  public readonly literalHint(
+    expr: ArrayLitExpr,
+    draft: Read<ArrayDraft>,
+  ): Type | undefined {
+    const tree = this.program.tree;
+
+    if (draft.hasDecimal) {
+      return this.store.plain(TypeKind.Decimal);
+    }
+
+    const seen = draft.seen;
+    if (seen != undefined && this.isNumeric(seen)) {
+      return seen;
+    }
+
+    let index = 0;
+
+    for (const element of tree.elementsOf(expr.elementsList)) {
+      const type = draft.types.get(index);
+      if (element.spread && type != undefined && this.isNumeric(type)) {
+        return type;
+      }
+
+      index += 1;
+    }
+
+    index = 0;
+
+    for (const element of tree.elementsOf(expr.elementsList)) {
+      const isFraction =
+        !draft.types.has(index) && !this.isIntTree(tree.exprOf(element.exprId));
+      if (isFraction) {
+        return this.store.plain(TypeKind.Double);
+      }
+
+      index += 1;
+    }
+
+    return undefined;
+  }
+
+  public readonly elementTypes(
+    expr: ArrayLitExpr,
+    draft: Read<ArrayDraft>,
+  ): Type[] {
+    const tree = this.program.tree;
+
+    const types: Type[] = [];
+    let index = 0;
+
+    for (const element of tree.elementsOf(expr.elementsList)) {
+      const type = draft.types.get(index) ?? this.store.plain(TypeKind.Error);
+
+      types.push(type);
+
+      index += 1;
+    }
+
+    return types;
+  }
+
+  public spreadFits(type: Type, element: Type, array: Type): boolean {
+    if (type.id == array.id || type.kind == TypeKind.Error) {
+      return true;
+    }
+
+    switch (type.kind) {
+      case TypeKind.String:
+        return element.kind == TypeKind.String;
+      case TypeKind.Array:
+        return this.fitsObjectArray(this.store.itemOf(type), element);
+      case TypeKind.Tuple:
+        return this.store
+          .itemsOf(type)
+          .every((part) => this.converts(part, element));
+      default:
+        return false;
+    }
+  }
+
+  public isDecimalLike(type: Type): boolean {
+    const plain = this.definedType(type);
+
+    return plain.kind == TypeKind.Decimal;
+  }
+
+  public readonly elementsError(
+    expr: ArrayLitExpr,
+    types: Read<Type[]>,
+    before: Type | undefined,
+    index: int,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const element = tree.elementsOf(expr.elementsList)[index];
+    const type = types[index];
+    if (element == undefined || before == undefined || type == undefined) {
+      return undefined;
+    }
+
+    const first = this.typeText(before);
+    const second = this.typeText(type);
+    const hasSpread = tree
+      .elementsOf(expr.elementsList)
+      .some((one) => one.spread);
+    const hasFailed = types.some((one) => one.kind == TypeKind.Error);
+    if (hasSpread || hasFailed) {
+      return {
+        code: Code.ElementTypesDiffer,
+        loc: tree.exprOf(element.exprId).loc,
+        details: {
+          first,
+          second,
+        },
+      };
+    }
+
+    const texts = types.map((one) => this.typeText(one));
+    const other = texts.join(kTypeSeparator);
+
+    return {
+      code: Code.ElementTypesNeedTuple,
+      loc: tree.exprOf(element.exprId).loc,
+      details: {
+        first,
+        second,
+        other,
+      },
+    };
+  }
+
+  public readonly refusedSpread(
+    expr: Expr,
+    type: Type,
+    code: Code,
+  ): Checked<Type> {
+    const first = this.typeText(type);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: { code, loc: expr.loc, details: { first } },
+    };
+  }
+
+  public tupleItem(expr: Expr, tuple: Type): Checked<Type> {
+    if (tuple.kind != TypeKind.Tuple) {
+      return { value: this.store.plain(TypeKind.Error) };
+    }
+
+    let element: Type | undefined = undefined;
+
+    for (const part of this.store.itemsOf(tuple)) {
+      element = this.joinedItem(element, part);
+      if (element == undefined || element.kind == TypeKind.Error) {
+        break;
+      }
+    }
+
+    if (element == undefined || element.kind == TypeKind.Error) {
+      const first = this.typeText(tuple);
+
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.TupleSpreadDiffers,
+          loc: expr.loc,
+          details: { first },
+        },
+      };
+    }
+
+    return { value: element };
+  }
+
+  public joinedElement(
+    expr: ArrayLitExpr,
+    draft: Read<ArrayDraft>,
+  ): Checked<Type | undefined> {
+    const tree = this.program.tree;
+
+    const elements = tree.elementsOf(expr.elementsList);
+    if (elements.length == 0) {
+      return {
+        value: undefined,
+        error: { code: Code.EmptyArray, loc: expr.loc, details: kNoDetails },
+      };
+    }
+
+    const types = this.elementTypes(expr, draft);
+    let element: Type | undefined = undefined;
+    let index = 0;
+
+    for (const type of types) {
+      if (type.kind == TypeKind.Error) {
+        return { value: undefined };
+      }
+
+      const joined = this.joinedItem(element, type);
+      if (joined == undefined) {
+        const elementsError = this.elementsError(expr, types, element, index);
+
+        return { value: undefined, error: elementsError };
+      }
+
+      element = joined;
+      index += 1;
+    }
+
+    if (element == undefined) {
+      return { value: undefined };
+    }
+    if (element.kind == TypeKind.Undefined || element.kind == TypeKind.Void) {
+      const first = this.typeText(element);
+
+      return {
+        value: undefined,
+        error: {
+          code: Code.UndefinedElement,
+          loc: expr.loc,
+          details: { first },
+        },
+      };
+    }
+
+    return { value: element };
+  }
+
+  private seenJoined(seen: Type | undefined, type: Type): Type | undefined {
+    if (seen == undefined) {
+      return type;
+    }
+
+    return this.unify(seen, type);
+  }
+
+  private fitsObjectArray(inner: Type, element: Type): boolean {
+    const plainInner = this.definedType(inner);
+    const plainElement = this.definedType(element);
+    const isObjects =
+      this.isObjectReference(plainInner) && this.isObjectKind(plainElement);
+    const isOptionalFitting =
+      this.isOptional(inner) == this.isOptional(element) ||
+      this.isOptional(element);
+
+    return isObjects && isOptionalFitting && this.converts(inner, element);
+  }
+}

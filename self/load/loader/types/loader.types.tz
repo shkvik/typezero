@@ -1,16 +1,19 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
-import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
-import { DeclaredClass } from "../../../program/ast/types/ast.types.declarations.tz";
-import {
-  ImportDecl,
-  ModulePath,
-} from "../../../program/ast/types/ast.types.modules.tz";
+import { ModulePath } from "../../../program/ast/types/ast.types.modules.tz";
 import {
   ModuleLink,
-  ParsedDeclaration,
-  ParsedFile,
   Program,
 } from "../../../program/module/types/module.types.tz";
+import {
+  DeclaredClass,
+} from "../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  ParsedDeclaration,
+  ParsedFile,
+} from "../../../program/syntax/types/syntax.types.files.tz";
+import {
+  ImportDecl,
+} from "../../../program/syntax/types/syntax.types.modules.tz";
 
 export enum ModuleState {
   New,
@@ -24,23 +27,21 @@ export type OpenModule = {
   readonly file: string;
   readonly parsed: ParsedFile;
   readonly declaration?: ParsedDeclaration;
-  readonly links: Cell<ModuleLink[]>;
+  readonly links: ModuleLink[];
   readonly implicit: readonly ImportDecl[];
-  readonly parts: Cell<ClassDecl[]>;
+  readonly partItems: int[];
   readonly isDeclarationOnly: boolean;
   readonly declared: readonly DeclaredClass[];
-  readonly problems: Cell<SourceError[]>;
-  state: Cell<ModuleState>;
+  readonly problems: SourceError[];
+  state: ModuleState;
 };
 
 export type Request = {
-  readonly owner: OpenModule;
+  readonly owner: int;
   readonly from: ModulePath;
   readonly names: readonly string[];
   readonly isImplicit: boolean;
 };
-
-export type InternedLoad = Interned<OpenModule | Request>;
 
 export type Overlay = {
   readonly path: string;

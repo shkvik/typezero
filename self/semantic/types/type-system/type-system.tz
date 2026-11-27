@@ -1,0 +1,176 @@
+import "./partial/type-system.partial.method-index.tz";
+import "../../code/type-system/partial/type-system.partial.expression-shapes.tz";
+import "../../code/type-system/partial/type-system.partial.expression-collector.tz";
+import "../../code/type-system/partial/type-system.partial.source-texts.tz";
+import "../../declaration/type-system/partial/type-system.partial.module-questions.tz";
+import "../../code/type-system/partial/type-system.partial.array-rules.tz";
+import "../../code/type-system/partial/type-system.partial.assignment-rules.tz";
+import "../../code/type-system/partial/type-system.partial.call-rules.tz";
+import "../../code/type-system/partial/type-system.partial.callback-rules.tz";
+import "../../code/type-system/partial/type-system.partial.class-override-rules.tz";
+import "../../code/type-system/partial/type-system.partial.class-rules.tz";
+import "../../code/type-system/partial/type-system.partial.class-value-rules.tz";
+import "../../code/type-system/partial/type-system.partial.comparison-rules.tz";
+import "../../code/type-system/partial/type-system.partial.concatenation-rules.tz";
+import "../../code/type-system/partial/type-system.partial.decorator-rules.tz";
+import "../../code/type-system/partial/type-system.partial.dictionary-rules.tz";
+import "../../code/type-system/partial/type-system.partial.dispose-rules.tz";
+import "../../code/type-system/partial/type-system.partial.function-rules.tz";
+import "../../code/type-system/partial/type-system.partial.index-rules.tz";
+import "../../code/type-system/partial/type-system.partial.literal-rules.tz";
+import "../../code/type-system/partial/type-system.partial.logic-rules.tz";
+import "../../code/type-system/partial/type-system.partial.object-member-rules.tz";
+import "../../code/type-system/partial/type-system.partial.object-rules.tz";
+import "../../code/type-system/partial/type-system.partial.operator-rules.tz";
+import "../../code/type-system/partial/type-system.partial.overload-rules.tz";
+import "../../code/type-system/partial/type-system.partial.statement-rules.tz";
+import "../../flow/type-system/partial/type-system.partial.bound-rules.tz";
+import "../../flow/type-system/partial/type-system.partial.flow-rules.tz";
+import "../../flow/type-system/partial/type-system.partial.narrowing-rules.tz";
+import "../../flow/type-system/partial/type-system.partial.proof-rules.tz";
+import "../../flow/type-system/partial/type-system.partial.truth-rules.tz";
+import "../../generics/type-system/partial/type-system.partial.generic-call-rules.tz";
+import "../../generics/type-system/partial/type-system.partial.generic-rules.tz";
+import "../../library/type-system/partial/type-system.partial.byte-number-rules.tz";
+import "../../library/type-system/partial/type-system.partial.byte-source-rules.tz";
+import "../../library/type-system/partial/type-system.partial.byte-hints.tz";
+import "../../library/type-system/partial/type-system.partial.bytes-rules.tz";
+import "../../library/type-system/partial/type-system.partial.child-rules.tz";
+import "../../library/type-system/partial/type-system.partial.crypto-rules.tz";
+import "../../library/type-system/partial/type-system.partial.date-rules.tz";
+import "../../library/type-system/partial/type-system.partial.decimal-rules.tz";
+import "../../library/type-system/partial/type-system.partial.event-rules.tz";
+import "../../library/type-system/partial/type-system.partial.foreign-rules.tz";
+import "../../library/type-system/partial/type-system.partial.fs-rules.tz";
+import "../../library/type-system/partial/type-system.partial.intl-date-rules.tz";
+import "../../library/type-system/partial/type-system.partial.intl-rules.tz";
+import "../../library/type-system/partial/type-system.partial.library-rules.tz";
+import "../../library/type-system/partial/type-system.partial.regex-rules.tz";
+import "../../library/type-system/partial/type-system.partial.result-rules.tz";
+import "../../library/type-system/partial/type-system.partial.text-coder-rules.tz";
+import "../../library/type-system/partial/type-system.partial.weak-ref-rules.tz";
+import "./partial/relation/type-system.partial.relation-conversion.tz";
+import "./partial/relation/type-system.partial.relation-patterns.tz";
+import "./partial/relation/type-system.partial.relation-references.tz";
+import "./partial/resolver/type-system.partial.resolver-alias-growth.tz";
+import "./partial/resolver/type-system.partial.resolver-aliases.tz";
+import "./partial/resolver/type-system.partial.resolver-builtins.tz";
+import "./partial/resolver/type-system.partial.resolver-class-values.tz";
+import "./partial/resolver/type-system.partial.resolver-conditionals.tz";
+import "./partial/resolver/type-system.partial.resolver-constraints.tz";
+import "./partial/resolver/type-system.partial.resolver-declared.tz";
+import "./partial/resolver/type-system.partial.resolver-enum-values.tz";
+import "./partial/resolver/type-system.partial.resolver-enums.tz";
+import "./partial/resolver/type-system.partial.resolver-forms.tz";
+import "./partial/resolver/type-system.partial.resolver-globals.tz";
+import "./partial/resolver/type-system.partial.resolver-intersections.tz";
+import "./partial/resolver/type-system.partial.resolver-library.tz";
+import "./partial/resolver/type-system.partial.resolver-mapped.tz";
+import "./partial/resolver/type-system.partial.resolver-members.tz";
+import "./partial/resolver/type-system.partial.resolver-methods.tz";
+import "./partial/resolver/type-system.partial.resolver-modules.tz";
+import "./partial/resolver/type-system.partial.resolver-operations.tz";
+import "./partial/resolver/type-system.partial.resolver-rules.tz";
+import "./partial/resolver/type-system.partial.resolver-signatures.tz";
+import "./partial/resolver/type-system.partial.resolver-substitution.tz";
+import "./partial/resolver/type-system.partial.resolver-templates.tz";
+import "./partial/resolver/type-system.partial.resolver-unions.tz";
+import "./partial/type-system.partial.mismatch-rules.tz";
+import "./partial/type-system.partial.type-of-rules.tz";
+import "./partial/type-system.partial.type-parts.tz";
+import "./partial/type-system.partial.type-questions.tz";
+import "./partial/type-system.partial.type-relation.tz";
+import "./partial/type-system.partial.type-resolver.tz";
+import "./partial/type-system.partial.type-text.tz";
+import "./partial/type-system.partial.type-unifier.tz";
+import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
+import { TypeAliasDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { Type } from "../../../program/type/types/type.types.tz";
+import { IntegerMath } from "../../code/integer-math/integer-math.tz";
+import { LibraryTables } from "../../library/library-tables/library-tables.tz";
+import { LiteralRanges } from "../literal-ranges/literal-ranges.tz";
+import { InferHole } from "../type-relation/types/type-relation.types.tz";
+import {
+  AliasDoor,
+  AliasOrigin,
+  EnumStep,
+  ModuleRecord,
+} from "../type-resolver/types/type-resolver.types.tz";
+
+export class TypeSystem {
+  public readonly store: TypeStore;
+  public readonly program: Program;
+  private readonly errors: ErrorLog;
+  private readonly ranges: LiteralRanges;
+  private readonly integers: IntegerMath;
+  private readonly tables: LibraryTables;
+  private assumed: Set<string>;
+  private inferHoles: Map<int, InferHole>;
+  private captured: Map<int, Type>;
+  private scopes: Map<int, ModuleScopes>;
+  private records: Map<int, ModuleRecord>;
+  private doors: Map<string, AliasDoor>;
+  private working: Map<string, int>;
+  private nesting: Map<string, int>;
+  private tailUses: Set<int>;
+  private readonly methodIndex: Map<string, int[]>;
+  private endless: Set<string>;
+  private bounded: Set<int>;
+  private holes: Set<int>;
+  private globals: Map<string, int>;
+  private namespaces: Map<string, int>;
+  private prefixes: Map<int, string>;
+  private libraryShapes: Set<int>;
+  private aliasOrigins: Map<int, AliasOrigin>;
+  private extending: TypeAliasDecl[];
+  private enumCache: Map<string, readonly EnumStep[]>;
+  private enumWholes: Map<string, Type>;
+  private enumOpen: Set<string>;
+
+  public constructor(
+    store: Own<TypeStore>,
+    program: Own<Program>,
+    resolved: Own<ModuleScopes[]>,
+  ) {
+    this.store = store;
+    this.program = program;
+    this.errors = new ErrorLog();
+    this.ranges = new LiteralRanges();
+    this.integers = new IntegerMath();
+    this.tables = new LibraryTables();
+    this.assumed = new Set<string>();
+    this.inferHoles = new Map<int, InferHole>();
+    this.captured = new Map<int, Type>();
+    this.scopes = new Map<int, ModuleScopes>();
+    this.records = new Map<int, ModuleRecord>();
+    this.doors = new Map<string, AliasDoor>();
+    this.working = new Map<string, int>();
+    this.nesting = new Map<string, int>();
+    this.tailUses = new Set<int>();
+    this.methodIndex = new Map<string, int[]>();
+    this.endless = new Set<string>();
+    this.bounded = new Set<int>();
+    this.holes = new Set<int>();
+    this.globals = new Map<string, int>();
+    this.namespaces = new Map<string, int>();
+    this.prefixes = new Map<int, string>();
+    this.libraryShapes = new Set<int>();
+    this.aliasOrigins = new Map<int, AliasOrigin>();
+    this.extending = [];
+    this.enumCache = new Map<string, readonly EnumStep[]>();
+    this.enumWholes = new Map<string, Type>();
+    this.enumOpen = new Set<string>();
+
+    for (const scopes of resolved.drain()) {
+      this.scopes.set(scopes.module, scopes);
+    }
+
+    this.indexGlobals();
+    this.indexMethods();
+  }
+}
+

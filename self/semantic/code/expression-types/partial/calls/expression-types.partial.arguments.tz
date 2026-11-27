@@ -21,9 +21,14 @@ import {
   CallKind,
   CallTarget,
 } from "../../types/expression-types.types.tz";
+import { AstList } from "../../../../../program/ast/types/ast.types.span.tz";
+import {
+  SyntheticNode,
+} from "../../../../../program/ast/ast-tree/types/ast-tree.types.synthetic.tz";
 
 partial class ExpressionTypes {
   private argumentsCheck(
+    list: AstList | undefined,
     args: Read<CallArgument[]>,
     target: Read<CallTarget>,
     module: int,
@@ -42,21 +47,26 @@ partial class ExpressionTypes {
 
     const slots = this.argumentSlots(args, module);
     const params = target.params;
-    const fixed = this.calls.fixedCount(target);
-    const limit = this.calls.spreadLimit(target, fixed, slots.length);
+    const fixed = this.types.callFixedCount(target);
+    const limit = this.types.spreadLimit(target, fixed, slots.length);
     const spread = slots.find((slot, index) => slot.spread && index < limit);
     if (spread != undefined) {
-      this.report(module, spread.expr.loc, Code.SpreadNotRest, kNoDetails);
+      this.errors.write(
+        module,
+        spread.expr.loc,
+        Code.SpreadNotRest,
+        kNoDetails,
+      );
       this.looseArguments(args, module);
 
       return false;
     }
 
-    const least = this.calls.leastArguments(target);
+    const least = this.types.leastArguments(target);
     const count = slots.length;
     const isTooMany = !target.rest && count > params.length;
     if (count < least || isTooMany) {
-      const word = this.calls.argumentCountText(
+      const word = this.types.argumentCountText(
         least,
         params.length,
         target.rest,
@@ -64,13 +74,16 @@ partial class ExpressionTypes {
       const other = `${count}`;
 
       if (target.isTagged ?? false) {
-        this.report(module, target.loc, Code.TaggedArgumentCount, {
+        this.errors.write(module, target.loc, Code.TaggedArgumentCount, {
           word,
           other,
-          place: this.statements.taggedPlace(count),
+          place: this.types.taggedPlace(count),
         });
       } else {
-        this.report(module, target.loc, Code.ArgumentCount, { word, other });
+        this.errors.write(module, target.loc, Code.ArgumentCount, {
+          word,
+          other,
+        });
       }
 
       this.looseArguments(args, module);
@@ -90,7 +103,9 @@ partial class ExpressionTypes {
     if (target.rest && restParam != undefined) {
       const rest = slots.slice(fixed);
 
-      this.restCheck(rest, restParam.type, target.loc, module);
+      const restList = this.restList(list, fixed, rest.length);
+
+      this.restCheck(rest, restList, restParam.type, target.loc, module);
     }
 
     return true;
@@ -107,21 +122,21 @@ partial class ExpressionTypes {
     }
 
     const params = target.params;
-    const least = this.calls.leastArguments(target);
+    const least = this.types.leastArguments(target);
     const count = args.length;
     const isTooMany = !target.rest && count > params.length;
     if (count >= least && !isTooMany) {
       return false;
     }
 
-    const word = this.calls.argumentCountText(
+    const word = this.types.argumentCountText(
       least,
       params.length,
       target.rest,
     );
     const other = `${count}`;
 
-    this.report(module, target.loc, Code.ArgumentCount, { word, other });
+    this.errors.write(module, target.loc, Code.ArgumentCount, { word, other });
     this.looseArguments(args, module);
 
     return true;
@@ -132,28 +147,43 @@ partial class ExpressionTypes {
     target: Read<CallTarget>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     for (let index = 0; index < args.length; index++) {
       const arg = args[index];
       const param = target.params[index];
       if (arg != undefined && param != undefined && !arg.spread) {
-        this.lenientClosure(arg.expr, param.type, module);
+        const expr = tree.exprOf(arg.exprId);
+
+        this.lenientClosure(expr, param.type, module);
       }
     }
   }
 
-  private argumentSlots(args: Read<CallArgument[]>, module: int): ArgumentSlot[] {
+  private argumentSlots(
+    args: Read<CallArgument[]>,
+    module: int,
+  ): ArgumentSlot[] {
+    const tree = this.types.program.tree;
+
     const slots: ArgumentSlot[] = [];
 
     for (const arg of args) {
       const items = this.spreadItems(arg, module);
       if (items == undefined) {
-        slots.push({ expr: arg.expr, spread: arg.spread });
+        const exprExpr = tree.exprOf(arg.exprId);
+
+        slots.push({ expr: exprExpr, spread: arg.spread });
 
         continue;
       }
 
       for (const item of items) {
-        slots.push({ expr: arg.expr, spread: false, element: item });
+        slots.push({
+          expr: tree.exprOf(arg.exprId),
+          spread: false,
+          element: item,
+        });
       }
     }
 
@@ -161,7 +191,9 @@ partial class ExpressionTypes {
   }
 
   private spreadItems(arg: CallArgument, module: int): Type[] | undefined {
-    const expr = arg.expr;
+    const tree = this.types.program.tree;
+
+    const expr = tree.exprOf(arg.exprId);
     if (!arg.spread || expr.kind != ExprKind.Name) {
       return undefined;
     }
@@ -179,12 +211,12 @@ partial class ExpressionTypes {
     const isFixed =
       type.kind == TypeKind.Tuple &&
       type.rest < 0 &&
-      type.required == type.items.length;
+      type.required == this.types.store.itemsOf(type).length;
     if (!isFixed || type.kind != TypeKind.Tuple) {
       return undefined;
     }
 
-    return type.items;
+    return this.types.store.itemsOf(type);
   }
 
   private kindArgumentCheck(
@@ -194,7 +226,7 @@ partial class ExpressionTypes {
     target: Read<CallTarget>,
     module: int,
   ): void {
-    const wanted = this.calls.parameterWanted(param);
+    const wanted = this.types.parameterWanted(param);
     const kind = target.kind ?? CallKind.Own;
     const isPlain = slot.element == undefined && !slot.spread;
     if (
@@ -243,13 +275,13 @@ partial class ExpressionTypes {
       return this.coerce(slot.expr, given, to, module, kNoPlace);
     }
 
-    const code = this.calls.positionCode(given, base);
-    const word = this.text.of(given);
+    const code = this.types.positionCode(given, base);
+    const word = this.types.typeText(given);
 
-    this.report(module, slot.expr.loc, code, { word });
-    const positionUseErrors = this.calls.positionUseErrors(slot, word, method);
+    this.errors.write(module, slot.expr.loc, code, { word });
+    const positionUseErrors = this.types.positionUseErrors(slot, word, method);
 
-    this.reportAll(module, positionUseErrors);
+    this.errors.writeAll(module, positionUseErrors);
   }
 
   private mathArgumentCheck(
@@ -270,9 +302,9 @@ partial class ExpressionTypes {
       isRounding &&
       !this.types.isOptional(given)
     ) {
-      this.report(module, slot.expr.loc, Code.MathRoundsInteger, {
+      this.errors.write(module, slot.expr.loc, Code.MathRoundsInteger, {
         word: method,
-        first: this.text.of(given),
+        first: this.types.typeText(given),
       });
 
       return;
@@ -280,16 +312,18 @@ partial class ExpressionTypes {
     if (base.kind == TypeKind.Int && !this.types.isOptional(given)) {
       return this.coerce(slot.expr, given, to, module, kNoPlace);
     }
-    if (this.relation.converts(given, to)) {
+    if (this.types.converts(given, to)) {
       return;
     }
     if (this.literalTarget(slot.expr, given, to, module) != undefined) {
       return;
     }
 
-    const code = this.calls.mathArgumentCode(given, base);
+    const code = this.types.mathArgumentCode(given, base);
 
-    this.report(module, slot.expr.loc, code, { word: this.text.of(given) });
+    this.errors.write(module, slot.expr.loc, code, {
+      word: this.types.typeText(given),
+    });
   }
 
   private argumentCheck(slot: ArgumentSlot, to: Type, module: int): void {
@@ -311,13 +345,15 @@ partial class ExpressionTypes {
     target: Read<CallTarget>,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const only = target.params[0];
     if (!target.rest || target.params.length != 1 || only == undefined) {
       return false;
     }
 
     const slots: ArgumentSlot[] = args.map((arg) => ({
-      expr: arg.expr,
+      expr: tree.exprOf(arg.exprId),
       spread: arg.spread,
     }));
 
@@ -336,7 +372,7 @@ partial class ExpressionTypes {
     }
 
     const given = slots.map((slot) => this.typed(slot.expr, undefined, module));
-    const word = this.text.of(to);
+    const word = this.types.typeText(to);
 
     for (let index = 0; index < slots.length; index++) {
       const slot = slots[index];
@@ -346,15 +382,17 @@ partial class ExpressionTypes {
         continue;
       }
       if (part == undefined) {
-        this.report(module, slot.expr.loc, Code.ListArgumentsMany, { word });
+        this.errors.write(module, slot.expr.loc, Code.ListArgumentsMany, {
+          word,
+        });
 
         return true;
       }
 
-      const isList = this.parts.isListParameter(part);
-      if (slot.spread && type != part) {
-        this.report(module, slot.expr.loc, Code.ListSpreadWrong, {
-          word: this.text.of(type),
+      const isList = this.types.isListParameter(part);
+      if (slot.spread && type.id != part.id) {
+        this.errors.write(module, slot.expr.loc, Code.ListSpreadWrong, {
+          word: this.types.typeText(type),
           first: word,
           other: this.listPartText(part),
         });
@@ -362,8 +400,8 @@ partial class ExpressionTypes {
         return true;
       }
       if (!slot.spread && isList) {
-        this.report(module, slot.expr.loc, Code.ListNotSpread, {
-          word: this.text.of(part),
+        this.errors.write(module, slot.expr.loc, Code.ListNotSpread, {
+          word: this.types.typeText(part),
         });
 
         return true;
@@ -372,7 +410,7 @@ partial class ExpressionTypes {
 
     const missing = parts[slots.length];
     if (missing != undefined) {
-      this.report(module, loc, Code.ListMissing, {
+      this.errors.write(module, loc, Code.ListMissing, {
         word,
         other: this.listPartText(missing),
       });
@@ -382,24 +420,26 @@ partial class ExpressionTypes {
   }
 
   private readonly listParts(to: Type): Type[] {
-    if (to.kind == TypeKind.TypeParameter && this.parts.isListParameter(to)) {
+    if (to.kind == TypeKind.TypeParameter && this.types.isListParameter(to)) {
       return [to];
     }
     if (to.kind != TypeKind.Tuple) {
       return [];
     }
 
-    const hasList = to.items.some((item) => this.parts.isListParameter(item));
+    const hasList = this.types.store
+      .itemsOf(to)
+      .some((item) => this.types.isListParameter(item));
     if (!hasList) {
       return [];
     }
 
-    return to.items;
+    return this.types.store.itemsOf(to);
   }
 
   private readonly listPartText(part: Type): string {
-    const name = this.text.of(part);
-    if (this.parts.isListParameter(part)) {
+    const name = this.types.typeText(part);
+    if (this.types.isListParameter(part)) {
       return `'...${name}'`;
     }
 
@@ -408,6 +448,7 @@ partial class ExpressionTypes {
 
   private restCheck(
     slots: Read<ArgumentSlot[]>,
+    list: AstList | undefined,
     to: Type,
     loc: int,
     module: int,
@@ -421,27 +462,30 @@ partial class ExpressionTypes {
     }
 
     const isExpanded = slots.some((slot) => slot.element != undefined);
-    if (isExpanded) {
+    if (isExpanded || list == undefined) {
       return this.restSlotsCheck(slots, to, module);
     }
 
+    const tree = this.types.program.tree;
     const first = slots[0];
-    const elements = slots.map((slot) => ({
-      expr: slot.expr,
-      spread: slot.spread,
-      hole: false,
-    }));
+    const base = first?.expr.id ?? 0;
+    const id = tree.syntheticId(SyntheticNode.RestArguments, base);
     const literal: ArrayLitExpr = {
       kind: ExprKind.ArrayLit,
+      id,
       loc: first?.expr.loc ?? loc,
-      elements,
+      elementsList: list,
     };
 
     this.checked(literal, to, module, kNoPlace);
   }
 
-  private restSlotsCheck(slots: Read<ArgumentSlot[]>, to: Type, module: int): void {
-    const item = this.calls.restItem(to);
+  private restSlotsCheck(
+    slots: Read<ArgumentSlot[]>,
+    to: Type,
+    module: int,
+  ): void {
+    const item = this.types.restItem(to);
 
     for (const slot of slots) {
       if (slot.spread) {
@@ -453,8 +497,24 @@ partial class ExpressionTypes {
   }
 
   private looseArguments(args: Read<CallArgument[]>, module: int): void {
+    const tree = this.types.program.tree;
+
     for (const arg of args) {
-      this.typed(arg.expr, undefined, module);
+      const expr = tree.exprOf(arg.exprId);
+
+      this.typed(expr, undefined, module);
     }
+  }
+
+  private readonly restList(
+    list: AstList | undefined,
+    fixed: int,
+    count: int,
+  ): AstList | undefined {
+    if (list == undefined || list.end - list.start != fixed + count) {
+      return undefined;
+    }
+
+    return { start: list.start + fixed, end: list.end };
   }
 }

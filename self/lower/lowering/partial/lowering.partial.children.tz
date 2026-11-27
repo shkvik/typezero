@@ -34,8 +34,10 @@ partial class Lowering {
     call: CallExpr,
     callee: NameExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(call);
-    const command = call.args[0];
+    const command = tree.argumentsOf(call.argsList)[0];
     if (callee.name != "spawnSync" || command == undefined) {
       this.notLowered(frame.module, call.loc, "a call of this function");
 
@@ -47,9 +49,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const second = call.args[1];
+    const second = tree.argumentsOf(call.argsList)[1];
     const hasList =
-      second != undefined && this.isListArgument(frame, second.expr);
+      second != undefined &&
+      this.isListArgument(frame, tree.exprOf(second.exprId));
     const listExpr = this.listOf(second, hasList);
     const options = this.optionsOf(call, hasList);
     const encoding = this.spawnEncoding(frame, options);
@@ -59,12 +62,15 @@ partial class Lowering {
       return undefined;
     }
 
-    const file = this.value(frame, command.expr);
+    const exprExpr = tree.exprOf(command.exprId);
+    const file = this.value(frame, exprExpr);
     const list = this.spawnList(frame, listExpr);
-    const string = this.store.plain(TypeKind.String);
+    const string = this.values.types.store.plain(TypeKind.String);
     const descriptor = this.descriptor(string);
-    const resultMaker = this.spawnMaker(type.value);
-    const errorMaker = this.spawnErrorMaker(type.error);
+    const resultMaker = this.spawnMaker(this.values.types.store.valueOf(type));
+    const errorMaker = this.spawnErrorMaker(
+      this.values.types.store.errorOf(type),
+    );
     if (file == undefined || list == undefined || descriptor == undefined) {
       return undefined;
     }
@@ -88,11 +94,16 @@ partial class Lowering {
     const parts = frame.made.slot(kSpawnParts, "spawn.parts");
     const params = [kPointerType, kPointerType, kPointerType, kPointerType];
     const running = this.ir.declare(kChildRun, kPointerType, params);
-    const ran = frame.made.call(running, [request, parts, errorMaker, resultMaker]);
+    const ran = frame.made.call(running, [
+      request,
+      parts,
+      errorMaker,
+      resultMaker,
+    ]);
     const value: IrValue = {
       type: kPointerType,
       value: ran,
-      tz: type.value,
+      tz: this.values.types.store.valueOf(type),
       owned: true,
     };
 
@@ -115,27 +126,36 @@ partial class Lowering {
     argument: CallArgument | undefined,
     hasList: boolean,
   ): Expr | undefined {
+    const tree = this.values.types.program.tree;
+
     if (argument == undefined || !hasList) {
       return undefined;
     }
 
-    return argument.expr;
+    return tree.exprOf(argument.exprId);
   }
 
-  private readonly optionsOf(call: CallExpr, hasList: boolean): Expr | undefined {
+  private readonly optionsOf(
+    call: CallExpr,
+    hasList: boolean,
+  ): Expr | undefined {
+    const tree = this.values.types.program.tree;
+
     let position = 1;
 
     if (hasList) {
       position = 2;
     }
 
-    return call.args[position]?.expr;
+    return tree.exprAt(tree.argumentsOf(call.argsList)[position]?.exprId);
   }
 
-  private readonly spawnEncoding(
+  private spawnEncoding(
     frame: Read<Frame>,
     options: Expr | undefined,
   ): int | undefined {
+    const tree = this.values.types.program.tree;
+
     if (options == undefined) {
       return 0;
     }
@@ -145,12 +165,13 @@ partial class Lowering {
 
     let encoding = 0;
 
-    for (const property of options.props) {
+    for (const property of tree.propertiesOf(options.propsList)) {
       if (property.name != "encoding") {
         return undefined;
       }
 
-      const text = this.constantText(frame, property.value);
+      const value = tree.exprOf(property.valueId);
+      const text = this.constantText(frame, value);
       const known = kEncodingNames.indexOf(text ?? "");
       if (known < 0) {
         return undefined;
@@ -167,14 +188,14 @@ partial class Lowering {
       return this.value(frame, expr);
     }
 
-    const string = this.store.plain(TypeKind.String);
+    const string = this.values.types.store.plain(TypeKind.String);
     const descriptor = this.descriptor(string);
     if (descriptor == undefined) {
       return undefined;
     }
 
     const value = this.emptyArray(frame, descriptor);
-    const tz = this.store.arrayOf(string);
+    const tz = this.values.types.store.arrayOf(string);
 
     return { type: kPointerType, value, tz, owned: true };
   }
@@ -208,7 +229,7 @@ partial class Lowering {
 
     this.makers.set(type.id, made.callee.fn);
 
-    for (const field of layout.fields) {
+    for (const field of this.fieldsOf(layout)) {
       const value = this.spawnField(frame, parts, field.name, field.type);
       if (value != undefined) {
         const address = made.field(layout.struct, object, field.index);
@@ -222,7 +243,11 @@ partial class Lowering {
     return made.callee.fn;
   }
 
-  private readonly spawnPart(frame: Read<Frame>, parts: LLVMValue, index: int): LLVMValue {
+  private readonly spawnPart(
+    frame: Read<Frame>,
+    parts: LLVMValue,
+    index: int,
+  ): LLVMValue {
     const type = this.spawnPartType(index);
 
     return frame.made.load(type, frame.made.field(kSpawnParts, parts, index));
@@ -360,7 +385,11 @@ partial class Lowering {
     const placed = this.somewhere(frame, present, type);
     const has = this.spawnPart(frame, parts, flag);
     const zero = this.ir.zero(kFlagType);
-    const isGiven = frame.made.integerCompare(IrIntPredicate.NotEqual, has, zero);
+    const isGiven = frame.made.integerCompare(
+      IrIntPredicate.NotEqual,
+      has,
+      zero,
+    );
 
     return frame.made.select(isGiven, placed.value, this.ir.zero(typeIr));
   }
@@ -384,7 +413,10 @@ partial class Lowering {
     const list = frame.made.field(kSpawnParts, parts, index);
     const itemType = this.pick(isText, kStringType, kPointerType);
     const position = this.ir.integer(kIntType, `${stream}`);
-    const loaded = frame.made.load(itemType, frame.made.element(itemType, list, position));
+    const loaded = frame.made.load(
+      itemType,
+      frame.made.element(itemType, list, position),
+    );
 
     let raw: IrValue = { type: itemType, value: loaded, tz: plain };
 
@@ -405,7 +437,11 @@ partial class Lowering {
     const pipedAt = frame.made.element(kFlagType, piped, position);
     const flag = frame.made.load(kFlagType, pipedAt);
     const zero = this.ir.zero(kFlagType);
-    const isPiped = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const isPiped = frame.made.integerCompare(
+      IrIntPredicate.NotEqual,
+      flag,
+      zero,
+    );
 
     return frame.made.select(isPiped, placed.value, this.ir.zero(typeIr));
   }
@@ -466,7 +502,7 @@ partial class Lowering {
 
     this.makers.set(type.id, made.callee.fn);
 
-    for (const variant of type.parts) {
+    for (const variant of this.values.types.store.partsOf(type)) {
       const maker = this.spawnMaker(variant);
       const reasonText = this.spawnReason(variant);
       if (maker == undefined) {
@@ -498,7 +534,7 @@ partial class Lowering {
     return made.callee.fn;
   }
 
-  private readonly makerCalled(
+  private makerCalled(
     made: IrFunction,
     maker: LLVMValue,
     parts: LLVMValue,
@@ -509,9 +545,8 @@ partial class Lowering {
   }
 
   private spawnReason(variant: Type): string {
-    const kind = this.layoutOf(variant)?.fields.find(
-      (one) => one.name == "kind",
-    );
+    const layout = this.layoutOf(variant);
+    const kind = this.layoutField(layout, "kind");
     if (kind == undefined) {
       return "";
     }

@@ -3,6 +3,7 @@ import {
   BinaryOp,
   Expr,
   ExprKind,
+  NameExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
 import {
@@ -23,15 +24,21 @@ import { Frame, IrValue, LoopTarget, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private statement(frame: Frame, statement: Stmt): void {
+    const tree = this.values.types.program.tree;
+
     this.statementLoc = statement.loc;
 
     switch (statement.kind) {
       case StmtKind.Expr:
-        return this.discarded(frame, statement.expr);
+        const expr = tree.exprOf(statement.exprId);
+
+        return this.discarded(frame, expr);
       case StmtKind.VarDecl:
         return this.variables(frame, statement);
       case StmtKind.Block:
-        return this.block(frame, statement.body);
+        const body = tree.stmtsOf(statement.bodyList);
+
+        return this.block(frame, body);
       case StmtKind.If:
         return this.ifStatement(frame, statement);
       case StmtKind.While:
@@ -86,19 +93,26 @@ partial class Lowering {
     }
   }
 
-  private moduleGlobals(module: Module): void {
-    for (const statement of module.file.items) {
+  private moduleGlobals(module: int): void {
+    const tree = this.values.types.program.tree;
+    const items = this.values.types.program.modules[module]?.file.itemsList;
+
+    for (const statement of tree.stmtsOf(items)) {
       if (statement.kind != StmtKind.VarDecl) {
         continue;
       }
 
-      for (const decl of statement.decls) {
-        this.moduleGlobal(module.id, decl);
+      for (const decl of tree.declaratorsOf(statement.declsList)) {
+        this.moduleGlobal(module, decl, statement.isConst);
       }
     }
   }
 
-  private moduleGlobal(module: int, decl: VarDeclarator): void {
+  private moduleGlobal(
+    module: int,
+    decl: VarDeclarator,
+    isConst: boolean,
+  ): void {
     const tz = this.values.variableOf(module, decl.loc);
     const type = this.typeOfVariable(module, decl, tz);
     if (tz == undefined || type == undefined) {
@@ -116,22 +130,41 @@ partial class Lowering {
     if (this.isManaged(tz)) {
       this.managedGlobals.push(place);
     }
+    if (isConst && this.isImmortalKind(tz)) {
+      this.immortalGlobals.add(key);
+    }
   }
 
   private variableTypeIn(frame: Frame, decl: VarDeclarator): Type | undefined {
+    const tree = this.values.types.program.tree;
+
     const variable = this.values.variableOf(frame.module, decl.loc);
     const tz = this.boundOrNone(variable);
-    const init = decl.init;
+    const init = tree.exprAt(decl.initId);
     if (init != undefined && init.kind == ExprKind.Binary) {
       if (init.op == BinaryOp.Nullish) {
         return this.nullishResult(frame, init) ?? tz;
       }
+    }
+    if (tz != undefined && init != undefined && tz.kind == TypeKind.Array) {
+      return this.lentHolding(frame, init, tz);
     }
     if (tz == undefined || tz.kind != TypeKind.Error || init == undefined) {
       return tz;
     }
 
     return this.typeIn(frame, init) ?? tz;
+  }
+
+  private lentHolding(frame: Frame, init: Expr, declared: Type): Type {
+    const given = this.typeIn(frame, init);
+    if (given == undefined || !this.isLookingArray(given)) {
+      return declared;
+    }
+
+    return this.values.types.store.lentArrayOf(
+      this.values.types.store.itemOf(declared),
+    );
   }
 
   private typeOfVariable(
@@ -156,7 +189,9 @@ partial class Lowering {
   }
 
   private variables(frame: Frame, statement: VarDeclStmt): void {
-    for (const decl of statement.decls) {
+    const tree = this.values.types.program.tree;
+
+    for (const decl of tree.declaratorsOf(statement.declsList)) {
       if (!statement.isConst) {
         this.letKeys.add(this.placeKey(frame.module, decl.loc));
       }
@@ -166,6 +201,8 @@ partial class Lowering {
   }
 
   private variable(frame: Frame, decl: VarDeclarator): void {
+    const tree = this.values.types.program.tree;
+
     const key = this.placeKey(frame.module, decl.loc);
     const known = this.places.get(key);
     const place = this.globalOrNone(known) ?? this.localPlace(frame, decl);
@@ -173,11 +210,15 @@ partial class Lowering {
       return;
     }
 
-    const init = decl.init;
+    const init = tree.exprAt(decl.initId);
     if (init == undefined) {
       return frame.made.store(this.ir.zero(place.type), place.pointer);
     }
-    if (place.flag != undefined && init.kind == ExprKind.Binary && init.op == BinaryOp.Nullish) {
+    if (
+      place.flag != undefined &&
+      init.kind == ExprKind.Binary &&
+      init.op == BinaryOp.Nullish
+    ) {
       return this.nullishInitialized(frame, place, init);
     }
 
@@ -195,7 +236,11 @@ partial class Lowering {
     this.immortalGlobal(frame, place, key);
   }
 
-  private nullishInitialized(frame: Frame, place: Place, init: BinaryExpr): void {
+  private nullishInitialized(
+    frame: Frame,
+    place: Place,
+    init: BinaryExpr,
+  ): void {
     const given = this.nullishValue(frame, init, true);
     if (given == undefined) {
       return;
@@ -292,7 +337,10 @@ partial class Lowering {
   }
 
   private ifStatement(frame: Frame, statement: IfStmt): void {
-    const test = this.truth(frame, statement.cond);
+    const tree = this.values.types.program.tree;
+
+    const cond = tree.exprOf(statement.condId);
+    const test = this.truth(frame, cond);
     if (test == undefined) {
       return;
     }
@@ -300,7 +348,7 @@ partial class Lowering {
     const then = frame.made.block("if.then");
     const otherwise = frame.made.block("if.else");
     const end = frame.made.block("if.end");
-    const elseStmt = statement.elseStmt;
+    const elseStmt = tree.stmtAt(statement.elseStmtId);
     let missed: LLVMBlock = end;
 
     if (elseStmt != undefined) {
@@ -309,7 +357,9 @@ partial class Lowering {
 
     frame.made.conditionalBranch(test, then, missed);
     frame.made.open(then);
-    this.statement(frame, statement.thenStmt);
+    const thenStmt = tree.stmtOf(statement.thenStmtId);
+
+    this.statement(frame, thenStmt);
     this.jumpTo(frame, end);
 
     frame.made.open(otherwise);
@@ -329,7 +379,9 @@ partial class Lowering {
   }
 
   private labeled(frame: Frame, statement: LabeledStmt): void {
-    const body = statement.body;
+    const tree = this.values.types.program.tree;
+
+    const body = tree.stmtOf(statement.bodyId);
     const isLoop =
       body.kind == StmtKind.While ||
       body.kind == StmtKind.DoWhile ||
@@ -393,12 +445,14 @@ partial class Lowering {
   }
 
   private returned(frame: Frame, statement: ReturnStmt): void {
+    const tree = this.values.types.program.tree;
+
     const inline = frame.inline;
     if (inline != undefined) {
       return this.inlineReturned(frame, statement, inline);
     }
 
-    const given = statement.value;
+    const given = tree.exprAt(statement.valueId);
     const result = frame.result;
     if (given == undefined || result == undefined) {
       this.cleanupsTo(frame, 0);
@@ -432,6 +486,31 @@ partial class Lowering {
     frame.made.returned(owned.value);
   }
 
+  private ownLocalPlace(
+    frame: Read<Frame>,
+    given: NameExpr,
+  ): Place | undefined {
+    const target = this.values.valueTargetOf(given, frame.module);
+    if (target == undefined) {
+      return undefined;
+    }
+
+    const key = this.placeKey(target.module, target.loc);
+    const place = this.places.get(key);
+    if (
+      place == undefined ||
+      place.owner != frame.id ||
+      place.isCaptured == true
+    ) {
+      return undefined;
+    }
+    if (place.flag != undefined || !this.isManaged(place.tz)) {
+      return undefined;
+    }
+
+    return place;
+  }
+
   private lentReturned(frame: Read<Frame>, returned: IrValue): void {
     this.cleanupsTo(frame, 0);
     this.dropping(frame, returned);
@@ -443,17 +522,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const target = this.values.valueTargetOf(given, frame.module);
-    if (target == undefined) {
-      return undefined;
-    }
-
-    const key = this.placeKey(target.module, target.loc);
-    const place = this.places.get(key);
-    if (place == undefined || place.owner != frame.id || place.isCaptured == true) {
-      return undefined;
-    }
-    if (place.flag != undefined || !this.isManaged(place.tz)) {
+    const place = this.ownLocalPlace(frame, given);
+    if (place == undefined) {
       return undefined;
     }
 

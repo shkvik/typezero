@@ -4,8 +4,7 @@ import { Lexer } from "../../../load/lexer/lexer.tz";
 import { Parser } from "../../../load/parser/parser.tz";
 import { SourceText } from "../../../program/module/types/module.types.tz";
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
-import { SourceFile } from "../../../program/ast/types/ast.types.modules.tz";
-import { DeclarationFile } from "../../../program/ast/types/ast.types.declarations.tz";
+import { AstFlattener } from "../../../load/ast-flattener/ast-flattener.tz";
 import { Dumper } from "../ast-dump/ast-dump.tz";
 import { Sources, SyntaxMode } from "./types/syntax-command.types.tz";
 import {
@@ -20,6 +19,12 @@ import {
   kListPrefix,
   kMaxRepeat,
 } from "./const/syntax-command.const.tz";
+import {
+  DeclarationFile,
+} from "../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  SourceFile,
+} from "../../../program/syntax/types/syntax.types.modules.tz";
 
 export class SyntaxCommand {
   private readonly modeWord?: string;
@@ -138,10 +143,6 @@ export class SyntaxCommand {
     return existsSync(`${stem}${kSourceExtension}`);
   }
 
-  private readonly everySource(sources: Read<Sources>): SourceText[] {
-    return sources.files.concat(sources.declarations.slice());
-  }
-
   private readonly wrongUsage(): void {
     console.error(kUsage);
     process.exitCode = kUsageExitCode;
@@ -153,7 +154,12 @@ export class SyntaxCommand {
   }
 
   private readonly printTokens(sources: Read<Sources>): void {
-    for (const source of this.everySource(sources)) {
+    this.printSourceTokens(sources.files);
+    this.printSourceTokens(sources.declarations);
+  }
+
+  private readonly printSourceTokens(sources: Read<SourceText[]>): void {
+    for (const source of sources) {
       console.log(`== ${source.path}`);
 
       const lexer = new Lexer(source.text);
@@ -172,27 +178,41 @@ export class SyntaxCommand {
   }
 
   private readonly printTrees(sources: Read<Sources>): void {
-    const parser = new Parser(sources.files.slice());
+    const parser = new Parser();
 
-    for (const parsed of parser.run()) {
-      const dumper = new Dumper(parsed.source.text);
+    const parsedFiles = parser.run(sources.files);
 
-      dumper.dumpFile(parsed.file);
+    for (const parsed of parsedFiles) {
+      const flattener = new AstFlattener();
+      const file = flattener.sourceFileOf(parsed.file);
+      const tree = flattener.takeTree();
+      const dumper = new Dumper(parsed.source.text, tree);
+      const syntax = parsed.file;
+
+      dumper.dumpFile(file);
+      dumper.dumpTables(syntax.fieldNames, syntax.stringConstants);
       this.printTree(parsed.source, dumper, parsed.errors);
     }
 
-    const declarationParser = new Parser(sources.declarations.slice());
+    const declarationParser = new Parser();
 
-    for (const parsed of declarationParser.runDeclarations()) {
-      const dumper = new Dumper(parsed.source.text);
+    const parsedDeclarations = declarationParser.runDeclarations(
+      sources.declarations,
+    );
 
-      dumper.dumpDeclarationFile(parsed.file);
+    for (const parsed of parsedDeclarations) {
+      const flattener = new AstFlattener();
+      const file = flattener.declarationOf(parsed.file);
+      const tree = flattener.takeTree();
+      const dumper = new Dumper(parsed.source.text, tree);
+
+      dumper.dumpDeclarationFile(file);
       this.printTree(parsed.source, dumper, parsed.errors);
     }
   }
 
   private readonly printTree(
-    source: SourceText,
+    source: Read<SourceText>,
     dumper: Read<Dumper>,
     errors: Read<SourceError[]>,
   ): void {
@@ -207,20 +227,29 @@ export class SyntaxCommand {
   }
 
   private readonly checkSources(sources: Read<Sources>): void {
-    const parser = new Parser(sources.files.slice());
+    const parser = new Parser();
 
-    for (const parsed of parser.run()) {
+    const parsedFiles = parser.run(sources.files);
+
+    for (const parsed of parsedFiles) {
       this.printErrors(parsed.source, parsed.errors);
     }
 
-    const declarationParser = new Parser(sources.declarations.slice());
+    const declarationParser = new Parser();
 
-    for (const parsed of declarationParser.runDeclarations()) {
+    const parsedDeclarations = declarationParser.runDeclarations(
+      sources.declarations,
+    );
+
+    for (const parsed of parsedDeclarations) {
       this.printErrors(parsed.source, parsed.errors);
     }
   }
 
-  private readonly printErrors(source: SourceText, errors: Read<SourceError[]>): void {
+  private readonly printErrors(
+    source: Read<SourceText>,
+    errors: Read<SourceError[]>,
+  ): void {
     if (errors.length == 0) {
       return;
     }
@@ -235,7 +264,7 @@ export class SyntaxCommand {
     for (const source of sources.files) {
       const lines = this.linesOf(source);
 
-      for (const line of lines) {
+      for (const line of lines.drain()) {
         this.checkSources({ files: [line], declarations: [] });
       }
     }
@@ -243,13 +272,13 @@ export class SyntaxCommand {
     for (const source of sources.declarations) {
       const lines = this.linesOf(source);
 
-      for (const line of lines) {
+      for (const line of lines.drain()) {
         this.checkSources({ files: [], declarations: [line] });
       }
     }
   }
 
-  private readonly linesOf(source: SourceText): SourceText[] {
+  private readonly linesOf(source: Read<SourceText>): SourceText[] {
     const text = source.text;
     const lines: SourceText[] = [];
     let start = 0;
@@ -284,9 +313,13 @@ export class SyntaxCommand {
   }
 
   private readonly lexAll(sources: Read<Sources>): int {
+    return this.lexEach(sources.files) + this.lexEach(sources.declarations);
+  }
+
+  private readonly lexEach(sources: Read<SourceText[]>): int {
     let tokens = 0;
 
-    for (const source of this.everySource(sources)) {
+    for (const source of sources) {
       const lexer = new Lexer(source.text);
       const lexed = lexer.run();
 
@@ -310,20 +343,29 @@ export class SyntaxCommand {
     files: SourceFile[],
     declarations: DeclarationFile[],
   ): void {
-    const parser = new Parser(sources.files.slice());
+    const parser = new Parser();
 
-    for (const parsed of parser.run()) {
+    const parsedFiles = parser.run(sources.files);
+
+    for (const parsed of parsedFiles.drain()) {
       files.push(parsed.file);
     }
 
-    const declarationParser = new Parser(sources.declarations.slice());
+    const declarationParser = new Parser();
 
-    for (const parsed of declarationParser.runDeclarations()) {
+    const parsedDeclarations = declarationParser.runDeclarations(
+      sources.declarations,
+    );
+
+    for (const parsed of parsedDeclarations.drain()) {
       declarations.push(parsed.file);
     }
   }
 
-  private readonly itemCount(files: Read<SourceFile[]>, declarations: Read<DeclarationFile[]>): int {
+  private readonly itemCount(
+    files: Read<SourceFile[]>,
+    declarations: Read<DeclarationFile[]>,
+  ): int {
     let items = 0;
 
     for (const file of files) {
@@ -376,7 +418,10 @@ export class SyntaxCommand {
     console.log(`lex ${lexText} ms, lex + parse ${parseText} ms per pass`);
   }
 
-  private readonly holdSources(sources: Read<Sources>, parseThem: boolean): void {
+  private readonly holdSources(
+    sources: Read<Sources>,
+    parseThem: boolean,
+  ): void {
     const files: SourceFile[] = [];
     const declarations: DeclarationFile[] = [];
 

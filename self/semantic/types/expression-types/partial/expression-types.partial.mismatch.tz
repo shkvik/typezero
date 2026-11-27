@@ -13,21 +13,21 @@ partial class ExpressionTypes {
     place: string,
   ): void {
     const texts: MismatchTexts = {
-      name: this.sources.operandName(expr),
+      name: this.types.operandName(expr),
       unknownCheck: this.unknownCheckText(expr, given, wanted),
-      isFresh: this.shapes.isFresh(expr),
+      isFresh: this.types.isFresh(expr),
       isPlaced: this.isPlacedLiteral(expr, wanted, module),
       place: place + this.fetchMismatchHint(given, wanted),
       both: this.bothText(expr, wanted, module),
     };
     const isBytes =
-      this.byteSources.isBytesType(given) &&
-      this.byteSources.isBytesType(wanted);
+      this.types.isBytesType(given) &&
+      this.types.isBytesType(wanted);
     if (isBytes) {
-      const first = this.text.of(given);
-      const second = this.text.of(wanted);
+      const first = this.types.typeText(given);
+      const second = this.types.typeText(wanted);
 
-      this.report(module, expr.loc, Code.NotAssignable, {
+      this.errors.write(module, expr.loc, Code.NotAssignable, {
         first,
         second,
         place,
@@ -36,9 +36,9 @@ partial class ExpressionTypes {
       return;
     }
 
-    const answer = this.mismatches.answerOf(given, wanted, texts);
+    const answer = this.types.answerOf(given, wanted, texts);
     if (answer != undefined) {
-      this.report(module, expr.loc, answer.code, answer.details);
+      this.errors.write(module, expr.loc, answer.code, answer.details);
     }
   }
 
@@ -53,7 +53,7 @@ partial class ExpressionTypes {
     }
 
     const goal = this.types.definedType(wanted);
-    const intervals = this.ranges.wholeIntervals(goal);
+    const intervals = this.ranges.wholeIntervals(this.types.store, goal);
     if (intervals.length == 0) {
       return false;
     }

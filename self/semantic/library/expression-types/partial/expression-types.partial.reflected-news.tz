@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
@@ -28,18 +29,21 @@ partial class ExpressionTypes {
       return;
     }
     if (!given.exact) {
-      return this.constructorWideningNote(given.instance, goal.instance);
+      return this.constructorWideningNote(
+        this.types.store.classInstanceOf(given),
+        this.types.store.classInstanceOf(goal),
+      );
     }
 
-    const instance = given.instance;
+    const instance = this.types.store.classInstanceOf(given);
     if (instance.kind != TypeKind.Instance) {
       return;
     }
 
     const decl = this.classOf(instance);
-    const target = goal.instance;
+    const target = this.types.store.classInstanceOf(goal);
     const isKnown = this.constructorCasts.some(
-      (one) => one.decl == decl && one.target == target,
+      (one) => one.decl.id == decl?.id && one.target.id == target.id,
     );
     if (decl == undefined || isKnown) {
       return;
@@ -49,11 +53,12 @@ partial class ExpressionTypes {
   }
 
   private constructorWideningNote(from: Type, to: Type): void {
-    if (from == to) {
+    if (from.id == to.id) {
       return;
     }
 
-    const isKnown = this.constructorWidenings.get(from.id)?.includes(to) ?? false;
+    const isKnown =
+      this.constructorWidenings.get(from.id)?.includes(to) ?? false;
     if (isKnown) {
       return;
     }
@@ -65,7 +70,11 @@ partial class ExpressionTypes {
   }
 
   private reflectedNewNote(expr: NewExpr, made: Type, module: int): void {
-    const exprs = expr.args.map((arg) => arg.expr);
+    const tree = this.types.program.tree;
+
+    const exprs = tree
+      .argumentsOf(expr.argsList)
+      .map((arg) => tree.exprOf(arg.exprId));
     const args = exprs.map((one) => this.peekType(one, module));
     const loc = expr.loc;
 
@@ -73,18 +82,29 @@ partial class ExpressionTypes {
   }
 
   private reflectedNewsCheck(module: int): void {
-    for (const reflected of this.reflectedNews.slice()) {
+    const news = replace(this.reflectedNews, []);
+
+    for (const reflected of news) {
       if (reflected.module == module) {
         this.reflectedNewCheck(reflected);
       }
     }
+
+    const added = replace(this.reflectedNews, news);
+
+    this.reflectedNews.push(...added);
   }
 
   private reflectedNewCheck(reflected: Read<ReflectedNew>): void {
     const reached = this.reachedConstructors(reflected.made);
+    const count = this.constructorCasts.length;
 
-    for (const cast of this.constructorCasts.slice()) {
-      if (!reached.includes(cast.target)) {
+    for (let index: int = 0; index < count; index++) {
+      const cast = this.constructorCasts[index];
+      if (
+        cast == undefined ||
+        !reached.some((one) => one.id == cast.target.id)
+      ) {
         continue;
       }
 
@@ -94,10 +114,15 @@ partial class ExpressionTypes {
         reflected,
       );
       if (reason != "") {
-        this.report(reflected.module, reflected.loc, Code.ReflectNewMayFail, {
-          word: cast.decl.name ?? "",
-          other: reason,
-        });
+        this.errors.write(
+          reflected.module,
+          reflected.loc,
+          Code.ReflectNewMayFail,
+          {
+            word: cast.decl.name ?? "",
+            other: reason,
+          },
+        );
 
         return;
       }
@@ -109,7 +134,7 @@ partial class ExpressionTypes {
     const waiting: Type[] = [];
 
     for (const cast of this.constructorCasts) {
-      if (!reached.includes(cast.target)) {
+      if (!reached.some((one) => one.id == cast.target.id)) {
         reached.push(cast.target);
         waiting.push(cast.target);
       }
@@ -135,12 +160,12 @@ partial class ExpressionTypes {
       if (current == undefined) {
         continue;
       }
-      if (current == made) {
+      if (current.id == made.id) {
         return true;
       }
 
       for (const next of this.constructorWidenings.get(current.id) ?? []) {
-        if (!seen.includes(next)) {
+        if (!seen.some((one) => one.id == next.id)) {
           seen.push(next);
           waiting.push(next);
         }
@@ -155,16 +180,21 @@ partial class ExpressionTypes {
     instance: InstanceType,
     reflected: Read<ReflectedNew>,
   ): string {
+    const tree = this.types.program.tree;
+
     if (decl.isAbstract) {
       return kAbstractReason;
     }
 
     const maker = this.makerOf(instance, decl);
-    if (maker == undefined || decl.typeParams.length > 0) {
+    if (
+      maker == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return "";
     }
 
-    const constructors = maker.owner.constructors;
+    const constructors = tree.functionsOf(maker.owner.constructorsList);
     if (constructors.length == 0) {
       return this.noConstructorReason(reflected.args.length);
     }
@@ -180,16 +210,24 @@ partial class ExpressionTypes {
       targets.push(target);
     }
 
-    const fitting = targets.filter((target) =>
-      this.isConstructing(target, reflected),
-    );
-    const exact = fitting.filter((target) =>
-      this.isExactConstructor(target, reflected.args),
-    );
-    if (fitting.length == 1 || exact.length == 1) {
+    let fitting: int = 0;
+    let exact: int = 0;
+
+    for (const target of targets) {
+      if (!this.isConstructing(target, reflected)) {
+        continue;
+      }
+
+      fitting += 1;
+
+      if (this.isExactConstructor(target, reflected.args)) {
+        exact += 1;
+      }
+    }
+    if (fitting == 1 || exact == 1) {
       return "";
     }
-    if (fitting.length > 1) {
+    if (fitting > 1) {
       return kSeveralReason;
     }
 
@@ -204,9 +242,12 @@ partial class ExpressionTypes {
     return kNoArgumentsReason;
   }
 
-  private isConstructing(target: Read<CallTarget>, reflected: Read<ReflectedNew>): boolean {
+  private isConstructing(
+    target: Read<CallTarget>,
+    reflected: Read<ReflectedNew>,
+  ): boolean {
     const args = reflected.args;
-    const least = this.calls.leastArguments(target);
+    const least = this.types.leastArguments(target);
     const isTooMany = !target.rest && args.length > target.params.length;
     if (args.length < least || isTooMany) {
       return false;
@@ -218,7 +259,7 @@ partial class ExpressionTypes {
       if (param == undefined || expr == undefined) {
         return false;
       }
-      if (this.relation.converts(arg, param)) {
+      if (this.types.converts(arg, param)) {
         return true;
       }
 
@@ -226,15 +267,21 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly isExactConstructor(target: Read<CallTarget>, args: Read<Type[]>): boolean {
+  private readonly isExactConstructor(
+    target: Read<CallTarget>,
+    args: Read<Type[]>,
+  ): boolean {
     return args.every((arg, index) => {
       const param = this.constructorParam(target, index);
 
-      return param != undefined && this.types.apparent(arg) == param;
+      return param != undefined && this.types.apparent(arg).id == param.id;
     });
   }
 
-  private readonly constructorParam(target: Read<CallTarget>, index: int): Type | undefined {
+  private readonly constructorParam(
+    target: Read<CallTarget>,
+    index: int,
+  ): Type | undefined {
     const last = target.params[target.params.length - 1];
     const param = target.params[index] ?? last;
 
@@ -243,7 +290,9 @@ partial class ExpressionTypes {
 
   private readonly takesText(targets: Read<CallTarget[]>): string {
     const shown = targets.map((target) => {
-      const params = target.params.map((param) => this.text.of(param.type));
+      const params = target.params.map((param) =>
+        this.types.typeText(param.type),
+      );
 
       return `(${params.join(", ")})`;
     });

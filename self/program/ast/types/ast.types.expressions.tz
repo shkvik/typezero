@@ -1,8 +1,5 @@
 import { KnownName } from "../../../load/token/types/token.types.tz";
-import { Span } from "./ast.types.span.tz";
-import { TypeRef } from "./ast.types.types.tz";
-import { FunctionDecl } from "./ast.types.functions.tz";
-import { ClassDecl } from "./ast.types.classes.tz";
+import { AstList, Span } from "./ast.types.span.tz";
 
 export enum UnaryOp {
   Neg,
@@ -85,6 +82,7 @@ export enum ExprKind {
 
 export type IntLitExpr = {
   readonly kind: ExprKind.IntLit;
+  readonly id: int;
   readonly loc: int;
   readonly value: uint64;
   readonly text?: Span;
@@ -92,6 +90,7 @@ export type IntLitExpr = {
 
 export type FloatLitExpr = {
   readonly kind: ExprKind.FloatLit;
+  readonly id: int;
   readonly loc: int;
   readonly value: double;
   readonly beyondDouble: boolean;
@@ -100,38 +99,43 @@ export type FloatLitExpr = {
 
 export type BoolLitExpr = {
   readonly kind: ExprKind.BoolLit;
+  readonly id: int;
   readonly loc: int;
   readonly value: boolean;
 };
 
 export type StringLitExpr = {
   readonly kind: ExprKind.StringLit;
+  readonly id: int;
   readonly loc: int;
   readonly value: string;
 };
 
 export type UndefinedExpr = {
   readonly kind: ExprKind.Undefined;
+  readonly id: int;
   readonly loc: int;
 };
 
 export type TemplateExpr = {
   readonly kind: ExprKind.Template;
+  readonly id: int;
   readonly loc: int;
-  readonly quasis: readonly string[];
-  readonly exprs: readonly Expr[];
+  readonly quasisList: AstList;
+  readonly exprsList: AstList;
 };
 
 export type ArrayElement = {
-  readonly expr: Expr;
+  readonly exprId: int;
   readonly spread: boolean;
   readonly hole: boolean;
 };
 
 export type ArrayLitExpr = {
   readonly kind: ExprKind.ArrayLit;
+  readonly id: int;
   readonly loc: int;
-  readonly elements: readonly ArrayElement[];
+  readonly elementsList: AstList;
 };
 
 export type PlainProperty = {
@@ -141,13 +145,13 @@ export type PlainProperty = {
 
 export type ComputedProperty = {
   readonly kind: PropertyKind.Computed;
-  readonly key: Expr;
+  readonly keyId: int;
 };
 
 export type SpreadProperty = {
   readonly kind: PropertyKind.Spread;
-  readonly omit: readonly string[];
-  readonly omitKeys: readonly IndexExpr[];
+  readonly omitList: AstList;
+  readonly omitKeysList: AstList;
 };
 
 export type PropertyForm = PlainProperty | ComputedProperty | SpreadProperty;
@@ -155,85 +159,95 @@ export type PropertyForm = PlainProperty | ComputedProperty | SpreadProperty;
 export type Property = {
   readonly name: string;
   readonly loc: int;
-  readonly value: Expr;
+  readonly valueId: int;
   readonly form: PropertyForm;
 };
 
 export type ObjectLitExpr = {
   readonly kind: ExprKind.ObjectLit;
+  readonly id: int;
   readonly loc: int;
-  readonly props: readonly Property[];
+  readonly propsList: AstList;
 };
 
 export type NameExpr = {
   readonly kind: ExprKind.Name;
+  readonly id: int;
   readonly loc: int;
   readonly name: string;
   readonly known: KnownName;
-  readonly typeArgs: readonly TypeRef[];
+  readonly typeArgsList: AstList;
 };
 
 export type MemberExpr = {
   readonly kind: ExprKind.Member;
+  readonly id: int;
   readonly loc: int;
-  readonly object: Expr;
+  readonly objectId: int;
   readonly name: string;
   readonly known: KnownName;
   readonly optional: boolean;
-  readonly typeArgs: readonly TypeRef[];
+  readonly typeArgsList: AstList;
 };
 
 export type IndexExpr = {
   readonly kind: ExprKind.Index;
+  readonly id: int;
   readonly loc: int;
-  readonly object: Expr;
-  readonly index: Expr;
+  readonly objectId: int;
+  readonly indexId: int;
   readonly optional: boolean;
 };
 
 export type UnaryExpr = {
   readonly kind: ExprKind.Unary;
+  readonly id: int;
   readonly loc: int;
   readonly op: UnaryOp;
-  readonly operand: Expr;
+  readonly operandId: int;
 };
 
 export type BinaryExpr = {
   readonly kind: ExprKind.Binary;
+  readonly id: int;
   readonly loc: int;
   readonly op: BinaryOp;
-  readonly lhs: Expr;
-  readonly rhs: Expr;
+  readonly lhsId: int;
+  readonly rhsId: int;
   readonly source?: Span;
 };
 
 export type AssignExpr = {
   readonly kind: ExprKind.Assign;
+  readonly id: int;
   readonly loc: int;
   readonly op?: BinaryOp;
-  readonly target: Expr;
-  readonly value: Expr;
+  readonly targetId: int;
+  readonly valueId: int;
   readonly source?: Span;
 };
 
 export type UpdateExpr = {
   readonly kind: ExprKind.Update;
+  readonly id: int;
   readonly loc: int;
   readonly increment: boolean;
   readonly prefix: boolean;
-  readonly target: Expr;
+  readonly targetId: int;
 };
 
 export type CallArgument = {
-  readonly expr: Expr;
+  readonly exprId: int;
   readonly spread: boolean;
+  readonly hole: boolean;
 };
 
 export type CallExpr = {
   readonly kind: ExprKind.Call;
+  readonly id: int;
   readonly loc: int;
-  readonly callee: Expr;
-  readonly args: readonly CallArgument[];
+  readonly calleeId: int;
+  readonly argsList: AstList;
   readonly optional: boolean;
   readonly tagged: boolean;
 };
@@ -246,61 +260,69 @@ export type NamedNew = {
 
 export type CalleeNew = {
   readonly kind: NewKind.Callee;
-  readonly callee: Expr;
+  readonly calleeId: int;
 };
 
 export type NewForm = NamedNew | CalleeNew;
 
 export type NewExpr = {
   readonly kind: ExprKind.New;
+  readonly id: int;
   readonly loc: int;
   readonly form: NewForm;
-  readonly typeArgs: readonly TypeRef[];
-  readonly args: readonly CallArgument[];
+  readonly typeArgsList: AstList;
+  readonly argsList: AstList;
 };
 
 export type ConditionalExpr = {
   readonly kind: ExprKind.Conditional;
+  readonly id: int;
   readonly loc: int;
-  readonly cond: Expr;
-  readonly thenExpr: Expr;
-  readonly elseExpr: Expr;
+  readonly condId: int;
+  readonly thenExprId: int;
+  readonly elseExprId: int;
 };
 
 export type CastExpr = {
   readonly kind: ExprKind.Cast;
+  readonly id: int;
   readonly loc: int;
-  readonly operand: Expr;
-  readonly target: TypeRef;
+  readonly operandId: int;
+  readonly targetId: int;
 };
 
 export type SequenceExpr = {
   readonly kind: ExprKind.Sequence;
+  readonly id: int;
   readonly loc: int;
-  readonly exprs: readonly Expr[];
+  readonly exprsList: AstList;
 };
 
 export type OptionalChainExpr = {
   readonly kind: ExprKind.OptionalChain;
+  readonly id: int;
   readonly loc: int;
-  readonly chain: Expr;
+  readonly chainId: int;
 };
 
 export type FunctionExpr = {
   readonly kind: ExprKind.Function;
+  readonly id: int;
   readonly loc: int;
-  readonly fn: FunctionDecl;
+  readonly fnId: int;
 };
 
 export type YieldExpr = {
   readonly kind: ExprKind.Yield;
+  readonly id: int;
   readonly loc: int;
-  readonly value?: Expr;
+  readonly valueId?: int;
   readonly delegate: boolean;
 };
 
 export type RegexLitExpr = {
   readonly kind: ExprKind.RegexLit;
+  readonly id: int;
   readonly loc: int;
   readonly pattern: string;
   readonly flags: string;
@@ -309,14 +331,16 @@ export type RegexLitExpr = {
 
 export type AwaitExpr = {
   readonly kind: ExprKind.Await;
+  readonly id: int;
   readonly loc: int;
-  readonly value: Expr;
+  readonly valueId: int;
 };
 
 export type ClassExpr = {
   readonly kind: ExprKind.Class;
+  readonly id: int;
   readonly loc: int;
-  readonly decl: ClassDecl;
+  readonly declId: int;
 };
 
 export type Expr =

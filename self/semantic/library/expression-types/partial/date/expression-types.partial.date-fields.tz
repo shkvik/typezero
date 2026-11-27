@@ -14,29 +14,33 @@ partial class ExpressionTypes {
     setter: string,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const values: (int | undefined)[] = [];
 
     for (const arg of args) {
-      const type = this.timeArgument(arg.expr, module);
-      const value = this.dateConstant(arg.expr, type, module);
+      const expr = tree.exprOf(arg.exprId);
+      const type = this.timeArgument(expr, module);
+      const exprExpr = tree.exprOf(arg.exprId);
+      const value = this.dateConstant(exprExpr, type, module);
 
       values.push(value);
     }
 
     const fields: DateFieldValues = { args, first, setter, values };
 
-    const yearFieldErrors = this.dates.yearFieldCheck(fields);
+    const yearFieldErrors = this.types.yearFieldCheck(fields);
 
-    this.reportAll(module, yearFieldErrors);
+    this.errors.writeAll(module, yearFieldErrors);
 
     const month = this.validMonth(fields, module);
 
-    const dayFieldErrors = this.dates.dayFieldCheck(fields, month);
+    const dayFieldErrors = this.types.dayFieldCheck(fields, month);
 
-    this.reportAll(module, dayFieldErrors);
-    const timeFieldsErrors = this.dates.timeFieldsCheck(fields);
+    this.errors.writeAll(module, dayFieldErrors);
+    const timeFieldsErrors = this.types.timeFieldsCheck(fields);
 
-    this.reportAll(module, timeFieldsErrors);
+    this.errors.writeAll(module, timeFieldsErrors);
   }
 
   private dateConstant(arg: Expr, type: Type, module: int): int | undefined {
@@ -54,10 +58,13 @@ partial class ExpressionTypes {
     return Math.trunc(double).toInt();
   }
 
-  private readonly validMonth(fields: Read<DateFieldValues>, module: int): int | undefined {
-    const checked = this.dates.validMonth(fields);
+  private validMonth(
+    fields: Read<DateFieldValues>,
+    module: int,
+  ): int | undefined {
+    const checked = this.types.validMonth(fields);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

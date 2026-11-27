@@ -9,125 +9,206 @@ import {
   ObjectLitExpr,
   PropertyKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ScopeTraversal {
-  private traverseOptionalExpr(expr: Expr | undefined): void {
+  private traverseOptionalExpr(
+    program: Read<Program>,
+    expr: Expr | undefined,
+  ): void {
     if (expr != undefined) {
-      this.traverseExpr(expr);
+      this.traverseExpr(program, expr);
     }
   }
 
-  private traverseExprs(exprs: Read<Expr[]>): void {
+  private traverseExprs(program: Read<Program>, exprs: Read<Expr[]>): void {
     for (const expr of exprs) {
-      this.traverseExpr(expr);
+      this.traverseExpr(program, expr);
     }
   }
 
-  private traverseExpr(expr: Expr): void {
+  private traverseExpr(program: Read<Program>, expr: Expr): void {
+    const tree = program.tree;
+
     switch (expr.kind) {
       case ExprKind.Name:
         this.useValue(expr.name, expr.loc);
 
-        return this.traverseTypes(expr.typeArgs);
+        const typeArgs = tree.typeRefsOf(expr.typeArgsList);
+
+        return this.traverseTypes(program, typeArgs);
       case ExprKind.Member:
-        this.noteMemberUse(expr.object, expr.name);
-        this.traverseExpr(expr.object);
+        const object = tree.exprOf(expr.objectId);
 
-        return this.traverseTypes(expr.typeArgs);
+        this.noteMemberUse(object, expr.name);
+        const objectExpr = tree.exprOf(expr.objectId);
+
+        this.traverseExpr(program, objectExpr);
+
+        const typeArgsItem = tree.typeRefsOf(expr.typeArgsList);
+
+        return this.traverseTypes(program, typeArgsItem);
       case ExprKind.Index:
-        this.traverseExpr(expr.object);
+        const exprObject = tree.exprOf(expr.objectId);
 
-        return this.traverseExpr(expr.index);
+        this.traverseExpr(program, exprObject);
+
+        const index = tree.exprOf(expr.indexId);
+
+        return this.traverseExpr(program, index);
       case ExprKind.Unary:
-        return this.traverseExpr(expr.operand);
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.traverseExpr(program, operand);
       case ExprKind.Binary:
-        this.traverseExpr(expr.lhs);
+        const lhs = tree.exprOf(expr.lhsId);
 
-        return this.traverseExpr(expr.rhs);
+        this.traverseExpr(program, lhs);
+
+        const rhs = tree.exprOf(expr.rhsId);
+
+        return this.traverseExpr(program, rhs);
       case ExprKind.Assign:
-        this.traverseExpr(expr.target);
+        const target = tree.exprOf(expr.targetId);
 
-        return this.traverseExpr(expr.value);
+        this.traverseExpr(program, target);
+
+        const value = tree.exprOf(expr.valueId);
+
+        return this.traverseExpr(program, value);
       case ExprKind.Update:
-        return this.traverseExpr(expr.target);
+        const targetExpr = tree.exprOf(expr.targetId);
+
+        return this.traverseExpr(program, targetExpr);
       case ExprKind.Call:
-        this.traverseExpr(expr.callee);
+        const callee = tree.exprOf(expr.calleeId);
 
-        return this.traverseArguments(expr.args);
+        this.traverseExpr(program, callee);
+
+        const args = tree.argumentsOf(expr.argsList);
+
+        return this.traverseArguments(program, args);
       case ExprKind.New:
-        return this.traverseNew(expr);
+        return this.traverseNew(program, expr);
       case ExprKind.Conditional:
-        this.traverseExpr(expr.cond);
-        this.traverseExpr(expr.thenExpr);
+        const cond = tree.exprOf(expr.condId);
 
-        return this.traverseExpr(expr.elseExpr);
+        this.traverseExpr(program, cond);
+        const thenExpr = tree.exprOf(expr.thenExprId);
+
+        this.traverseExpr(program, thenExpr);
+
+        const elseExpr = tree.exprOf(expr.elseExprId);
+
+        return this.traverseExpr(program, elseExpr);
       case ExprKind.Cast:
-        this.traverseExpr(expr.operand);
+        const operandExpr = tree.exprOf(expr.operandId);
 
-        return this.traverseType(expr.target);
+        this.traverseExpr(program, operandExpr);
+
+        const targetRef = tree.typeRefOf(expr.targetId);
+
+        return this.traverseType(program, targetRef);
       case ExprKind.Sequence:
-        return this.traverseExprs(expr.exprs);
+        const exprs = tree.exprsOf(expr.exprsList);
+
+        return this.traverseExprs(program, exprs);
       case ExprKind.OptionalChain:
-        return this.traverseExpr(expr.chain);
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.traverseExpr(program, chain);
       case ExprKind.Function:
-        return this.traverseFunction(expr.fn);
+        const fn = tree.functionOf(expr.fnId);
+
+        return this.traverseFunction(program, fn);
       case ExprKind.Yield:
-        return this.traverseOptionalExpr(expr.value);
+        const valueExpr = tree.exprAt(expr.valueId);
+
+        return this.traverseOptionalExpr(program, valueExpr);
       case ExprKind.Await:
-        return this.traverseExpr(expr.value);
+        const exprValue = tree.exprOf(expr.valueId);
+
+        return this.traverseExpr(program, exprValue);
       case ExprKind.Class:
-        return this.traverseClass(expr.decl, true);
+        const decl = tree.classOf(expr.declId);
+
+        return this.traverseClass(program, decl, true);
       case ExprKind.Template:
-        return this.traverseExprs(expr.exprs);
+        const exprsItem = tree.exprsOf(expr.exprsList);
+
+        return this.traverseExprs(program, exprsItem);
       case ExprKind.ArrayLit:
-        for (const element of expr.elements) {
-          this.traverseExpr(element.expr);
+        for (const element of tree.elementsOf(expr.elementsList)) {
+          const exprExpr = tree.exprOf(element.exprId);
+
+          this.traverseExpr(program, exprExpr);
         }
 
         return;
       case ExprKind.ObjectLit:
-        return this.traverseObject(expr);
+        return this.traverseObject(program, expr);
       default:
         return;
     }
   }
 
-  private traverseArguments(args: Read<CallArgument[]>): void {
+  private traverseArguments(
+    program: Read<Program>,
+    args: Read<CallArgument[]>,
+  ): void {
+    const tree = program.tree;
+
     for (const argument of args) {
-      this.traverseExpr(argument.expr);
+      const expr = tree.exprOf(argument.exprId);
+
+      this.traverseExpr(program, expr);
     }
   }
 
-  private traverseNew(expr: NewExpr): void {
+  private traverseNew(program: Read<Program>, expr: NewExpr): void {
+    const tree = program.tree;
+
     const form = expr.form;
     if (form.kind == NewKind.Named) {
       this.useValue(form.name, expr.loc, Code.ClassNotFound);
     } else {
-      this.traverseExpr(form.callee);
+      const callee = tree.exprOf(form.calleeId);
+
+      this.traverseExpr(program, callee);
     }
 
-    this.traverseTypes(expr.typeArgs);
-    this.traverseArguments(expr.args);
+    const typeArgs = tree.typeRefsOf(expr.typeArgsList);
+
+    this.traverseTypes(program, typeArgs);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.traverseArguments(program, args);
   }
 
-  private traverseObject(expr: ObjectLitExpr): void {
-    for (const property of expr.props) {
+  private traverseObject(program: Read<Program>, expr: ObjectLitExpr): void {
+    const tree = program.tree;
+
+    for (const property of tree.propertiesOf(expr.propsList)) {
       const form = property.form;
-      const value = property.value;
+      const value = tree.exprOf(property.valueId);
 
       if (form.kind == PropertyKind.Computed) {
-        this.traverseExpr(form.key);
+        const key = tree.exprOf(form.keyId);
+
+        this.traverseExpr(program, key);
       }
       if (
         form.kind == PropertyKind.Defaulted &&
         value.kind == ExprKind.Assign
       ) {
-        this.traverseExpr(value.value);
+        const valueExpr = tree.exprOf(value.valueId);
+
+        this.traverseExpr(program, valueExpr);
 
         continue;
       }
 
-      this.traverseExpr(value);
+      this.traverseExpr(program, value);
     }
   }
 }

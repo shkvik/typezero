@@ -34,21 +34,31 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const written = this.writtenArguments(expr.typeArgs, module);
+    const tree = this.types.program.tree;
+
+    const written = this.writtenArguments(
+      tree.typeRefsOf(expr.typeArgsList),
+      module,
+    );
     if (written == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (name == kBufferClass) {
-      this.report(module, expr.loc, Code.NewBuffer, kNoDetails);
-      this.looseArguments(expr.args, module);
+      this.errors.write(module, expr.loc, Code.NewBuffer, kNoDetails);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const isDict = name == kMapClass || name == kSetClass;
     const key = written[0];
-    if (isDict && this.resolver.keyCheck(expr.typeArgs[0], key, module)) {
-      return this.store.plain(TypeKind.Error);
+    if (
+      isDict &&
+      this.types.keyCheck(tree.typeRefsOf(expr.typeArgsList)[0], key, module)
+    ) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
     switch (name) {
@@ -77,13 +87,16 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly writtenArguments(refs: Read<TypeRef[]>, module: int): Type[] | undefined {
+  private writtenArguments(
+    refs: Read<TypeRef[]>,
+    module: int,
+  ): Type[] | undefined {
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const written = refs.map((ref) => this.resolver.resolve(ref, context));
+    const written = refs.map((ref) => this.types.resolve(ref, context));
     if (written.some((type) => type.kind == TypeKind.Error)) {
       return undefined;
     }
@@ -97,19 +110,23 @@ partial class ExpressionTypes {
     written: Read<Type[]>,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const home = target.module;
-    const opened = this.program.modules[home];
-    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    const opened = this.types.program.modules[home];
+    const declared = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == target.loc);
     if (declared == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const instance = this.resolver.declaredInstance(home, declared, written);
+    const instance = this.types.declaredInstance(home, declared, written);
     if (instance == undefined || instance.kind != TypeKind.Instance) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const makers = declared.members.filter(
+    const makers = tree.declaredMembersOf(declared.membersList).filter(
       (one) => one.form.kind == DeclaredMemberKind.Constructor,
     );
     const form = makers[0]?.form;
@@ -119,14 +136,17 @@ partial class ExpressionTypes {
     if (makers.length != 1 || form == undefined) {
       return instance;
     }
-    if (form.kind == DeclaredMemberKind.Field || form.typeParams.length > 0) {
+    if (
+      form.kind == DeclaredMemberKind.Field ||
+      tree.typeParamsOf(form.typeParamsList).length > 0
+    ) {
       return instance;
     }
 
     const sites: ParameterSite[] = [];
 
-    for (const param of form.params) {
-      const type = param.type;
+    for (const param of tree.paramsOf(form.paramsList)) {
+      const type = tree.typeRefAt(param.typeId);
       if (type == undefined) {
         return instance;
       }
@@ -140,24 +160,29 @@ partial class ExpressionTypes {
       });
     }
 
-    const context = this.resolver.classContext(
+    const context = this.types.classContext(
       instance,
-      declared.typeParams,
+      tree.typeParamsOf(declared.typeParamsList),
       home,
     );
-    const signature = this.resolver.signature(sites, undefined, context);
+    const signature = this.types.signature(sites, undefined, context);
     if (signature.kind != TypeKind.Function) {
       return instance;
     }
 
-    const shape = signature.shape;
-    const params = shape.params;
+    const shape = this.types.store.functionShapeOf(signature);
+    const params = shape.params.slice();
     const rest = shape.rest;
     const loc = expr.loc;
     const call: CallTarget = { params, rest, loc, isLenient: true };
-    const isPassed = this.argumentsCheck(expr.args, call, module);
+    const isPassed = this.argumentsCheck(
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      call,
+      module,
+    );
     if (!isPassed) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return instance;
@@ -170,30 +195,44 @@ partial class ExpressionTypes {
     declared: DeclaredClass,
     module: int,
   ): Type {
-    const context = this.resolver.classContext(
+    const tree = this.types.program.tree;
+
+    const context = this.types.classContext(
       instance,
-      declared.typeParams,
+      tree.typeParamsOf(declared.typeParamsList),
       instance.module,
     );
     const variants = this.variantsOf(makers, context);
     const name = declared.name;
-    const chosen = this.quietVariant(expr.args, name, variants, module);
+    const chosen = this.quietVariant(
+      tree.argumentsOf(expr.argsList),
+      name,
+      variants,
+      module,
+    );
     if (chosen == undefined) {
-      this.looseValues(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseValues(args, module);
 
       return instance;
     }
 
-    const shape = chosen.shape;
+    const shape = this.types.store.functionShapeOf(chosen);
     const call: CallTarget = {
       params: shape.params,
       rest: shape.rest,
       loc: expr.loc,
       isLenient: true,
     };
-    const isPassed = this.argumentsCheck(expr.args, call, module);
+    const isPassed = this.argumentsCheck(
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      call,
+      module,
+    );
     if (!isPassed) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return instance;

@@ -28,8 +28,8 @@ partial class Lowering {
     }
 
     const layout = this.layoutOf(error);
-    const code = layout?.fields.find((one) => one.name == "code");
-    const message = layout?.fields.find((one) => one.name == "message");
+    const code = this.layoutField(layout, "code");
+    const message = this.layoutField(layout, "message");
     if (layout == undefined || code == undefined || message == undefined) {
       return undefined;
     }
@@ -56,7 +56,7 @@ partial class Lowering {
     made.store(messageValue, made.field(layout.struct, object, message.index));
 
     for (let index = 0; index < extra.length; index++) {
-      const field = layout.fields.find((one) => one.name == extra[index]);
+      const field = this.layoutField(layout, extra[index]);
       if (field == undefined) {
         continue;
       }
@@ -67,7 +67,7 @@ partial class Lowering {
       made.store(value, made.field(layout.struct, object, field.index));
     }
 
-    for (const field of layout.fields) {
+    for (const field of this.fieldsOf(layout)) {
       const literals = this.textLiterals(field.type);
       const only = literals[0];
       const isFixed = field.name != "code" && literals.length == 1;
@@ -93,7 +93,11 @@ partial class Lowering {
     return `${parts} }`;
   }
 
-  private codeChosen(frame: Read<Frame>, text: LLVMValue, type: Type): LLVMValue {
+  private codeChosen(
+    frame: Read<Frame>,
+    text: LLVMValue,
+    type: Type,
+  ): LLVMValue {
     const literals = this.textLiterals(type);
     const first = literals[0] ?? "";
     let chosen: LLVMValue = this.stringValue(first).value;
@@ -105,7 +109,11 @@ partial class Lowering {
 
     for (const literal of literals.slice(1)) {
       const order = frame.made.call(compare, [text, this.cText(literal)]);
-      const isSame = frame.made.integerCompare(IrIntPredicate.Equal, order, zero);
+      const isSame = frame.made.integerCompare(
+        IrIntPredicate.Equal,
+        order,
+        zero,
+      );
       const value = this.stringValue(literal).value;
 
       chosen = frame.made.select(isSame, value, chosen);
@@ -124,7 +132,7 @@ partial class Lowering {
 
     const texts: string[] = [];
 
-    for (const part of type.parts) {
+    for (const part of this.values.types.store.partsOf(type)) {
       if (part.kind == TypeKind.Literal) {
         texts.push(part.text);
       }
@@ -133,7 +141,7 @@ partial class Lowering {
     return texts;
   }
 
-  private readonly failedSlot(): LLVMValue {
+  private failedSlot(): LLVMValue {
     return this.ir.external(kFailedSlot, "{ ptr }");
   }
 
@@ -151,7 +159,11 @@ partial class Lowering {
     const slot = this.failedSlot();
     const failure = frame.made.load(kPointerType, slot);
     const none = this.ir.zero(kPointerType);
-    const isFailed = frame.made.integerCompare(IrIntPredicate.NotEqual, failure, none);
+    const isFailed = frame.made.integerCompare(
+      IrIntPredicate.NotEqual,
+      failure,
+      none,
+    );
     const failed = frame.made.block("call.failed");
     const fine = frame.made.block("call.ok");
     const end = frame.made.block("call.end");
@@ -163,7 +175,7 @@ partial class Lowering {
     const error: IrValue = {
       type: kPointerType,
       value: failure,
-      tz: type.error,
+      tz: this.values.types.store.errorOf(type),
       owned: true,
     };
     const bad = this.madeResult(frame, type, false, error, loc);
@@ -192,14 +204,17 @@ partial class Lowering {
   }
 
   private numberOf(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(call);
-    const argument = call.args[0];
-    const double = this.store.plain(TypeKind.Double);
+    const argument = tree.argumentsOf(call.argsList)[0];
+    const double = this.values.types.store.plain(TypeKind.Double);
     if (argument == undefined) {
       return this.doubleValue(0.0);
     }
 
-    const given = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
     if (given == undefined || type == undefined) {
       return undefined;
     }
@@ -207,7 +222,7 @@ partial class Lowering {
       return this.converted(frame, given, double, call.loc);
     }
 
-    const maker = this.failureMaker(type.error);
+    const maker = this.failureMaker(this.values.types.store.errorOf(type));
     if (maker == undefined) {
       this.notLowered(frame.module, call.loc, "a failure of this type");
 
@@ -226,8 +241,10 @@ partial class Lowering {
   }
 
   private parsedInteger(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(call);
-    const argument = call.args[0];
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined || type == undefined) {
       return undefined;
     }
@@ -235,8 +252,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const maker = this.failureMaker(type.error);
-    const given = this.value(frame, argument.expr);
+    const maker = this.failureMaker(this.values.types.store.errorOf(type));
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
     const radix = this.integerArgument(frame, call, 1);
     if (maker == undefined || given == undefined || radix == undefined) {
       this.notLowered(frame.module, call.loc, "this call of parseInt");
@@ -248,7 +266,7 @@ partial class Lowering {
     const callee = this.ir.declare(kParseInteger, kIntType, params);
     const args = this.textParts(frame, given).concat([radix.value, maker]);
     const parsed = frame.made.call(callee, args);
-    const int = this.store.integer(64, false);
+    const int = this.values.types.store.integer(64, false);
     const value: IrValue = { type: kIntType, value: parsed, tz: int };
 
     this.dropping(frame, given);

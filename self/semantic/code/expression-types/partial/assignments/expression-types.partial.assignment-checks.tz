@@ -27,7 +27,9 @@ import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
   private lengthAssignCheck(expr: AssignExpr, given: Type, module: int): void {
-    const target = expr.target;
+    const tree = this.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
     const isLength =
       expr.op == undefined &&
       target.kind == ExprKind.Member &&
@@ -36,27 +38,41 @@ partial class ExpressionTypes {
       return;
     }
 
-    const object = this.peekType(target.object, module);
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.peekType(objectExpr, module);
 
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Array || given.kind == TypeKind.Error) {
       return;
     }
-    if (this.objects.hasZeroValue(base.item)) {
+    if (this.types.hasZeroValue(this.types.store.itemOf(base))) {
       const range: ProofRange = { what: kArrayLengthWhat, low: 0 };
 
-      this.requireBetween(expr.value, given, range, module);
+      const value = tree.exprOf(expr.valueId);
+
+      this.requireBetween(value, given, range, module);
 
       return;
     }
-    if (this.isProvenLength(target.object, expr.value, module)) {
+    if (
+      this.isProvenLength(
+        tree.exprOf(target.objectId),
+        tree.exprOf(expr.valueId),
+        module,
+      )
+    ) {
       return;
     }
 
-    this.report(module, expr.value.loc, Code.LengthNotProven, {
-      first: this.text.of(base.item),
-      word: this.sources.valueText(target.object, module),
-    });
+    this.errors.write(
+      module,
+      tree.exprOf(expr.valueId).loc,
+      Code.LengthNotProven,
+      {
+        first: this.types.typeText(this.types.store.itemOf(base)),
+        word: this.types.valueText(tree.exprOf(target.objectId), module),
+      },
+    );
   }
 
   private isProvenLength(object: Expr, value: Expr, module: int): boolean {
@@ -80,11 +96,15 @@ partial class ExpressionTypes {
     type: Type,
     module: int,
   ): Type {
-    const isLiteralTree = this.shapes.isIntTree(expr.value);
-    const hint = this.assignments.compoundHint(op, type, isLiteralTree);
-    const given = this.typed(expr.value, hint, module);
+    const tree = this.types.program.tree;
 
-    const target = expr.target;
+    const value = tree.exprOf(expr.valueId);
+    const isLiteralTree = this.types.isIntTree(value);
+    const hint = this.types.compoundHint(op, type, isLiteralTree);
+    const valueExpr = tree.exprOf(expr.valueId);
+    const given = this.typed(valueExpr, hint, module);
+
+    const target = tree.exprOf(expr.targetId);
     const isUnchecked =
       this.isLibraryTarget(target, module) ||
       this.isPlacedLiteral(target, given, module);
@@ -92,7 +112,7 @@ partial class ExpressionTypes {
       return given;
     }
     if (type.kind == TypeKind.String) {
-      const joinError = this.assignments.stringCompoundError(
+      const joinError = this.types.stringCompoundError(
         expr,
         op,
         type,
@@ -100,7 +120,7 @@ partial class ExpressionTypes {
         module,
       );
 
-      this.reportFound(module, joinError);
+      this.errors.writeFound(module, joinError);
 
       return given;
     }
@@ -117,7 +137,9 @@ partial class ExpressionTypes {
     given: Type,
     module: int,
   ): void {
-    const isBits = this.assignments.isIntegerOnly(op);
+    const tree = this.types.program.tree;
+
+    const isBits = this.types.isIntegerOnly(op);
     const isBroken =
       type.kind == TypeKind.Error || given.kind == TypeKind.Error;
     const isDecimal = type.kind == TypeKind.Decimal && !isBits;
@@ -125,13 +147,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    const value = expr.value;
-    const isShift = this.assignments.isShift(op);
-    const isOther = !isShift && given.kind == TypeKind.Int && given != type;
+    const value = tree.exprOf(expr.valueId);
+    const isShift = this.types.isShift(op);
+    const isOther =
+      !isShift && given.kind == TypeKind.Int && given.id != type.id;
     const isAdapting =
       isOther && this.literalTarget(value, given, type, module) != undefined;
-    const isWrapping = !isShift && this.assignments.isWrapping(type, given);
-    const operandsError = this.assignments.compoundOperandsError(
+    const isWrapping = !isShift && this.types.isWrapping(type, given);
+    const operandsError = this.types.compoundOperandsError(
       expr,
       op,
       type,
@@ -139,7 +162,7 @@ partial class ExpressionTypes {
       isAdapting || isWrapping,
     );
     if (operandsError != undefined) {
-      return this.reportFound(module, operandsError);
+      return this.errors.writeFound(module, operandsError);
     }
     if (isAdapting) {
       return;
@@ -150,7 +173,7 @@ partial class ExpressionTypes {
     const isByZero =
       isCounted && isDividing && this.intConstant(value, given, module) == 0;
     if (isByZero) {
-      this.report(module, value.loc, Code.DivisionByZero, kNoDetails);
+      this.errors.write(module, value.loc, Code.DivisionByZero, kNoDetails);
     }
     if (isWrapping || isShift) {
       return;
@@ -164,6 +187,8 @@ partial class ExpressionTypes {
     tested: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const op = expr.op;
     const isArithmetic =
       op != undefined &&
@@ -176,21 +201,22 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const given = this.peekType(expr.value, module);
+    const value = tree.exprOf(expr.valueId);
+    const given = this.peekType(value, module);
 
-    this.report(module, expr.loc, Code.OperandTypesUndefined, {
-      first: this.text.of(tested),
-      second: this.text.of(given),
-      other: `${this.sources.operatorText(op)}=`,
+    this.errors.write(module, expr.loc, Code.OperandTypesUndefined, {
+      first: this.types.typeText(tested),
+      second: this.types.typeText(given),
+      other: `${this.types.operatorText(op)}=`,
     });
 
     return true;
   }
 
-  private readonly logicalTargetCheck(expr: AssignExpr, module: int): boolean {
-    const checked = this.flows.logicalTargetCheck(expr);
+  private logicalTargetCheck(expr: AssignExpr, module: int): boolean {
+    const checked = this.types.logicalTargetCheck(expr);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -200,20 +226,23 @@ partial class ExpressionTypes {
     isCompound: boolean,
     module: int,
   ): void {
-    const object = this.peekType(target.object, module);
+    const tree = this.types.program.tree;
+
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.peekType(objectExpr, module);
 
     const base = this.types.definedType(object);
     if (base.kind == TypeKind.Tuple) {
-      const tupleWriteError = this.flows.tupleWriteCheck(target, base);
+      const tupleWriteError = this.types.tupleWriteCheck(target, base);
 
-      return this.reportFound(module, tupleWriteError);
+      return this.errors.writeFound(module, tupleWriteError);
     }
     if (base.kind == TypeKind.String) {
       const code = Code.StringElementAssigned;
 
-      return this.report(module, target.loc, code, kNoDetails);
+      return this.errors.write(module, target.loc, code, kNoDetails);
     }
-    if (this.bytes.elementOf(base) != undefined) {
+    if (this.types.elementOf(base) != undefined) {
       return this.bytesStoreCheck(target, base, module);
     }
     if (base.kind != TypeKind.Array) {
@@ -234,7 +263,7 @@ partial class ExpressionTypes {
       return undefined;
     }
     if (this.isThisName(target, module)) {
-      this.report(module, target.loc, Code.ThisAssigned, kNoDetails);
+      this.errors.write(module, target.loc, Code.ThisAssigned, kNoDetails);
 
       return undefined;
     }
@@ -251,14 +280,14 @@ partial class ExpressionTypes {
   }
 
   private readonly importedCode(home: int): Code {
-    if (this.modules.isLibraryModule(home)) {
+    if (this.types.isLibraryModule(home)) {
       return Code.AssignToImported;
     }
 
     return Code.AssignToImportedVariable;
   }
 
-  private readonly fixedTargetCheck(
+  private fixedTargetCheck(
     target: NameExpr,
     found: ValueTarget,
     module: int,
@@ -271,7 +300,7 @@ partial class ExpressionTypes {
     if (found.module != module) {
       const code = this.importedCode(found.module);
 
-      this.report(module, target.loc, code, { word });
+      this.errors.write(module, target.loc, code, { word });
 
       return true;
     }
@@ -281,26 +310,42 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, target.loc, Code.AssignToConstant, { word });
+    this.errors.write(module, target.loc, Code.AssignToConstant, { word });
 
     return true;
   }
 
   private bytesStoreCheck(target: IndexExpr, object: Type, module: int): void {
-    if (this.isProvenIndex(target.object, target.index, module)) {
+    const tree = this.types.program.tree;
+
+    if (
+      this.isProvenIndex(
+        tree.exprOf(target.objectId),
+        tree.exprOf(target.indexId),
+        module,
+      )
+    ) {
       return;
     }
 
-    const key = this.peekType(target.index, module);
+    const index = tree.exprOf(target.indexId);
+    const key = this.peekType(index, module);
 
     if (key.kind == TypeKind.Error) {
       return;
     }
 
-    const constant = this.intConstant(target.index, key, module);
-    const shownObject = this.sources.valueText(target.object, module);
-    const shownIndex = this.sources.valueText(target.index, module);
-    const storeError = this.bytes.storeError(
+    const indexExpr = tree.exprOf(target.indexId);
+    const constant = this.intConstant(indexExpr, key, module);
+    const shownObject = this.types.valueText(
+      tree.exprOf(target.objectId),
+      module,
+    );
+    const shownIndex = this.types.valueText(
+      tree.exprOf(target.indexId),
+      module,
+    );
+    const storeError = this.types.storeError(
       target,
       object,
       constant,
@@ -308,21 +353,24 @@ partial class ExpressionTypes {
       shownIndex,
     );
 
-    this.reportFound(module, storeError);
+    this.errors.writeFound(module, storeError);
   }
 
   private elementDeclared(target: IndexExpr, module: int): Type | undefined {
-    const object = this.peekType(target.object, module);
+    const tree = this.types.program.tree;
+
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.peekType(objectExpr, module);
 
     const base = this.types.definedType(object);
     if (base.kind == TypeKind.Array) {
-      return base.item;
+      return this.types.store.itemOf(base);
     }
-    if (this.bytes.isClamped(base)) {
-      return this.store.integer(64, false);
+    if (this.types.isClamped(base)) {
+      return this.types.store.integer(64, false);
     }
 
-    return this.bytes.elementOf(base);
+    return this.types.elementOf(base);
   }
 
   private fieldDeclared(target: MemberExpr, module: int): Type | undefined {
@@ -341,16 +389,19 @@ partial class ExpressionTypes {
   }
 
   private isLibraryTarget(target: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (target.kind != ExprKind.Member) {
       return false;
     }
 
-    const object = this.peekType(target.object, module);
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.peekType(objectExpr, module);
 
     const isInstance =
       object.kind == TypeKind.Instance &&
-      this.modules.isLibraryModule(object.module);
+      this.types.isLibraryModule(object.module);
 
-    return isInstance || this.resolver.isLibraryShape(object);
+    return isInstance || this.types.isLibraryShape(object);
   }
 }

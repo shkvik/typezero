@@ -4,10 +4,15 @@ import "./partial/ownership-check.partial.statements.tz";
 import "./partial/ownership-check.partial.expressions.tz";
 import "./partial/ownership-check.partial.places.tz";
 import "./partial/ownership-check.partial.values.tz";
+import "./partial/ownership-check.partial.frozen.tz";
+import "./partial/ownership-check.partial.returns.tz";
 import "./partial/ownership-check.partial.calls.tz";
+import "./partial/ownership-check.partial.call-results.tz";
+import "./partial/ownership-check.partial.callees.tz";
+import "./partial/ownership-check.partial.variance.tz";
 import "./partial/ownership-check.partial.closures.tz";
 import "./partial/ownership-check.partial.rules.tz";
-import "./partial/ownership-check.partial.cells.tz";
+import "./partial/ownership-check.partial.variables.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
 import {
@@ -26,19 +31,15 @@ import { Module, Program } from "../../../program/module/types/module.types.tz";
 import { SourceLines } from "../../../program/source-lines/source-lines.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../code/expression-types/expression-types.tz";
-import { TypeTraits } from "../type-traits/type-traits.tz";
 import { kCheckedLibraries } from "../../declaration/module-questions/const/module-questions.const.tz";
-import { CellGuard, FlowState, FunctionFrame } from "./types/ownership-check.types.tz";
+import { FlowState, FunctionFrame } from "./types/ownership-check.types.tz";
 
 export class OwnershipCheck {
-  private readonly store: TypeStore;
   public readonly values: ExpressionTypes;
-  private readonly program: Program;
-  private readonly traits: TypeTraits;
   private readonly errors: ErrorLog;
   private readonly functions: Map<string, FunctionDecl>;
   private readonly classes: Map<string, ClassDecl>;
-  private readonly partHomes: Map<FunctionDecl, int>;
+  private readonly partHomes: Map<int, int>;
   private readonly lines: Map<int, SourceLines>;
   private readonly frames: FunctionFrame[];
   private readonly hintTexts: string[];
@@ -46,20 +47,17 @@ export class OwnershipCheck {
   private module: int;
   private home: int;
   private liveFrom: int;
-  private moveUses: Set<Expr>;
+  private moveUses: Set<int>;
   private borrowDecls: Set<string>;
-  private readonly cellGuards: CellGuard[];
-  private readonly ownCode: Set<FunctionDecl>;
+  private lentClosures: Set<int>;
+  private readonly ownCode: Set<int>;
 
-  public constructor(store: TypeStore, values: Own<ExpressionTypes>, program: Own<Program>) {
-    this.store = store;
+  public constructor(values: Own<ExpressionTypes>) {
     this.values = values;
-    this.program = program;
-    this.traits = new TypeTraits(store, this.program);
     this.errors = new ErrorLog();
     this.functions = new Map<string, FunctionDecl>();
     this.classes = new Map<string, ClassDecl>();
-    this.partHomes = new Map<FunctionDecl, int>();
+    this.partHomes = new Map<int, int>();
     this.lines = new Map<int, SourceLines>();
     this.frames = [];
     this.hintTexts = [];
@@ -67,28 +65,32 @@ export class OwnershipCheck {
     this.module = -1;
     this.home = -1;
     this.liveFrom = -1;
-    this.moveUses = new Set<Expr>();
+    this.moveUses = new Set<int>();
     this.borrowDecls = new Set<string>();
-    this.cellGuards = [];
-    this.ownCode = new Set<FunctionDecl>();
+    this.lentClosures = new Set<int>();
+    this.ownCode = new Set<int>();
   }
 
-  public takeMoves(): Set<Expr> {
-    return replace(this.moveUses, new Set<Expr>());
+  public takeMoves(): Set<int> {
+    return replace(this.moveUses, new Set<int>());
   }
 
   public takeBorrows(): Set<string> {
     return replace(this.borrowDecls, new Set<string>());
   }
 
+  public takeLentClosures(): Set<int> {
+    return replace(this.lentClosures, new Set<int>());
+  }
+
   public run(): void {
-    for (const module of this.program.modules) {
+    for (const module of this.values.types.program.modules) {
       if (this.isChecked(module)) {
         this.indexModule(module);
       }
     }
 
-    for (const module of this.program.modules) {
+    for (const module of this.values.types.program.modules) {
       if (this.isChecked(module)) {
         this.checkModule(module);
       }
@@ -104,7 +106,7 @@ export class OwnershipCheck {
   }
 
   private hint(loc: int, kind: string, name: string): void {
-    const module = this.program.modules[this.home];
+    const module = this.values.types.program.modules[this.home];
     const lines = this.sourceLines();
     if (module == undefined || lines == undefined) {
       return;
@@ -113,10 +115,12 @@ export class OwnershipCheck {
     const place = lines.placeOf(loc);
     const path = module.source.path;
 
-    this.hintTexts.push(`${path}:${place.line}:${place.column}: hint ${kind} ${name}`);
+    this.hintTexts.push(
+      `${path}:${place.line}:${place.column}: hint ${kind} ${name}`,
+    );
   }
 
-  private readonly isChecked(module: Module): boolean {
+  private readonly isChecked(module: Read<Module>): boolean {
     if (module.isDeclarationOnly) {
       return false;
     }
@@ -124,13 +128,15 @@ export class OwnershipCheck {
     return !module.source.isLibrary || kCheckedLibraries.includes(module.name);
   }
 
-  private indexModule(module: Module): void {
-    for (const item of module.file.items) {
+  private indexModule(module: Read<Module>): void {
+    const tree = this.values.types.program.tree;
+
+    for (const item of tree.stmtsOf(module.file.itemsList)) {
       this.indexStatement(module.id, item);
     }
-    for (const part of module.parts) {
-      for (const method of part.methods) {
-        this.partHomes.set(method, module.id);
+    for (const part of tree.classesOf(module.partsList)) {
+      for (const method of tree.functionsOf(part.methodsList)) {
+        this.partHomes.set(method.id, module.id);
       }
     }
     if (!module.source.isLibrary) {
@@ -152,22 +158,20 @@ export class OwnershipCheck {
   }
 
   private indexClass(module: int, decl: ClassDecl): void {
+    const tree = this.values.types.program.tree;
+
     this.classes.set(this.keyOf(module, decl.loc), decl);
 
-    for (const method of decl.methods) {
+    for (const method of tree.functionsOf(decl.methodsList)) {
       this.functions.set(this.keyOf(module, method.loc), method);
     }
-    for (const made of decl.constructors) {
+    for (const made of tree.functionsOf(decl.constructorsList)) {
       this.functions.set(this.keyOf(module, made.loc), made);
     }
   }
 
   private readonly keyOf(module: int, loc: int): string {
     return `${module}:${loc}`;
-  }
-
-  private readonly report(loc: int, code: Code, details: Details): void {
-    this.errors.write(this.home, loc, code, details);
   }
 
   private lineOf(loc: int): string {
@@ -181,21 +185,14 @@ export class OwnershipCheck {
     return `${place.line}`;
   }
 
-  private sourceLines(): SourceLines | undefined {
-    const known = this.lines.get(this.home);
-    if (known != undefined) {
-      return known;
+  private sourceLines(): Read<SourceLines> | undefined {
+    const module = this.values.types.program.modules[this.home];
+    if (!this.lines.has(this.home) && module != undefined) {
+      const made = new SourceLines(module.source.text);
+
+      this.lines.set(this.home, made);
     }
 
-    const module = this.program.modules[this.home];
-    if (module == undefined) {
-      return undefined;
-    }
-
-    const made = new SourceLines(module.source.text);
-
-    this.lines.set(this.home, made);
-
-    return made;
+    return this.lines.get(this.home);
   }
 }

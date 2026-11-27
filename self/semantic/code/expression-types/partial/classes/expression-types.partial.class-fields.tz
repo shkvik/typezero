@@ -19,43 +19,55 @@ import { StaticOwner, ThisPlace } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private checkFields(decl: ClassDecl, module: int): void {
-    for (let index = 0; index < decl.fields.length; index++) {
-      const memberNameErrors = this.overrides.memberNameErrors(decl, index);
+    const tree = this.types.program.tree;
 
-      this.reportAll(module, memberNameErrors);
+    for (
+      let index = 0;
+      index < tree.fieldsOf(decl.fieldsList).length;
+      index++
+    ) {
+      const memberNameErrors = this.types.memberNameErrors(decl, index);
+
+      this.errors.writeAll(module, memberNameErrors);
     }
 
-    for (const field of decl.fields) {
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       this.checkField(decl, field, module);
     }
   }
 
   private checkField(decl: ClassDecl, field: ClassField, module: int): void {
+    const tree = this.types.program.tree;
+
     const word = field.name;
 
     if (field.presence == FieldPresence.Definite) {
-      this.report(module, field.loc, Code.SetLater, { word });
+      this.errors.write(module, field.loc, Code.SetLater, { word });
     }
 
     this.checkFieldValue(decl, field, module);
 
     const isParameter = field.form == FieldKind.Parameter;
-    if (isParameter && field.type == undefined) {
-      this.report(module, field.loc, Code.ParamFieldNeedsType, { word });
+    if (isParameter && tree.typeRefAt(field.typeId) == undefined) {
+      this.errors.write(module, field.loc, Code.ParamFieldNeedsType, { word });
 
       return;
     }
-    if (!isParameter && field.type == undefined && field.init == undefined) {
-      this.report(module, field.loc, Code.FieldNeedsType, { word });
+    if (
+      !isParameter &&
+      tree.typeRefAt(field.typeId) == undefined &&
+      tree.exprAt(field.initId) == undefined
+    ) {
+      this.errors.write(module, field.loc, Code.FieldNeedsType, { word });
 
       return;
     }
 
-    const init = field.init;
+    const init = tree.exprAt(field.initId);
     const isStatic = field.form == FieldKind.Static;
-    const isShown = init == undefined || this.shapes.isFieldLiteral(init);
-    if (isStatic && field.type == undefined && !isShown) {
-      this.report(module, field.loc, Code.StaticNeedsType, { word });
+    const isShown = init == undefined || this.types.isFieldLiteral(init);
+    if (isStatic && tree.typeRefAt(field.typeId) == undefined && !isShown) {
+      this.errors.write(module, field.loc, Code.StaticNeedsType, { word });
 
       return;
     }
@@ -69,7 +81,9 @@ partial class ExpressionTypes {
     field: ClassField,
     module: int,
   ): void {
-    const init = field.init;
+    const tree = this.types.program.tree;
+
+    const init = tree.exprAt(field.initId);
     const word = field.name;
     const isFunction = init != undefined && init.kind == ExprKind.Function;
     const isValued =
@@ -77,35 +91,49 @@ partial class ExpressionTypes {
     if (!isValued || init == undefined) {
       return;
     }
-    if (decl.constructors.length > 0) {
-      this.report(module, field.loc, Code.FieldValueWithConstructor, {
+    const constructors = tree.countOf(decl.constructorsList);
+    if (constructors > 0) {
+      this.errors.write(module, field.loc, Code.FieldValueWithConstructor, {
         word,
       });
 
       return;
     }
-    if (field.type == undefined || !this.shapes.isFieldLiteral(init)) {
-      this.report(module, field.loc, Code.FieldValueNotLiteral, { word });
+    if (
+      tree.typeRefAt(field.typeId) == undefined ||
+      !this.types.isFieldLiteral(init)
+    ) {
+      this.errors.write(module, field.loc, Code.FieldValueNotLiteral, { word });
 
       return;
     }
 
     const owner: StaticOwner = { decl, module };
-    const type = this.staticFieldType(field.type, field.presence, owner);
+    const type = this.staticFieldType(
+      tree.typeRefAt(field.typeId),
+      field.presence,
+      owner,
+    );
 
     this.checked(init, type, module, kNoPlace);
   }
 
   private staticValue(decl: ClassDecl, field: ClassField, module: int): void {
+    const tree = this.types.program.tree;
+
     const owner: StaticOwner = { decl, module };
-    const init = field.init;
+    const init = tree.exprAt(field.initId);
     const word = field.name;
-    const type = this.staticFieldType(field.type, field.presence, owner);
-    const params = this.parts.genericParameters(type) ?? [];
+    const type = this.staticFieldType(
+      tree.typeRefAt(field.typeId),
+      field.presence,
+      owner,
+    );
+    const params = this.types.genericParameters(type) ?? [];
     if (params.length > 0) {
       const first = decl.name ?? "";
 
-      this.report(module, field.loc, Code.StaticTypeParameters, {
+      this.errors.write(module, field.loc, Code.StaticTypeParameters, {
         word,
         first,
       });
@@ -115,9 +143,9 @@ partial class ExpressionTypes {
     if (init == undefined) {
       const isOptional = field.presence == FieldPresence.Optional;
       if (!isOptional && type.kind != TypeKind.Error) {
-        const first = this.text.of(type);
+        const first = this.types.typeText(type);
 
-        this.report(module, field.loc, Code.StaticNeedsValue, {
+        this.errors.write(module, field.loc, Code.StaticNeedsValue, {
           word,
           first,
         });
@@ -126,7 +154,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const unknown = this.store.plain(TypeKind.Error);
+    const unknown = this.types.store.plain(TypeKind.Error);
 
     this.ownerClasses.push(owner);
     this.selves.push(unknown);
@@ -145,7 +173,12 @@ partial class ExpressionTypes {
     type: Type,
     module: int,
   ): void {
-    if (field.type == undefined || type.kind == TypeKind.Error) {
+    const tree = this.types.program.tree;
+
+    if (
+      tree.typeRefAt(field.typeId) == undefined ||
+      type.kind == TypeKind.Error
+    ) {
       this.typed(init, undefined, module);
 
       return;

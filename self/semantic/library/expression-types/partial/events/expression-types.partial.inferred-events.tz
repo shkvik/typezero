@@ -29,21 +29,23 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const isEmitting = member.name == kEmitName;
-    const name = expr.args[0]?.expr;
-    const rest = expr.args.slice(1);
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const rest = tree.argumentsOf(expr.argsList).slice(1);
     if (name == undefined) {
       return this.inferredResult(member, instance);
     }
 
-    const text = this.store.plain(TypeKind.String);
+    const text = this.types.store.plain(TypeKind.String);
 
     this.checked(name, text, module, kNoPlace);
 
     const event = this.constantKey(name, module);
     if (event == undefined) {
       if (isEmitting) {
-        this.report(module, name.loc, Code.EventNameUnknown, {
+        this.errors.write(module, name.loc, Code.EventNameUnknown, {
           word: member.name,
         });
       }
@@ -53,7 +55,11 @@ partial class ExpressionTypes {
       return this.inferredResult(member, instance);
     }
 
-    const key = this.inferredKey(member.object, instance, module);
+    const key = this.inferredKey(
+      tree.exprOf(member.objectId),
+      instance,
+      module,
+    );
     if (isEmitting) {
       this.inferredEmit(rest, name, event, key, module);
     } else {
@@ -71,16 +77,20 @@ partial class ExpressionTypes {
     key: string | undefined,
     module: int,
   ): void {
-    const rest = expr.args.slice(1);
-    const first = this.eventMarks.firstEmits.get(`${key} ${event}`);
-    if (key == undefined || first == undefined) {
+    const tree = this.types.program.tree;
+
+    const rest = tree.argumentsOf(expr.argsList).slice(1);
+    const emitted = this.eventMarks.firstEmits.get(`${key} ${event}`);
+    const firstArgs = emitted?.args.slice();
+    if (key == undefined || firstArgs == undefined) {
       return this.inferredLoose(rest, module);
     }
 
-    const args = this.store.tupleOf({
-      items: first.args,
+    const required = firstArgs.length;
+    const args = this.types.store.tupleOf({
+      items: firstArgs,
       readonly: false,
-      required: first.args.length,
+      required,
       rest: -1,
     });
 
@@ -88,14 +98,18 @@ partial class ExpressionTypes {
   }
 
   private inferredLoose(args: Read<CallArgument[]>, module: int): void {
+    const tree = this.types.program.tree;
+
     for (const arg of args) {
-      this.listenerLoose(arg.expr, module);
+      const expr = tree.exprOf(arg.exprId);
+
+      this.listenerLoose(expr, module);
     }
   }
 
-  private readonly inferredResult(member: MemberExpr, instance: InstanceType): Type {
+  private inferredResult(member: MemberExpr, instance: InstanceType): Type {
     if (member.name == kEmitName) {
-      return this.store.plain(TypeKind.Boolean);
+      return this.types.store.plain(TypeKind.Boolean);
     }
     if (kListenerQueries.includes(member.name)) {
       return this.listenersOf(undefined);
@@ -144,7 +158,11 @@ partial class ExpressionTypes {
     key: string | undefined,
     module: int,
   ): void {
-    const given = rest.map((arg) => this.emittedType(arg.expr, module));
+    const tree = this.types.program.tree;
+
+    const given = rest.map((arg) =>
+      this.emittedType(tree.exprOf(arg.exprId), module),
+    );
     if (key == undefined) {
       this.eventMarks.looseEmitModules.add(module);
 
@@ -171,16 +189,18 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.emittedAgainCheck(rest, name, event, given, first, module);
+    const earlier: FirstEmit = { args: first.args.slice(), place: first.place };
+
+    this.emittedAgainCheck(rest, name, event, given, earlier, module);
   }
 
   private emittedType(value: Expr, module: int): Type {
     const type = this.typed(value, undefined, module);
 
-    return this.relation.baseOf(type) ?? type;
+    return this.types.baseOf(type) ?? type;
   }
 
-  private readonly emittedAgainCheck(
+  private emittedAgainCheck(
     rest: Read<CallArgument[]>,
     name: Expr,
     event: string,
@@ -188,12 +208,14 @@ partial class ExpressionTypes {
     first: Read<FirstEmit>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const shown = this.emittedText(first.args);
     if (given.length != first.args.length) {
       const count = given.length;
       const other = `${count} argument${this.countMark(count)}`;
 
-      this.report(module, name.loc, Code.EventEmittedCount, {
+      this.errors.write(module, name.loc, Code.EventEmittedCount, {
         word: event,
         first: shown,
         second: first.place,
@@ -210,23 +232,28 @@ partial class ExpressionTypes {
       if (now == undefined || before == undefined || arg == undefined) {
         continue;
       }
-      if (now.kind == TypeKind.Error || this.relation.converts(now, before)) {
+      if (now.kind == TypeKind.Error || this.types.converts(now, before)) {
         continue;
       }
 
-      this.report(module, arg.expr.loc, Code.EventEmittedType, {
-        word: event,
-        first: shown,
-        second: first.place,
-        other: this.text.of(now),
-      });
+      this.errors.write(
+        module,
+        tree.exprOf(arg.exprId).loc,
+        Code.EventEmittedType,
+        {
+          word: event,
+          first: shown,
+          second: first.place,
+          other: this.types.typeText(now),
+        },
+      );
 
       return;
     }
   }
 
   private readonly emittedText(args: Read<Type[]>): string {
-    const parts = args.map((one) => this.text.of(one));
+    const parts = args.map((one) => this.types.typeText(one));
 
     return `[${parts.join(", ")}]`;
   }
@@ -240,7 +267,7 @@ partial class ExpressionTypes {
   }
 
   private readonly placeText(module: int, loc: int): string {
-    const opened = this.program.modules[module];
+    const opened = this.types.program.modules[module];
     if (opened == undefined) {
       return "";
     }
@@ -253,7 +280,7 @@ partial class ExpressionTypes {
     return `${file}:${place.line}:${place.column}`;
   }
 
-  private readonly unemittedListensCheck(module: int): void {
+  private unemittedListensCheck(module: int): void {
     if (this.eventMarks.looseEmitModules.size > 0) {
       return;
     }
@@ -268,13 +295,13 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const error = this.events.notEmittedError(
+      const error = this.types.notEmittedError(
         listen.loc,
         names,
         listen.event,
       );
 
-      this.reportFound(module, error);
+      this.errors.writeFound(module, error);
     }
   }
 }

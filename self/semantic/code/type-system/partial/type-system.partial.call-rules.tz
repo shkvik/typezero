@@ -1,0 +1,516 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  FunctionParameter,
+  FunctionType,
+  ObjectField,
+  ObjectType,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  ArgumentSlot,
+  CallKind,
+  CallTarget,
+  RankedVariant,
+} from "../../expression-types/types/expression-types.types.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  BodySource,
+  FunctionDecl,
+  FunctionPlace,
+  Param,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  kManyArguments,
+  kOneArgument,
+  kOrMore,
+  kParameterLetters,
+  kRangeDash,
+  kRepeatName,
+  kToFixedName,
+} from "../../call-rules/const/call-rules.const.tz";
+import {
+  kEmptyList,
+} from "../../../../program/ast/ast-tree/const/ast-tree.const.tz";
+
+partial class TypeSystem {
+  public parameterWanted(param: FunctionParameter): Type {
+    const type = param.type;
+    if (type.kind == TypeKind.Void) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+    if (!param.optional || type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    return this.optional(type);
+  }
+
+  public readonly callFixedCount(target: Read<CallTarget>): int {
+    if (target.rest) {
+      return target.params.length - 1;
+    }
+
+    return target.params.length;
+  }
+
+  public readonly spreadLimit(
+    target: Read<CallTarget>,
+    fixed: int,
+    count: int,
+  ): int {
+    if (target.rest) {
+      return fixed;
+    }
+
+    return count;
+  }
+
+  public readonly leastArguments(target: Read<CallTarget>): int {
+    const fixed = this.callFixedCount(target);
+    let least = 0;
+
+    for (let index = 0; index < fixed; index++) {
+      const param = target.params[index];
+      if (param != undefined && !param.optional) {
+        least += 1;
+      }
+    }
+
+    return least;
+  }
+
+  public readonly argumentCountText(
+    least: int,
+    most: int,
+    rest: boolean,
+  ): string {
+    const range = this.countRange(least, most, rest);
+
+    if (least == 1 && most == 1 && !rest) {
+      return range + kOneArgument;
+    }
+
+    return range + kManyArguments;
+  }
+
+  public readonly positionCode(given: Type, base: Type): Code {
+    if (base.kind == TypeKind.Double) {
+      return Code.PositionFraction;
+    }
+    if (this.isOptional(given) && base.kind == TypeKind.Int) {
+      return Code.PositionMaybe;
+    }
+
+    return Code.PositionNotInteger;
+  }
+
+  public readonly mathArgumentCode(given: Type, base: Type): Code {
+    const isNumber = base.kind == TypeKind.Int || base.kind == TypeKind.Double;
+    if (this.isOptional(given) && isNumber) {
+      return Code.MathArgumentMaybe;
+    }
+    if (base.kind == TypeKind.Decimal) {
+      return Code.MathArgumentDecimal;
+    }
+
+    return Code.MathArgument;
+  }
+
+  public readonly restItem(to: Type): Type {
+    if (to.kind == TypeKind.Array) {
+      return this.store.itemOf(to);
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  public readonly directParams(
+    params: Own<FunctionParameter[]>,
+    self: Type | undefined,
+  ): FunctionParameter[] {
+    if (self == undefined) {
+      return params;
+    }
+
+    const first: FunctionParameter = { type: self, optional: false };
+
+    return [first].concat(params);
+  }
+
+  public readonly isOpenRest(
+    params: Read<FunctionParameter[]>,
+    rest: boolean,
+  ): boolean {
+    const last = params[params.length - 1];
+
+    return rest && last != undefined && this.mentionsParameter(last.type);
+  }
+
+  public isOptionalFunction(type: UnionType): boolean {
+    const defined = this.definedType(type);
+
+    return this.isOptional(type) && defined.kind == TypeKind.Function;
+  }
+
+  public readonly isUncallable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Boolean:
+      case TypeKind.Literal:
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+      case TypeKind.Object:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly libraryKind(isLibrary: boolean): CallKind {
+    if (isLibrary) {
+      return CallKind.Library;
+    }
+
+    return CallKind.Own;
+  }
+
+  public readonly isPlainRest(params: Read<FunctionParameter[]>): boolean {
+    const last = params[params.length - 1];
+    if (last == undefined || last.type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    return this.store.itemOf(last.type).kind != TypeKind.Union;
+  }
+
+  public readonly isStrictShape(params: Read<FunctionParameter[]>): boolean {
+    return params.every((param) => this.isStrictParam(param.type));
+  }
+
+  public promiseNew(written: Read<Type[]>, wanted: Type | undefined): Type {
+    const value = written[0];
+    if (value != undefined) {
+      return this.store.promiseOf(value);
+    }
+
+    const goal = this.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Promise) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return goal;
+  }
+
+  public readonly signatureVariants(
+    name: string,
+    fields: Read<ObjectField[]>,
+  ): RankedVariant[] {
+    const ranked: RankedVariant[] = [];
+
+    for (const field of fields) {
+      const type = field.type;
+      if (type.kind == TypeKind.Function) {
+        const fn = this.signatureDecl(name);
+
+        ranked.push({ fn, type, ranks: [], isAdapted: false, failed: -1 });
+      }
+    }
+
+    return ranked;
+  }
+
+  public readonly thisCallProblem(
+    expr: CallExpr,
+    word: string,
+  ): Code | undefined {
+    const tree = this.program.tree;
+
+    if (word == "bind") {
+      return Code.ThisBindUnsupported;
+    }
+    if (word != "call" && word != "apply") {
+      return Code.ThisFunctionProperty;
+    }
+    const args = tree.argumentsOf(expr.argsList);
+    if (args.length == 0) {
+      return Code.ThisArgumentFirst;
+    }
+
+    const isSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
+    const isApplyShape =
+      tree.argumentsOf(expr.argsList).length == 2 && !isSpread;
+    if (word == "apply" && !isApplyShape) {
+      return Code.ThisApplyArguments;
+    }
+
+    return undefined;
+  }
+
+  public readonly thisCallTail(word: string): string {
+    if (word == "apply") {
+      return ", args)";
+    }
+
+    return ", ...)";
+  }
+
+  public readonly positionUseErrors(
+    slot: ArgumentSlot,
+    word: string,
+    name: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (name == kToFixedName) {
+      errors.push({
+        code: Code.FixedDigitsNotWhole,
+        loc: slot.expr.loc,
+        details: { word },
+      });
+    }
+    if (name == kRepeatName) {
+      errors.push({
+        code: Code.RepeatCountNotWhole,
+        loc: slot.expr.loc,
+        details: { word },
+      });
+    }
+
+    return errors;
+  }
+
+  public readonly thisParameterCheck(
+    fn: FunctionDecl,
+    param: Param,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (fn.isArrow) {
+      errors.push({
+        code: Code.ArrowThisParameter,
+        loc: param.loc,
+        details: kNoDetails,
+      });
+
+      return errors;
+    }
+    if (fn.role != undefined) {
+      errors.push({
+        code: Code.MethodThisParameter,
+        loc: param.loc,
+        details: kNoDetails,
+      });
+    }
+
+    return errors;
+  }
+
+  public partMethod(
+    member: MemberExpr,
+    receiver: string,
+    part: ObjectType,
+  ): Checked<FunctionType | undefined> {
+    const word = member.name;
+    const first = this.typeText(part);
+    const field = this.store.fieldsOf(part).find((one) => one.name == word);
+    if (field != undefined && this.store.isBase(part)) {
+      return {
+        value: undefined,
+        error: {
+          code: Code.UnionMethodBase,
+          loc: member.loc,
+          details: {
+            word,
+            first: receiver,
+            second: first,
+          },
+        },
+      };
+    }
+    if (field == undefined) {
+      return {
+        value: undefined,
+        error: {
+          code: Code.VariantLacksMethod,
+          loc: member.loc,
+          details: {
+            word: receiver,
+            first,
+            other: word,
+          },
+        },
+      };
+    }
+
+    const type = this.fieldWanted(field);
+    if (type.kind != TypeKind.Function) {
+      return {
+        value: undefined,
+        error: {
+          code: Code.UnionFieldNotFunction,
+          loc: member.loc,
+          details: {
+            word: receiver,
+            first,
+            other: word,
+          },
+        },
+      };
+    }
+
+    return { value: type };
+  }
+
+  public sharedMethod(
+    member: MemberExpr,
+    object: UnionType,
+    parts: Read<ObjectType[]>,
+  ): Checked<FunctionType | undefined> {
+    const receiver = this.typeText(object);
+    let common: FunctionType | undefined = undefined;
+
+    for (const part of parts) {
+      const checked = this.partMethod(member, receiver, part);
+      const type = checked.value;
+      if (type == undefined) {
+        return checked;
+      }
+      if (common != undefined && type.id != common.id) {
+        return {
+          value: undefined,
+          error: {
+            code: Code.UnionMethodsDiffer,
+            loc: member.loc,
+            details: {
+              first: receiver,
+              word: member.name,
+              second: this.typeText(common),
+              other: this.typeText(type),
+            },
+          },
+        };
+      }
+
+      common = type;
+    }
+
+    return { value: common };
+  }
+
+  public readonly typeVariants(
+    name: string,
+    types: Read<FunctionType[]>,
+  ): RankedVariant[] {
+    const variants: RankedVariant[] = [];
+
+    for (const type of types) {
+      const fn = this.signatureDecl(name);
+
+      variants.push({ fn, type, ranks: [], isAdapted: false, failed: -1 });
+    }
+
+    return variants;
+  }
+
+  private readonly countRange(least: int, most: int, rest: boolean): string {
+    if (rest) {
+      return `${least}${kOrMore}`;
+    }
+    if (most != least) {
+      return `${least}${kRangeDash}${most}`;
+    }
+
+    return `${least}`;
+  }
+
+  private readonly isStrictParam(type: Type): boolean {
+    if (this.mentionsParameter(type)) {
+      return false;
+    }
+
+    const parts = this.unionMembers(type);
+
+    return parts.every((part) => this.isPlainParam(part));
+  }
+
+  private readonly isPlainParam(part: Type): boolean {
+    switch (part.kind) {
+      case TypeKind.Error:
+      case TypeKind.Function:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+      case TypeKind.Json:
+      case TypeKind.Dict:
+        return false;
+      case TypeKind.Array:
+        return this.isPlainParam(this.store.itemOf(part));
+      default:
+        return true;
+    }
+  }
+
+  private dictNew(
+    dict: DictKind,
+    written: Read<Type[]>,
+    wanted: Type | undefined,
+  ): Type {
+    const first = written[0];
+    const second = written[1] ?? first;
+    if (first != undefined && second != undefined) {
+      return this.store.dictOf(dict, first, second);
+    }
+
+    const goal = this.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Dict || goal.dict != dict) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return goal;
+  }
+
+  private readonly signatureDecl(name: string): FunctionDecl {
+    return {
+      kind: StmtKind.Function,
+      id: -1,
+      loc: 0,
+      name,
+      typeParamsList: kEmptyList,
+      paramsList: kEmptyList,
+      isArrow: false,
+      concise: false,
+      ownName: name,
+      place: FunctionPlace.Lifted,
+      bodySource: BodySource.Intrinsic,
+      isGenerator: false,
+      isAsync: false,
+    };
+  }
+
+  public readonly signatureParamName(index: int): string {
+    const count = kParameterLetters.length;
+
+    return kParameterLetters.charAt(index % count);
+  }
+}

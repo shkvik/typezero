@@ -31,31 +31,45 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const name = decl.name ?? "";
     const isStreamClass =
       this.isStreamModule(home) && kStreamClassNames.includes(name);
-    if (!isStreamClass || this.modules.isLibraryModule(module)) {
+    if (!isStreamClass || this.types.isLibraryModule(module)) {
       return undefined;
     }
     if (name != kPassThroughName) {
       this.reportAbstractStream(expr, name, module);
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (expr.typeArgs.length > 0 || this.isWantedClass(wanted, name, home)) {
+    if (
+      tree.typeRefsOf(expr.typeArgsList).length > 0 ||
+      this.isWantedClass(wanted, name, home)
+    ) {
       return undefined;
     }
 
-    this.report(module, expr.loc, Code.StreamUntypedNew, { word: name });
-    this.looseArguments(expr.args, module);
+    this.errors.write(module, expr.loc, Code.StreamUntypedNew, { word: name });
+    const argsItem = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(argsItem, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly reportAbstractStream(expr: NewExpr, name: string, module: int): void {
+  private reportAbstractStream(expr: NewExpr, name: string, module: int): void {
     if (name == kReadableName) {
-      this.report(module, expr.loc, Code.StreamAbstractReadable, kNoDetails);
+      this.errors.write(
+        module,
+        expr.loc,
+        Code.StreamAbstractReadable,
+        kNoDetails,
+      );
 
       return;
     }
@@ -63,7 +77,7 @@ partial class ExpressionTypes {
     const first = kStreamAbstractHooks.get(name) ?? "";
     const second = kStreamAbstractExamples.get(name) ?? "";
 
-    this.report(module, expr.loc, Code.StreamAbstract, {
+    this.errors.write(module, expr.loc, Code.StreamAbstract, {
       word: name,
       first,
       second,
@@ -90,14 +104,18 @@ partial class ExpressionTypes {
   }
 
   private hookedParameter(fn: FunctionDecl, param: Param, type: Type): Type {
+    const tree = this.types.program.tree;
+
     const isHook = kStreamHookNames.includes(fn.name);
     if (type.kind != TypeKind.Double || !isHook) {
       return type;
     }
 
     const hook = this.libraryHookType(fn);
-    const index = fn.params.indexOf(param);
-    const wanted = hook?.shape.params[index]?.type;
+    const index = tree
+      .paramsOf(fn.paramsList)
+      .findIndex((one) => one.loc == param.loc);
+    const wanted = this.types.store.paramsOf(hook)[index]?.type;
     if (wanted == undefined || wanted.kind != TypeKind.Int) {
       return type;
     }
@@ -106,23 +124,30 @@ partial class ExpressionTypes {
   }
 
   private libraryHookType(fn: FunctionDecl): FunctionType | undefined {
+    const tree = this.types.program.tree;
+
     const current = this.ownerClasses[this.ownerClasses.length - 1];
-    if (current == undefined || current.decl.typeParams.length > 0) {
+    if (
+      current == undefined ||
+      tree.typeParamsOf(current.decl.typeParamsList).length > 0
+    ) {
       return undefined;
     }
 
     const decl = current.decl;
-    const self = this.resolver.classInstance(current.module, decl, []);
+    const self = this.types.classInstance(current.module, decl, []);
     if (self.kind != TypeKind.Instance) {
       return undefined;
     }
 
-    const parent = this.classes.parentOf(self, decl);
+    const parent = this.types.parentOf(self, decl);
     if (parent == undefined) {
       return undefined;
     }
 
-    const entry = this.classMember(parent, fn.name).entry;
+    const entryLookup = this.classMember(parent, fn.name);
+
+    const entry = entryLookup.entry;
     const theirs = entry?.methods[0];
     if (entry == undefined || theirs == undefined) {
       return undefined;
@@ -152,7 +177,10 @@ partial class ExpressionTypes {
 
     const code = this.hookCode(method.name);
 
-    this.report(module, method.loc, code, { word: method.name, first: hook });
+    this.errors.write(module, method.loc, code, {
+      word: method.name,
+      first: hook,
+    });
   }
 
   private readonly hookCode(name: string): Code {
@@ -169,16 +197,22 @@ partial class ExpressionTypes {
     parent: InstanceType | undefined,
     module: int,
   ): string | undefined {
+    const tree = this.types.program.tree;
+
     const isHook = kStreamHookNames.includes(method.name);
-    const isTyped = method.params.every((param) => param.type != undefined);
+    const isTyped = tree
+      .paramsOf(method.paramsList)
+      .every((param) => tree.typeRefAt(param.typeId) != undefined);
     if (!isHook || !isTyped || parent == undefined) {
       return undefined;
     }
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return undefined;
     }
 
-    const entry = this.classMember(parent, method.name).entry;
+    const entryLookup = this.classMember(parent, method.name);
+
+    const entry = entryLookup.entry;
     const theirs = entry?.methods[0];
     if (entry == undefined || theirs == undefined) {
       return undefined;
@@ -195,12 +229,12 @@ partial class ExpressionTypes {
 
     const home = entry.instance.module;
     const isSame =
-      this.classes.isSameParameters(ownType, theirType) ||
+      this.types.isSameParameters(ownType, theirType) ||
       this.isLibraryHookPrefix(ownType, theirType, home);
     if (isSame) {
       return undefined;
     }
 
-    return this.classes.variantText(theirs, theirType);
+    return this.types.variantText(theirs, theirType);
   }
 }

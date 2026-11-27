@@ -19,12 +19,18 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const switchFunctionsErrors =
-      this.statements.switchFunctionsCheck(statement);
+      this.types.switchFunctionsCheck(statement);
 
-    this.reportAll(module, switchFunctionsErrors);
+    this.errors.writeAll(module, switchFunctionsErrors);
 
-    const subject = this.typed(statement.discriminant, undefined, module);
+    const subject = this.typed(
+      tree.exprOf(statement.discriminantId),
+      undefined,
+      module,
+    );
     const tests = this.caseTypes(statement, subject, module);
 
     this.typeOfCasesCheck(statement, module);
@@ -34,36 +40,41 @@ partial class ExpressionTypes {
     this.forgetLooped(statement, module);
 
     const before = this.factsCopy();
-    const discriminant = statement.discriminant;
+    const discriminant = tree.exprOf(statement.discriminantId);
     let reached: Map<string, Type> | undefined = undefined;
     let passed = new Map<string, Type>();
     const exits: Map<string, Type>[] = [];
-    const lastCase = statement.cases[statement.cases.length - 1];
+    const lastCase = tree.casesOf(statement.casesList)[
+      tree.casesOf(statement.casesList).length - 1
+    ];
 
-    for (const option of statement.cases) {
-      const test = option.test;
+    for (const option of tree.casesOf(statement.casesList)) {
+      const test = tree.exprAt(option.testId);
       const facts = this.caseFacts(discriminant, test, passed, module);
 
       reached = this.reachedFacts(reached, facts);
 
       if (test != undefined) {
-        passed = this.narrowings.mergedFacts(
+        passed = this.types.mergedFacts(
           passed,
           this.factsOfCase(discriminant, test, passed, false, module),
         );
       }
-      if (option.body.length == 0) {
+      const bodyItem = tree.stmtsOf(option.bodyList);
+      if (bodyItem.length == 0) {
         continue;
       }
 
-      const entered = this.narrowings.mergedFacts(before, reached);
+      const entered = this.types.mergedFacts(before, reached);
 
       this.facts = entered;
-      this.walkStatements(option.body, frame, module);
+      const body = tree.stmtsOf(option.bodyList);
+
+      this.walkStatements(body, frame, module);
 
       const left = replace(this.facts, new Map<string, Type>(before));
 
-      if (this.isSwitchExit(option, option == lastCase, module)) {
+      if (this.isSwitchExit(option, option.loc == lastCase?.loc, module)) {
         exits.push(left);
       }
 
@@ -85,7 +96,7 @@ partial class ExpressionTypes {
 
     const facts = this.factsOfCase(discriminant, test, passed, true, module);
 
-    return this.narrowings.mergedFacts(passed, facts);
+    return this.types.mergedFacts(passed, facts);
   }
 
   private factsOfCase(
@@ -103,7 +114,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private readonly reachedFacts(
+  private reachedFacts(
     reached: Read<Map<string, Type> | undefined>,
     facts: Own<Map<string, Type>>,
   ): Map<string, Type> {
@@ -111,28 +122,30 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    return this.narrowings.joinedFacts(reached, facts);
+    return this.types.joinedFacts(reached, facts);
   }
 
   private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
+    const tree = this.types.program.tree;
+
     const tests: Type[] = [];
 
     if (subject.kind == TypeKind.Error) {
       return tests;
     }
 
-    for (const option of statement.cases) {
-      const test = option.test;
+    for (const option of tree.casesOf(statement.casesList)) {
+      const test = tree.exprAt(option.testId);
       if (test != undefined) {
         const type = this.typed(test, subject, module);
 
-        const caseTypeError = this.statements.caseTypeCheck(
+        const caseTypeError = this.types.caseTypeCheck(
           test,
           type,
           subject,
         );
 
-        this.reportFound(module, caseTypeError);
+        this.errors.writeFound(module, caseTypeError);
         tests.push(type);
       }
     }
@@ -146,6 +159,8 @@ partial class ExpressionTypes {
     tests: Read<Type[]>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const key = `${module} ${statement.loc}`;
     const isUnknown =
       subject.kind == TypeKind.Error ||
@@ -156,18 +171,18 @@ partial class ExpressionTypes {
       return;
     }
 
-    const hasDefault = statement.cases.some(
-      (option) => option.test == undefined,
+    const hasDefault = tree.casesOf(statement.casesList).some(
+      (option) => tree.exprAt(option.testId) == undefined,
     );
     const isListed =
-      !this.types.isOptional(subject) && this.objects.isLiteralSet(subject);
+      !this.types.isOptional(subject) && this.types.isLiteralSet(subject);
     if (hasDefault || !isListed) {
       return;
     }
 
     const left = this.types
       .unionMembers(subject)
-      .filter((part) => !tests.includes(part));
+      .filter((part) => !tests.some((one) => one.id == part.id));
     const first = left[0];
     if (first == undefined) {
       this.coveredSwitches.add(key);
@@ -175,33 +190,41 @@ partial class ExpressionTypes {
       return;
     }
 
-    const names = left.map((part) => this.text.of(part));
-    const word = this.statements.listedNames(names);
-    const other = this.text.of(first);
+    const names = left.map((part) => this.types.typeText(part));
+    const word = this.types.listedNames(names);
+    const other = this.types.typeText(first);
 
-    this.report(module, statement.discriminant.loc, Code.SwitchCasesLeft, {
-      word,
-      other,
-    });
+    this.errors.write(
+      module,
+      tree.exprOf(statement.discriminantId).loc,
+      Code.SwitchCasesLeft,
+      {
+        word,
+        other,
+      },
+    );
   }
 
   private typeOfCasesCheck(statement: SwitchStmt, module: int): void {
-    const subject = statement.discriminant;
+    const tree = this.types.program.tree;
+
+    const subject = tree.exprOf(statement.discriminantId);
     if (subject.kind != ExprKind.Unary || subject.op != UnaryOp.TypeOf) {
       return;
     }
 
-    const tested = this.peekType(subject.operand, module);
+    const operand = tree.exprOf(subject.operandId);
+    const tested = this.peekType(operand, module);
 
-    for (const option of statement.cases) {
-      const test = option.test;
+    for (const option of tree.casesOf(statement.casesList)) {
+      const test = tree.exprAt(option.testId);
       if (test == undefined || test.kind != ExprKind.StringLit) {
         continue;
       }
 
-      const answer = this.typeOfs.answerOf(tested, test.value);
+      const answer = this.types.typeOfAnswerOf(tested, test.value);
       if (answer != undefined) {
-        this.report(module, test.loc, answer.code, answer.details);
+        this.errors.write(module, test.loc, answer.code, answer.details);
       }
     }
   }

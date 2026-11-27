@@ -1,0 +1,276 @@
+import { FileParser } from "../file-parser.tz";
+import {
+  ArrayTypeForm,
+  LiteralTypeForm,
+  MappedTypeForm,
+  PlainTypeForm,
+  PredicateTypeForm,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  ClassMember,
+} from "../../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  UnsafeMark,
+} from "../../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  BlockStmt,
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+import {
+  FunctionTypeForm,
+  FunctionTypeParam,
+  ObjectTypeField,
+  ObjectTypeForm,
+  TemplateTypeForm,
+  TupleElement,
+  TupleTypeForm,
+  TypeForm,
+  TypeOfTypeForm,
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
+
+partial class FileParser {
+  private readonly copyPlainTypeForm(node: Read<PlainTypeForm>): PlainTypeForm {
+    return { kind: node.kind };
+  }
+
+  private readonly copyArrayTypeForm(node: Read<ArrayTypeForm>): ArrayTypeForm {
+    return { kind: node.kind, readonly: node.readonly };
+  }
+
+  private readonly copyFunctionTypeParam(
+    node: Read<FunctionTypeParam>,
+  ): FunctionTypeParam {
+    const type = this.copyTypeRef(node.type);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      optional: node.optional,
+      type,
+    };
+  }
+
+  private readonly copyFunctionTypeForm(
+    node: Read<FunctionTypeForm>,
+  ): FunctionTypeForm {
+    const params = node.params.map((one) => this.copyFunctionTypeParam(one));
+    const result = this.copyTypeRefAt(node.result);
+
+    return {
+      kind: node.kind,
+      params,
+      rest: node.rest,
+      result,
+    };
+  }
+
+  private readonly copyObjectTypeField(
+    node: Read<ObjectTypeField>,
+  ): ObjectTypeField {
+    const typeParams = node.typeParams.map((one) =>
+      this.copyTypeParamDecl(one),
+    );
+    const type = this.copyTypeRef(node.type);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      optional: node.optional,
+      readonly: node.readonly,
+      method: node.method,
+      call: node.call,
+      typeParams,
+      type,
+    };
+  }
+
+  private readonly copyObjectTypeForm(
+    node: Read<ObjectTypeForm>,
+  ): ObjectTypeForm {
+    const fields = node.fields.map((one) => this.copyObjectTypeField(one));
+
+    return { kind: node.kind, fields };
+  }
+
+  private readonly copyTupleElement(node: Read<TupleElement>): TupleElement {
+    const type = this.copyTypeRef(node.type);
+
+    return { type, spread: node.spread };
+  }
+
+  private readonly copyTupleTypeForm(node: Read<TupleTypeForm>): TupleTypeForm {
+    const elements = node.elements.map((one) => this.copyTupleElement(one));
+
+    return {
+      kind: node.kind,
+      elements,
+      readonly: node.readonly,
+    };
+  }
+
+  private readonly copyLiteralTypeForm(
+    node: Read<LiteralTypeForm>,
+  ): LiteralTypeForm {
+    return {
+      kind: node.kind,
+      text: node.text,
+      number: node.number,
+      integer: node.integer,
+      beyondDouble: node.beyondDouble,
+    };
+  }
+
+  private readonly copyPredicateTypeForm(
+    node: Read<PredicateTypeForm>,
+  ): PredicateTypeForm {
+    return { kind: node.kind, asserts: node.asserts };
+  }
+
+  private readonly copyTypeOfTypeForm(
+    node: Read<TypeOfTypeForm>,
+  ): TypeOfTypeForm {
+    const names = node.names.slice();
+
+    return { kind: node.kind, names };
+  }
+
+  private readonly copyMappedTypeForm(
+    node: Read<MappedTypeForm>,
+  ): MappedTypeForm {
+    return {
+      kind: node.kind,
+      optionalChange: node.optionalChange,
+      readonlyChange: node.readonlyChange,
+    };
+  }
+
+  private readonly copyTemplateTypeForm(
+    node: Read<TemplateTypeForm>,
+  ): TemplateTypeForm {
+    const texts = node.texts.slice();
+
+    return { kind: node.kind, texts };
+  }
+
+  private readonly copyTypeForm(node: Read<TypeForm>): TypeForm {
+    switch (node.kind) {
+      case TypeRefKind.Name:
+      case TypeRefKind.Union:
+      case TypeRefKind.Generic:
+      case TypeRefKind.KeyOf:
+      case TypeRefKind.Indexed:
+      case TypeRefKind.Conditional:
+      case TypeRefKind.Infer:
+      case TypeRefKind.Intersection:
+      case TypeRefKind.Invalid:
+        return this.copyPlainTypeForm(node);
+      case TypeRefKind.Array:
+        return this.copyArrayTypeForm(node);
+      case TypeRefKind.Function:
+        return this.copyFunctionTypeForm(node);
+      case TypeRefKind.Object:
+        return this.copyObjectTypeForm(node);
+      case TypeRefKind.Tuple:
+        return this.copyTupleTypeForm(node);
+      case TypeRefKind.Literal:
+        return this.copyLiteralTypeForm(node);
+      case TypeRefKind.Predicate:
+        return this.copyPredicateTypeForm(node);
+      case TypeRefKind.TypeOf:
+        return this.copyTypeOfTypeForm(node);
+      case TypeRefKind.Mapped:
+        return this.copyMappedTypeForm(node);
+      case TypeRefKind.Template:
+        return this.copyTemplateTypeForm(node);
+    }
+
+    return { kind: TypeRefKind.Invalid };
+  }
+
+  private readonly copyTypeRef(node: Read<TypeRef>): TypeRef {
+    const form = this.copyTypeForm(node.form);
+    const args = node.args.map((one) => this.copyTypeRef(one));
+
+    return {
+      form,
+      name: node.name,
+      loc: node.loc,
+      args,
+      source: node.source,
+    };
+  }
+
+  private readonly copyTypeParamDecl(node: Read<TypeParamDecl>): TypeParamDecl {
+    const constraint = this.copyTypeRefAt(node.constraint);
+    const defaultType = this.copyTypeRefAt(node.defaultType);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      constraint,
+      defaultType,
+    };
+  }
+
+  private readonly copyBlockStmtAt(
+    node: Read<BlockStmt | undefined>,
+  ): BlockStmt | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.copyBlockStmt(node);
+  }
+
+  private readonly copyClassMemberAt(
+    node: Read<ClassMember | undefined>,
+  ): ClassMember | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.copyClassMember(node);
+  }
+
+  private readonly copyExprAt(node: Read<Expr | undefined>): Expr | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.copyExpr(node);
+  }
+
+  private readonly copyStmtAt(node: Read<Stmt | undefined>): Stmt | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.copyStmt(node);
+  }
+
+  private readonly copyTypeRefAt(
+    node: Read<TypeRef | undefined>,
+  ): TypeRef | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.copyTypeRef(node);
+  }
+
+  private readonly copyUnsafeMarkAt(
+    node: Read<UnsafeMark | undefined>,
+  ): UnsafeMark | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.copyUnsafeMark(node);
+  }
+}

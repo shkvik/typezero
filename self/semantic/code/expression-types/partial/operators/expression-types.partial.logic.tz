@@ -18,41 +18,56 @@ import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.t
 
 partial class ExpressionTypes {
   private notTyped(expr: UnaryExpr, module: int): Type {
-    this.branchCheck(expr.operand, TruthUse.Not, module);
+    const tree = this.types.program.tree;
 
-    return this.store.plain(TypeKind.Boolean);
+    const operand = tree.exprOf(expr.operandId);
+
+    this.branchCheck(operand, TruthUse.Not, module);
+
+    return this.types.store.plain(TypeKind.Boolean);
   }
 
   private branchCheck(expr: Expr, use: TruthUse, module: int): void {
-    if (this.shapes.isLogical(expr) && expr.kind == ExprKind.Binary) {
+    const tree = this.types.program.tree;
+
+    if (this.types.isLogical(expr) && expr.kind == ExprKind.Binary) {
       const isAnd = expr.op == BinaryOp.LogAnd;
 
-      this.branchCheck(expr.lhs, TruthUse.Condition, module);
+      const lhs = tree.exprOf(expr.lhsId);
 
-      const facts = this.factsOf(expr.lhs, isAnd, module);
+      this.branchCheck(lhs, TruthUse.Condition, module);
+
+      const lhsExpr = tree.exprOf(expr.lhsId);
+      const facts = this.factsOf(lhsExpr, isAnd, module);
       const before = this.underFacts(facts);
 
-      this.branchCheck(expr.rhs, TruthUse.Condition, module);
+      const rhs = tree.exprOf(expr.rhsId);
+
+      this.branchCheck(rhs, TruthUse.Condition, module);
       this.facts = before;
       this.redundantTestsCheck(expr, module);
 
       return;
     }
     if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
-      return this.branchCheck(expr.operand, TruthUse.Not, module);
+      return this.branchCheck(
+        tree.exprOf(expr.operandId),
+        TruthUse.Not,
+        module,
+      );
     }
 
-    const boolean = this.store.plain(TypeKind.Boolean);
+    const boolean = this.types.store.plain(TypeKind.Boolean);
     const type = this.typed(expr, boolean, module);
 
     if (expr.kind == ExprKind.Assign && expr.op == undefined) {
-      const assignmentConditionError = this.logic.assignmentConditionError(
+      const assignmentConditionError = this.types.assignmentConditionError(
         expr,
         type,
         use,
       );
 
-      return this.reportFound(module, assignmentConditionError);
+      return this.errors.writeFound(module, assignmentConditionError);
     }
     if (type.kind != TypeKind.Boolean) {
       this.checkTruthy(expr, type, use, undefined, module);
@@ -65,20 +80,28 @@ partial class ExpressionTypes {
     side: LogicSide,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const isAnd = expr.op == BinaryOp.LogAnd;
-    const use = this.logic.logicalUse(isAnd);
+    const use = this.types.logicalUse(isAnd);
     const expected = this.types.wantedPart(wanted);
-    const written = this.testedValue(expr.lhs, expected, use, module);
-    const left = this.types.apparent(written);
-    const isLeftTruthy = this.checkTruthy(
-      expr.lhs,
-      left,
+    const written = this.testedValue(
+      tree.exprOf(expr.lhsId),
+      expected,
       use,
-      expr.rhs,
       module,
     );
-    const hint = this.logic.rightHint(isAnd, left, expected);
-    const facts = this.factsOf(expr.lhs, isAnd, module);
+    const left = this.types.apparent(written);
+    const isLeftTruthy = this.checkTruthy(
+      tree.exprOf(expr.lhsId),
+      left,
+      use,
+      tree.exprOf(expr.rhsId),
+      module,
+    );
+    const hint = this.types.rightHint(isAnd, left, expected);
+    const lhs = tree.exprOf(expr.lhsId);
+    const facts = this.factsOf(lhs, isAnd, module);
     const before = this.underFacts(facts);
     const right = this.logicalRight(expr, hint, side, module);
 
@@ -87,9 +110,15 @@ partial class ExpressionTypes {
 
     const isRightTruthy =
       side == LogicSide.Value ||
-      this.checkTruthy(expr.rhs, right, TruthUse.Condition, undefined, module);
+      this.checkTruthy(
+        tree.exprOf(expr.rhsId),
+        right,
+        TruthUse.Condition,
+        undefined,
+        module,
+      );
     if (!isLeftTruthy || !isRightTruthy) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.logicalResult(expr, left, right, isAnd, module);
@@ -101,13 +130,17 @@ partial class ExpressionTypes {
     use: TruthUse,
     module: int,
   ): Type {
-    if (this.shapes.isLogical(expr) && expr.kind == ExprKind.Binary) {
+    const tree = this.types.program.tree;
+
+    if (this.types.isLogical(expr) && expr.kind == ExprKind.Binary) {
       return this.logicalTyped(expr, expected, LogicSide.Tested, module);
     }
     if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
-      this.branchCheck(expr.operand, TruthUse.Not, module);
+      const operand = tree.exprOf(expr.operandId);
 
-      return this.store.plain(TypeKind.Boolean);
+      this.branchCheck(operand, TruthUse.Not, module);
+
+      return this.types.store.plain(TypeKind.Boolean);
     }
 
     return this.typed(expr, expected, module);
@@ -119,31 +152,40 @@ partial class ExpressionTypes {
     side: LogicSide,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     if (side == LogicSide.Value) {
-      return this.typed(expr.rhs, hint, module);
+      const rhs = tree.exprOf(expr.rhsId);
+
+      return this.typed(rhs, hint, module);
     }
 
-    return this.testedValue(expr.rhs, hint, TruthUse.Condition, module);
+    return this.testedValue(
+      tree.exprOf(expr.rhsId),
+      hint,
+      TruthUse.Condition,
+      module,
+    );
   }
 
-  private readonly logicalResult(
+  private logicalResult(
     expr: BinaryExpr,
     left: Type,
     right: Type,
     isAnd: boolean,
     module: int,
   ): Type {
-    const checked = this.logic.logicalResult(expr, left, right, isAnd);
+    const checked = this.types.logicalResult(expr, left, right, isAnd);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
-    const checked = this.logic.rightVoid(expr, isAnd);
+  private reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
+    const checked = this.types.rightVoid(expr, isAnd);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -153,21 +195,31 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    this.branchCheck(expr.cond, TruthUse.Condition, module);
+    const tree = this.types.program.tree;
+
+    const cond = tree.exprOf(expr.condId);
+
+    this.branchCheck(cond, TruthUse.Condition, module);
 
     const start = this.recursions.length;
-    const isThenWaiting = this.shapes.isWaiting(expr.thenExpr);
-    const isElseWaiting = this.shapes.isWaiting(expr.elseExpr);
+    const thenExpr = tree.exprOf(expr.thenExprId);
+    const isThenWaiting = this.types.isWaiting(thenExpr);
+    const elseExpr = tree.exprOf(expr.elseExprId);
+    const isElseWaiting = this.types.isWaiting(elseExpr);
     if (isThenWaiting && !isElseWaiting) {
       const elseType = this.branchTyped(expr, false, wanted, module);
-      const thenHint = this.logic.branchHint(expr.thenExpr, elseType, wanted);
+      const thenHint = this.types.branchHint(
+        tree.exprOf(expr.thenExprId),
+        elseType,
+        wanted,
+      );
       const thenType = this.branchTyped(expr, true, thenHint, module);
 
       return this.joinedBranches(expr, thenType, elseType, start, module);
     }
 
     const thenType = this.branchTyped(expr, true, wanted, module);
-    const elseHint = this.logic.elseHint(
+    const elseHint = this.types.elseHint(
       expr,
       thenType,
       wanted,
@@ -184,8 +236,15 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const branch = this.narrowings.sideOf(isThen, expr.thenExpr, expr.elseExpr);
-    const facts = this.factsOf(expr.cond, isThen, module);
+    const tree = this.types.program.tree;
+
+    const branch = this.types.sideOf(
+      isThen,
+      tree.exprOf(expr.thenExprId),
+      tree.exprOf(expr.elseExprId),
+    );
+    const cond = tree.exprOf(expr.condId);
+    const facts = this.factsOf(cond, isThen, module);
     const before = this.underFacts(facts);
     const type = this.typed(branch, wanted, module);
 
@@ -201,49 +260,55 @@ partial class ExpressionTypes {
     start: int,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const isThenBroken = thenType.kind == TypeKind.Error;
     const isElseBroken = elseType.kind == TypeKind.Error;
     if (isThenBroken || isElseBroken) {
       return this.failedBranches(thenType, elseType, start);
     }
 
-    const isDifferent = thenType != elseType;
+    const isDifferent = thenType.id != elseType.id;
     const thenTarget = this.adaptedBranch(
       isDifferent,
-      expr.thenExpr,
+      tree.exprOf(expr.thenExprId),
       thenType,
       elseType,
       module,
     );
     const elseTarget = this.adaptedBranch(
-      isDifferent && thenTarget == thenType,
-      expr.elseExpr,
+      isDifferent && thenTarget.id == thenType.id,
+      tree.exprOf(expr.elseExprId),
       elseType,
       thenType,
       module,
     );
-    const common = this.unifier.unionUnify(thenTarget, elseTarget);
+    const common = this.types.unionUnify(thenTarget, elseTarget);
     if (common != undefined) {
       return common;
     }
 
-    const first = this.text.of(thenTarget);
-    const second = this.text.of(elseTarget);
+    const first = this.types.typeText(thenTarget);
+    const second = this.types.typeText(elseTarget);
 
-    this.report(module, expr.loc, Code.BranchesIncompatible, {
+    this.errors.write(module, expr.loc, Code.BranchesIncompatible, {
       first,
       second,
     });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly failedBranches(thenType: Type, elseType: Type, start: int): Type {
+  private readonly failedBranches(
+    thenType: Type,
+    elseType: Type,
+    start: int,
+  ): Type {
     const isPending = this.recursions.length > start;
     const isThenBroken = thenType.kind == TypeKind.Error;
     const isElseBroken = elseType.kind == TypeKind.Error;
     if (!isPending || isThenBroken == isElseBroken) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (isThenBroken) {
       return elseType;

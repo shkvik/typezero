@@ -1,0 +1,305 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Expr,
+  ExprKind,
+  NewExpr,
+  NewKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+  SwitchCase,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+
+partial class TypeSystem {
+  public readonly optionalPart(expr: Expr | undefined): Expr[] {
+    if (expr == undefined) {
+      return [];
+    }
+
+    return [expr];
+  }
+
+  public readonly functionExprs(fn: FunctionDecl, isDeep: boolean): Expr[] {
+    const tree = this.program.tree;
+
+    const exprs: Expr[] = [];
+    const values: Expr[] = [];
+    const body = tree.blockAt(fn.bodyId);
+    if (body == undefined) {
+      return exprs;
+    }
+
+    for (const statement of tree.stmtsOf(body.bodyList)) {
+      this.statementExprs(statement, exprs, values, isDeep);
+    }
+
+    return exprs;
+  }
+
+  public readonly statementExprs(
+    statement: Stmt,
+    exprs: Expr[],
+    values: Expr[],
+    isDeep: boolean,
+  ): void {
+    const tree = this.program.tree;
+
+    switch (statement.kind) {
+      case StmtKind.Block:
+        for (const inner of tree.stmtsOf(statement.bodyList)) {
+          this.statementExprs(inner, exprs, values, isDeep);
+        }
+
+        return;
+      case StmtKind.VarDecl:
+        for (const decl of tree.declaratorsOf(statement.declsList)) {
+          const init = tree.exprAt(decl.initId);
+
+          this.optionalExprs(init, exprs, isDeep);
+        }
+
+        return;
+      case StmtKind.Expr:
+        const expr = tree.exprOf(statement.exprId);
+
+        return this.exprs(expr, exprs, isDeep);
+      case StmtKind.If:
+        const cond = tree.exprOf(statement.condId);
+
+        this.exprs(cond, exprs, isDeep);
+        this.statementExprs(
+          tree.stmtOf(statement.thenStmtId),
+          exprs,
+          values,
+          isDeep,
+        );
+
+        return this.optionalStatement(
+          tree.stmtAt(statement.elseStmtId),
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+        const condExpr = tree.exprOf(statement.condId);
+
+        this.exprs(condExpr, exprs, isDeep);
+
+        return this.statementExprs(
+          tree.stmtOf(statement.bodyId),
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.For:
+        this.optionalStatement(
+          tree.stmtAt(statement.initId),
+          exprs,
+          values,
+          isDeep,
+        );
+        const statementCond = tree.exprAt(statement.condId);
+
+        this.optionalExprs(statementCond, exprs, isDeep);
+        const step = tree.exprAt(statement.stepId);
+
+        this.optionalExprs(step, exprs, isDeep);
+
+        return this.optionalStatement(
+          tree.stmtAt(statement.bodyId),
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.ForOf:
+        const iterable = tree.exprOf(statement.iterableId);
+
+        this.exprs(iterable, exprs, isDeep);
+
+        return this.statementExprs(
+          tree.stmtOf(statement.bodyId),
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.Switch:
+        return this.switchExprs(
+          tree.exprOf(statement.discriminantId),
+          tree.casesOf(statement.casesList),
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.Labeled:
+        return this.statementExprs(
+          tree.stmtOf(statement.bodyId),
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.Return: {
+        const value = tree.exprAt(statement.valueId);
+        if (value != undefined) {
+          values.push(value);
+          this.exprs(value, exprs, isDeep);
+        }
+
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private readonly switchExprs(
+    discriminant: Expr,
+    cases: Read<SwitchCase[]>,
+    exprs: Expr[],
+    values: Expr[],
+    isDeep: boolean,
+  ): void {
+    const tree = this.program.tree;
+
+    this.exprs(discriminant, exprs, isDeep);
+
+    for (const option of cases) {
+      const test = tree.exprAt(option.testId);
+
+      this.optionalExprs(test, exprs, isDeep);
+
+      for (const inner of tree.stmtsOf(option.bodyList)) {
+        this.statementExprs(inner, exprs, values, isDeep);
+      }
+    }
+  }
+
+  private readonly optionalStatement(
+    statement: Stmt | undefined,
+    exprs: Expr[],
+    values: Expr[],
+    isDeep: boolean,
+  ): void {
+    if (statement != undefined) {
+      this.statementExprs(statement, exprs, values, isDeep);
+    }
+  }
+
+  private readonly optionalExprs(
+    expr: Expr | undefined,
+    exprs: Expr[],
+    isDeep: boolean,
+  ): void {
+    if (expr != undefined) {
+      this.exprs(expr, exprs, isDeep);
+    }
+  }
+
+  public readonly exprs(expr: Expr, exprs: Expr[], isDeep: boolean): void {
+    const tree = this.program.tree;
+
+    exprs.push(expr);
+
+    if (expr.kind == ExprKind.Function) {
+      const fn = tree.functionOf(expr.fnId);
+
+      return this.innerExprs(fn, exprs, isDeep);
+    }
+
+    for (const child of this.children(expr)) {
+      this.exprs(child, exprs, isDeep);
+    }
+  }
+
+  private readonly innerExprs(
+    fn: FunctionDecl,
+    exprs: Expr[],
+    isDeep: boolean,
+  ): void {
+    const tree = this.program.tree;
+
+    const body = tree.blockAt(fn.bodyId);
+    const values: Expr[] = [];
+    if (!isDeep || body == undefined) {
+      return;
+    }
+
+    for (const statement of tree.stmtsOf(body.bodyList)) {
+      this.statementExprs(statement, exprs, values, isDeep);
+    }
+  }
+
+  private readonly children(expr: Expr): Expr[] {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Member:
+        return [tree.exprOf(expr.objectId)];
+      case ExprKind.Index:
+        return [tree.exprOf(expr.objectId), tree.exprOf(expr.indexId)];
+      case ExprKind.Unary:
+      case ExprKind.Cast:
+        return [tree.exprOf(expr.operandId)];
+      case ExprKind.Binary:
+        return [tree.exprOf(expr.lhsId), tree.exprOf(expr.rhsId)];
+      case ExprKind.Assign:
+        return [tree.exprOf(expr.targetId), tree.exprOf(expr.valueId)];
+      case ExprKind.Update:
+        return [tree.exprOf(expr.targetId)];
+      case ExprKind.Call:
+        return [
+          tree.exprOf(expr.calleeId),
+          ...tree
+            .argumentsOf(expr.argsList)
+            .map((arg) => tree.exprOf(arg.exprId)),
+        ];
+      case ExprKind.New:
+        return this.newChildren(expr);
+      case ExprKind.Conditional:
+        return [
+          tree.exprOf(expr.condId),
+          tree.exprOf(expr.thenExprId),
+          tree.exprOf(expr.elseExprId),
+        ];
+      case ExprKind.Sequence:
+      case ExprKind.Template:
+        return tree.exprsOf(expr.exprsList);
+      case ExprKind.OptionalChain:
+        return [tree.exprOf(expr.chainId)];
+      case ExprKind.Yield:
+        const value = tree.exprAt(expr.valueId);
+
+        return this.optionalPart(value);
+      case ExprKind.Await:
+        return [tree.exprOf(expr.valueId)];
+      case ExprKind.ArrayLit:
+        return tree
+          .elementsOf(expr.elementsList)
+          .map((element) => tree.exprOf(element.exprId));
+      case ExprKind.ObjectLit:
+        return tree
+          .propertiesOf(expr.propsList)
+          .map((property) => tree.exprOf(property.valueId));
+      default:
+        return [];
+    }
+  }
+
+  private readonly newChildren(expr: NewExpr): Expr[] {
+    const tree = this.program.tree;
+
+    const args = tree
+      .argumentsOf(expr.argsList)
+      .map((arg) => tree.exprOf(arg.exprId));
+    const form = expr.form;
+    if (form.kind == NewKind.Named) {
+      return args;
+    }
+
+    return [tree.exprOf(form.calleeId), ...args];
+  }
+}

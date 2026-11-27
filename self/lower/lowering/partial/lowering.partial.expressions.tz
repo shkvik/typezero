@@ -36,6 +36,8 @@ import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private value(frame: Frame, expr: Expr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const ready = this.readyValue(expr);
     if (ready != undefined) {
       return ready;
@@ -53,7 +55,7 @@ partial class Lowering {
 
     switch (expr.kind) {
       case ExprKind.Undefined: {
-        const tz = this.store.plain(TypeKind.Undefined);
+        const tz = this.values.types.store.plain(TypeKind.Undefined);
 
         return { type: kBooleanType, value: this.ir.zero(kBooleanType), tz };
       }
@@ -80,9 +82,13 @@ partial class Lowering {
       case ExprKind.Conditional:
         return this.conditional(frame, expr);
       case ExprKind.Sequence:
-        return this.sequence(frame, expr.exprs);
+        const exprs = tree.exprsOf(expr.exprsList);
+
+        return this.sequence(frame, exprs);
       case ExprKind.Cast:
-        return this.cast(frame, expr, expr.operand);
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.cast(frame, expr, operand);
       case ExprKind.Template:
         return this.templateValue(frame, expr);
       case ExprKind.ArrayLit:
@@ -118,7 +124,7 @@ partial class Lowering {
 
     const number = this.enumNumber(frame, expr);
     if (number != undefined) {
-      const int = this.store.integer(64, false);
+      const int = this.values.types.store.integer(64, false);
 
       return this.integerValue(kIntType, `${number}`, int);
     }
@@ -128,7 +134,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const folded = this.answers.foldedOf(expr);
+    const folded = this.values.answers.foldedOf(expr);
     if (folded != undefined && this.isInteger(type)) {
       const tz = this.widened(type);
       const ir = this.irType(tz) ?? kIntType;
@@ -152,7 +158,7 @@ partial class Lowering {
     }
   }
 
-  private readonly enumText(frame: Read<Frame>, expr: Expr): string | undefined {
+  private enumText(frame: Read<Frame>, expr: Expr): string | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -160,7 +166,7 @@ partial class Lowering {
     return this.values.enumText(expr, frame.module);
   }
 
-  private readonly enumNumber(frame: Read<Frame>, expr: Expr): decimal | undefined {
+  private enumNumber(frame: Read<Frame>, expr: Expr): decimal | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -168,8 +174,8 @@ partial class Lowering {
     return this.values.enumNumber(expr, frame.module);
   }
 
-  private readonly booleanValue(value: boolean): IrValue {
-    const tz = this.store.plain(TypeKind.Boolean);
+  private booleanValue(value: boolean): IrValue {
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
     let text: string = "0";
 
     if (value) {
@@ -184,7 +190,7 @@ partial class Lowering {
     if (expr.name == kThisName && self != undefined) {
       return this.loaded(frame, self);
     }
-    if (this.moves.has(expr) && frame.inline == undefined) {
+    if (this.moves.has(expr.id) && frame.inline == undefined) {
       const moved = this.movedLocal(frame, expr);
       if (moved != undefined) {
         return moved;
@@ -262,12 +268,18 @@ partial class Lowering {
   }
 
   private unary(frame: Frame, expr: UnaryExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     switch (expr.op) {
       case UnaryOp.Plus:
       case UnaryOp.NonNull:
-        return this.value(frame, expr.operand);
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.value(frame, operand);
       case UnaryOp.Not:
-        return this.negated(frame, expr.operand);
+        const operandExpr = tree.exprOf(expr.operandId);
+
+        return this.negated(frame, operandExpr);
       case UnaryOp.Neg:
         return this.minus(frame, expr);
       case UnaryOp.BitNot:
@@ -285,7 +297,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const tz = this.store.plain(TypeKind.Boolean);
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
     const yes = this.ir.integer(kBooleanType, "1");
     const value = frame.made.binary(IrOpcode.Xor, test, yes);
 
@@ -293,12 +305,15 @@ partial class Lowering {
   }
 
   private minus(frame: Frame, expr: UnaryExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const literal = this.negativeLiteral(frame, expr);
     if (literal != undefined) {
       return literal;
     }
 
-    const operand = this.value(frame, expr.operand);
+    const operandExpr = tree.exprOf(expr.operandId);
+    const operand = this.value(frame, operandExpr);
     if (operand == undefined) {
       return undefined;
     }
@@ -339,7 +354,10 @@ partial class Lowering {
   }
 
   private inverted(frame: Frame, expr: UnaryExpr): IrValue | undefined {
-    const given = this.value(frame, expr.operand);
+    const tree = this.values.types.program.tree;
+
+    const operand = tree.exprOf(expr.operandId);
+    const given = this.value(frame, operand);
     if (given == undefined || !this.isInteger(given.tz)) {
       this.notLowered(frame.module, expr.loc, "this operator");
 
@@ -356,9 +374,12 @@ partial class Lowering {
     frame: Frame,
     expr: ConditionalExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeOf(expr);
     const type = this.typeOrUndefined(result);
-    const test = this.truth(frame, expr.cond);
+    const condExpr = tree.exprOf(expr.condId);
+    const test = this.truth(frame, condExpr);
     if (result == undefined || type == undefined || test == undefined) {
       this.notLowered(frame.module, expr.loc, "this condition");
 
@@ -372,13 +393,18 @@ partial class Lowering {
     frame.made.conditionalBranch(test, then, otherwise);
     frame.made.open(then);
 
-    const first = this.branchValue(frame, expr.thenExpr, result);
+    const thenExpr = tree.exprOf(expr.thenExprId);
+    const first = this.branchValue(frame, thenExpr, result);
     const firstBlock = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
     frame.made.open(otherwise);
 
-    const second = this.branchValue(frame, expr.elseExpr, result);
+    const second = this.branchValue(
+      frame,
+      tree.exprOf(expr.elseExprId),
+      result,
+    );
     const secondBlock = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
@@ -489,7 +515,11 @@ partial class Lowering {
     if (this.isInteger(value.tz)) {
       const zero = this.ir.zero(value.type);
 
-      return frame.made.integerCompare(IrIntPredicate.NotEqual, value.value, zero);
+      return frame.made.integerCompare(
+        IrIntPredicate.NotEqual,
+        value.value,
+        zero,
+      );
     }
     if (this.isDouble(value.tz)) {
       const zero = this.ir.zero(kDoubleType);
@@ -510,7 +540,11 @@ partial class Lowering {
       const mask = this.ir.hexInteger(kIntType, kLengthMask);
       const length = frame.made.binary(IrOpcode.And, meta, mask);
       const zero = this.ir.zero(kIntType);
-      const test = frame.made.integerCompare(IrIntPredicate.NotEqual, length, zero);
+      const test = frame.made.integerCompare(
+        IrIntPredicate.NotEqual,
+        length,
+        zero,
+      );
 
       this.dropping(frame, value);
 
@@ -524,7 +558,7 @@ partial class Lowering {
 
   private intLiteral(frame: Read<Frame>, expr: IntLitExpr): IrValue {
     const answered = this.typeOf(expr);
-    let tz = this.store.integer(64, false);
+    let tz = this.values.types.store.integer(64, false);
 
     if (answered != undefined && this.isInteger(answered)) {
       tz = this.widened(answered);
@@ -541,7 +575,7 @@ partial class Lowering {
       this.isDouble(answered) &&
       !written.startsWith(kHexPrefix);
     if (isWide) {
-      const wide = this.store.plain(TypeKind.Double);
+      const wide = this.values.types.store.plain(TypeKind.Double);
 
       return { type: kDoubleType, value: this.ir.realOf(written), tz: wide };
     }
@@ -554,8 +588,13 @@ partial class Lowering {
     return this.integerValue(type, written, tz);
   }
 
-  private negativeLiteral(frame: Read<Frame>, expr: UnaryExpr): IrValue | undefined {
-    const operand = expr.operand;
+  private negativeLiteral(
+    frame: Read<Frame>,
+    expr: UnaryExpr,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const operand = tree.exprOf(expr.operandId);
     const answered = this.typeOf(expr);
     if (operand.kind != ExprKind.IntLit || answered == undefined) {
       return undefined;
@@ -569,14 +608,21 @@ partial class Lowering {
       return undefined;
     }
 
-    const wide = this.store.plain(TypeKind.Double);
+    const wide = this.values.types.store.plain(TypeKind.Double);
 
-    return { type: kDoubleType, value: this.ir.realOf(`-${written}`), tz: wide };
+    return {
+      type: kDoubleType,
+      value: this.ir.realOf(`-${written}`),
+      tz: wide,
+    };
   }
 
-  private readonly writtenDigits(frame: Read<Frame>, expr: IntLitExpr): string | undefined {
+  private readonly writtenDigits(
+    frame: Read<Frame>,
+    expr: IntLitExpr,
+  ): string | undefined {
     const span = expr.text;
-    const module = this.program.modules[frame.module];
+    const module = this.values.types.program.modules[frame.module];
     if (span == undefined || module == undefined) {
       return undefined;
     }

@@ -32,45 +32,51 @@ import {
 
 partial class ExpressionTypes {
   private newSourceCheck(expr: NewExpr, made: Type, module: int): void {
-    const source = expr.args[0];
-    const hasSpread = expr.args.some((arg) => arg.spread);
+    const tree = this.types.program.tree;
+
+    const source = tree.argumentsOf(expr.argsList)[0];
+    const hasSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
     if (source == undefined || hasSpread) {
       return;
     }
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return;
     }
-    if (this.byteNumbers.ownerOf(made) == ByteOwner.DataView) {
-      return this.dataViewCheck(expr, source.expr, module);
+    if (this.types.ownerOf(made) == ByteOwner.DataView) {
+      const exprExpr = tree.exprOf(source.exprId);
+
+      return this.dataViewCheck(expr, exprExpr, module);
     }
 
-    const name = this.byteSources.typedName(made);
-    const isLiteral = source.expr.kind == ExprKind.ArrayLit;
-    const element = this.bytes.elementOf(made);
+    const name = this.types.typedName(made);
+    const isLiteral = tree.exprOf(source.exprId).kind == ExprKind.ArrayLit;
+    const element = this.types.elementOf(made);
     if (name == undefined || element == undefined) {
       return;
     }
-    if (isLiteral && expr.args.length == 1) {
-      this.byteValuesChecked(source.expr, made, module);
+    if (isLiteral && tree.argumentsOf(expr.argsList).length == 1) {
+      const sourceExpr = tree.exprOf(source.exprId);
+
+      this.byteValuesChecked(sourceExpr, made, module);
 
       return;
     }
 
-    const from = this.peekType(source.expr, module);
+    const from = this.peekType(tree.exprOf(source.exprId), module);
     const base = this.types.definedType(from);
-    if (this.byteSources.isArrayBuffer(from)) {
+    if (this.types.isArrayBuffer(from)) {
       return this.typedViewCheck(expr, made, module);
     }
 
-    const offset = expr.args[1];
+    const offset = tree.argumentsOf(expr.argsList)[1];
     if (offset != undefined && base.kind != TypeKind.Error) {
-      const offsetOnlyError = this.byteSources.offsetOnlyError(
-        offset.expr.loc,
+      const offsetOnlyError = this.types.offsetOnlyError(
+        tree.exprOf(offset.exprId).loc,
         name,
         from,
       );
 
-      return this.reportFound(module, offsetOnlyError);
+      return this.errors.writeFound(module, offsetOnlyError);
     }
 
     const isLength =
@@ -81,31 +87,31 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.byteSourceCheck(source.expr, from, made, module);
+    this.byteSourceCheck(tree.exprOf(source.exprId), from, made, module);
   }
 
-  private readonly byteSourceCheck(
+  private byteSourceCheck(
     source: Expr,
     from: Type,
     target: Type,
     module: int,
   ): boolean {
-    const shape = this.byteSources.sourceShape(from);
-    const name = this.byteSources.typedName(target) ?? "";
+    const shape = this.types.sourceShape(from);
+    const name = this.types.typedName(target) ?? "";
     if (shape.element == undefined) {
-      const notSourceError = this.byteSources.notSourceError(
+      const notSourceError = this.types.notSourceError(
         source.loc,
         name,
         from,
       );
 
-      this.reportFound(module, notSourceError);
+      this.errors.writeFound(module, notSourceError);
 
       return false;
     }
 
-    const shown = this.sources.valueText(source, module);
-    const elementError = this.byteSources.elementError(
+    const shown = this.types.valueText(source, module);
+    const elementError = this.types.elementError(
       source.loc,
       target,
       from,
@@ -113,7 +119,7 @@ partial class ExpressionTypes {
       shown,
     );
 
-    this.reportFound(module, elementError);
+    this.errors.writeFound(module, elementError);
 
     return elementError == undefined;
   }
@@ -124,46 +130,61 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): void {
-    if (this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    if (this.types.isLibraryModule(module)) {
       return;
     }
 
-    const owner = this.byteNumbers.ownerOf(instance);
+    const owner = this.types.ownerOf(instance);
     if (owner == ByteOwner.Buffer && member.name == kAllocName) {
       return this.allocFillCheck(expr, module);
     }
     if (owner == ByteOwner.Buffer || member.name != kFromName) {
       return;
     }
-    if (this.byteSources.typedName(instance) == undefined) {
+    if (this.types.typedName(instance) == undefined) {
       return;
     }
 
-    const source = expr.args[0];
-    const element = this.bytes.elementOf(instance);
+    const source = tree.argumentsOf(expr.argsList)[0];
+    const element = this.types.elementOf(instance);
     if (source == undefined || source.spread || element == undefined) {
       return;
     }
-    if (source.expr.kind == ExprKind.ArrayLit && expr.args.length == 1) {
-      this.byteValuesChecked(source.expr, instance, module);
+    if (
+      tree.exprOf(source.exprId).kind == ExprKind.ArrayLit &&
+      tree.argumentsOf(expr.argsList).length == 1
+    ) {
+      const exprExpr = tree.exprOf(source.exprId);
+
+      this.byteValuesChecked(exprExpr, instance, module);
 
       return;
     }
-    if (source.expr.kind == ExprKind.ArrayLit) {
+    const sourceExpr = tree.exprOf(source.exprId);
+    if (sourceExpr.kind == ExprKind.ArrayLit) {
       return;
     }
 
-    const from = this.peekType(source.expr, module);
+    const from = this.peekType(tree.exprOf(source.exprId), module);
     if (from.kind == TypeKind.Error) {
       return;
     }
-    if (expr.args.length == 1) {
-      this.byteSourceCheck(source.expr, from, instance, module);
+    const args = tree.argumentsOf(expr.argsList);
+    if (args.length == 1) {
+      this.byteSourceCheck(tree.exprOf(source.exprId), from, instance, module);
 
       return;
     }
 
-    this.mappedSourceCheck(expr, source.expr, from, instance, module);
+    this.mappedSourceCheck(
+      expr,
+      tree.exprOf(source.exprId),
+      from,
+      instance,
+      module,
+    );
   }
 
   private mappedSourceCheck(
@@ -173,29 +194,36 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): void {
-    const shape = this.byteSources.sourceShape(from);
-    const name = this.byteSources.typedName(instance) ?? "";
+    const tree = this.types.program.tree;
+
+    const shape = this.types.sourceShape(from);
+    const name = this.types.typedName(instance) ?? "";
     if (shape.element == undefined) {
-      const notIterableError = this.byteSources.notIterableError(
+      const notIterableError = this.types.notIterableError(
         source.loc,
         name,
         from,
       );
 
-      return this.reportFound(module, notIterableError);
+      return this.errors.writeFound(module, notIterableError);
     }
 
-    const mapper = expr.args[1];
-    const element = this.bytes.elementOf(instance);
+    const mapper = tree.argumentsOf(expr.argsList)[1];
+    const element = this.types.elementOf(instance);
     if (mapper == undefined || mapper.spread || element == undefined) {
       return;
     }
-    if (mapper.expr.kind != ExprKind.Function) {
-      return this.namedMapperCheck(mapper.expr, instance, module);
+    const mapperExpr = tree.exprOf(mapper.exprId);
+    if (mapperExpr.kind != ExprKind.Function) {
+      return this.namedMapperCheck(
+        tree.exprOf(mapper.exprId),
+        instance,
+        module,
+      );
     }
 
-    const index = this.store.integer(64, false);
-    const signature = this.store.functionOf({
+    const index = this.types.store.integer(64, false);
+    const signature = this.types.store.functionOf({
       params: [
         { type: shape.element, optional: false },
         { type: index, optional: false },
@@ -204,7 +232,9 @@ partial class ExpressionTypes {
       result: element,
     });
 
-    this.typed(mapper.expr, signature, module);
+    const exprExpr = tree.exprOf(mapper.exprId);
+
+    this.typed(exprExpr, signature, module);
   }
 
   private namedMapperCheck(mapper: Expr, target: Type, module: int): void {
@@ -220,41 +250,46 @@ partial class ExpressionTypes {
       return;
     }
 
-    const mapFitError = this.byteSources.mapFitError(mapper.loc, target);
+    const mapFitError = this.types.mapFitError(mapper.loc, target);
 
-    this.reportFound(module, mapFitError);
+    this.errors.writeFound(module, mapFitError);
   }
 
   private allocFillCheck(expr: CallExpr, module: int): void {
-    const fill = expr.args[1];
+    const tree = this.types.program.tree;
+
+    const fill = tree.argumentsOf(expr.argsList)[1];
     if (fill == undefined || fill.spread) {
       return;
     }
 
-    const type = this.peekType(fill.expr, module);
+    const exprExpr = tree.exprOf(fill.exprId);
+    const type = this.peekType(exprExpr, module);
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Error) {
       return;
     }
-    if (!this.byteSources.isFillValue(base)) {
-      const allocFillError = this.byteSources.allocFillError(
-        fill.expr.loc,
+    if (!this.types.isFillValue(base)) {
+      const allocFillError = this.types.allocFillError(
+        tree.exprOf(fill.exprId).loc,
         type,
       );
 
-      return this.reportFound(module, allocFillError);
+      return this.errors.writeFound(module, allocFillError);
     }
 
-    this.byteValueFitCheck(fill.expr, base, module);
+    const fillExpr = tree.exprOf(fill.exprId);
+
+    this.byteValueFitCheck(fillExpr, base, module);
   }
 
   private byteValueFitCheck(value: Expr, base: Type, module: int): void {
-    const info = this.byteSources.byteInfo();
+    const info = this.types.byteSourceByteInfo();
     if (base.kind != TypeKind.Int || info == undefined) {
       return;
     }
 
-    this.byteFitCheck(value, info, this.byteSources.byteRange(), module);
+    this.byteFitCheck(value, info, this.types.byteRange(), module);
   }
 
   private typedSetCall(
@@ -263,11 +298,15 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    const element = this.bytes.elementOf(instance);
-    const source = expr.args[0];
-    const count = expr.args.length;
+    const tree = this.types.program.tree;
+
+    const element = this.types.elementOf(instance);
+    const source = tree.argumentsOf(expr.argsList)[0];
+    const count = tree.argumentsOf(expr.argsList).length;
     const isPlain =
-      count >= 1 && count <= 2 && expr.args.every((arg) => !arg.spread);
+      count >= 1 &&
+      count <= 2 &&
+      tree.argumentsOf(expr.argsList).every((arg) => !arg.spread);
     if (member.name != kSetName || element == undefined) {
       return undefined;
     }
@@ -276,19 +315,24 @@ partial class ExpressionTypes {
     }
 
     const isFitting = this.setSourceTyped(
-      source.expr,
+      tree.exprOf(source.exprId),
       element,
       instance,
       module,
     );
-    const offset = expr.args[1]?.expr;
+    const offset = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     const isPlaced = this.setOffsetTyped(offset, module);
 
     if (isFitting && isPlaced) {
-      this.setRangeCheck(member.object, source.expr, offset, module);
+      this.setRangeCheck(
+        tree.exprOf(member.objectId),
+        tree.exprOf(source.exprId),
+        offset,
+        module,
+      );
     }
 
-    return this.store.plain(TypeKind.Void);
+    return this.types.store.plain(TypeKind.Void);
   }
 
   private setSourceTyped(
@@ -306,9 +350,9 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const iteratorError = this.byteSources.setIteratorError(source.loc, from);
+    const iteratorError = this.types.setIteratorError(source.loc, from);
     if (iteratorError != undefined) {
-      this.reportFound(module, iteratorError);
+      this.errors.writeFound(module, iteratorError);
 
       return false;
     }
@@ -319,16 +363,16 @@ partial class ExpressionTypes {
   private byteValuesChecked(values: Expr, target: Type, module: int): boolean {
     const before = this.errors.count();
     const element = this.valueElement(target);
-    const wanted = this.store.arrayOf(element);
+    const wanted = this.types.store.arrayOf(element);
     const given = this.checked(values, wanted, module, kNoPlace);
 
     return given.kind != TypeKind.Error && this.errors.count() == before;
   }
 
-  private readonly valueElement(target: Type): Type {
-    const element = this.bytes.elementOf(target);
-    if (element == undefined || this.bytes.isClamped(target)) {
-      return this.store.integer(64, false);
+  private valueElement(target: Type): Type {
+    const element = this.types.elementOf(target);
+    if (element == undefined || this.types.isClamped(target)) {
+      return this.types.store.integer(64, false);
     }
 
     return element;
@@ -339,7 +383,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
     const given = this.typed(offset, int, module);
     return this.requireBetween(
       offset,
@@ -355,7 +399,7 @@ partial class ExpressionTypes {
     offset: Expr | undefined,
     module: int,
   ): void {
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return;
     }
 
@@ -364,23 +408,23 @@ partial class ExpressionTypes {
     const length =
       this.constLength(target, module) ?? this.measuredLength(target, module);
     if (at != undefined && most != undefined && length != undefined) {
-      const sum = this.bounds.linearSum(at, most);
+      const sum = this.types.linearSum(at, most);
       if (sum != undefined && this.isLinearUpTo(sum, length, 0)) {
         return;
       }
     }
 
     const shownOffset = this.shownOffset(offset, module);
-    const shownSource = this.sources.valueText(source, module);
-    const shownTarget = this.sources.valueText(target, module);
-    const setFitError = this.byteSources.setFitError(
+    const shownSource = this.types.valueText(source, module);
+    const shownTarget = this.types.valueText(target, module);
+    const setFitError = this.types.setFitError(
       source.loc,
       shownOffset,
       shownSource,
       shownTarget,
     );
 
-    this.reportFound(module, setFitError);
+    this.errors.writeFound(module, setFitError);
   }
 
   private offsetLinear(
@@ -395,16 +439,21 @@ partial class ExpressionTypes {
   }
 
   private mostLength(source: Expr, module: int): Linear | undefined {
+    const tree = this.types.program.tree;
+
     switch (source.kind) {
       case ExprKind.ArrayLit: {
-        const isPlain = source.elements.every(
+        const isPlain = tree.elementsOf(source.elementsList).every(
           (one) => !one.spread && !one.hole,
         );
         if (!isPlain) {
           return undefined;
         }
 
-        return { term: kZeroTerm, offset: source.elements.length.toDecimal() };
+        return {
+          term: kZeroTerm,
+          offset: tree.elementsOf(source.elementsList).length.toDecimal(),
+        };
       }
       case ExprKind.Call:
         return this.partLength(source, module);
@@ -416,13 +465,15 @@ partial class ExpressionTypes {
   }
 
   private partLength(call: CallExpr, module: int): Linear | undefined {
-    const callee = call.callee;
-    const first = call.args[0]?.expr;
-    const second = call.args[1]?.expr;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
+    const first = tree.exprAt(tree.argumentsOf(call.argsList)[0]?.exprId);
+    const second = tree.exprAt(tree.argumentsOf(call.argsList)[1]?.exprId);
     const isPart =
       callee.kind == ExprKind.Member &&
       kPartNames.includes(callee.name) &&
-      call.args.length == 2;
+      tree.argumentsOf(call.argsList).length == 2;
     if (!isPart || first == undefined || second == undefined) {
       return undefined;
     }
@@ -448,23 +499,29 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): void {
-    if (this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    if (this.types.isLibraryModule(module)) {
       return;
     }
-    if (expr.args.some((arg) => arg.spread)) {
+    if (tree.argumentsOf(expr.argsList).some((arg) => arg.spread)) {
       return;
     }
 
     const name = member.name;
-    const isTyped = this.byteSources.typedName(instance) != undefined;
-    const mapper = expr.args[0];
+    const isTyped = this.types.typedName(instance) != undefined;
+    const mapper = tree.argumentsOf(expr.argsList)[0];
     if (isTyped && name == kWithName) {
       return this.withIndexCheck(expr, member, module);
     }
     if (isTyped && name == kMapName && mapper != undefined) {
-      return this.namedMapperCheck(mapper.expr, instance, module);
+      return this.namedMapperCheck(
+        tree.exprOf(mapper.exprId),
+        instance,
+        module,
+      );
     }
-    if (this.byteNumbers.ownerOf(instance) != ByteOwner.Buffer) {
+    if (this.types.ownerOf(instance) != ByteOwner.Buffer) {
       return;
     }
     if (name == kFillName || kSearchNames.includes(name)) {
@@ -479,26 +536,36 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): void {
-    const index = expr.args[0];
+    const tree = this.types.program.tree;
+
+    const index = tree.argumentsOf(expr.argsList)[0];
     if (index == undefined) {
       return;
     }
 
-    const given = this.peekType(index.expr, module);
+    const exprExpr = tree.exprOf(index.exprId);
+    const given = this.peekType(exprExpr, module);
     if (given.kind == TypeKind.Error) {
       return;
     }
-    if (this.isAtInBounds(member.object, index.expr, module)) {
+    if (
+      this.isAtInBounds(
+        tree.exprOf(member.objectId),
+        tree.exprOf(index.exprId),
+        module,
+      )
+    ) {
       return;
     }
 
-    const shown = this.sources.valueText(member.object, module);
-    const withIndexError = this.byteSources.withIndexError(
-      index.expr.loc,
+    const object = tree.exprOf(member.objectId);
+    const shown = this.types.valueText(object, module);
+    const withIndexError = this.types.withIndexError(
+      tree.exprOf(index.exprId).loc,
       shown,
     );
 
-    this.reportFound(module, withIndexError);
+    this.errors.writeFound(module, withIndexError);
   }
 
   private isAtInBounds(object: Expr, index: Expr, module: int): boolean {
@@ -523,31 +590,40 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): void {
-    const value = expr.args[0];
+    const tree = this.types.program.tree;
+
+    const value = tree.argumentsOf(expr.argsList)[0];
     if (value == undefined) {
       return;
     }
 
-    const type = this.peekType(value.expr, module);
+    const exprExpr = tree.exprOf(value.exprId);
+    const type = this.peekType(exprExpr, module);
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Error) {
       return;
     }
-    if (!this.byteSources.isFillValue(base)) {
-      const valueArgumentError = this.byteSources.valueArgumentError(
-        value.expr.loc,
+    if (!this.types.isFillValue(base)) {
+      const valueArgumentError = this.types.valueArgumentError(
+        tree.exprOf(value.exprId).loc,
         member.name,
         type,
       );
 
-      return this.reportFound(module, valueArgumentError);
+      return this.errors.writeFound(module, valueArgumentError);
     }
     if (member.name != kFillName) {
       return;
     }
 
-    this.byteValueFitCheck(value.expr, base, module);
-    this.fillPositionsCheck(expr.args, member.object, module);
+    const valueExpr = tree.exprOf(value.exprId);
+
+    this.byteValueFitCheck(valueExpr, base, module);
+    this.fillPositionsCheck(
+      tree.argumentsOf(expr.argsList),
+      tree.exprOf(member.objectId),
+      module,
+    );
   }
 
   private fillPositionsCheck(
@@ -555,8 +631,10 @@ partial class ExpressionTypes {
     buffer: Expr,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     for (let index = 1; index < args.length && index < 3; index++) {
-      const position = args[index]?.expr;
+      const position = tree.exprAt(args[index]?.exprId);
       if (position == undefined) {
         return;
       }
@@ -586,15 +664,21 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): void {
-    const positions = this.byteSources.positionsOf(member.name);
-    const target = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const positions = this.types.positionsOf(member.name);
+    const target = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (positions.length == 0 || target == undefined) {
       return;
     }
 
-    for (let index = 1; index < expr.args.length; index++) {
+    for (
+      let index = 1;
+      index < tree.argumentsOf(expr.argsList).length;
+      index++
+    ) {
       const position = positions[index - 1];
-      const value = expr.args[index]?.expr;
+      const value = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
       if (position == undefined || value == undefined) {
         continue;
       }
@@ -619,10 +703,12 @@ partial class ExpressionTypes {
     target: Expr,
     member: MemberExpr,
   ): Expr {
+    const tree = this.types.program.tree;
+
     if (isTarget) {
       return target;
     }
 
-    return member.object;
+    return tree.exprOf(member.objectId);
   }
 }

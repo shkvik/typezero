@@ -3326,7 +3326,7 @@ export const kMessages: Record<Code, Message> = {
     text: "'{word}' takes a number or a decimal, found '{first}'{other}",
   },
   [Code.ClosedArgUnknown]: {
-    text: "a string known only when the program runs may be no {word}, which JavaScript would throw a RangeError for; compare it with them first, e.g. 'if (x == \"{first}\" || x == \"{second}\")'",
+    text: 'a string known only when the program runs may be no {word}, which JavaScript would throw a RangeError for; compare it with them first, e.g. \'if (x == "{first}" || x == "{second}")\'',
   },
   [Code.ClosedArgNotAllowed]: {
     text: "'{first}' is no {word}, and JavaScript would throw a RangeError",
@@ -3509,19 +3509,19 @@ export const kMessages: Record<Code, Message> = {
     text: "the option 'encoding' of '{word}' is written as a literal, e.g. 'utf8': it decides whether the output is a string or a Buffer",
   },
   [Code.ChildStdio]: {
-    text: "the option 'stdio' of '{word}' is written as a literal, e.g. \"inherit\" or [\"pipe\", \"inherit\", \"pipe\"]: whether there is output depends on it",
+    text: 'the option \'stdio\' of \'{word}\' is written as a literal, e.g. "inherit" or ["pipe", "inherit", "pipe"]: whether there is output depends on it',
   },
   [Code.ChildStdioThree]: {
     text: "only stdin, stdout and stderr are supported in 'stdio'; more streams come with the async functions (docs/process.md, step 2)",
   },
   [Code.ChildStdioLiteral]: {
-    text: "each stream of 'stdio' is written as a literal: \"pipe\", \"inherit\", \"ignore\" or a file descriptor such as 2",
+    text: 'each stream of \'stdio\' is written as a literal: "pipe", "inherit", "ignore" or a file descriptor such as 2',
   },
   [Code.ChildStdioIpc]: {
     text: "'ipc' is the channel to another Node that fork starts, which tz does not have (docs/process.md, section 4)",
   },
   [Code.ChildStdioUnknown]: {
-    text: "unknown stdio '{word}'; a stream is \"pipe\", \"inherit\", \"ignore\" or a file descriptor such as 2",
+    text: 'unknown stdio \'{word}\'; a stream is "pipe", "inherit", "ignore" or a file descriptor such as 2',
   },
   [Code.ChildStdioSpread]: {
     text: "write each stream of 'stdio' in the literal",
@@ -3608,7 +3608,7 @@ export const kMessages: Record<Code, Message> = {
     text: "'{word}' takes a regex{other}, found '{first}'",
   },
   [Code.RegexTextReplace]: {
-    text: "'replace' with a string replaces only the first occurrence (\"a-b-c\".replace(\"-\", \"+\") is \"a+b-c\" in JavaScript); to replace all of them write 'replaceAll({word}, ...)', for only the first one a regex: 'replace({first}, ...)'",
+    text: '\'replace\' with a string replaces only the first occurrence ("a-b-c".replace("-", "+") is "a+b-c" in JavaScript); to replace all of them write \'replaceAll({word}, ...)\', for only the first one a regex: \'replace({first}, ...)\'',
   },
   [Code.RegexTextSearch]: {
     text: "'search' takes a regex, and JavaScript makes one of a string, where '.' matches any character; to find the text write 'indexOf({word})', for a regex '{first}'",
@@ -4010,10 +4010,10 @@ export const kMessages: Record<Code, Message> = {
     text: "this text is not JSON, so JSON.parse would always fail: it starts with a byte order mark (BOM)",
   },
   [Code.JsonNeverNull]: {
-    text: "after 'typeof {word} {first} \"{other}\"' {word} is never null here: the typeof of null is \"null\"; drop this check",
+    text: 'after \'typeof {word} {first} "{other}"\' {word} is never null here: the typeof of null is "null"; drop this check',
   },
   [Code.JsonNeverArray]: {
-    text: "after 'typeof {word} {first} \"{other}\"' {word} is never an array here: the typeof of an array is \"array\"; drop this check",
+    text: 'after \'typeof {word} {first} "{other}"\' {word} is never an array here: the typeof of an array is "array"; drop this check',
   },
   [Code.KeyedFieldsDiffer]: {
     text: "the fields that '{word}' names must all be in '{other}' and have one type",
@@ -4178,7 +4178,7 @@ export const kMessages: Record<Code, Message> = {
     text: "cannot find '{word}': package {other} has no {first} or {second} (in {path})",
   },
   [Code.PackageNoEntry]: {
-    text: "package {other} names no file to import: it has no package.json with \"main\" or \"exports\", and none of {word} (in {path})",
+    text: 'package {other} names no file to import: it has no package.json with "main" or "exports", and none of {word} (in {path})',
   },
   [Code.PackageForeignNamed]: {
     text: "'{word}' names {path}, and the files of tz end in .tz: rename it to {other}",
@@ -4468,12 +4468,6 @@ export const kMessages: Record<Code, Message> = {
   [Code.OwnTakeElement]: {
     text: "'{word}' is an element of an array, so it cannot be given away; take it out with pop, shift or splice, or give a copy (structuredClone)",
   },
-  [Code.OwnInternedChanged]: {
-    text: "'{word}' is shared (Interned), so only its readonly methods can be called; '{other}' is not readonly",
-  },
-  [Code.OwnCellBorrow]: {
-    text: "'{word}' is inside a Cell, so only a copy can leave it, and its type does not copy",
-  },
   [Code.OwnBorrowField]: {
     text: "the field '{word}' cannot hold a borrow: a borrow lives only inside a function; keep the value itself or a copy",
   },
@@ -4493,7 +4487,7 @@ export const kMessages: Record<Code, Message> = {
     text: "@Unsafe needs 'reason': a string that says why the dangerous operations here are right",
   },
   [Code.OwnUnsafeUses]: {
-    text: "the function does '{word}' operations of tz:unsafe, so @Unsafe lists UnsafeUse.{word} in 'uses' (UnsafeUse has Memory, Cell and Foreign)",
+    text: "the function does '{word}' operations of tz:unsafe, so @Unsafe lists UnsafeUse.{word} in 'uses' (UnsafeUse has Memory and Foreign)",
   },
   [Code.OwnUnsafeUnused]: {
     text: "@Unsafe lists UnsafeUse.{word}, but the function does no such operation; take it out of 'uses'",
@@ -4501,11 +4495,11 @@ export const kMessages: Record<Code, Message> = {
   [Code.OwnCloneField]: {
     text: "'{word}' cannot be copied by structuredClone: it is {other}; give its class a [Symbol.clone]() method that says how to copy it",
   },
-  [Code.OwnCellReach]: {
-    text: "'{word}' is called while '{other}' is borrowed from a Cell, and it could change that Cell; go over a copy ('.slice()') or make the call first, in its own statement",
-  },
   [Code.OwnUnsafeRequires]: {
     text: "'{word}' asks its caller to keep a condition (@Unsafe 'requires'), so call it only inside a function or method marked @Unsafe",
+  },
+  [Code.OwnCopyShared]: {
+    text: "'{word}' has a changeable type and is passed as the copy type '{first}', so both would share one value; give '{word}' the type '{first}' where it is made",
   },
   [Code.OwnMutVariance]: {
     text: "'{word}' is passed to be changed as a wider type, so the function may put another kind of value into it; take Read<...> if it only reads, or pass a copy",
@@ -4524,9 +4518,6 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.OwnTakeEmpty]: {
     text: "'{word}' has no empty value to leave in its place, so it cannot be taken; write replace({word}, value)",
-  },
-  [Code.OwnInternedField]: {
-    text: "'{word}' is part of a shared (Interned) value, so it cannot be changed; only its Cell fields can",
   },
   [Code.OwnGiveGlobal]: {
     text: "'{word}' is a module constant, so it cannot be given away; give a copy (structuredClone)",

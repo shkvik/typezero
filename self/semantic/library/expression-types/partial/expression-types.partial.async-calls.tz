@@ -9,34 +9,38 @@ import {
 
 partial class ExpressionTypes {
   private timerArgumentsCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     const isTimer =
       callee.kind == ExprKind.Name &&
       (callee.name == "setTimeout" || callee.name == "setInterval") &&
       this.isGlobalUse(callee, module);
-    const callback = expr.args[0]?.expr;
+    const callback = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isInterval =
       isTimer && callee.kind == ExprKind.Name && callee.name == kIntervalName;
     if (isInterval && callback != undefined) {
       this.listenerLifeCheck(callback, undefined, true, module);
     }
 
-    const extra = expr.args[2]?.expr;
+    const extra = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
     if (!isTimer || extra == undefined) {
       return;
     }
 
-    this.report(module, extra.loc, Code.TimerArguments, kNoDetails);
+    this.errors.write(module, extra.loc, Code.TimerArguments, kNoDetails);
   }
 
-  private readonly uncaughtCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    const event = expr.args[0]?.expr;
+  private uncaughtCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    const event = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (callee.kind != ExprKind.Member || event == undefined) {
       return;
     }
 
-    const holder = callee.object;
+    const holder = tree.exprOf(callee.objectId);
     const isProcess =
       holder.kind == ExprKind.Name &&
       holder.name == "process" &&
@@ -48,6 +52,6 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, event.loc, Code.NothingToCatch, kNoDetails);
+    this.errors.write(module, event.loc, Code.NothingToCatch, kNoDetails);
   }
 }

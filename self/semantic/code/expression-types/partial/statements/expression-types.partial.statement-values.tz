@@ -18,18 +18,18 @@ partial class ExpressionTypes {
     at: int | undefined,
     module: int,
   ): void {
-    if (this.lenientCalls.has(expr)) {
+    if (this.lenientCalls.has(expr.id)) {
       return this.libraryUsedCheck(expr, type, at, module);
     }
 
     const isKept =
-      expr.kind == ExprKind.Assign || this.statements.isTakingElement(expr);
+      expr.kind == ExprKind.Assign || this.types.isTakingElement(expr);
     if (isKept) {
       return;
     }
 
     const defined = this.types.definedType(type);
-    const held = this.statements.heldType(type);
+    const held = this.types.heldType(type);
     if (held.kind != defined.kind) {
       return;
     }
@@ -37,17 +37,17 @@ partial class ExpressionTypes {
     this.requireOf(defined, RequirementKind.Unused, "");
 
     if (defined.kind == TypeKind.Promise) {
-      const promiseUsedError = this.statements.promiseUsedError(
+      const promiseUsedError = this.types.promiseUsedError(
         expr,
-        defined.value,
+        this.types.store.valueOf(defined),
         at,
         module,
       );
 
-      return this.reportFound(module, promiseUsedError);
+      return this.errors.writeFound(module, promiseUsedError);
     }
     if (defined.kind == TypeKind.Result) {
-      this.report(module, expr.loc, Code.ResultUnused, kNoDetails);
+      this.errors.write(module, expr.loc, Code.ResultUnused, kNoDetails);
     }
   }
 
@@ -58,17 +58,17 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const defined = this.types.definedType(type);
-    const loc = this.statements.calleeLoc(expr);
+    const loc = this.types.calleeLoc(expr);
     if (!this.isValueMethodCall(expr, module)) {
       return;
     }
     if (defined.kind == TypeKind.Array) {
-      const item = this.types.definedType(defined.item);
+      const item = this.types.definedType(this.types.store.itemOf(defined));
       if (item.kind == TypeKind.Promise) {
-        this.report(module, loc, Code.PromisesNotAwaited, kNoDetails);
+        this.errors.write(module, loc, Code.PromisesNotAwaited, kNoDetails);
       }
-      if (item.kind == TypeKind.Result && this.statements.isMappingCall(expr)) {
-        this.report(module, loc, Code.ResultsUnused, kNoDetails);
+      if (item.kind == TypeKind.Result && this.types.isMappingCall(expr)) {
+        this.errors.write(module, loc, Code.ResultsUnused, kNoDetails);
       }
 
       return;
@@ -77,30 +77,33 @@ partial class ExpressionTypes {
       return;
     }
 
-    const held = this.statements.heldType(defined.value);
+    const held = this.types.heldType(this.types.store.valueOf(defined));
     if (held.kind == TypeKind.Result) {
       return;
     }
 
-    const text = this.sources.statementText(at, module);
+    const text = this.types.statementText(at, module);
     if (text == "") {
-      return this.report(module, loc, Code.PromiseNotAwaited, kNoDetails);
+      return this.errors.write(module, loc, Code.PromiseNotAwaited, kNoDetails);
     }
 
-    this.report(module, loc, Code.PromiseNotAwaitedHere, { word: text });
+    this.errors.write(module, loc, Code.PromiseNotAwaitedHere, { word: text });
   }
 
   private isValueMethodCall(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Call) {
       return false;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return false;
     }
 
-    const object = this.peekType(callee.object, module);
+    const objectExpr = tree.exprOf(callee.objectId);
+    const object = this.peekType(objectExpr, module);
 
     const base = this.types.definedType(object);
 

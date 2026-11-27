@@ -1,0 +1,454 @@
+import { FileParser } from "../file-parser.tz";
+import {
+  ExprKind,
+  NamedNew,
+  NewKind,
+  PlainProperty,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ArrayElement,
+  ArrayLitExpr,
+  AssignExpr,
+  AwaitExpr,
+  BinaryExpr,
+  BoolLitExpr,
+  CallArgument,
+  CallExpr,
+  CalleeNew,
+  CastExpr,
+  ClassExpr,
+  ComputedProperty,
+  ConditionalExpr,
+  Expr,
+  FloatLitExpr,
+  FunctionExpr,
+  IndexExpr,
+  IntLitExpr,
+  MemberExpr,
+  NameExpr,
+  NewExpr,
+  NewForm,
+  ObjectLitExpr,
+  OptionalChainExpr,
+  Property,
+  PropertyForm,
+  RegexLitExpr,
+  SequenceExpr,
+  SpreadProperty,
+  StringLitExpr,
+  TemplateExpr,
+  UnaryExpr,
+  UndefinedExpr,
+  UpdateExpr,
+  YieldExpr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+
+partial class FileParser {
+  private readonly copyIntLitExpr(node: Read<IntLitExpr>): IntLitExpr {
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      value: node.value,
+      text: node.text,
+    };
+  }
+
+  private readonly copyFloatLitExpr(node: Read<FloatLitExpr>): FloatLitExpr {
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      value: node.value,
+      beyondDouble: node.beyondDouble,
+      text: node.text,
+    };
+  }
+
+  private readonly copyBoolLitExpr(node: Read<BoolLitExpr>): BoolLitExpr {
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      value: node.value,
+    };
+  }
+
+  private readonly copyStringLitExpr(node: Read<StringLitExpr>): StringLitExpr {
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      value: node.value,
+    };
+  }
+
+  private readonly copyUndefinedExpr(node: Read<UndefinedExpr>): UndefinedExpr {
+    return { kind: node.kind, loc: node.loc };
+  }
+
+  private readonly copyTemplateExpr(node: Read<TemplateExpr>): TemplateExpr {
+    const quasis = node.quasis.slice();
+    const exprs = node.exprs.map((one) => this.copyExpr(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      quasis,
+      exprs,
+    };
+  }
+
+  private readonly copyArrayElement(node: Read<ArrayElement>): ArrayElement {
+    const expr = this.copyExpr(node.expr);
+
+    return { expr, spread: node.spread, hole: node.hole };
+  }
+
+  private readonly copyArrayLitExpr(node: Read<ArrayLitExpr>): ArrayLitExpr {
+    const elements = node.elements.map((one) => this.copyArrayElement(one));
+
+    return { kind: node.kind, loc: node.loc, elements };
+  }
+
+  private readonly copyPlainProperty(node: Read<PlainProperty>): PlainProperty {
+    return { kind: node.kind };
+  }
+
+  private readonly copyComputedProperty(
+    node: Read<ComputedProperty>,
+  ): ComputedProperty {
+    const key = this.copyExpr(node.key);
+
+    return { kind: node.kind, key };
+  }
+
+  private readonly copySpreadProperty(
+    node: Read<SpreadProperty>,
+  ): SpreadProperty {
+    const omit = node.omit.slice();
+    const omitKeys = node.omitKeys.map((one) => this.copyIndexExpr(one));
+
+    return { kind: node.kind, omit, omitKeys };
+  }
+
+  private readonly copyPropertyForm(node: Read<PropertyForm>): PropertyForm {
+    switch (node.kind) {
+      case PropertyKind.Value:
+      case PropertyKind.Method:
+      case PropertyKind.Defaulted:
+        return this.copyPlainProperty(node);
+      case PropertyKind.Computed:
+        return this.copyComputedProperty(node);
+      case PropertyKind.Spread:
+        return this.copySpreadProperty(node);
+    }
+
+    return { kind: PropertyKind.Value };
+  }
+
+  private readonly copyProperty(node: Read<Property>): Property {
+    const value = this.copyExpr(node.value);
+    const form = this.copyPropertyForm(node.form);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      value,
+      form,
+    };
+  }
+
+  private readonly copyObjectLitExpr(node: Read<ObjectLitExpr>): ObjectLitExpr {
+    const props = node.props.map((one) => this.copyProperty(one));
+
+    return { kind: node.kind, loc: node.loc, props };
+  }
+
+  private readonly copyNameExpr(node: Read<NameExpr>): NameExpr {
+    const typeArgs = node.typeArgs.map((one) => this.copyTypeRef(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      name: node.name,
+      known: node.known,
+      typeArgs,
+    };
+  }
+
+  private readonly copyMemberExpr(node: Read<MemberExpr>): MemberExpr {
+    const object = this.copyExpr(node.object);
+    const typeArgs = node.typeArgs.map((one) => this.copyTypeRef(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      object,
+      name: node.name,
+      known: node.known,
+      optional: node.optional,
+      typeArgs,
+    };
+  }
+
+  private readonly copyIndexExpr(node: Read<IndexExpr>): IndexExpr {
+    const object = this.copyExpr(node.object);
+    const index = this.copyExpr(node.index);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      object,
+      index,
+      optional: node.optional,
+    };
+  }
+
+  private readonly copyUnaryExpr(node: Read<UnaryExpr>): UnaryExpr {
+    const operand = this.copyExpr(node.operand);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      op: node.op,
+      operand,
+    };
+  }
+
+  private readonly copyBinaryExpr(node: Read<BinaryExpr>): BinaryExpr {
+    const lhs = this.copyExpr(node.lhs);
+    const rhs = this.copyExpr(node.rhs);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      op: node.op,
+      lhs,
+      rhs,
+      source: node.source,
+    };
+  }
+
+  private readonly copyAssignExpr(node: Read<AssignExpr>): AssignExpr {
+    const target = this.copyExpr(node.target);
+    const value = this.copyExpr(node.value);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      op: node.op,
+      target,
+      value,
+      source: node.source,
+    };
+  }
+
+  private readonly copyUpdateExpr(node: Read<UpdateExpr>): UpdateExpr {
+    const target = this.copyExpr(node.target);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      increment: node.increment,
+      prefix: node.prefix,
+      target,
+    };
+  }
+
+  private readonly copyCallArgument(node: Read<CallArgument>): CallArgument {
+    const expr = this.copyExpr(node.expr);
+
+    return { expr, spread: node.spread };
+  }
+
+  private readonly copyCallExpr(node: Read<CallExpr>): CallExpr {
+    const callee = this.copyExpr(node.callee);
+    const args = node.args.map((one) => this.copyCallArgument(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      callee,
+      args,
+      optional: node.optional,
+      tagged: node.tagged,
+    };
+  }
+
+  private readonly copyNamedNew(node: Read<NamedNew>): NamedNew {
+    return {
+      kind: node.kind,
+      name: node.name,
+      member: node.member,
+    };
+  }
+
+  private readonly copyCalleeNew(node: Read<CalleeNew>): CalleeNew {
+    const callee = this.copyExpr(node.callee);
+
+    return { kind: node.kind, callee };
+  }
+
+  private readonly copyNewForm(node: Read<NewForm>): NewForm {
+    switch (node.kind) {
+      case NewKind.Named:
+        return this.copyNamedNew(node);
+      case NewKind.Callee:
+        return this.copyCalleeNew(node);
+    }
+
+    return { kind: NewKind.Named, name: "" };
+  }
+
+  private readonly copyNewExpr(node: Read<NewExpr>): NewExpr {
+    const form = this.copyNewForm(node.form);
+    const typeArgs = node.typeArgs.map((one) => this.copyTypeRef(one));
+    const args = node.args.map((one) => this.copyCallArgument(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      form,
+      typeArgs,
+      args,
+    };
+  }
+
+  private readonly copyConditionalExpr(
+    node: Read<ConditionalExpr>,
+  ): ConditionalExpr {
+    const cond = this.copyExpr(node.cond);
+    const thenExpr = this.copyExpr(node.thenExpr);
+    const elseExpr = this.copyExpr(node.elseExpr);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      cond,
+      thenExpr,
+      elseExpr,
+    };
+  }
+
+  private readonly copyCastExpr(node: Read<CastExpr>): CastExpr {
+    const operand = this.copyExpr(node.operand);
+    const target = this.copyTypeRef(node.target);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      operand,
+      target,
+    };
+  }
+
+  private readonly copySequenceExpr(node: Read<SequenceExpr>): SequenceExpr {
+    const exprs = node.exprs.map((one) => this.copyExpr(one));
+
+    return { kind: node.kind, loc: node.loc, exprs };
+  }
+
+  private readonly copyOptionalChainExpr(
+    node: Read<OptionalChainExpr>,
+  ): OptionalChainExpr {
+    const chain = this.copyExpr(node.chain);
+
+    return { kind: node.kind, loc: node.loc, chain };
+  }
+
+  private readonly copyFunctionExpr(node: Read<FunctionExpr>): FunctionExpr {
+    const fn = this.copyFunctionDecl(node.fn);
+
+    return { kind: node.kind, loc: node.loc, fn };
+  }
+
+  private readonly copyYieldExpr(node: Read<YieldExpr>): YieldExpr {
+    const value = this.copyExprAt(node.value);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      value,
+      delegate: node.delegate,
+    };
+  }
+
+  private readonly copyRegexLitExpr(node: Read<RegexLitExpr>): RegexLitExpr {
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      pattern: node.pattern,
+      flags: node.flags,
+      written: node.written,
+    };
+  }
+
+  private readonly copyAwaitExpr(node: Read<AwaitExpr>): AwaitExpr {
+    const value = this.copyExpr(node.value);
+
+    return { kind: node.kind, loc: node.loc, value };
+  }
+
+  private readonly copyClassExpr(node: Read<ClassExpr>): ClassExpr {
+    const decl = this.copyClassDecl(node.decl);
+
+    return { kind: node.kind, loc: node.loc, decl };
+  }
+
+  private readonly copyExpr(node: Read<Expr>): Expr {
+    switch (node.kind) {
+      case ExprKind.IntLit:
+        return this.copyIntLitExpr(node);
+      case ExprKind.FloatLit:
+        return this.copyFloatLitExpr(node);
+      case ExprKind.BoolLit:
+        return this.copyBoolLitExpr(node);
+      case ExprKind.StringLit:
+        return this.copyStringLitExpr(node);
+      case ExprKind.Undefined:
+        return this.copyUndefinedExpr(node);
+      case ExprKind.Template:
+        return this.copyTemplateExpr(node);
+      case ExprKind.ArrayLit:
+        return this.copyArrayLitExpr(node);
+      case ExprKind.ObjectLit:
+        return this.copyObjectLitExpr(node);
+      case ExprKind.Name:
+        return this.copyNameExpr(node);
+      case ExprKind.Member:
+        return this.copyMemberExpr(node);
+      case ExprKind.Index:
+        return this.copyIndexExpr(node);
+      case ExprKind.Unary:
+        return this.copyUnaryExpr(node);
+      case ExprKind.Binary:
+        return this.copyBinaryExpr(node);
+      case ExprKind.Assign:
+        return this.copyAssignExpr(node);
+      case ExprKind.Update:
+        return this.copyUpdateExpr(node);
+      case ExprKind.Call:
+        return this.copyCallExpr(node);
+      case ExprKind.New:
+        return this.copyNewExpr(node);
+      case ExprKind.Conditional:
+        return this.copyConditionalExpr(node);
+      case ExprKind.Cast:
+        return this.copyCastExpr(node);
+      case ExprKind.Sequence:
+        return this.copySequenceExpr(node);
+      case ExprKind.OptionalChain:
+        return this.copyOptionalChainExpr(node);
+      case ExprKind.Function:
+        return this.copyFunctionExpr(node);
+      case ExprKind.Yield:
+        return this.copyYieldExpr(node);
+      case ExprKind.RegexLit:
+        return this.copyRegexLitExpr(node);
+      case ExprKind.Await:
+        return this.copyAwaitExpr(node);
+      case ExprKind.Class:
+        return this.copyClassExpr(node);
+    }
+
+    return { kind: ExprKind.Undefined, loc: node.loc };
+  }
+}

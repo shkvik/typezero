@@ -12,14 +12,18 @@ import { Mark } from "./types/cursor.types.tz";
 import { kEnd, kNotResumed } from "./const/cursor.const.tz";
 
 export class Cursor {
-  private readonly tokens: readonly Token[];
+  private tokens: Token[];
   private at: int;
   private recovering: boolean;
   private discarding: int;
   private resumedAt: int;
   public errors: SourceError[];
 
-  public constructor(tokens: readonly Token[]) {
+  public takeTokens(): Token[] {
+    return replace(this.tokens, []);
+  }
+
+  public constructor(tokens: Own<Token[]>) {
     this.tokens = tokens;
     this.at = 0;
     this.recovering = false;

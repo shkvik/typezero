@@ -19,9 +19,12 @@ import {
 
 partial class ExpressionTypes {
   private equalityTyped(expr: BinaryExpr, module: int): Type {
-    const boolean = this.store.plain(TypeKind.Boolean);
+    const tree = this.types.program.tree;
+
+    const boolean = this.types.store.plain(TypeKind.Boolean);
     const isNull =
-      this.isNullSide(expr.lhs, module) || this.isNullSide(expr.rhs, module);
+      this.isNullSide(tree.exprOf(expr.lhsId), module) ||
+      this.isNullSide(tree.exprOf(expr.rhsId), module);
     if (isNull) {
       this.nullEquality(expr, module);
 
@@ -30,10 +33,17 @@ partial class ExpressionTypes {
 
     const sides = this.comparedOperands(expr, module);
 
-    this.typeOfCheck(sides.left, expr.rhs, module);
-    this.typeOfCheck(sides.right, expr.lhs, module);
+    const rhsExpr = tree.exprOf(expr.rhsId);
 
-    const pair = { left: sides.left.type, right: sides.right.type };
+    this.typeOfCheck(sides.left, rhsExpr, module);
+    const lhs = tree.exprOf(expr.lhsId);
+
+    this.typeOfCheck(sides.right, lhs, module);
+
+    const pair: OperandPair = {
+      left: sides.left.type,
+      right: sides.right.type,
+    };
 
     this.equalOperands(expr, pair, module);
 
@@ -54,9 +64,9 @@ partial class ExpressionTypes {
       return;
     }
     if (left.kind == TypeKind.Void || right.kind == TypeKind.Void) {
-      const operandsError = this.operators.operandsError(expr, pair);
+      const operandsError = this.types.operandsError(expr, pair);
 
-      return this.reportFound(module, operandsError);
+      return this.errors.writeFound(module, operandsError);
     }
     if (left.kind == TypeKind.Undefined || right.kind == TypeKind.Undefined) {
       return;
@@ -65,24 +75,26 @@ partial class ExpressionTypes {
     const hasJson =
       plainLeft.kind == TypeKind.Json || plainRight.kind == TypeKind.Json;
     if (hasJson) {
-      const jsonEqualityError = this.comparisons.jsonEqualityError(expr, pair);
+      const jsonEqualityError = this.types.jsonEqualityError(expr, pair);
 
-      return this.reportFound(module, jsonEqualityError);
+      return this.errors.writeFound(module, jsonEqualityError);
     }
 
     const hasResult =
       plainLeft.kind == TypeKind.Result || plainRight.kind == TypeKind.Result;
     if (hasResult) {
-      const other = this.sources.operatorText(expr.op);
+      const other = this.types.operatorText(expr.op);
 
-      return this.report(module, expr.loc, Code.ResultsCompared, { other });
+      return this.errors.write(module, expr.loc, Code.ResultsCompared, {
+        other,
+      });
     }
 
     const hasParameter =
       plainLeft.kind == TypeKind.TypeParameter ||
       plainRight.kind == TypeKind.TypeParameter;
-    if (hasParameter && plainLeft == plainRight) {
-      const word = this.sources.operatorText(expr.op);
+    if (hasParameter && plainLeft.id == plainRight.id) {
+      const word = this.types.operatorText(expr.op);
 
       return this.requireOf(plainLeft, RequirementKind.Compare, word);
     }
@@ -97,36 +109,51 @@ partial class ExpressionTypes {
       return;
     }
 
-    const common = this.comparisons.comparisonType(adapted.left, adapted.right);
+    const common = this.types.comparisonType(adapted.left, adapted.right);
     if (common == undefined) {
-      const incomparableError = this.comparisons.incomparableError(
+      const incomparableError = this.types.incomparableError(
         expr,
         adapted,
         module,
       );
 
-      this.reportFound(module, incomparableError);
+      this.errors.writeFound(module, incomparableError);
     }
   }
 
   private comparedOperands(expr: BinaryExpr, module: int): ComparedPair {
-    const isLiteralLeft = this.comparisons.isComparedLiteral(expr.lhs);
-    const isLiteralRight = this.comparisons.isComparedLiteral(expr.rhs);
+    const tree = this.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const isLiteralLeft = this.types.isComparedLiteral(lhs);
+    const isLiteralRight = this.types.isComparedLiteral(
+      tree.exprOf(expr.rhsId),
+    );
     if (isLiteralLeft && !isLiteralRight) {
-      const right = this.comparedSide(expr.rhs, undefined, module);
-      const leftHint = this.comparisons.comparisonHint(right.type, expr.lhs);
-      const left = this.comparedSide(expr.lhs, leftHint, module);
+      const right = this.comparedSide(
+        tree.exprOf(expr.rhsId),
+        undefined,
+        module,
+      );
+      const leftHint = this.types.comparisonHint(
+        right.type,
+        tree.exprOf(expr.lhsId),
+      );
+      const lhsExpr = tree.exprOf(expr.lhsId);
+      const left = this.comparedSide(lhsExpr, leftHint, module);
 
       return { left, right };
     }
 
-    const left = this.comparedSide(expr.lhs, undefined, module);
-    const rightHint = this.comparisons.literalComparisonHint(
+    const exprLhs = tree.exprOf(expr.lhsId);
+    const left = this.comparedSide(exprLhs, undefined, module);
+    const rightHint = this.types.literalComparisonHint(
       isLiteralRight,
       left.type,
-      expr.rhs,
+      tree.exprOf(expr.rhsId),
     );
-    const right = this.comparedSide(expr.rhs, rightHint, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.comparedSide(rhs, rightHint, module);
 
     return { left, right };
   }
@@ -136,12 +163,15 @@ partial class ExpressionTypes {
     hint: Type | undefined,
     module: int,
   ): ComparedSide {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Unary || expr.op != UnaryOp.TypeOf) {
       return { type: this.typed(expr, hint, module) };
     }
 
-    const tested = this.typed(expr.operand, undefined, module);
-    const type = this.store.plain(TypeKind.String);
+    const operand = tree.exprOf(expr.operandId);
+    const tested = this.typed(operand, undefined, module);
+    const type = this.types.store.plain(TypeKind.String);
 
     return { type, tested };
   }
@@ -151,19 +181,26 @@ partial class ExpressionTypes {
   }
 
   private nullEquality(expr: BinaryExpr, module: int): void {
-    const isLeftNull = this.isNullSide(expr.lhs, module);
-    const isRightNull = this.isNullSide(expr.rhs, module);
-    const nullSide = this.comparisons.nullOperand(isLeftNull, expr);
+    const tree = this.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const isLeftNull = this.isNullSide(lhs, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const isRightNull = this.isNullSide(rhs, module);
+    const nullSide = this.types.nullOperand(isLeftNull, expr);
     const type = this.nullOther(isLeftNull, isRightNull, expr, module);
     const plain = this.types.definedType(type);
     if (type.kind == TypeKind.Error || plain.kind == TypeKind.Json) {
       return;
     }
 
-    const first = this.text.of(type);
-    const other = this.sources.operatorText(expr.op);
+    const first = this.types.typeText(type);
+    const other = this.types.operatorText(expr.op);
 
-    this.report(module, nullSide.loc, Code.NullNeverEqual, { first, other });
+    this.errors.write(module, nullSide.loc, Code.NullNeverEqual, {
+      first,
+      other,
+    });
   }
 
   private nullOther(
@@ -172,24 +209,31 @@ partial class ExpressionTypes {
     expr: BinaryExpr,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     if (isLeftNull && isRightNull) {
-      return this.store.plain(TypeKind.Undefined);
+      return this.types.store.plain(TypeKind.Undefined);
     }
     if (isLeftNull) {
-      return this.typed(expr.rhs, undefined, module);
+      const rhs = tree.exprOf(expr.rhsId);
+
+      return this.typed(rhs, undefined, module);
     }
 
-    return this.typed(expr.lhs, undefined, module);
+    const lhs = tree.exprOf(expr.lhsId);
+
+    return this.typed(lhs, undefined, module);
   }
 
   private orderTyped(expr: BinaryExpr, module: int): Type {
-    const boolean = this.store.plain(TypeKind.Boolean);
+    const boolean = this.types.store.plain(TypeKind.Boolean);
     const sides = this.comparedOperands(expr, module);
     const written = sides.left.type;
     const isSameParameter =
-      written.kind == TypeKind.TypeParameter && written == sides.right.type;
+      written.kind == TypeKind.TypeParameter &&
+      written.id == sides.right.type.id;
     if (isSameParameter) {
-      const word = this.sources.operatorText(expr.op);
+      const word = this.types.operatorText(expr.op);
 
       this.requireOf(written, RequirementKind.Compare, word);
 
@@ -219,27 +263,27 @@ partial class ExpressionTypes {
       return;
     }
     if (this.types.isDate(left) || this.types.isDate(right)) {
-      const dateComparisonErrors = this.dates.dateComparisonErrors(expr, pair);
+      const dateComparisonErrors = this.types.dateComparisonErrors(expr, pair);
 
-      return this.reportAll(module, dateComparisonErrors);
+      return this.errors.writeAll(module, dateComparisonErrors);
     }
     if (left.kind == TypeKind.Decimal || right.kind == TypeKind.Decimal) {
       return this.decimalComparison(expr, pair, module);
     }
     if (!this.types.isNumeric(left) || !this.types.isNumeric(right)) {
-      const operandsError = this.operators.operandsError(expr, pair);
+      const operandsError = this.types.operandsError(expr, pair);
 
-      return this.reportFound(module, operandsError);
+      return this.errors.writeFound(module, operandsError);
     }
 
     const adapted = this.adapted(expr, pair, module);
-    const isSame = adapted.left == adapted.right;
+    const isSame = adapted.left.id == adapted.right.id;
     const hasIntegers =
       adapted.left.kind == TypeKind.Int && adapted.right.kind == TypeKind.Int;
     if (!isSame && !hasIntegers) {
-      const mixedError = this.operators.mixedError(expr, adapted, module);
+      const mixedError = this.types.mixedError(expr, adapted, module);
 
-      this.reportFound(module, mixedError);
+      this.errors.writeFound(module, mixedError);
     }
   }
 
@@ -248,12 +292,22 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): void {
-    const isLeftFitting = this.isDecimalSide(expr.lhs, pair.left, module);
-    const isRightFitting = this.isDecimalSide(expr.rhs, pair.right, module);
-    if (!isLeftFitting || !isRightFitting) {
-      const decimalMixError = this.decimals.decimalMixError(expr, pair, module);
+    const tree = this.types.program.tree;
 
-      this.reportFound(module, decimalMixError);
+    const isLeftFitting = this.isDecimalSide(
+      tree.exprOf(expr.lhsId),
+      pair.left,
+      module,
+    );
+    const isRightFitting = this.isDecimalSide(
+      tree.exprOf(expr.rhsId),
+      pair.right,
+      module,
+    );
+    if (!isLeftFitting || !isRightFitting) {
+      const decimalMixError = this.types.decimalMixError(expr, pair, module);
+
+      this.errors.writeFound(module, decimalMixError);
     }
   }
 
@@ -262,38 +316,43 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const expected = this.types.wantedPart(wanted);
-    const given = this.typed(expr.lhs, expected, module);
-    const left = this.matchBeforeList(given, expr.rhs);
+    const lhs = tree.exprOf(expr.lhsId);
+    const given = this.typed(lhs, expected, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const left = this.matchBeforeList(given, rhs);
     if (left.kind == TypeKind.Error) {
       return left;
     }
 
-    const hint = this.comparisons.nullishHint(left, expected);
-    const right = this.typed(expr.rhs, hint, module);
+    const hint = this.types.nullishHint(left, expected);
+    const rhsExpr = tree.exprOf(expr.rhsId);
+    const right = this.typed(rhsExpr, hint, module);
     const pair: OperandPair = { left, right };
 
     if (left.kind == TypeKind.Error || right.kind == TypeKind.Error) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (left.kind == TypeKind.Void || right.kind == TypeKind.Void) {
-      const operandsError = this.operators.operandsError(expr, pair);
+      const operandsError = this.types.operandsError(expr, pair);
 
-      this.reportFound(module, operandsError);
+      this.errors.writeFound(module, operandsError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (left.kind == TypeKind.Undefined) {
       return right;
     }
 
-    const base = this.comparisons.nullishBase(left, right);
+    const base = this.types.nullishBase(left, right);
     if (base == undefined || base.kind == TypeKind.Error) {
-      const operandsError2 = this.operators.operandsError(expr, pair);
+      const operandsError2 = this.types.operandsError(expr, pair);
 
-      this.reportFound(module, operandsError2);
+      this.errors.writeFound(module, operandsError2);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.types.isOptional(right) || right.kind == TypeKind.Undefined) {
       return this.types.optional(base);

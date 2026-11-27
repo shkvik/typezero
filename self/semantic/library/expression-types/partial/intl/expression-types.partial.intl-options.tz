@@ -43,24 +43,24 @@ partial class ExpressionTypes {
   ): boolean {
     const given = this.typed(options, undefined, module);
     const base = this.types.definedType(given);
-    if (given.kind == TypeKind.Error || this.modules.isLibraryModule(module)) {
+    if (given.kind == TypeKind.Error || this.types.isLibraryModule(module)) {
       return false;
     }
     if (given.kind == TypeKind.Undefined && isDisplay) {
-      const noTypeError = this.intl.optionsNoTypeError(options.loc);
+      const noTypeError = this.types.optionsNoTypeError(options.loc);
 
-      this.reportFound(module, noTypeError);
+      this.errors.writeFound(module, noTypeError);
 
       return false;
     }
-    if (!this.intl.isPlainOptions(given)) {
-      const objectError = this.intl.optionsObjectError(
+    if (!this.types.isPlainOptions(given)) {
+      const objectError = this.types.optionsObjectError(
         options.loc,
         what,
         given,
       );
 
-      this.reportFound(module, objectError);
+      this.errors.writeFound(module, objectError);
 
       return false;
     }
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
 
     let isFine = isLocaleOk;
 
-    for (const field of base.fields) {
+    for (const field of this.types.store.fieldsOf(base)) {
       const isFieldOk = this.intlFieldCheck(
         options,
         field,
@@ -86,17 +86,34 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const isTextOk = this.intlTextsCheck(options, base.fields, service, module);
+    const isTextOk = this.intlTextsCheck(
+      options,
+      this.types.store.fieldsOf(base),
+      service,
+      module,
+    );
     const isDeclared =
       options.kind != ExprKind.ObjectLit &&
-      this.store.labelOf(base) != undefined;
+      this.types.store.labelOf(base) != undefined;
     if (isDeclared) {
       return isTextOk;
     }
 
-    const isRangeOk = this.intlRangesCheck(options, base.fields, module);
-    const isPairOk = this.intlPairsCheck(options, base.fields, module);
-    const isRoundOk = this.intlRoundingCheck(options, base.fields, module);
+    const isRangeOk = this.intlRangesCheck(
+      options,
+      this.types.store.fieldsOf(base),
+      module,
+    );
+    const isPairOk = this.intlPairsCheck(
+      options,
+      this.types.store.fieldsOf(base),
+      module,
+    );
+    const isRoundOk = this.intlRoundingCheck(
+      options,
+      this.types.store.fieldsOf(base),
+      module,
+    );
 
     return isTextOk && isRangeOk && isPairOk && isRoundOk;
   }
@@ -108,17 +125,17 @@ partial class ExpressionTypes {
     what: string,
     module: int,
   ): boolean {
-    const option = this.intl.option(service, field.name);
+    const option = this.tables.intlOption(service, field.name);
     const loc = this.optionLoc(options, field.name);
     if (option == undefined) {
-      const unknownError = this.intl.unknownOptionError(
+      const unknownError = this.types.intlUnknownOptionError(
         loc,
         field.name,
         what,
         service,
       );
 
-      this.reportFound(module, unknownError);
+      this.errors.writeFound(module, unknownError);
 
       return false;
     }
@@ -127,10 +144,10 @@ partial class ExpressionTypes {
     if (value.kind == TypeKind.Undefined) {
       return true;
     }
-    if (!this.intl.kindFits(option.kind, value)) {
-      const kindError = this.intl.optionKindError(loc, option, field.type);
+    if (!this.types.kindFits(option.kind, value)) {
+      const kindError = this.types.optionKindError(loc, option, field.type);
 
-      this.reportFound(module, kindError);
+      this.errors.writeFound(module, kindError);
 
       return false;
     }
@@ -140,11 +157,11 @@ partial class ExpressionTypes {
     if (
       text != undefined &&
       isListed &&
-      !this.intl.isAllowedText(option, text)
+      !this.types.isAllowedText(option, text)
     ) {
-      const badValueError = this.intl.badValueError(loc, option, text);
+      const badValueError = this.types.badValueError(loc, option, text);
 
-      this.reportFound(module, badValueError);
+      this.errors.writeFound(module, badValueError);
 
       return false;
     }
@@ -167,35 +184,37 @@ partial class ExpressionTypes {
     module: int,
   ): boolean {
     const value = this.optionValue(options, field.name);
-    let texts = this.intl.literalTexts(field.type);
+    let texts = this.types.literalTexts(field.type);
 
     if (value != undefined) {
       const given = this.peekType(value, module);
       const known = this.encodingTexts(value, given, module, 0);
 
-      texts = known ?? texts;
+      if (known != undefined) {
+        texts = known;
+      }
     }
     if (texts == undefined) {
-      const openError = this.intl.openValueError(loc, option);
+      const openError = this.types.openValueError(loc, option);
 
-      this.reportFound(module, openError);
+      this.errors.writeFound(module, openError);
 
       return false;
     }
 
-    const wrong = texts.find((one) => !this.intl.isAllowedText(option, one));
+    const wrong = texts.find((one) => !this.types.isAllowedText(option, one));
     if (wrong == undefined) {
       return true;
     }
 
-    const badValueError = this.intl.badValueError(loc, option, wrong);
+    const badValueError = this.types.badValueError(loc, option, wrong);
 
-    this.reportFound(module, badValueError);
+    this.errors.writeFound(module, badValueError);
 
     return false;
   }
 
-  private readonly intlTextsCheck(
+  private intlTextsCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     service: Read<IntlService>,
@@ -205,27 +224,30 @@ partial class ExpressionTypes {
     const currency = this.optionTextNamed(options, fields, kCurrencyOption);
     const unit = this.optionTextNamed(options, fields, kUnitOption);
 
-    if (currency != undefined && !this.intl.isCurrency(currency)) {
+    if (currency != undefined && !this.types.isCurrency(currency)) {
       const loc = this.optionLoc(options, kCurrencyOption);
 
-      this.reportFound(module, this.intl.currencyError(loc, currency));
+      this.errors.writeFound(module, this.types.currencyError(loc, currency));
 
       isFine = false;
     }
-    if (unit != undefined && !this.intl.isUnit(unit)) {
+    if (unit != undefined && !this.types.isUnit(unit)) {
       const loc = this.optionLoc(options, kUnitOption);
 
-      this.reportFound(module, this.intl.unitError(loc, unit));
+      this.errors.writeFound(module, this.types.unitError(loc, unit));
 
       isFine = false;
     }
 
     for (const name of kKeywordOptions) {
       const value = this.optionTextNamed(options, fields, name);
-      if (value != undefined && !this.intl.isKeywordType(value)) {
+      if (value != undefined && !this.types.isKeywordType(value)) {
         const loc = this.optionLoc(options, name);
 
-        this.reportFound(module, this.intl.keywordError(loc, value, name));
+        this.errors.writeFound(
+          module,
+          this.types.keywordError(loc, value, name),
+        );
 
         isFine = false;
       }
@@ -234,7 +256,10 @@ partial class ExpressionTypes {
     const isStyleOk = this.intlStyleCheck(options, fields, service, module);
     const hasType = fields.some((one) => one.name == kTypeOption);
     if (service.name == kDisplayNamesClass && !hasType) {
-      this.reportFound(module, this.intl.optionsNoTypeError(options.loc));
+      this.errors.writeFound(
+        module,
+        this.types.optionsNoTypeError(options.loc),
+      );
 
       return false;
     }
@@ -242,7 +267,7 @@ partial class ExpressionTypes {
     return isFine && isStyleOk;
   }
 
-  private readonly intlStyleCheck(
+  private intlStyleCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     service: Read<IntlService>,
@@ -254,7 +279,7 @@ partial class ExpressionTypes {
     }
 
     const written = this.optionText(options, style);
-    const listed = this.intl.literalTexts(style.type) ?? [];
+    const listed = this.types.literalTexts(style.type) ?? [];
     const styles = this.writtenStyles(written, listed);
     const hasCurrency = fields.some((one) => one.name == kCurrencyOption);
     const hasUnit = fields.some((one) => one.name == kUnitOption);
@@ -262,12 +287,12 @@ partial class ExpressionTypes {
     let isFine = true;
 
     if (styles.includes(kCurrencyOption) && !hasCurrency) {
-      this.reportFound(module, this.intl.styleCurrencyError(loc));
+      this.errors.writeFound(module, this.types.styleCurrencyError(loc));
 
       isFine = false;
     }
     if (styles.includes(kUnitOption) && !hasUnit) {
-      this.reportFound(module, this.intl.styleUnitError(loc));
+      this.errors.writeFound(module, this.types.styleUnitError(loc));
 
       isFine = false;
     }
@@ -317,7 +342,7 @@ partial class ExpressionTypes {
     if (constant != undefined) {
       const isInside = constant >= range.low && constant <= range.high;
       if (!isInside) {
-        const rangeError = this.intl.digitRangeError(
+        const rangeError = this.types.digitRangeError(
           loc,
           range.name,
           range.low,
@@ -325,7 +350,7 @@ partial class ExpressionTypes {
           true,
         );
 
-        this.reportFound(module, rangeError);
+        this.errors.writeFound(module, rangeError);
       }
 
       return isInside;
@@ -342,7 +367,7 @@ partial class ExpressionTypes {
       }
     }
 
-    const openError = this.intl.digitRangeError(
+    const openError = this.types.digitRangeError(
       loc,
       range.name,
       range.low,
@@ -350,7 +375,7 @@ partial class ExpressionTypes {
       false,
     );
 
-    this.reportFound(module, openError);
+    this.errors.writeFound(module, openError);
 
     return false;
   }
@@ -380,14 +405,14 @@ partial class ExpressionTypes {
         this.optionNumber(options, low) != undefined &&
         this.optionNumber(options, high) != undefined;
       const loc = this.optionLoc(options, pair.high);
-      const aboveError = this.intl.aboveError(
+      const aboveError = this.types.aboveError(
         loc,
         pair.low,
         pair.high,
         isKnown,
       );
 
-      this.reportFound(module, aboveError);
+      this.errors.writeFound(module, aboveError);
 
       isFine = false;
     }
@@ -452,7 +477,10 @@ partial class ExpressionTypes {
     }
 
     const constant = this.optionNumber(options, field);
-    const isUnion = this.intl.isIncrementUnion(field.type, kRoundingIncrements);
+    const isUnion = this.types.isIncrementUnion(
+      field.type,
+      kRoundingIncrements,
+    );
     const isKnown = constant != undefined || isUnion;
     const isListed =
       constant == undefined || kRoundingIncrements.includes(constant);
@@ -465,12 +493,12 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const incrementsError = this.intl.incrementsError(
+    const incrementsError = this.types.incrementsError(
       loc,
       constant != undefined,
     );
 
-    this.reportFound(module, incrementsError);
+    this.errors.writeFound(module, incrementsError);
 
     return false;
   }
@@ -487,7 +515,10 @@ partial class ExpressionTypes {
         one.name == "maximumSignificantDigits",
     );
     if (isSignificant) {
-      return this.reportFound(module, this.intl.incrementSignificantError(loc));
+      return this.errors.writeFound(
+        module,
+        this.types.incrementSignificantError(loc),
+      );
     }
 
     const low = fields.find((one) => one.name == "minimumFractionDigits");
@@ -498,20 +529,22 @@ partial class ExpressionTypes {
       this.isNotAbove(options, low, high, module) &&
       this.isNotAbove(options, high, low, module);
     if (!isSame) {
-      this.reportFound(module, this.intl.incrementSameError(loc));
+      this.errors.writeFound(module, this.types.incrementSameError(loc));
     }
   }
 
   private readonly optionValue(options: Expr, name: string): Expr | undefined {
+    const tree = this.types.program.tree;
+
     if (options.kind != ExprKind.ObjectLit) {
       return undefined;
     }
 
-    const found = options.props.find(
+    const found = tree.propertiesOf(options.propsList).find(
       (one) => one.form.kind != PropertyKind.Spread && one.name == name,
     );
 
-    return found?.value;
+    return tree.exprAt(found?.valueId);
   }
 
   private readonly optionLoc(options: Expr, name: string): int {
@@ -520,16 +553,16 @@ partial class ExpressionTypes {
     return value?.loc ?? options.loc;
   }
 
-  private readonly optionText(options: Expr, field: ObjectField): string | undefined {
+  private optionText(options: Expr, field: ObjectField): string | undefined {
     const value = this.optionValue(options, field.name);
     if (value != undefined) {
-      const written = this.textCoders.literalLabel(value);
+      const written = this.types.literalLabel(value);
       if (written != undefined) {
         return written;
       }
     }
 
-    const texts = this.intl.literalTexts(field.type);
+    const texts = this.types.literalTexts(field.type);
     const base = this.types.definedType(field.type);
     if (
       texts == undefined ||
@@ -542,7 +575,7 @@ partial class ExpressionTypes {
     return texts[0];
   }
 
-  private readonly optionTextNamed(
+  private optionTextNamed(
     options: Expr,
     fields: Read<ObjectField[]>,
     name: string,
@@ -555,7 +588,7 @@ partial class ExpressionTypes {
     return this.optionText(options, field);
   }
 
-  private readonly optionNumber(options: Expr, field: ObjectField): decimal | undefined {
+  private optionNumber(options: Expr, field: ObjectField): decimal | undefined {
     const value = this.optionValue(options, field.name);
     if (value != undefined) {
       const written = this.writtenNumber(value);
@@ -564,12 +597,15 @@ partial class ExpressionTypes {
       }
     }
 
-    return this.intl.literalNumber(field.type);
+    return this.types.literalNumber(field.type);
   }
 
   private readonly writtenNumber(value: Expr): decimal | undefined {
+    const tree = this.types.program.tree;
+
     if (value.kind == ExprKind.Unary && value.op == UnaryOp.Neg) {
-      const inner = this.writtenNumber(value.operand);
+      const operand = tree.exprOf(value.operandId);
+      const inner = this.writtenNumber(operand);
 
       return this.oppositeOf(inner);
     }

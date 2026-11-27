@@ -3,24 +3,32 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  Expr,
   ExprKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   NameOrigin,
-  VarDeclarator,
 } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
-  Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
-import { Decorator } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
   ExportForm,
   ModuleName,
   ModulePath,
 } from "../../../../program/ast/types/ast.types.modules.tz";
 import { kExportNames } from "../const/file-parser.const.modules.tz";
+import {
+  Decorator,
+} from "../../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
 
 partial class FileParser {
   private readonly partialClassAhead(): boolean {

@@ -1,0 +1,131 @@
+import { StmtKind } from "../../ast/types/ast.types.statements.tz";
+import {
+  ClassDecl,
+  EnumDecl,
+  HandleDecl,
+  TypeAliasDecl,
+} from "./syntax.types.classes.tz";
+import { Expr } from "./syntax.types.expressions.tz";
+import { FunctionDecl } from "./syntax.types.functions.tz";
+import { VarDeclarator } from "./syntax.types.patterns.tz";
+
+export type BlockStmt = {
+  readonly kind: StmtKind.Block;
+  readonly loc: int;
+  readonly body: readonly Stmt[];
+  readonly end?: int;
+};
+
+export type VarDeclStmt = {
+  readonly kind: StmtKind.VarDecl;
+  readonly loc: int;
+  readonly isConst: boolean;
+  readonly isUsing: boolean;
+  readonly decls: readonly VarDeclarator[];
+};
+
+export type ExprStmt = {
+  readonly kind: StmtKind.Expr;
+  readonly loc: int;
+  readonly expr: Expr;
+};
+
+export type IfStmt = {
+  readonly kind: StmtKind.If;
+  readonly loc: int;
+  readonly cond: Expr;
+  readonly thenStmt: Stmt;
+  readonly elseStmt?: Stmt;
+};
+
+export type WhileStmt = {
+  readonly kind: StmtKind.While;
+  readonly loc: int;
+  readonly cond: Expr;
+  readonly body: Stmt;
+};
+
+export type DoWhileStmt = {
+  readonly kind: StmtKind.DoWhile;
+  readonly loc: int;
+  readonly body: Stmt;
+  readonly cond: Expr;
+};
+
+export type ForStmt = {
+  readonly kind: StmtKind.For;
+  readonly loc: int;
+  readonly init?: Stmt;
+  readonly cond?: Expr;
+  readonly step?: Expr;
+  readonly body?: Stmt;
+};
+
+export type ForOfStmt = {
+  readonly kind: StmtKind.ForOf;
+  readonly loc: int;
+  readonly isConst: boolean;
+  readonly isUsing: boolean;
+  readonly keys: boolean;
+  readonly isAwait: boolean;
+  readonly binding: VarDeclarator;
+  readonly iterable: Expr;
+  readonly body: Stmt;
+};
+
+export type SwitchCase = {
+  readonly loc: int;
+  readonly test?: Expr;
+  readonly body: readonly Stmt[];
+};
+
+export type SwitchStmt = {
+  readonly kind: StmtKind.Switch;
+  readonly loc: int;
+  readonly discriminant: Expr;
+  readonly cases: readonly SwitchCase[];
+};
+
+export type LabeledStmt = {
+  readonly kind: StmtKind.Labeled;
+  readonly loc: int;
+  readonly label: string;
+  readonly body: Stmt;
+};
+
+export type ReturnStmt = {
+  readonly kind: StmtKind.Return;
+  readonly loc: int;
+  readonly value?: Expr;
+};
+
+export type JumpStmt = {
+  readonly kind: StmtKind.Break | StmtKind.Continue;
+  readonly loc: int;
+  readonly label: string;
+};
+
+export type MarkerStmt = {
+  readonly kind: StmtKind.Empty | StmtKind.Debugger;
+  readonly loc: int;
+};
+
+export type Stmt =
+  | BlockStmt
+  | VarDeclStmt
+  | FunctionDecl
+  | ExprStmt
+  | IfStmt
+  | WhileStmt
+  | DoWhileStmt
+  | ForStmt
+  | ForOfStmt
+  | SwitchStmt
+  | LabeledStmt
+  | ReturnStmt
+  | JumpStmt
+  | MarkerStmt
+  | TypeAliasDecl
+  | EnumDecl
+  | ClassDecl
+  | HandleDecl;

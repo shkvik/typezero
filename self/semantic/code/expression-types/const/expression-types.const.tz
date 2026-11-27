@@ -384,4 +384,5 @@ export const kUnsafeReason = "reason";
 export const kUnsafeModuleName = "tz:unsafe";
 export const kUnsafeUsesName = "uses";
 export const kUnsafeMemory = "Memory";
-export const kUnsafeUses = ["Memory", "Cell", "Foreign"];
+export const kUnsafeUses = ["Memory", "Foreign"];
+export const kLentArrayMethods = ["slice", "filter", "view"];

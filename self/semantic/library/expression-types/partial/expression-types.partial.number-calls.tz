@@ -14,30 +14,34 @@ import {
 } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly doubleConversionCheck(
+  private doubleConversionCheck(
     member: MemberExpr,
     object: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const base = this.types.apparent(object);
     if (base.kind != TypeKind.Double) {
       return false;
     }
 
-    const word = this.sources.operandName(member.object);
+    const objectExpr = tree.exprOf(member.objectId);
+    const word = this.types.operandName(objectExpr);
     if (member.name == "toDecimal") {
-      this.report(module, member.loc, Code.DoubleToDecimal, { word });
+      this.errors.write(module, member.loc, Code.DoubleToDecimal, { word });
 
       return true;
     }
     if (!kIntegerConversions.includes(member.name)) {
       return false;
     }
-    if (this.isRoundingCall(member.object, module)) {
+    const memberObject = tree.exprOf(member.objectId);
+    if (this.isRoundingCall(memberObject, module)) {
       return false;
     }
 
-    this.report(module, member.loc, Code.DoubleUnrounded, {
+    this.errors.write(module, member.loc, Code.DoubleUnrounded, {
       word,
       other: member.name,
     });
@@ -46,16 +50,18 @@ partial class ExpressionTypes {
   }
 
   private readonly isRoundingCall(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Call) {
       return false;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return false;
     }
 
-    const holder = callee.object;
+    const holder = tree.exprOf(callee.objectId);
 
     return (
       holder.kind == ExprKind.Name &&
@@ -66,56 +72,63 @@ partial class ExpressionTypes {
   }
 
   private mathOneTypeCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return;
     }
 
-    const holder = callee.object;
+    const holder = tree.exprOf(callee.objectId);
     const isMath =
       holder.kind == ExprKind.Name &&
       holder.name == kMathName &&
       this.isGlobalUse(holder, module);
     const isRanged =
       callee.name == "min" || callee.name == "max" || callee.name == "clamp";
-    if (!isMath || !isRanged || expr.args.length < 2) {
+    if (!isMath || !isRanged || tree.argumentsOf(expr.argsList).length < 2) {
       return;
     }
 
     this.errors.beginTrial();
 
-    const types = expr.args.map((arg) =>
-      this.types.apparent(this.typed(arg.expr, undefined, module)),
-    );
+    const types = tree
+      .argumentsOf(expr.argsList)
+      .map((arg) =>
+        this.types.apparent(
+          this.typed(tree.exprOf(arg.exprId), undefined, module),
+        ),
+      );
 
     this.errors.endTrial();
 
-    const first = expr.args.findIndex(
-      (arg) => !this.shapes.isNumberLiteral(arg.expr),
+    const first = tree.argumentsOf(expr.argsList).findIndex(
+      (arg) => !this.types.isNumberLiteral(tree.exprOf(arg.exprId)),
     );
     const common = types[first];
-    if (common == undefined || !this.library.isMathNumber(common)) {
+    if (common == undefined || !this.types.isMathNumber(common)) {
       return;
     }
 
-    for (let index = first + 1; index < expr.args.length; index++) {
-      const arg = expr.args[index]?.expr;
+    for (
+      let index = first + 1;
+      index < tree.argumentsOf(expr.argsList).length;
+      index++
+    ) {
+      const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
       const type = types[index];
-      if (arg == undefined || type == undefined || type == common) {
+      if (arg == undefined || type == undefined || type.id == common.id) {
         continue;
       }
-      if (
-        !this.library.isMathNumber(type) ||
-        this.shapes.isNumberLiteral(arg)
-      ) {
+      if (!this.types.isMathNumber(type) || this.types.isNumberLiteral(arg)) {
         continue;
       }
 
-      const place = this.library.mathOneHint(arg, type, common);
+      const place = this.types.mathOneHint(arg, type, common);
 
-      this.report(module, arg.loc, Code.MathOneType, {
-        first: this.text.of(common),
-        second: this.text.of(type),
+      this.errors.write(module, arg.loc, Code.MathOneType, {
+        first: this.types.typeText(common),
+        second: this.types.typeText(type),
         place,
       });
 
@@ -124,18 +137,20 @@ partial class ExpressionTypes {
   }
 
   private mathSpreadCall(expr: CallExpr, module: int): Type | undefined {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return undefined;
     }
 
-    const holder = callee.object;
+    const holder = tree.exprOf(callee.objectId);
     const isMath =
       holder.kind == ExprKind.Name &&
       holder.name == kMathName &&
       this.isGlobalUse(holder, module);
     const isRanged = callee.name == "min" || callee.name == "max";
-    const isSpread = expr.args.some((arg) => arg.spread);
+    const isSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
     if (!isMath || !isRanged || !isSpread) {
       return undefined;
     }
@@ -144,42 +159,49 @@ partial class ExpressionTypes {
     let hasValue = false;
     let isNumeric = true;
 
-    for (const arg of expr.args) {
+    for (const arg of tree.argumentsOf(expr.argsList)) {
       if (!arg.spread) {
         const type = this.types.apparent(
-          this.typed(arg.expr, undefined, module),
+          this.typed(tree.exprOf(arg.exprId), undefined, module),
         );
 
         hasValue = true;
-        isNumeric = isNumeric && this.library.isMathNumber(type);
+        isNumeric = isNumeric && this.types.isMathNumber(type);
 
         continue;
       }
 
-      const item = this.spreadNumbers(arg.expr, module);
+      const exprExpr = tree.exprOf(arg.exprId);
+      const item = this.spreadNumbers(exprExpr, module);
       if (item == undefined) {
         isNumeric = false;
 
         continue;
       }
-      if (this.isFilledSource(arg.expr, module)) {
+      const argExpr = tree.exprOf(arg.exprId);
+      if (this.isFilledSource(argExpr, module)) {
         hasValue = true;
       }
-      if (common != undefined && common != item) {
-        this.report(module, arg.expr.loc, Code.MathSpreadType, {
-          word: callee.name,
-          first: this.text.of(common),
-          second: this.text.of(item),
-        });
+      if (common != undefined && common.id != item.id) {
+        this.errors.write(
+          module,
+          tree.exprOf(arg.exprId).loc,
+          Code.MathSpreadType,
+          {
+            word: callee.name,
+            first: this.types.typeText(common),
+            second: this.types.typeText(item),
+          },
+        );
 
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
 
       common = item;
     }
 
     if (!isNumeric || common == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (hasValue) {
       return common;
@@ -199,12 +221,12 @@ partial class ExpressionTypes {
     if (item != undefined && item.kind == TypeKind.Error) {
       return undefined;
     }
-    if (item != undefined && this.library.isMathNumber(item)) {
+    if (item != undefined && this.types.isMathNumber(item)) {
       return item;
     }
 
-    this.report(module, arg.loc, Code.MathSpreadNotNumbers, {
-      word: this.text.of(type),
+    this.errors.write(module, arg.loc, Code.MathSpreadNotNumbers, {
+      word: this.types.typeText(type),
     });
 
     return undefined;
@@ -224,10 +246,12 @@ partial class ExpressionTypes {
   }
 
   private isFilledSource(arg: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (arg.kind == ExprKind.ArrayLit) {
       return (
-        arg.elements.length > 0 &&
-        arg.elements.every((element) => !element.spread)
+        tree.elementsOf(arg.elementsList).length > 0 &&
+        tree.elementsOf(arg.elementsList).every((element) => !element.spread)
       );
     }
 

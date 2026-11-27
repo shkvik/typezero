@@ -1,0 +1,6 @@
+export const kOpenBrace = 123;
+export const kCloseBrace = 125;
+export const kOpenBracket = 91;
+export const kCloseBracket = 93;
+export const kComma = 44;
+export const kDigitZero = 48;

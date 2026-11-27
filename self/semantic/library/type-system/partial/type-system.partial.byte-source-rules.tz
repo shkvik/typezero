@@ -1,0 +1,539 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  ProofRange,
+} from "../../../flow/proof-rules/types/proof-rules.types.tz";
+import {
+  ByteKindInfo,
+} from "../../byte-number-rules/types/byte-number-rules.types.tz";
+import {
+  kArrayBufferClass,
+  kBufferName,
+  kUnionNarrowNames,
+  kFlatMapName,
+  kLocaleName,
+  kTextCoderNames,
+  kBufferEncodingLabel,
+  kBufferEncodings,
+  kSizeNames,
+  kComparePositions,
+  kCopyPositions,
+  kElementSizes,
+} from "../../byte-source-rules/const/byte-source-rules.const.tz";
+import {
+  BytePosition,
+  SourceShape,
+} from "../../byte-source-rules/types/byte-source-rules.types.tz";
+
+partial class TypeSystem {
+  public isArrayBuffer(type: Type): boolean {
+    const base = this.definedType(type);
+
+    return base.kind == TypeKind.Instance && base.name == kArrayBufferClass;
+  }
+
+  public typedName(type: Type): string | undefined {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return undefined;
+    }
+    if (this.elementOf(base) == undefined) {
+      return undefined;
+    }
+
+    return base.name;
+  }
+
+  public byteSourceInfoOf(type: Type): ByteKindInfo | undefined {
+    const element = this.elementOf(type);
+    if (element == undefined || this.isClamped(type)) {
+      return undefined;
+    }
+
+    return this.infoOfElement(element);
+  }
+
+  public sourceShape(from: Type): SourceShape {
+    const base = this.definedType(from);
+    const typed = this.elementOf(base);
+    if (typed != undefined) {
+      return { element: typed, isTyped: true };
+    }
+    if (base.kind == TypeKind.Array) {
+      return { element: this.store.itemOf(base), isTyped: false };
+    }
+    if (base.kind == TypeKind.Iterator) {
+      return {
+        element: this.store.iteratorShapeOf(base).yielded,
+        isTyped: false,
+      };
+    }
+
+    return { isTyped: false };
+  }
+
+  public notSourceError(loc: int, target: string, from: Type): SourceError {
+    const base = this.definedType(from);
+    const first = this.typeText(from);
+    const other = this.stringHint(base.kind == TypeKind.String);
+
+    return {
+      code: Code.BytesSourceKind,
+      loc,
+      details: { word: target, first, other },
+    };
+  }
+
+  public readonly notIterableError(
+    loc: int,
+    target: string,
+    from: Type,
+  ): SourceError {
+    const word = `'${target}.from'`;
+    const first = this.typeText(from);
+
+    return { code: Code.BytesFromSource, loc, details: { word, first } };
+  }
+
+  public elementError(
+    loc: int,
+    target: Type,
+    from: Type,
+    shape: SourceShape,
+    shown: string,
+  ): SourceError | undefined {
+    const element = shape.element;
+    const word = this.typeText(target);
+    const first = this.typeText(from);
+    if (element == undefined) {
+      return undefined;
+    }
+
+    const base = this.definedType(element);
+    const isNumber = base.kind == TypeKind.Int || base.kind == TypeKind.Double;
+    if (!isNumber) {
+      return {
+        code: Code.BytesSourceNotNumbers,
+        loc,
+        details: { word, first },
+      };
+    }
+
+    const info = this.byteSourceInfoOf(target);
+    const range = info?.range;
+    if (info == undefined || range == undefined) {
+      return undefined;
+    }
+    if (base.kind == TypeKind.Double) {
+      const details: Details = { word, first, other: shown };
+
+      return { code: Code.BytesSourceDoubles, loc, details };
+    }
+
+    return this.rangeError(loc, info, range, shape, word, first, shown);
+  }
+
+  public setIteratorError(loc: int, from: Type): SourceError | undefined {
+    const base = this.definedType(from);
+    if (base.kind != TypeKind.Iterator) {
+      return undefined;
+    }
+
+    return { code: Code.BytesSetIterator, loc, details: kNoDetails };
+  }
+
+  public readonly setFitError(
+    loc: int,
+    offset: string | undefined,
+    source: string,
+    target: string,
+  ): SourceError {
+    const start = this.startText(offset);
+    const word = `${start}${source}.length <= ${target}.length`;
+
+    return { code: Code.BytesSetUnproven, loc, details: { word } };
+  }
+
+  public readonly withIndexError(loc: int, array: string): SourceError {
+    return { code: Code.BytesWithIndex, loc, details: { word: array } };
+  }
+
+  public readonly valueArgumentError(
+    loc: int,
+    name: string,
+    found: Type,
+  ): SourceError {
+    const first = this.typeText(found);
+
+    return {
+      code: Code.BufferValueArgument,
+      loc,
+      details: { word: name, first },
+    };
+  }
+
+  public readonly allocFillError(loc: int, found: Type): SourceError {
+    const first = this.typeText(found);
+
+    return { code: Code.BufferAllocFill, loc, details: { first } };
+  }
+
+  public mapFitError(loc: int, target: Type): SourceError | undefined {
+    const info = this.byteSourceInfoOf(target);
+    const range = info?.range;
+    if (info == undefined || range == undefined) {
+      return undefined;
+    }
+
+    const word = `an element of '${this.typeText(target)}'`;
+    const place = this.byteSourceRangeText(range);
+    const other = this.wrapHint(info, "f(x)");
+
+    return {
+      code: Code.BytesMapUnproven,
+      loc,
+      details: { word, place, other },
+    };
+  }
+
+  public isFillValue(type: Type): boolean {
+    const base = this.definedType(type);
+    if (base.kind == TypeKind.Int || base.kind == TypeKind.String) {
+      return true;
+    }
+
+    return this.isByteSource(base);
+  }
+
+  public readonly byteRange(): ProofRange {
+    return { what: "a byte", low: 0, high: 255 };
+  }
+
+  public readonly byteSourceByteInfo(): ByteKindInfo | undefined {
+    return this.byteInfo();
+  }
+
+  public readonly positionsOf(name: string): BytePosition[] {
+    if (name == "compare") {
+      return kComparePositions.slice();
+    }
+    if (name == "copy") {
+      return kCopyPositions.slice();
+    }
+
+    return [];
+  }
+
+  public elementSize(type: Type): decimal | undefined {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const row = kElementSizes.find((one) => one.name == base.name);
+
+    return row?.size;
+  }
+
+  public readonly sizeOfName(name: string): decimal | undefined {
+    const row = kElementSizes.find((one) => one.name == name);
+
+    return row?.size;
+  }
+
+  public isByteView(type: Type): boolean {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    return (
+      base.name != kArrayBufferClass && this.elementSize(base) != undefined
+    );
+  }
+
+  public readonly offsetAlignedError(
+    loc: int,
+    what: string,
+    size: decimal,
+  ): SourceError {
+    const details: Details = { word: what, other: `${size}` };
+
+    return { code: Code.ViewOffsetAligned, loc, details };
+  }
+
+  public readonly sizeAlignedError(
+    loc: int,
+    what: string,
+    size: decimal,
+  ): SourceError {
+    const details: Details = { word: what, other: `${size}` };
+
+    return { code: Code.ViewSizeAligned, loc, details };
+  }
+
+  public readonly notFitsError(
+    loc: int,
+    what: string,
+    offset: string | undefined,
+    length: string,
+    size: decimal,
+    buffer: string,
+  ): SourceError {
+    const start = this.startText(offset);
+    const times = this.timesText(size);
+    const other = `${start}${length}${times}`;
+    const details: Details = { word: what, other, first: buffer };
+
+    return { code: Code.ViewNotFits, loc, details };
+  }
+
+  public viewOverError(loc: int, found: Type): SourceError {
+    const first = this.typeText(found);
+    const isTyped = this.elementOf(found) != undefined;
+    const other = this.viewHint(isTyped);
+
+    return { code: Code.ViewOverBuffer, loc, details: { first, other } };
+  }
+
+  public readonly offsetOnlyError(
+    loc: int,
+    target: string,
+    found: Type,
+  ): SourceError {
+    const first = this.typeText(found);
+
+    return {
+      code: Code.ViewOffsetOnly,
+      loc,
+      details: { word: target, first },
+    };
+  }
+
+  public readonly isEncodingLabel(label: string | undefined): boolean {
+    return label == kBufferEncodingLabel;
+  }
+
+  public readonly encodingError(
+    loc: int,
+    texts: Read<string[]>,
+  ): SourceError | undefined {
+    for (const text of texts) {
+      const lower = text.toLowerCase();
+      if (!kBufferEncodings.includes(lower)) {
+        return {
+          code: Code.BufferEncodingUnknown,
+          loc,
+          details: { word: text },
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  public readonly unknownEncodingError(loc: int): SourceError {
+    return { code: Code.BufferEncodingNotKnown, loc, details: kNoDetails };
+  }
+
+  public readonly isSizeName(name: string): boolean {
+    return kSizeNames.includes(name);
+  }
+
+  public lengthFixedError(loc: int, type: Type): SourceError | undefined {
+    const isBytes = this.isByteView(type) || this.isArrayBuffer(type);
+    if (!isBytes) {
+      return undefined;
+    }
+
+    const word = this.typeText(this.definedType(type));
+
+    return { code: Code.BytesLengthFixed, loc, details: { word } };
+  }
+
+  public isBytesType(type: Type): boolean {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return false;
+    }
+    if (!this.isLibraryModule(base.module)) {
+      return false;
+    }
+
+    const isView = this.isByteView(base) || this.isArrayBuffer(base);
+
+    return isView || kTextCoderNames.includes(base.name);
+  }
+
+  public readonly missingMemberError(
+    loc: int,
+    name: string,
+    type: Type,
+    isNotCalled: boolean,
+  ): SourceError {
+    const first = this.typeText(type);
+    const details: Details = { word: name, first };
+    if (isNotCalled) {
+      return { code: Code.MethodNotCalled, loc, details };
+    }
+
+    return { code: Code.PropertyMissing, loc, details };
+  }
+
+  public readonly missingMethodError(
+    loc: int,
+    name: string,
+    type: Type,
+    isTyped: boolean,
+  ): SourceError {
+    if (isTyped && name == kFlatMapName) {
+      return { code: Code.BytesFlatMap, loc, details: kNoDetails };
+    }
+    if (isTyped && name == kLocaleName) {
+      return { code: Code.BytesLocale, loc, details: kNoDetails };
+    }
+
+    return this.missingMemberError(loc, name, type, false);
+  }
+
+  public notIndexedError(loc: int, type: Type): SourceError | undefined {
+    const base = this.definedType(type);
+    if (!this.isBytesType(base) || this.typedName(base) != undefined) {
+      return undefined;
+    }
+
+    const first = this.typeText(base);
+    const other = this.indexHint(base);
+
+    return { code: Code.BytesNotIndexed, loc, details: { first, other } };
+  }
+
+  public noTextError(loc: int, type: Type): SourceError | undefined {
+    const base = this.definedType(type);
+    if (!this.isBytesType(base) || this.typedName(base) != undefined) {
+      return undefined;
+    }
+
+    const first = this.typeText(base);
+    const other = this.textHint(base);
+
+    return { code: Code.BytesNoText, loc, details: { first, other } };
+  }
+
+  public isBytesUnion(parts: Read<Type[]>): boolean {
+    return parts.length > 1 && parts.every((part) => this.isBytesType(part));
+  }
+
+  public unionMemberError(
+    loc: int,
+    name: string,
+    parts: Read<Type[]>,
+    union: Type,
+  ): SourceError | undefined {
+    const first = this.typeText(union);
+    if (kUnionNarrowNames.includes(name)) {
+      return {
+        code: Code.BytesUnionNarrow,
+        loc,
+        details: { word: name, first },
+      };
+    }
+
+    const lacking = parts.find((part) => !this.hasUnionMember(name, part));
+    if (lacking == undefined) {
+      return undefined;
+    }
+
+    const holder = parts.find((part) => this.hasUnionMember(name, part));
+    const second = this.typeText(lacking);
+    const other = this.narrowHint(holder);
+    const details: Details = { word: name, first, second, other };
+
+    return { code: Code.BytesUnionLacking, loc, details };
+  }
+
+  public readonly isBufferName(name: string): boolean {
+    return name == kBufferName;
+  }
+
+  public byteSourceKindOf(type: Type): string | undefined {
+    if (this.isOptional(type)) {
+      return undefined;
+    }
+
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Instance || !this.isBytesType(base)) {
+      return undefined;
+    }
+
+    return base.name;
+  }
+
+  public readonly isKindName(name: string): boolean {
+    const isView = kElementSizes.some((one) => one.name == name);
+
+    return (
+      isView || name == kArrayBufferClass || kTextCoderNames.includes(name)
+    );
+  }
+
+  public instanceofError(
+    loc: int,
+    left: Type,
+    kind: string,
+  ): SourceError | undefined {
+    const base = this.definedType(left);
+    const word = kind;
+    if (base.kind == TypeKind.Unknown || base.kind == TypeKind.AnyObject) {
+      return undefined;
+    }
+    if (base.kind == TypeKind.Union) {
+      return this.unionInstanceofError(
+        loc,
+        left,
+        this.store.partsOf(base),
+        kind,
+      );
+    }
+
+    const first = this.typeText(left);
+    if (this.isKind(kind, left)) {
+      return { code: Code.InstanceOfAlwaysTrue, loc, details: { word, first } };
+    }
+
+    const isOptional = this.isOptional(left);
+    if (isOptional && this.isKind(kind, base)) {
+      const shown = this.typeText(base);
+
+      return {
+        code: Code.InstanceOfOrUndefined,
+        loc,
+        details: { first: shown },
+      };
+    }
+    if (this.canBeBuffer(kind, base)) {
+      return undefined;
+    }
+
+    return { code: Code.InstanceOfNeverBuiltin, loc, details: { word, first } };
+  }
+
+  private isByteSource(base: Type): boolean {
+    const element = this.elementOf(base);
+    const isClamped = this.isClamped(base);
+
+    return (
+      element != undefined &&
+      element.kind == TypeKind.Int &&
+      element.bits == 8 &&
+      element.unsigned &&
+      !isClamped
+    );
+  }
+}

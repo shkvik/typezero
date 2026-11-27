@@ -1,0 +1,453 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kArgumentsCall,
+  kClassNoun,
+  kConditionCodes,
+  kDecimalNoun,
+  kMaybeSuffix,
+  kNegation,
+  kNumberNoun,
+  kObjectNoun,
+  kPlainCall,
+  kPromiseNoun,
+  kTruthCodes,
+} from "../../truth-rules/const/truth-rules.const.tz";
+import {
+  TruthAnswer,
+  TruthCodes,
+  TruthProblem,
+  TruthTexts,
+  TruthUse,
+} from "../../truth-rules/types/truth-rules.types.tz";
+
+partial class TypeSystem {
+  public problemOf(type: Type): TruthProblem {
+    if (type.kind == TypeKind.Void) {
+      return TruthProblem.Void;
+    }
+    if (this.openParameterOf(type) != undefined) {
+      return TruthProblem.Parameter;
+    }
+
+    const base = this.truthBaseOf(type);
+
+    return this.typeProblem(type, base);
+  }
+
+  public truthAnswerOf(
+    type: Type,
+    use: TruthUse,
+    texts: TruthTexts,
+  ): TruthAnswer {
+    const base = this.truthBaseOf(type);
+    if (type.kind == TypeKind.Void) {
+      return { code: Code.VoidTested, details: kNoDetails, base };
+    }
+
+    const parameter = this.openParameterOf(type);
+    if (parameter != undefined) {
+      return this.parameterAnswer(type, parameter, use, texts);
+    }
+
+    const problem = this.typeProblem(type, base);
+    const codes = this.codesOf(use);
+    const truthCode = this.truthCode(problem, codes, type, base, use);
+    const code = this.lengthCode(texts.isLength, truthCode);
+    const word = texts.word;
+    const other = texts.other;
+    const details = this.truthDetails(code, type, base, word, other, use);
+
+    return { code, details, base };
+  }
+
+  public readonly isNumberMember(member: Type): boolean {
+    const plain = this.baseOf(member) ?? member;
+    const isOpen =
+      plain.kind == TypeKind.TypeParameter || plain.kind == TypeKind.Json;
+
+    return this.isNumberLike(plain) || isOpen;
+  }
+
+  public readonly isTruthyObject(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Iterator:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+      case TypeKind.Class:
+        return true;
+      default:
+        return this.isObjectKind(base);
+    }
+  }
+
+  public readonly holderNoun(base: Type): string {
+    switch (base.kind) {
+      case TypeKind.Array:
+        return "an array";
+      case TypeKind.Function:
+        return "a function";
+      case TypeKind.Promise:
+        return "a Promise";
+      case TypeKind.Class:
+        return kClassNoun;
+      default:
+        return "an object";
+    }
+  }
+
+  private truthBaseOf(type: Type): Type {
+    const plain = this.definedType(type);
+
+    return this.apparent(plain);
+  }
+
+  private readonly parameterAnswer(
+    type: Type,
+    parameter: Type,
+    use: TruthUse,
+    texts: TruthTexts,
+  ): TruthAnswer {
+    const code = this.parameterTruthCode(use);
+    const first = this.typeText(type);
+    const second = this.typeText(parameter);
+    const details: Details = {
+      word: texts.word,
+      first,
+      second,
+      other: texts.other,
+    };
+
+    return { code, details, base: parameter };
+  }
+
+  private readonly codesOf(use: TruthUse): TruthCodes {
+    const codes = kTruthCodes.find((row) => row.use == use);
+
+    return codes ?? kConditionCodes;
+  }
+
+  private openParameterOf(type: Type): Type | undefined {
+    const base = this.definedType(type);
+    const isParameter = base.kind == TypeKind.TypeParameter;
+    if (!isParameter || this.store.constraintOf(base) != undefined) {
+      return undefined;
+    }
+
+    return base;
+  }
+
+  private readonly parameterTruthCode(use: TruthUse): Code {
+    switch (use) {
+      case TruthUse.Not:
+        return Code.ParameterNot;
+      case TruthUse.And:
+        return Code.ParameterAnd;
+      case TruthUse.Or:
+        return Code.ParameterOr;
+      case TruthUse.OrAssign:
+        return Code.ParameterOrAssign;
+      case TruthUse.AndAssign:
+        return Code.ParameterAndAssign;
+      default:
+        return Code.ParameterCondition;
+    }
+  }
+
+  private readonly typeProblem(type: Type, base: Type): TruthProblem {
+    if (this.isTestable(type, base)) {
+      return TruthProblem.None;
+    }
+
+    switch (base.kind) {
+      case TypeKind.Union:
+      case TypeKind.Literal:
+        return this.unionTruthProblem(type, base);
+      case TypeKind.Json:
+        return TruthProblem.Json;
+      case TypeKind.Unknown:
+        return TruthProblem.Unknown;
+      case TypeKind.Result:
+        return TruthProblem.Result;
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+        return TruthProblem.Number;
+      default:
+        return TruthProblem.Truthy;
+    }
+  }
+
+  private readonly isTestable(type: Type, base: Type): boolean {
+    const isPlain =
+      type.kind == TypeKind.Undefined ||
+      type.kind == TypeKind.Error ||
+      base.kind == TypeKind.Error ||
+      base.kind == TypeKind.Never ||
+      base.kind == TypeKind.TypeParameter ||
+      base.kind == TypeKind.Boolean ||
+      base.kind == TypeKind.String ||
+      base.kind == TypeKind.Template;
+    if (isPlain) {
+      return true;
+    }
+
+    return this.isOptional(type) && this.isHolder(base);
+  }
+
+  private readonly isHolder(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Array:
+      case TypeKind.Class:
+      case TypeKind.Function:
+      case TypeKind.Result:
+      case TypeKind.Iterator:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+        return true;
+      default:
+        return this.isObjectKind(base);
+    }
+  }
+
+  private readonly unionTruthProblem(type: Type, base: Type): TruthProblem {
+    const number = this.unionNumber(base);
+    const isFalsy = this.isOptional(type) || this.hasFalsyMember(base);
+
+    if (number != undefined) {
+      return TruthProblem.UnionNumber;
+    }
+    if (isFalsy) {
+      return TruthProblem.None;
+    }
+
+    return TruthProblem.UnionTruthy;
+  }
+
+  private readonly unionNumber(base: Type): Type | undefined {
+    let number: Type | undefined = undefined;
+
+    for (const member of this.unionMembers(base)) {
+      if (this.isNumberMember(member)) {
+        number = member;
+      }
+    }
+
+    return number;
+  }
+
+  private readonly hasFalsyMember(base: Type): boolean {
+    return this.unionMembers(base).some((member) => this.isFalsyMember(member));
+  }
+
+  private readonly isFalsyMember(member: Type): boolean {
+    if (member.kind != TypeKind.Literal) {
+      return member.kind == TypeKind.Boolean || member.kind == TypeKind.String;
+    }
+    if (member.literal == LiteralKind.String) {
+      return member.text == "";
+    }
+
+    return member.text == "0";
+  }
+
+  private readonly truthCode(
+    problem: TruthProblem,
+    codes: TruthCodes,
+    type: Type,
+    base: Type,
+    use: TruthUse,
+  ): Code {
+    switch (problem) {
+      case TruthProblem.UnionTruthy:
+        return Code.UnionTruthy;
+      case TruthProblem.UnionNumber:
+        return Code.UnionNumberTruthy;
+      case TruthProblem.Json:
+        return codes.json;
+      case TruthProblem.Unknown:
+        return codes.unknown;
+      case TruthProblem.Result:
+        return this.resultTruthCode(use);
+      case TruthProblem.Number:
+        return this.numberTruthCode(codes, type, base);
+      default:
+        return this.objectTruthCode(codes, base);
+    }
+  }
+
+  private readonly lengthCode(isLength: boolean, code: Code): Code {
+    if (!isLength) {
+      return code;
+    }
+
+    switch (code) {
+      case Code.NumberCondition:
+        return Code.LengthCondition;
+      case Code.NumberAnd:
+        return Code.LengthAnd;
+      case Code.NumberOr:
+        return Code.LengthOr;
+      case Code.MaybeNumberCondition:
+        return Code.MaybeLengthCondition;
+      case Code.MaybeNumberNot:
+        return Code.MaybeLengthNot;
+      case Code.MaybeNumberAnd:
+        return Code.MaybeLengthAnd;
+      default:
+        return code;
+    }
+  }
+
+  private readonly resultTruthCode(use: TruthUse): Code {
+    if (use == TruthUse.Not) {
+      return Code.ResultTruthyNot;
+    }
+
+    return Code.ResultTruthy;
+  }
+
+  private readonly numberTruthCode(
+    codes: TruthCodes,
+    type: Type,
+    base: Type,
+  ): Code {
+    if (this.isOptional(type)) {
+      return codes.maybe;
+    }
+    if (base.kind == TypeKind.Double) {
+      return codes.fraction;
+    }
+
+    return codes.number;
+  }
+
+  private readonly objectTruthCode(codes: TruthCodes, base: Type): Code {
+    if (base.kind == TypeKind.Array) {
+      return codes.array;
+    }
+    if (this.isTruthyObject(base)) {
+      return codes.object;
+    }
+
+    return codes.function;
+  }
+
+  private readonly truthDetails(
+    code: Code,
+    type: Type,
+    base: Type,
+    word: string,
+    other: string,
+    use: TruthUse,
+  ): Details {
+    if (code == Code.UnionTruthy) {
+      return { first: this.typeText(type) };
+    }
+    if (code == Code.UnionNumberTruthy) {
+      return this.unionNumberDetails(type, base, word);
+    }
+
+    const first = this.truthNoun(type, base);
+    const second = this.typeText(base);
+
+    if (base.kind != TypeKind.Function) {
+      return { first, second, word, other };
+    }
+
+    const call = this.callOf(base, word, use);
+
+    return { first, second, word: call, other };
+  }
+
+  private readonly unionNumberDetails(
+    type: Type,
+    base: Type,
+    word: string,
+  ): Details {
+    const number = this.unionNumber(base);
+    const first = this.typeText(type);
+
+    if (number == undefined) {
+      return { first, word };
+    }
+
+    const second = this.typeText(number);
+
+    return { first, second, word };
+  }
+
+  private readonly truthNoun(type: Type, base: Type): string {
+    if (base.kind == TypeKind.Promise) {
+      return kPromiseNoun;
+    }
+    if (base.kind == TypeKind.Class) {
+      return kClassNoun;
+    }
+    if (!this.isNumberLike(base)) {
+      return kObjectNoun;
+    }
+
+    const noun = this.numberNoun(base);
+
+    if (!this.isOptional(type)) {
+      return noun;
+    }
+
+    return noun + kMaybeSuffix;
+  }
+
+  private readonly numberNoun(base: Type): string {
+    if (base.kind == TypeKind.Decimal) {
+      return kDecimalNoun;
+    }
+
+    return kNumberNoun;
+  }
+
+  private readonly callOf(base: Type, word: string, use: TruthUse): string {
+    const prefix = this.negationOf(use);
+
+    if (this.minArguments(base) == 0) {
+      return prefix + word + kPlainCall;
+    }
+
+    return prefix + word + kArgumentsCall;
+  }
+
+  private readonly negationOf(use: TruthUse): string {
+    if (use == TruthUse.Not) {
+      return kNegation;
+    }
+
+    return "";
+  }
+
+  private readonly minArguments(base: Type): int {
+    if (base.kind != TypeKind.Function) {
+      return 0;
+    }
+
+    const shape = this.store.functionShapeOf(base);
+    let count = 0;
+    let index = 0;
+
+    for (const param of shape.params) {
+      const isRest = shape.rest && index == shape.params.length - 1;
+      if (!param.optional && !isRest) {
+        count += 1;
+      }
+
+      index += 1;
+    }
+
+    return count;
+  }
+}

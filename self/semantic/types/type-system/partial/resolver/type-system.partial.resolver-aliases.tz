@@ -1,0 +1,540 @@
+import { TypeSystem } from "../../type-system.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  TypeAliasDecl,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  ObjectField,
+  OperationKind,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kAliasDepthLimit,
+  kAliasNestLimit,
+} from "../../../type-resolver/const/type-resolver.const.tables.tz";
+import {
+  AliasDoor,
+  DoorState,
+  TypeContext,
+  TypePlace,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private alias(
+    module: int,
+    decl: TypeAliasDecl,
+    written: Own<Type[]>,
+    isTail: boolean,
+  ): Type {
+    const tree = this.program.tree;
+
+    const bindings = this.bind(
+      module,
+      tree.typeParamsOf(decl.typeParamsList),
+      written,
+    );
+    const args = Array.from(bindings.values());
+    const ids = args.map((arg) => `${arg.id}`);
+    const home = `${module} ${decl.loc}`;
+    const key = `${home} ${ids.join(" ")}`;
+    const label = this.labelText(module, decl.name, written);
+    const open = this.doors.get(key);
+    if (open != undefined) {
+      return this.reenter(module, decl, key, args, label);
+    }
+
+    const depth = this.working.get(home) ?? 0;
+    const nested = this.nesting.get(home) ?? 0;
+    const seen = new Set<int>();
+    if (depth > 0 && this.anyDepends(args, seen)) {
+      return this.operation(OperationKind.Alias, args, label);
+    }
+
+    const error = this.store.plain(TypeKind.Error);
+
+    if (depth >= kAliasDepthLimit) {
+      this.reportDepth(module, decl, home, false);
+
+      return error;
+    }
+    if (nested >= kAliasNestLimit) {
+      this.reportDepth(module, decl, home, true);
+
+      return error;
+    }
+
+    const typeRef = tree.typeRefOf(decl.typeId);
+
+    this.markTailUses(typeRef);
+
+    const declType = tree.typeRefOf(decl.typeId);
+    const reserved = this.reserve(declType, label);
+    const door: AliasDoor = {
+      state: DoorState.InWork,
+      entered: false,
+      result: error,
+      reserved,
+    };
+
+    this.doors.set(key, door);
+    const step = this.nestingStep(isTail);
+
+    this.working.set(home, depth + 1);
+    this.nesting.set(home, nested + step);
+
+    const body = this.aliasBody(decl, {
+      module,
+      bindings,
+      place: TypePlace.Plain,
+    });
+    const settled = this.settle(module, decl, key, body);
+    const result = this.endedOr(home, settled);
+
+    this.working.set(home, depth);
+    this.nesting.set(home, nested);
+    this.aliasDone(key, result);
+    this.labelAlias(decl, result, label);
+    this.labelLibraryUnion(module, decl, result, label);
+    this.keepOrigin(module, decl, written, result);
+
+    if (this.record(module)?.library == true) {
+      this.libraryShapes.add(result.id);
+    }
+
+    return result;
+  }
+
+  private keepOrigin(
+    module: int,
+    decl: TypeAliasDecl,
+    args: Own<Type[]>,
+    result: Type,
+  ): void {
+    const tree = this.program.tree;
+
+    if (
+      tree.typeParamsOf(decl.typeParamsList).length == 0 ||
+      this.aliasOrigins.has(result.id)
+    ) {
+      return;
+    }
+
+    this.aliasOrigins.set(result.id, { module, decl, args });
+  }
+
+  private readonly endedOr(home: string, settled: Type): Type {
+    if (this.endless.has(home)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return settled;
+  }
+
+  private readonly nestingStep(isTail: boolean): int {
+    if (isTail) {
+      return 0;
+    }
+
+    return 1;
+  }
+
+  private markTailUses(root: TypeRef): void {
+    const tree = this.program.tree;
+
+    const waiting: TypeRef[] = [root];
+
+    while (waiting.length > 0) {
+      const ref = waiting.pop();
+      if (ref == undefined || ref.form.kind != TypeRefKind.Conditional) {
+        continue;
+      }
+
+      for (const branch of tree.typeRefsOf(ref.argsList).slice(2)) {
+        this.tailUses.add(branch.id);
+        waiting.push(branch);
+      }
+    }
+  }
+
+  private reportDepth(
+    module: int,
+    decl: TypeAliasDecl,
+    home: string,
+    isNested: boolean,
+  ): void {
+    const tree = this.program.tree;
+
+    if (this.endless.has(home)) {
+      return;
+    }
+
+    this.endless.add(home);
+
+    const typeRef = tree.typeRefOf(decl.typeId);
+    const refs = this.refsOf(typeRef);
+    const isConditional = refs.some(
+      (ref) => ref.form.kind == TypeRefKind.Conditional,
+    );
+    if (!isConditional) {
+      this.report(module, decl.loc, Code.AliasEndless, { word: decl.name });
+
+      return;
+    }
+
+    const code = this.deepCode(isNested);
+
+    this.report(module, decl.loc, code, { word: decl.name });
+  }
+
+  private readonly deepCode(isNested: boolean): Code {
+    if (isNested) {
+      return Code.AliasNests;
+    }
+
+    return Code.AliasTooDeep;
+  }
+
+  private aliasDone(key: string, result: Type): void {
+    const door = this.doors.get(key);
+    if (door != undefined) {
+      const done: AliasDoor = { ...door, result, state: DoorState.Done };
+
+      this.doors.set(key, done);
+    }
+  }
+
+  private aliasEntered(key: string): void {
+    const door = this.doors.get(key);
+    if (door != undefined) {
+      const entered: AliasDoor = { ...door, entered: true };
+
+      this.doors.set(key, entered);
+    }
+  }
+
+  private reenter(
+    module: int,
+    decl: TypeAliasDecl,
+    key: string,
+    args: Own<Type[]>,
+    label: string,
+  ): Type {
+    const door = this.doors.get(key);
+    if (door == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (door.state == DoorState.Done) {
+      return door.result;
+    }
+
+    const reserved = door.reserved;
+    const wasEntered = door.entered;
+    if (reserved != undefined) {
+      this.aliasEntered(key);
+
+      return reserved;
+    }
+
+    const seen = new Set<int>();
+    if (this.anyDepends(args, seen)) {
+      return this.operation(OperationKind.Alias, args, label);
+    }
+    if (!wasEntered) {
+      this.report(module, decl.loc, Code.AliasRefersToItself, {
+        word: decl.name,
+      });
+    }
+
+    this.aliasEntered(key);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private reserve(ref: TypeRef, label: string): Type | undefined {
+    switch (ref.form.kind) {
+      case TypeRefKind.Object: {
+        const reserved = this.store.reserveObject();
+
+        this.store.label(reserved, label);
+
+        return reserved;
+      }
+      case TypeRefKind.Union: {
+        const reserved = this.store.reserveUnion();
+
+        this.store.label(reserved, label);
+
+        return reserved;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private aliasBody(
+    decl: TypeAliasDecl,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    const bases = tree.typeRefsOf(decl.basesList);
+    if (bases.length == 0) {
+      const typeRef = tree.typeRefOf(decl.typeId);
+
+      return this.ownBody(typeRef, context);
+    }
+
+    const fields = new Map<string, ObjectField>();
+    const owners = new Map<string, string>();
+    const parents: Type[] = [];
+
+    this.extending.push(decl);
+
+    for (const base of tree.typeRefsOf(decl.basesList)) {
+      this.baseFields(decl, base, owners, fields, context, parents);
+    }
+
+    this.extending.pop();
+
+    const declType = tree.typeRefOf(decl.typeId);
+    const own = this.ownBody(declType, context);
+
+    this.narrowedChecks(decl, own, owners, fields, context.module);
+    this.inherit(fields, own);
+
+    const merged = Array.from(fields.values());
+    const made = this.store.objectOf(merged);
+
+    this.addParents(made, parents);
+
+    return made;
+  }
+
+  private addParents(type: Type, parents: Read<Type[]>): void {
+    const known = this.store.parentsOf(type);
+    const added = parents.filter(
+      (parent) => !known.some((one) => one.id == parent.id),
+    );
+    if (added.length > 0) {
+      this.store.inherit(type, known.concat(added));
+    }
+  }
+
+  private baseFields(
+    decl: TypeAliasDecl,
+    base: TypeRef,
+    owners: Map<string, string>,
+    fields: Map<string, ObjectField>,
+    context: Read<TypeContext>,
+    parents: Type[],
+  ): void {
+    const module = context.module;
+    const first = decl.name;
+    const word = base.name;
+    if (word == first) {
+      return this.report(module, base.loc, Code.InterfaceItself, { first });
+    }
+
+    const isLooping = this.extending.some((one) => one.name == word);
+    if (isLooping) {
+      return this.report(module, base.loc, Code.InterfaceItselfThrough, {
+        first,
+        word,
+      });
+    }
+
+    const parent = this.resolve(base, context);
+    if (parent.kind == TypeKind.Instance) {
+      return this.report(module, base.loc, Code.InterfaceClassBase, { word });
+    }
+    if (parent.kind != TypeKind.Object) {
+      return this.notObjectBase(parent, base, module);
+    }
+
+    for (const field of this.store.fieldsOf(parent)) {
+      fields.set(field.name, field);
+      owners.set(field.name, word);
+    }
+
+    parents.push(parent);
+  }
+
+  private notObjectBase(parent: Type, base: TypeRef, module: int): void {
+    if (parent.kind == TypeKind.Error || this.isLibrary(module)) {
+      return;
+    }
+
+    this.report(module, base.loc, Code.InterfaceNotObject, {
+      word: this.typeText(parent),
+    });
+  }
+
+  private narrowedChecks(
+    decl: TypeAliasDecl,
+    own: Type,
+    owners: Read<Map<string, string>>,
+    fields: Read<Map<string, ObjectField>>,
+    module: int,
+  ): void {
+    const tree = this.program.tree;
+
+    const form = tree.typeRefOf(decl.typeId).form;
+    if (own.kind != TypeKind.Object || form.kind != TypeRefKind.Object) {
+      return;
+    }
+
+    for (const written of tree.objectFieldsOf(form.fieldsList)) {
+      const field = this.store
+        .fieldsOf(own)
+        .find((one) => one.name == written.name);
+      const inherited = fields.get(written.name);
+      if (field == undefined || inherited == undefined || written.method) {
+        continue;
+      }
+      if (this.isSameLayout(field.type, inherited.type)) {
+        continue;
+      }
+
+      this.report(module, written.loc, Code.InterfaceFieldLayout, {
+        word: written.name,
+        first: decl.name,
+        second: this.typeText(field.type),
+        other: owners.get(written.name) ?? "",
+        place: this.typeText(inherited.type),
+      });
+    }
+  }
+
+  private readonly isSameLayout(own: Type, theirs: Type): boolean {
+    const isOpen = own.kind == TypeKind.Error || theirs.kind == TypeKind.Error;
+    if (own.id == theirs.id || isOpen) {
+      return true;
+    }
+    if (own.kind != TypeKind.Instance || theirs.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const chain: Type[] = [own];
+
+    for (let index = 0; index < chain.length; index++) {
+      const current = chain[index];
+      if (current.id == theirs.id) {
+        return true;
+      }
+      if (current == undefined) {
+        break;
+      }
+
+      for (const parent of this.store.parentsOf(current)) {
+        if (!chain.some((one) => one.id == parent.id)) {
+          chain.push(parent);
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private ownBody(ref: TypeRef, context: Read<TypeContext>): Type {
+    const form = ref.form;
+    if (form.kind == TypeRefKind.Object) {
+      return this.object(form, context, true);
+    }
+
+    return this.resolve(ref, context);
+  }
+
+  private readonly inherit(fields: Map<string, ObjectField>, from: Type): void {
+    if (from.kind != TypeKind.Object) {
+      return;
+    }
+
+    for (const field of this.store.fieldsOf(from)) {
+      fields.set(field.name, field);
+    }
+  }
+
+  private settle(
+    module: int,
+    decl: TypeAliasDecl,
+    key: string,
+    body: Type,
+  ): Type {
+    const door = this.doors.get(key);
+    const reserved = door?.reserved;
+
+    if (door == undefined || !door.entered || body.kind == TypeKind.Error) {
+      return body;
+    }
+    if (reserved == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (body.kind == TypeKind.Object) {
+      this.store.fillObject(reserved, this.store.fieldsOf(body));
+      this.addParents(reserved, this.store.parentsOf(body));
+
+      return reserved;
+    }
+    if (body.kind == TypeKind.Union && this.isClosed(body, reserved)) {
+      this.store.fillUnion(reserved, this.store.partsOf(body));
+
+      return reserved;
+    }
+
+    this.report(module, decl.loc, Code.RecursiveUnion, { word: decl.name });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private readonly isClosed(body: UnionType, reserved: Type): boolean {
+    if (
+      body.id == reserved.id ||
+      this.store.partsOf(body).some((one) => one.id == reserved.id)
+    ) {
+      return false;
+    }
+
+    return !this.store
+      .partsOf(body)
+      .some((part) => part.kind == TypeKind.Undefined);
+  }
+
+  private labelLibraryUnion(
+    module: int,
+    decl: TypeAliasDecl,
+    result: Type,
+    label: string,
+  ): void {
+    const tree = this.program.tree;
+
+    const written = tree.typeRefOf(decl.typeId).form.kind == TypeRefKind.Union;
+    const isPlain = tree.typeParamsOf(decl.typeParamsList).length == 0;
+    const isLibrary = this.record(module)?.library == true;
+    if (!written || !isPlain || !isLibrary || result.kind != TypeKind.Union) {
+      return;
+    }
+
+    const isOfObjects = this.store.partsOf(result).some(
+      (part) => part.kind == TypeKind.Object,
+    );
+    const isDeclared = this.program.modules[module]?.isDeclarationOnly == true;
+    if (!isOfObjects || isDeclared) {
+      this.store.label(result, label);
+    }
+  }
+
+  private labelAlias(decl: TypeAliasDecl, result: Type, label: string): void {
+    const tree = this.program.tree;
+
+    const written = tree.typeRefOf(decl.typeId).form.kind == TypeRefKind.Object;
+    if (written && result.kind == TypeKind.Object) {
+      this.store.label(result, label);
+    }
+  }
+}

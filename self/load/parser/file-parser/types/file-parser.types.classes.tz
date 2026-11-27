@@ -1,16 +1,22 @@
+import { Access } from "../../../../program/ast/types/ast.types.classes.tz";
+import { Span } from "../../../../program/ast/types/ast.types.span.tz";
 import {
-  Access,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
   ClassField,
   Decorator,
-} from "../../../../program/ast/types/ast.types.classes.tz";
-import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
-import { Span } from "../../../../program/ast/types/ast.types.span.tz";
-import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+} from "../../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/syntax/types/syntax.types.functions.tz";
 import {
   TypeParamDecl,
   TypeRef,
-} from "../../../../program/ast/types/ast.types.types.tz";
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 export type Modifiers = {
   isStatic: boolean;

@@ -1,7 +1,7 @@
-import { RegexClasses } from "../regex-classes/regex-classes.tz";
+import "./partial/regex-syntax.partial.escapes.tz";
+import "./partial/regex-syntax.partial.classes.tz";
+import "./partial/regex-syntax.partial.quantifiers.tz";
 import { RegexCursor } from "../regex-cursor/regex-cursor.tz";
-import { RegexEscapes } from "../regex-escapes/regex-escapes.tz";
-import { RegexQuantifiers } from "../regex-quantifiers/regex-quantifiers.tz";
 import {
   kBackslashEndText,
   kDecimalBase,
@@ -36,9 +36,6 @@ import {
 
 export class RegexSyntax {
   private readonly cursor: RegexCursor;
-  private readonly escapes: RegexEscapes;
-  private readonly classes: RegexClasses;
-  private readonly quantifiers: RegexQuantifiers;
   private readonly names: string[];
   private readonly paths: int[][];
   private readonly path: int[];
@@ -50,9 +47,6 @@ export class RegexSyntax {
 
   public constructor(text: string, flags: string) {
     this.cursor = new RegexCursor(text, flags);
-    this.escapes = new RegexEscapes(this.cursor);
-    this.classes = new RegexClasses(this.cursor, this.escapes);
-    this.quantifiers = new RegexQuantifiers(this.cursor);
     this.names = [""];
     this.paths = [[]];
     this.path = [];
@@ -64,22 +58,20 @@ export class RegexSyntax {
   }
 
   public check(): RegexSyntaxError | undefined {
-    const cursor = this.cursor;
-
     this.scanCaptures();
 
     const isParsed = this.disjunction();
-    if (isParsed && !cursor.isAtEnd()) {
-      cursor.fail(this.leftoverText());
+    if (isParsed && !this.cursor.isAtEnd()) {
+      this.cursor.fail(this.leftoverText());
     }
-    if (!cursor.isFailed()) {
+    if (!this.cursor.isFailed()) {
       this.resolveNames();
     }
-    if (!cursor.isFailed()) {
+    if (!this.cursor.isFailed()) {
       return undefined;
     }
 
-    return { message: cursor.error, at: cursor.errorAt };
+    return { message: this.cursor.error, at: this.cursor.errorAt };
   }
 
   private readonly leftoverText(): string {
@@ -91,19 +83,18 @@ export class RegexSyntax {
   }
 
   private scanCaptures(): void {
-    const cursor = this.cursor;
-    const text = cursor.text;
+    const text = this.cursor.text;
     let depth = 0;
     let index = 0;
 
     while (index < text.length) {
-      const char = cursor.charAt(index);
+      const char = this.cursor.charAt(index);
       if (char == "\\") {
         index += 2;
 
         continue;
       }
-      if (char == "[" && (depth == 0 || cursor.isSets)) {
+      if (char == "[" && (depth == 0 || this.cursor.isSets)) {
         depth += 1;
       }
       if (char == "]" && depth > 0) {
@@ -118,24 +109,22 @@ export class RegexSyntax {
   }
 
   private countGroupAt(index: int): void {
-    const cursor = this.cursor;
-    if (cursor.charAt(index + 1) != "?") {
+    if (this.cursor.charAt(index + 1) != "?") {
       this.totalCaptures += 1;
 
       return;
     }
 
-    const third = cursor.charAt(index + 3);
+    const third = this.cursor.charAt(index + 3);
     const isNamed =
-      cursor.charAt(index + 2) == "<" && third != "=" && third != "!";
+      this.cursor.charAt(index + 2) == "<" && third != "=" && third != "!";
     if (isNamed) {
       this.totalCaptures += 1;
-      cursor.hasNames = true;
+      this.cursor.hasNames = true;
     }
   }
 
   private disjunction(): boolean {
-    const cursor = this.cursor;
     const id = this.disjunctions;
 
     this.disjunctions += 1;
@@ -148,7 +137,7 @@ export class RegexSyntax {
 
     let branch = 1;
 
-    while (cursor.accept("|")) {
+    while (this.cursor.accept("|")) {
       this.path.splice(this.path.length - 1, 1, branch);
 
       if (!this.alternative()) {
@@ -174,12 +163,11 @@ export class RegexSyntax {
   }
 
   private term(): boolean {
-    const cursor = this.cursor;
-    if (cursor.isAtEnd()) {
+    if (this.cursor.isAtEnd()) {
       return false;
     }
 
-    const char = cursor.current();
+    const char = this.cursor.current();
 
     switch (char) {
       case "|":
@@ -187,7 +175,7 @@ export class RegexSyntax {
         return false;
       case "^":
       case "$":
-        cursor.index += 1;
+        this.cursor.index += 1;
 
         return this.unquantifiable(false);
       case "(":
@@ -199,21 +187,21 @@ export class RegexSyntax {
       case "*":
       case "+":
       case "?":
-        return cursor.fail(kNothingToRepeatText);
+        return this.cursor.fail(kNothingToRepeatText);
       case "{":
         return this.braceTerm();
       case "}":
       case "]":
         return this.bracketTerm();
       default:
-        cursor.nextChar();
+        this.cursor.nextChar();
 
-        return this.quantifiers.quantifier();
+        return this.quantifier();
     }
   }
 
-  private readonly unquantifiable(isLook: boolean): boolean {
-    if (!this.quantifiers.isQuantifierStart()) {
+  private unquantifiable(isLook: boolean): boolean {
+    if (!this.isQuantifierStart()) {
       return true;
     }
     if (isLook) {
@@ -224,18 +212,16 @@ export class RegexSyntax {
   }
 
   private groupTerm(): boolean {
-    const cursor = this.cursor;
+    this.cursor.index += 1;
+    this.cursor.depth += 1;
 
-    cursor.index += 1;
-    cursor.depth += 1;
-
-    if (cursor.depth > kMaxDepth) {
-      return cursor.fail(kTooLargeText);
+    if (this.cursor.depth > kMaxDepth) {
+      return this.cursor.fail(kTooLargeText);
     }
 
     const end = this.group();
 
-    cursor.depth -= 1;
+    this.cursor.depth -= 1;
 
     switch (end) {
       case RegexGroupEnd.Failed:
@@ -243,107 +229,100 @@ export class RegexSyntax {
       case RegexGroupEnd.Fixed:
         return this.unquantifiable(true);
       default:
-        return this.quantifiers.quantifier();
+        return this.quantifier();
     }
   }
 
-  private readonly classTerm(): boolean {
-    const cursor = this.cursor;
-
-    cursor.index += 1;
+  private classTerm(): boolean {
+    this.cursor.index += 1;
 
     const isFine = this.classFine();
     if (!isFine) {
       return false;
     }
 
-    return this.quantifiers.quantifier();
+    return this.quantifier();
   }
 
-  private readonly classFine(): boolean {
+  private classFine(): boolean {
     if (this.cursor.isSets) {
-      return this.classes.setClass();
+      return this.setClass();
     }
 
-    return this.classes.legacyClass();
+    return this.legacyClass();
   }
 
-  private readonly braceTerm(): boolean {
-    const cursor = this.cursor;
-    if (this.quantifiers.isQuantifierStart()) {
-      return cursor.fail(kNothingToRepeatText);
+  private braceTerm(): boolean {
+    if (this.isQuantifierStart()) {
+      return this.cursor.fail(kNothingToRepeatText);
     }
-    if (cursor.isUnicode) {
-      return cursor.fail(kLoneBracketsText);
+    if (this.cursor.isUnicode) {
+      return this.cursor.fail(kLoneBracketsText);
     }
 
-    cursor.index += 1;
+    this.cursor.index += 1;
 
-    return this.quantifiers.quantifier();
+    return this.quantifier();
   }
 
-  private readonly bracketTerm(): boolean {
-    const cursor = this.cursor;
-    if (cursor.isUnicode) {
-      return cursor.fail(kLoneBracketsText);
+  private bracketTerm(): boolean {
+    if (this.cursor.isUnicode) {
+      return this.cursor.fail(kLoneBracketsText);
     }
 
-    cursor.index += 1;
+    this.cursor.index += 1;
 
-    return this.quantifiers.quantifier();
+    return this.quantifier();
   }
 
   private group(): RegexGroupEnd {
-    const cursor = this.cursor;
-    const at = cursor.index - 1;
-    if (!cursor.accept("?")) {
+    const at = this.cursor.index - 1;
+    if (!this.cursor.accept("?")) {
       return this.captureGroup("", at);
     }
 
-    const char = cursor.current();
+    const char = this.cursor.current();
     const isBehind =
-      char == "<" && (cursor.isNextAt("=") || cursor.isNextAt("!"));
+      char == "<" && (this.cursor.isNextAt("=") || this.cursor.isNextAt("!"));
     if (char == "=" || char == "!") {
-      cursor.index += 1;
+      this.cursor.index += 1;
 
       return this.lookGroup(false);
     }
     if (isBehind) {
-      cursor.index += 2;
+      this.cursor.index += 2;
 
       return this.lookGroup(true);
     }
     if (char == "<") {
-      cursor.index += 1;
+      this.cursor.index += 1;
 
       return this.namedGroup(at);
     }
     if (char != ":" && !this.modifiers()) {
-      cursor.fail(kInvalidGroupText);
+      this.cursor.fail(kInvalidGroupText);
 
       return RegexGroupEnd.Failed;
     }
 
-    cursor.accept(":");
+    this.cursor.accept(":");
 
     return this.closedGroup();
   }
 
   private captureGroup(name: string, at: int): RegexGroupEnd {
-    const cursor = this.cursor;
-
     this.captures += 1;
 
     if (this.captures > kMaxCaptures) {
-      cursor.fail(kTooManyCapturesText);
+      this.cursor.fail(kTooManyCapturesText);
 
       return RegexGroupEnd.Failed;
     }
 
     const path = this.path.slice();
     if (this.isDuplicateName(name, path)) {
-      cursor.index = at;
-      cursor.fail(kDuplicateNameText);
+      this.cursor.index = at;
+      this.cursor.fail(kDuplicateNameText);
 
       return RegexGroupEnd.Failed;
     }
@@ -361,7 +340,7 @@ export class RegexSyntax {
       return RegexGroupEnd.Failed;
     }
 
-    const name = this.escapes.groupName();
+    const name = this.groupName();
     if (name == undefined) {
       return RegexGroupEnd.Failed;
     }
@@ -400,7 +379,7 @@ export class RegexSyntax {
     return this.closedEnd(RegexGroupEnd.Quantifiable);
   }
 
-  private readonly closedEnd(end: RegexGroupEnd): RegexGroupEnd {
+  private closedEnd(end: RegexGroupEnd): RegexGroupEnd {
     if (this.cursor.accept(")")) {
       return end;
     }
@@ -410,29 +389,28 @@ export class RegexSyntax {
     return RegexGroupEnd.Failed;
   }
 
-  private readonly modifiers(): boolean {
-    const cursor = this.cursor;
+  private modifiers(): boolean {
     let added = "";
     let removed = "";
     let hasDash = false;
 
-    while (!cursor.accept(":")) {
-      const char = cursor.current();
+    while (!this.cursor.accept(":")) {
+      const char = this.cursor.current();
       if (char == "-") {
         if (hasDash) {
-          return cursor.fail(kMultipleDashesText);
+          return this.cursor.fail(kMultipleDashesText);
         }
 
         hasDash = true;
-        cursor.index += 1;
+        this.cursor.index += 1;
 
         continue;
       }
       if (!kModifierFlags.includes(char)) {
-        return cursor.fail(kInvalidGroupText);
+        return this.cursor.fail(kInvalidGroupText);
       }
       if (added.includes(char) || removed.includes(char)) {
-        return cursor.fail(kRepeatedFlagText);
+        return this.cursor.fail(kRepeatedFlagText);
       }
 
       if (hasDash) {
@@ -441,11 +419,11 @@ export class RegexSyntax {
         added += char;
       }
 
-      cursor.index += 1;
+      this.cursor.index += 1;
     }
 
     if (hasDash && removed == "" && added == "") {
-      return cursor.fail(kInvalidFlagGroupText);
+      return this.cursor.fail(kInvalidFlagGroupText);
     }
 
     return true;
@@ -470,7 +448,10 @@ export class RegexSyntax {
     return false;
   }
 
-  private readonly mightBothParticipate(first: Read<int[]>, second: Read<int[]>): boolean {
+  private readonly mightBothParticipate(
+    first: Read<int[]>,
+    second: Read<int[]>,
+  ): boolean {
     let index = 0;
 
     while (index + 1 < first.length && index + 1 < second.length) {
@@ -492,19 +473,18 @@ export class RegexSyntax {
   }
 
   private escapeTerm(): boolean {
-    const cursor = this.cursor;
-    const at = cursor.index;
+    const at = this.cursor.index;
 
-    cursor.index += 1;
+    this.cursor.index += 1;
 
-    if (cursor.isAtEnd()) {
-      return cursor.fail(kBackslashEndText);
+    if (this.cursor.isAtEnd()) {
+      return this.cursor.fail(kBackslashEndText);
     }
 
-    const char = cursor.current();
-    const isNamed = cursor.isUnicode || cursor.hasNames;
+    const char = this.cursor.current();
+    const isNamed = this.cursor.isUnicode || this.cursor.hasNames;
     if (char == "b" || char == "B") {
-      cursor.index += 1;
+      this.cursor.index += 1;
 
       return this.unquantifiable(false);
     }
@@ -514,75 +494,71 @@ export class RegexSyntax {
     if (char == "k" && isNamed) {
       return this.namedReference(at);
     }
-    if (this.escapes.isSetEscape(char)) {
-      cursor.index += 1;
+    if (this.isSetEscape(char)) {
+      this.cursor.index += 1;
 
-      return this.quantifiers.quantifier();
+      return this.quantifier();
     }
     if (kPropertyEscapes.includes(char)) {
       return this.propertyTerm(char);
     }
-    if (this.escapes.characterEscape(false) < 0) {
+    if (this.characterEscape(false) < 0) {
       return false;
     }
 
-    return this.quantifiers.quantifier();
+    return this.quantifier();
   }
 
-  private readonly propertyTerm(char: string): boolean {
-    const cursor = this.cursor;
-    if (!cursor.isUnicode) {
-      return cursor.fail(kPropertyFlagText);
+  private propertyTerm(char: string): boolean {
+    if (!this.cursor.isUnicode) {
+      return this.cursor.fail(kPropertyFlagText);
     }
 
-    cursor.index += 1;
+    this.cursor.index += 1;
 
-    if (!this.escapes.propertyEscape(char == kNegatedProperty)) {
+    if (!this.propertyEscape(char == kNegatedProperty)) {
       return false;
     }
 
-    return this.quantifiers.quantifier();
+    return this.quantifier();
   }
 
-  private readonly numberedReference(at: int): boolean {
-    const cursor = this.cursor;
-    const start = cursor.index;
+  private numberedReference(at: int): boolean {
+    const start = this.cursor.index;
     let number = 0;
 
-    while (cursor.isDigitAt(cursor.index) && number <= kMaxCaptures) {
-      const digit = cursor.digitAt(cursor.index);
+    while (this.cursor.isDigitAt(this.cursor.index) && number <= kMaxCaptures) {
+      const digit = this.cursor.digitAt(this.cursor.index);
 
-      number = this.quantifiers.clamped(number * kDecimalBase + digit);
-      cursor.index += 1;
+      number = this.clamped(number * kDecimalBase + digit);
+      this.cursor.index += 1;
     }
 
     if (number <= this.totalCaptures) {
-      return this.quantifiers.quantifier();
+      return this.quantifier();
     }
 
-    cursor.index = start;
+    this.cursor.index = start;
 
-    if (cursor.isUnicode) {
-      return cursor.fail(kEscapeText);
+    if (this.cursor.isUnicode) {
+      return this.cursor.fail(kEscapeText);
     }
 
-    cursor.index = at;
+    this.cursor.index = at;
 
-    return cursor.fail(kNoSuchGroupText);
+    return this.cursor.fail(kNoSuchGroupText);
   }
 
   private namedReference(at: int): boolean {
-    const cursor = this.cursor;
+    this.cursor.index += 1;
 
-    cursor.index += 1;
-
-    if (!cursor.accept("<")) {
-      return cursor.fail(kNamedReferenceText);
+    if (!this.cursor.accept("<")) {
+      return this.cursor.fail(kNamedReferenceText);
     }
 
-    const name = this.escapes.groupName();
+    const name = this.groupName();
     if (name == undefined) {
-      cursor.renameError(kNamedReferenceText);
+      this.cursor.renameError(kNamedReferenceText);
 
       return false;
     }
@@ -592,10 +568,10 @@ export class RegexSyntax {
       this.references.push({ name, at });
     }
 
-    return this.quantifiers.quantifier();
+    return this.quantifier();
   }
 
-  private readonly resolveNames(): void {
+  private resolveNames(): void {
     const known = this.names.slice(1);
 
     for (const reference of this.references) {

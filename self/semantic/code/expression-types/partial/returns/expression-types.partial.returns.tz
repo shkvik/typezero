@@ -20,8 +20,12 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     this.walkReturnValue(statement, frame, module);
-    this.noteGuardExit(statement.value, frame, module);
+    const value = tree.exprAt(statement.valueId);
+
+    this.noteGuardExit(value, frame, module);
   }
 
   private walkReturnValue(
@@ -29,17 +33,19 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
-    const value = statement.value;
+    const tree = this.types.program.tree;
+
+    const value = tree.exprAt(statement.valueId);
     const fn = frame.fn;
 
     this.returnBeforeSuper(statement.loc, module);
     this.returnFieldsCheck(statement, fn, module);
-    const returnAwaitError = this.statements.returnAwaitCheck(value, frame);
+    const returnAwaitError = this.types.returnAwaitCheck(value, frame);
 
-    this.reportFound(module, returnAwaitError);
+    this.errors.writeFound(module, returnAwaitError);
 
     if (fn == undefined) {
-      this.report(
+      this.errors.write(
         module,
         statement.loc,
         Code.ReturnOutsideFunction,
@@ -50,7 +56,7 @@ partial class ExpressionTypes {
     }
 
     if (value != undefined && fn.role?.method == MethodKind.Constructor) {
-      this.report(module, value.loc, Code.ConstructorReturn, kNoDetails);
+      this.errors.write(module, value.loc, Code.ConstructorReturn, kNoDetails);
 
       return this.valueCheck(value, module);
     }
@@ -63,13 +69,13 @@ partial class ExpressionTypes {
       return this.voidReturn(value, frame, module);
     }
     if (value == undefined) {
-      const emptyReturnError = this.statements.emptyReturnError(
+      const emptyReturnError = this.types.emptyReturnError(
         statement,
         result,
         frame,
       );
 
-      return this.reportFound(module, emptyReturnError);
+      return this.errors.writeFound(module, emptyReturnError);
     }
 
     const given = this.returnedType(value, result, frame, module);
@@ -86,7 +92,7 @@ partial class ExpressionTypes {
   ): Type {
     const given = this.typed(value, wanted, module);
     if (frame.isAsync && given.kind == TypeKind.Promise) {
-      return given.value;
+      return this.types.store.valueOf(given);
     }
 
     return given;
@@ -133,7 +139,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private readonly returnShapeHint(
+  private returnShapeHint(
     value: Expr,
     frame: Read<FunctionFrame>,
     module: int,
@@ -143,29 +149,35 @@ partial class ExpressionTypes {
     }
 
     const earlier = frame.returns.find((one) =>
-      this.statements.isShapedType(one.type),
+      this.types.isShapedType(one.type),
     );
 
     return earlier?.type;
   }
 
   private readonly isReturnShaped(value: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     switch (value.kind) {
       case ExprKind.ObjectLit:
       case ExprKind.ArrayLit:
         return true;
       case ExprKind.Conditional:
         return (
-          this.isReturnShaped(value.thenExpr, module) ||
-          this.isReturnShaped(value.elseExpr, module)
+          this.isReturnShaped(tree.exprOf(value.thenExprId), module) ||
+          this.isReturnShaped(tree.exprOf(value.elseExprId), module)
         );
       case ExprKind.Call: {
-        const callee = value.callee;
+        const callee = tree.exprOf(value.calleeId);
         const isMaker =
           callee.kind == ExprKind.Name && this.isResultMaker(callee, module);
-        const isSpread = value.args.some((arg) => arg.spread);
+        const isSpread = tree
+          .argumentsOf(value.argsList)
+          .some((arg) => arg.spread);
 
-        return isMaker && value.args.length <= 1 && !isSpread;
+        return (
+          isMaker && tree.argumentsOf(value.argsList).length <= 1 && !isSpread
+        );
       }
       default:
         return false;
@@ -190,9 +202,12 @@ partial class ExpressionTypes {
       return;
     }
 
-    const word = this.functions.functionLabel(frame.fn);
-    const first = this.text.of(given);
+    const word = this.types.functionLabel(frame.fn);
+    const first = this.types.typeText(given);
 
-    this.report(module, value.loc, Code.VoidReturnsValue, { word, first });
+    this.errors.write(module, value.loc, Code.VoidReturnsValue, {
+      word,
+      first,
+    });
   }
 }

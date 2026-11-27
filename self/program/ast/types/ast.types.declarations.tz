@@ -1,8 +1,5 @@
-import { TypeParamDecl, TypeRef } from "./ast.types.types.tz";
-import { Stmt } from "./ast.types.statements.tz";
-import { Param } from "./ast.types.functions.tz";
 import { Access } from "./ast.types.classes.tz";
-import { ExportDecl, ImportDecl } from "./ast.types.modules.tz";
+import { AstList } from "./ast.types.span.tz";
 
 export enum DeclaredMemberKind {
   Field,
@@ -18,8 +15,8 @@ export type DeclaredField = {
 
 export type DeclaredSignature = {
   readonly kind: DeclaredMemberKind.Method | DeclaredMemberKind.Constructor;
-  readonly typeParams: readonly TypeParamDecl[];
-  readonly params: readonly Param[];
+  readonly typeParamsList: AstList;
+  readonly paramsList: AstList;
 };
 
 export type DeclaredMemberForm = DeclaredField | DeclaredSignature;
@@ -31,22 +28,22 @@ export type DeclaredMember = {
   readonly accessWritten: boolean;
   readonly isStatic: boolean;
   readonly form: DeclaredMemberForm;
-  readonly type?: TypeRef;
+  readonly typeId?: int;
 };
 
 export type DeclaredClass = {
   readonly name: string;
   readonly loc: int;
   readonly isAbstract: boolean;
-  readonly typeParams: readonly TypeParamDecl[];
-  readonly base?: TypeRef;
-  readonly implemented: readonly TypeRef[];
-  readonly members: readonly DeclaredMember[];
+  readonly typeParamsList: AstList;
+  readonly baseId?: int;
+  readonly implementedList: AstList;
+  readonly membersList: AstList;
 };
 
 export type DeclarationFile = {
-  readonly items: readonly Stmt[];
-  readonly classes: readonly DeclaredClass[];
-  readonly imports: readonly ImportDecl[];
-  readonly exports: readonly ExportDecl[];
+  readonly itemsList: AstList;
+  readonly classesList: AstList;
+  readonly importsList: AstList;
+  readonly exportsList: AstList;
 };

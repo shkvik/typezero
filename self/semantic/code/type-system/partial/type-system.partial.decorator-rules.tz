@@ -1,0 +1,486 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ClassDecl,
+  Decorator,
+  FieldKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  DecorateRun,
+  DecoratedName,
+  DecoratorPlace,
+  DecoratorUse,
+} from "../../expression-types/types/expression-types.types.tz";
+import {
+  kDecoratorPlaces,
+  kDescriptorValueName,
+} from "../../decorator-rules/const/decorator-rules.const.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import { kHiddenMark } from "../../source-texts/const/source-texts.const.tz";
+
+partial class TypeSystem {
+  public readonly isDecoratedClass(decl: ClassDecl): boolean {
+    const tree = this.program.tree;
+
+    const isMethod = tree
+      .functionsOf(decl.methodsList)
+      .some((fn) => this.isDecoratedFunction(fn));
+    const isMade = tree
+      .functionsOf(decl.constructorsList)
+      .some((fn) => this.hasDecoratedParams(fn));
+    const isField = tree
+      .fieldsOf(decl.fieldsList)
+      .some((field) => tree.decoratorsOf(field.decoratorsList).length > 0);
+
+    return (
+      tree.decoratorsOf(decl.decoratorsList).length > 0 ||
+      isMethod ||
+      isMade ||
+      isField
+    );
+  }
+
+  public readonly hasDecoratedParams(fn: FunctionDecl): boolean {
+    const tree = this.program.tree;
+
+    return tree
+      .paramsOf(fn.paramsList)
+      .some((param) => tree.decoratorsOf(param.decoratorsList).length > 0);
+  }
+
+  public readonly decoratorNames(decorators: Read<Decorator[]>): string[] {
+    const tree = this.program.tree;
+
+    return decorators.map((decorator) =>
+      this.decoratorName(tree.exprOf(decorator.exprId)),
+    );
+  }
+
+  public readonly methodDecoratorNames(fn: FunctionDecl): string[] {
+    const tree = this.program.tree;
+
+    const names = this.decoratorNames(
+      tree.decoratorsOf(fn.role?.decoratorsList) ?? [],
+    );
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      const decorators = tree.decoratorsOf(param.decoratorsList);
+      const more = this.decoratorNames(decorators);
+
+      names.push(...more);
+    }
+
+    return names;
+  }
+
+  public readonly clashWhat(
+    earlier: Read<DecoratedName>,
+    later: Read<DecoratedName>,
+  ): string {
+    const name = later.name;
+    if (earlier.isStatic != later.isStatic) {
+      return `both the static member '${name}' and the member '${name}'`;
+    }
+
+    return `two variants of '${name}'`;
+  }
+
+  public readonly clashRecords(
+    earlier: Read<DecoratedName>,
+    later: Read<DecoratedName>,
+  ): string {
+    const names = later.decorators.slice().reverse();
+    const shared = names.find(
+      (name) => name != "" && earlier.decorators.includes(name),
+    );
+    if (shared == undefined) {
+      return "the records 'design:*' the compiler writes";
+    }
+
+    return `the records of '@${shared}'`;
+  }
+
+  public readonly ownUses(decorators: Read<Decorator[]>): DecoratorUse[] {
+    return decorators.map((decorator) => ({ decorator, param: -1 }));
+  }
+
+  public readonly addParamUses(uses: DecoratorUse[], fn: FunctionDecl): void {
+    const tree = this.program.tree;
+
+    for (let index = 0; index < tree.paramsOf(fn.paramsList).length; index++) {
+      const param = tree.paramsOf(fn.paramsList)[index];
+
+      for (const decorator of tree.decoratorsOf(param?.decoratorsList) ?? []) {
+        uses.push({ decorator, param: index });
+      }
+    }
+  }
+
+  public readonly classUses(decl: ClassDecl): DecoratorUse[] {
+    const tree = this.program.tree;
+
+    const decorators = tree.decoratorsOf(decl.decoratorsList);
+    const uses = this.ownUses(decorators);
+
+    for (const fn of tree.functionsOf(decl.constructorsList)) {
+      this.addParamUses(uses, fn);
+    }
+
+    return uses;
+  }
+
+  public readonly isDescriptorUse(place: DecoratorPlace, count: int): boolean {
+    return place == DecoratorPlace.Method && count >= 3;
+  }
+
+  public readonly usePlace(
+    run: Read<DecorateRun>,
+    use: DecoratorUse,
+  ): DecoratorPlace {
+    if (use.param >= 0) {
+      return DecoratorPlace.Parameter;
+    }
+
+    return run.place;
+  }
+
+  public thirdParameter(type: FunctionType): Type | undefined {
+    const third = this.store.paramsOf(type)[2];
+    if (third == undefined) {
+      return undefined;
+    }
+
+    return this.definedType(third.type);
+  }
+
+  public readonly isDescriptorType(type: Type): boolean {
+    if (type.kind != TypeKind.Object) {
+      return false;
+    }
+
+    return this.store
+      .fieldsOf(type)
+      .some((field) => field.name == kDescriptorValueName);
+  }
+
+  public readonly isPositionType(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  public readonly decoratorLabel(expr: Expr): string {
+    const name = this.decoratorName(expr);
+    if (name == "") {
+      return "the decorator";
+    }
+
+    return `'${name}'`;
+  }
+
+  public readonly decoratedConstructorsCheck(
+    decl: ClassDecl,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const decorated = tree
+      .functionsOf(decl.constructorsList)
+      .filter((fn) => this.hasDecoratedParams(fn));
+    const second = decorated[1];
+    if (second == undefined) {
+      return undefined;
+    }
+
+    return {
+      code: Code.DecoratedConstructors,
+      loc: second.loc,
+      details: {
+        word: decl.name ?? "",
+      },
+    };
+  }
+
+  public readonly nameClashCheck(
+    decl: ClassDecl,
+    earlier: Read<DecoratedName[]>,
+    later: Read<DecoratedName>,
+  ): SourceError | undefined {
+    const other = earlier.find((one) => one.name == later.name);
+    if (other == undefined) {
+      return undefined;
+    }
+
+    const first = this.clashWhat(other, later);
+    const second = this.clashRecords(other, later);
+
+    return {
+      code: Code.DecoratedSameName,
+      loc: later.loc,
+      details: {
+        word: decl.name ?? "",
+        first,
+        second,
+      },
+    };
+  }
+
+  public readonly parameterPlaceCheck(fn: FunctionDecl): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+
+    if (fn.role != undefined) {
+      return errors;
+    }
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      const first = tree.decoratorsOf(param.decoratorsList)[0];
+      if (first != undefined) {
+        errors.push({
+          code: Code.DecoratorParameterPlace,
+          loc: first.loc,
+          details: kNoDetails,
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public decoratorFit(
+    use: DecoratorUse,
+    place: DecoratorPlace,
+    type: Type,
+  ): Checked<int> {
+    const tree = this.program.tree;
+
+    const row = kDecoratorPlaces.find((one) => one.place == place);
+    const given = row?.given ?? 3;
+    if (
+      row == undefined ||
+      type.kind != TypeKind.Function ||
+      this.store.hasRest(type)
+    ) {
+      return { value: given };
+    }
+
+    const params = this.store.paramsOf(type);
+    const isUnknown = params.some((param) => param.type.kind == TypeKind.Error);
+    if (isUnknown) {
+      return { value: given };
+    }
+
+    const count = params.length;
+    const needs = Math.min(this.leastOf(type), count);
+    const expr = tree.exprOf(use.decorator.exprId);
+    const word = this.decoratorLabel(expr);
+    const loc = use.decorator.loc;
+    if (needs > given) {
+      return {
+        value: -1,
+        error: {
+          code: Code.DecoratorArguments,
+          loc,
+          details: {
+            word,
+            first: row.noun,
+            other: `${needs}`,
+            second: `${given}`,
+            place: row.args,
+          },
+        },
+      };
+    }
+
+    const third = this.thirdParameter(type);
+    const isDescriptor = third != undefined && this.isDescriptorType(third);
+    if (isDescriptor && place == DecoratorPlace.Parameter) {
+      return {
+        value: -1,
+        error: {
+          code: Code.DecoratorDescriptorParameter,
+          loc,
+          details: { word },
+        },
+      };
+    }
+
+    const isPosition = third != undefined && this.isPositionType(third);
+    if (isPosition && place == DecoratorPlace.Method) {
+      return {
+        value: -1,
+        error: {
+          code: Code.DecoratorPositionMethod,
+          loc,
+          details: { word },
+        },
+      };
+    }
+
+    return { value: count };
+  }
+
+  public readonly decoratedNamesCheck(decl: ClassDecl): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const members = this.decoratedNames(decl);
+
+    for (let index = 1; index < members.length; index++) {
+      const later = members[index];
+      if (later != undefined) {
+        const nameClashError = this.nameClashCheck(
+          decl,
+          members.slice(0, index),
+          later,
+        );
+
+        if (nameClashError != undefined) {
+          errors.push(nameClashError);
+        }
+      }
+    }
+
+    return errors;
+  }
+
+  public readonly decoratedNames(decl: ClassDecl): DecoratedName[] {
+    const tree = this.program.tree;
+
+    const members: DecoratedName[] = [];
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      const decorators = this.decoratorNames(
+        tree.decoratorsOf(field.decoratorsList),
+      );
+      if (decorators.length > 0) {
+        members.push({
+          name: field.name,
+          loc: field.loc,
+          isStatic: field.form == FieldKind.Static,
+          decorators,
+        });
+      }
+    }
+
+    for (const fn of tree.functionsOf(decl.methodsList)) {
+      const decorators = this.methodDecoratorNames(fn);
+      if (decorators.length > 0) {
+        members.push({
+          name: fn.name,
+          loc: fn.loc,
+          isStatic: this.isStaticMethod(fn),
+          decorators,
+        });
+      }
+    }
+
+    return members;
+  }
+
+  public readonly memberRuns(decl: ClassDecl): DecorateRun[] {
+    const tree = this.program.tree;
+
+    const runs: DecorateRun[] = [];
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      const decorators = tree.decoratorsOf(field.decoratorsList);
+      const uses = this.ownUses(decorators);
+      const first = uses[0];
+      if (first != undefined) {
+        runs.push({
+          decl,
+          field,
+          uses,
+          place: DecoratorPlace.Field,
+          isStatic: field.form == FieldKind.Static,
+          at: first.decorator.loc,
+        });
+      }
+    }
+
+    for (const fn of tree.functionsOf(decl.methodsList)) {
+      const uses = this.ownUses(
+        tree.decoratorsOf(fn.role?.decoratorsList) ?? [],
+      );
+
+      this.addParamUses(uses, fn);
+
+      const first = uses[0];
+      if (first != undefined) {
+        runs.push({
+          decl,
+          method: fn,
+          uses,
+          place: DecoratorPlace.Method,
+          isStatic: this.isStaticMethod(fn),
+          at: first.decorator.loc,
+        });
+      }
+    }
+
+    const instance: DecorateRun[] = [];
+    const statics: DecorateRun[] = [];
+
+    for (const run of runs.drain()) {
+      if (run.isStatic) {
+        statics.push(run);
+      } else {
+        instance.push(run);
+      }
+    }
+
+    return instance.concat(statics);
+  }
+
+  private readonly isDecoratedFunction(fn: FunctionDecl): boolean {
+    const tree = this.program.tree;
+
+    const own = tree.decoratorsOf(fn.role?.decoratorsList) ?? [];
+
+    return own.length > 0 || this.hasDecoratedParams(fn);
+  }
+
+  private readonly decoratorName(expr: Expr): string {
+    const tree = this.program.tree;
+
+    const names: string[] = [];
+    let link = this.withoutCalls(expr);
+
+    while (link.kind == ExprKind.Member) {
+      names.push(link.name);
+      link = this.withoutCalls(tree.exprOf(link.objectId));
+    }
+
+    if (link.kind != ExprKind.Name || link.name.startsWith(kHiddenMark)) {
+      return "";
+    }
+
+    return [link.name].concat(names.reverse()).join(".");
+  }
+
+  private readonly withoutCalls(expr: Expr): Expr {
+    const tree = this.program.tree;
+
+    let callee = expr;
+
+    while (callee.kind == ExprKind.Call) {
+      callee = tree.exprOf(callee.calleeId);
+    }
+
+    return callee;
+  }
+}

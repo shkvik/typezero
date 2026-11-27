@@ -14,183 +14,271 @@ import {
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { JumpKind } from "../types/scope-traversal.types.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ScopeTraversal {
-  private traverseStatements(statements: Read<Stmt[]>): void {
+  private traverseStatements(
+    program: Read<Program>,
+    statements: Read<Stmt[]>,
+  ): void {
     for (const statement of statements) {
-      this.traverseStatement(statement);
+      this.traverseStatement(program, statement);
     }
   }
 
-  private traverseStatement(statement: Stmt): void {
+  private traverseStatement(program: Read<Program>, statement: Stmt): void {
+    const tree = program.tree;
+
     switch (statement.kind) {
       case StmtKind.Block:
-        return this.traverseBlock(statement.body);
+        const body = tree.stmtsOf(statement.bodyList);
+
+        return this.traverseBlock(program, body);
       case StmtKind.VarDecl:
-        return this.traverseDeclarators(statement.decls);
+        return this.traverseDeclarators(
+          program,
+          tree.declaratorsOf(statement.declsList),
+        );
       case StmtKind.Function:
-        return this.traverseFunction(statement);
+        return this.traverseFunction(program, statement);
       case StmtKind.Expr:
-        return this.traverseExpr(statement.expr);
+        const expr = tree.exprOf(statement.exprId);
+
+        return this.traverseExpr(program, expr);
       case StmtKind.If:
-        return this.traverseIf(statement);
+        return this.traverseIf(program, statement);
       case StmtKind.While:
       case StmtKind.DoWhile:
       case StmtKind.For:
       case StmtKind.ForOf:
-        return this.traverseTarget(statement, JumpKind.Loop);
+        return this.traverseTarget(program, statement, JumpKind.Loop);
       case StmtKind.Switch:
-        return this.traverseTarget(statement, JumpKind.Switch);
+        return this.traverseTarget(program, statement, JumpKind.Switch);
       case StmtKind.Labeled:
-        return this.traverseLabeled(statement, []);
+        return this.traverseLabeled(program, statement, []);
       case StmtKind.Break:
       case StmtKind.Continue:
         return this.jumpCheck(statement);
       case StmtKind.Return:
-        return this.traverseOptionalExpr(statement.value);
+        return this.traverseOptionalExpr(
+          program,
+          tree.exprAt(statement.valueId),
+        );
       case StmtKind.TypeAlias:
-        return this.traverseTypeAlias(statement);
+        return this.traverseTypeAlias(program, statement);
       case StmtKind.Enum:
-        return this.traverseEnum(statement);
+        return this.traverseEnum(program, statement);
       case StmtKind.Class:
-        return this.traverseClass(statement, false);
+        return this.traverseClass(program, statement, false);
       default:
         return;
     }
   }
 
-  private traverseInTarget(statement: Stmt): void {
+  private traverseInTarget(program: Read<Program>, statement: Stmt): void {
+    const tree = program.tree;
+
     switch (statement.kind) {
       case StmtKind.While:
-        this.traverseExpr(statement.cond);
+        const cond = tree.exprOf(statement.condId);
 
-        return this.traverseScoped(statement.body);
+        this.traverseExpr(program, cond);
+
+        const body = tree.stmtOf(statement.bodyId);
+
+        return this.traverseScoped(program, body);
       case StmtKind.DoWhile:
-        this.traverseScoped(statement.body);
+        const bodyStmt = tree.stmtOf(statement.bodyId);
 
-        return this.traverseExpr(statement.cond);
+        this.traverseScoped(program, bodyStmt);
+
+        const condExpr = tree.exprOf(statement.condId);
+
+        return this.traverseExpr(program, condExpr);
       case StmtKind.For:
-        return this.traverseFor(statement);
+        return this.traverseFor(program, statement);
       case StmtKind.ForOf:
-        return this.traverseForOf(statement);
+        return this.traverseForOf(program, statement);
       case StmtKind.Switch:
-        return this.traverseSwitch(statement);
+        return this.traverseSwitch(program, statement);
       default:
-        return this.traverseStatement(statement);
+        return this.traverseStatement(program, statement);
     }
   }
 
-  private traverseBlock(body: Read<Stmt[]>): void {
+  private traverseBlock(program: Read<Program>, body: Read<Stmt[]>): void {
     this.scopes.open();
-    this.declareStatements(body);
-    this.traverseStatements(body);
+    this.declareStatements(program, body);
+    this.traverseStatements(program, body);
     this.scopes.close();
   }
 
-  private traverseScoped(statement: Stmt): void {
+  private traverseScoped(program: Read<Program>, statement: Stmt): void {
+    const tree = program.tree;
+
     if (statement.kind == StmtKind.Block) {
-      return this.traverseBlock(statement.body);
+      const body = tree.stmtsOf(statement.bodyList);
+
+      return this.traverseBlock(program, body);
     }
 
-    this.traverseBlock([statement]);
+    this.traverseBlock(program, [statement]);
   }
 
-  private traverseDeclarators(decls: Read<VarDeclarator[]>): void {
+  private traverseDeclarators(
+    program: Read<Program>,
+    decls: Read<VarDeclarator[]>,
+  ): void {
     for (const decl of decls) {
-      this.traverseDeclarator(decl);
+      this.traverseDeclarator(program, decl);
     }
   }
 
-  private traverseDeclarator(decl: VarDeclarator): void {
-    this.traverseOptionalType(decl.typeAnn);
-    this.traverseOptionalExpr(decl.init);
+  private traverseDeclarator(
+    program: Read<Program>,
+    decl: VarDeclarator,
+  ): void {
+    const tree = program.tree;
+
+    const typeAnn = tree.typeRefAt(decl.typeAnnId);
+
+    this.traverseOptionalType(program, typeAnn);
+    const init = tree.exprAt(decl.initId);
+
+    this.traverseOptionalExpr(program, init);
     this.scopes.markLive(decl.name);
   }
 
-  private traverseIf(statement: IfStmt): void {
-    this.traverseExpr(statement.cond);
-    this.traverseScoped(statement.thenStmt);
+  private traverseIf(program: Read<Program>, statement: IfStmt): void {
+    const tree = program.tree;
 
-    const elseStmt = statement.elseStmt;
+    const cond = tree.exprOf(statement.condId);
+
+    this.traverseExpr(program, cond);
+    const thenStmt = tree.stmtOf(statement.thenStmtId);
+
+    this.traverseScoped(program, thenStmt);
+
+    const elseStmt = tree.stmtAt(statement.elseStmtId);
     if (elseStmt != undefined) {
-      this.traverseScoped(elseStmt);
+      this.traverseScoped(program, elseStmt);
     }
   }
 
-  private traverseFor(statement: ForStmt): void {
+  private traverseFor(program: Read<Program>, statement: ForStmt): void {
+    const tree = program.tree;
+
     this.scopes.open();
 
-    const init = statement.init;
+    const init = tree.stmtAt(statement.initId);
     if (init != undefined) {
-      this.declareStatement(init);
-      this.traverseStatement(init);
+      this.declareStatement(program, init);
+      this.traverseStatement(program, init);
     }
 
-    this.traverseOptionalExpr(statement.cond);
-    this.traverseOptionalExpr(statement.step);
+    const cond = tree.exprAt(statement.condId);
 
-    const body = statement.body;
+    this.traverseOptionalExpr(program, cond);
+    const step = tree.exprAt(statement.stepId);
+
+    this.traverseOptionalExpr(program, step);
+
+    const body = tree.stmtAt(statement.bodyId);
     if (body != undefined) {
-      this.traverseScoped(body);
+      this.traverseScoped(program, body);
     }
 
     this.scopes.close();
   }
 
-  private traverseForOf(statement: ForOfStmt): void {
+  private traverseForOf(program: Read<Program>, statement: ForOfStmt): void {
+    const tree = program.tree;
+
     const binding = statement.binding;
 
     this.scopes.open();
-    this.traverseExpr(statement.iterable);
+    const iterable = tree.exprOf(statement.iterableId);
+
+    this.traverseExpr(program, iterable);
     this.declareValue(
+      program,
       { name: binding.name, kind: SymbolKind.Variable, loc: binding.loc },
       true,
     );
-    this.traverseOptionalType(binding.typeAnn);
-    this.traverseScoped(statement.body);
+    const typeAnn = tree.typeRefAt(binding.typeAnnId);
+
+    this.traverseOptionalType(program, typeAnn);
+    const body = tree.stmtOf(statement.bodyId);
+
+    this.traverseScoped(program, body);
     this.scopes.close();
   }
 
-  private traverseSwitch(statement: SwitchStmt): void {
-    this.traverseExpr(statement.discriminant);
+  private traverseSwitch(program: Read<Program>, statement: SwitchStmt): void {
+    const tree = program.tree;
+
+    const discriminant = tree.exprOf(statement.discriminantId);
+
+    this.traverseExpr(program, discriminant);
     this.scopes.open();
 
-    for (const one of statement.cases) {
-      this.declareStatements(one.body);
+    for (const one of tree.casesOf(statement.casesList)) {
+      const body = tree.stmtsOf(one.bodyList);
+
+      this.declareStatements(program, body);
     }
 
     const noted: int[] = [];
 
-    for (const one of statement.cases) {
-      this.traverseOptionalExpr(one.test);
-      this.traverseStatements(one.body);
-      this.rememberCaseVariables(one, noted);
+    for (const one of tree.casesOf(statement.casesList)) {
+      const test = tree.exprAt(one.testId);
+
+      this.traverseOptionalExpr(program, test);
+      const bodyItem = tree.stmtsOf(one.bodyList);
+
+      this.traverseStatements(program, bodyItem);
+      this.rememberCaseVariables(program, one, noted);
     }
 
     this.forgetCaseVariables(noted);
     this.scopes.close();
   }
 
-  private traverseTypeAlias(alias: TypeAliasDecl): void {
+  private traverseTypeAlias(
+    program: Read<Program>,
+    alias: TypeAliasDecl,
+  ): void {
+    const tree = program.tree;
+
     this.scopes.open();
-    this.declareTypeParams(alias.typeParams);
-    this.traverseType(alias.type);
-    this.traverseTypes(alias.bases);
+    const typeParams = tree.typeParamsOf(alias.typeParamsList);
+
+    this.declareTypeParams(program, typeParams);
+    const typeRef = tree.typeRefOf(alias.typeId);
+
+    this.traverseType(program, typeRef);
+    const bases = tree.typeRefsOf(alias.basesList);
+
+    this.traverseTypes(program, bases);
     this.scopes.close();
   }
 
-  private traverseEnum(decl: EnumDecl): void {
+  private traverseEnum(program: Read<Program>, decl: EnumDecl): void {
+    const tree = program.tree;
+
     this.scopes.open();
 
-    for (const member of decl.members) {
+    for (const member of tree.enumMembersOf(decl.membersList)) {
       this.scopes.declareValue(
         { name: member.name, kind: SymbolKind.EnumMember, loc: member.loc },
         true,
       );
     }
 
-    for (const member of decl.members) {
-      this.traverseOptionalExpr(member.init);
+    for (const member of tree.enumMembersOf(decl.membersList)) {
+      const init = tree.exprAt(member.initId);
+
+      this.traverseOptionalExpr(program, init);
     }
 
     this.scopes.close();

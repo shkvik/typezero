@@ -51,7 +51,9 @@ partial class Lowering {
     return this.joined(frame, parts);
   }
 
-  private readonly concatLeaves(expr: Expr, leaves: Expr[]): void {
+  private concatLeaves(expr: Expr, leaves: Expr[]): void {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(expr);
     const isText = type == undefined || this.isString(type);
     if (expr.kind != ExprKind.Binary || expr.op != BinaryOp.Add || !isText) {
@@ -60,8 +62,12 @@ partial class Lowering {
       return;
     }
 
-    this.concatLeaves(expr.lhs, leaves);
-    this.concatLeaves(expr.rhs, leaves);
+    const lhs = tree.exprOf(expr.lhsId);
+
+    this.concatLeaves(lhs, leaves);
+    const rhs = tree.exprOf(expr.rhsId);
+
+    this.concatLeaves(rhs, leaves);
   }
 
   private concatPart(frame: Frame, expr: Expr): IrValue | undefined {
@@ -117,7 +123,11 @@ partial class Lowering {
     return { type: kStringType, value, tz: part.tz, owned: part.owned };
   }
 
-  private textPart(frame: Frame, value: IrValue, loc: int): IrValue | undefined {
+  private textPart(
+    frame: Frame,
+    value: IrValue,
+    loc: int,
+  ): IrValue | undefined {
     if (this.isString(value.tz)) {
       return value;
     }
@@ -156,8 +166,12 @@ partial class Lowering {
     return undefined;
   }
 
-  private readonly numberPart(frame: Read<Frame>, bits: LLVMValue, meta: string): IrValue {
-    const tz = this.store.plain(TypeKind.Unknown);
+  private numberPart(
+    frame: Read<Frame>,
+    bits: LLVMValue,
+    meta: string,
+  ): IrValue {
+    const tz = this.values.types.store.plain(TypeKind.Unknown);
     const pointer = frame.made.cast(IrOpcode.IntToPtr, bits, kPointerType);
     const empty = this.ir.undefinedOf(kStringType);
     const first = frame.made.insert(empty, pointer, 0);
@@ -168,7 +182,7 @@ partial class Lowering {
   }
 
   private joined(frame: Read<Frame>, parts: Read<IrValue[]>): IrValue {
-    const tz = this.store.plain(TypeKind.String);
+    const tz = this.values.types.store.plain(TypeKind.String);
     const count = parts.length;
     if (count == 0) {
       return this.stringValue("");
@@ -208,17 +222,20 @@ partial class Lowering {
   }
 
   private templateValue(frame: Frame, expr: TemplateExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const parts: IrValue[] = [];
-    const only = expr.exprs[0];
+    const only = tree.exprsOf(expr.exprsList)[0];
     const isAlone =
-      expr.exprs.length == 1 && expr.quasis.every((quasi) => quasi.length == 0);
+      tree.exprsOf(expr.exprsList).length == 1 &&
+      tree.textsOf(expr.quasisList).every((quasi) => quasi.length == 0);
     if (only != undefined && isAlone) {
       return this.aloneValue(frame, only);
     }
 
-    for (let index = 0; index < expr.quasis.length; index++) {
-      const quasi = expr.quasis[index] ?? "";
-      const inner = expr.exprs[index];
+    for (let index = 0; index < tree.textsOf(expr.quasisList).length; index++) {
+      const quasi = tree.textsOf(expr.quasisList)[index] ?? "";
+      const inner = tree.exprsOf(expr.exprsList)[index];
 
       if (quasi.length > 0) {
         parts.push(this.stringValue(quasi));
@@ -259,11 +276,15 @@ partial class Lowering {
   }
 
   private memberValue(frame: Frame, expr: MemberExpr): IrValue | undefined {
-    if (this.isProcessName(frame, expr.object)) {
+    const tree = this.values.types.program.tree;
+
+    const exprObject = tree.exprOf(expr.objectId);
+    if (this.isProcessName(frame, exprObject)) {
       return this.processMember(frame, expr);
     }
 
-    const object = this.typeIn(frame, expr.object);
+    const objectExpr = tree.exprOf(expr.objectId);
+    const object = this.typeIn(frame, objectExpr);
     const isArray = object != undefined && this.isArray(object);
     if (isArray && expr.name == "length") {
       return this.arrayMember(frame, expr);
@@ -297,7 +318,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const text = this.value(frame, expr.object);
+    const text = this.value(frame, tree.exprOf(expr.objectId));
     if (text == undefined) {
       return undefined;
     }
@@ -305,7 +326,7 @@ partial class Lowering {
     const meta = frame.made.extract(text.value, 1);
     const mask = this.ir.hexInteger(kIntType, kLengthMask);
     const length = frame.made.binary(IrOpcode.And, meta, mask);
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
 
     this.dropping(frame, text);
 

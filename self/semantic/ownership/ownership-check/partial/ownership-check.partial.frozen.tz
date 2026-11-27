@@ -1,0 +1,178 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kThisName } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private isFrozenExpr(expr: Expr): boolean {
+    const type = this.values.answers.typeOf(expr);
+    if (type == undefined || !this.isReadonlyChain(expr)) {
+      return false;
+    }
+    if (this.values.isDeepImmutable(type)) {
+      return true;
+    }
+
+    return this.isUnderReadonlyArray(expr);
+  }
+
+  private readonly isUnderReadonlyArray(expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Member: {
+        const object = tree.exprOf(expr.objectId);
+        if (this.isReadonlyArrayExpr(expr) && this.isThisRooted(object)) {
+          return true;
+        }
+
+        return this.isUnderReadonlyArray(object);
+      }
+      case ExprKind.Index: {
+        const object = tree.exprOf(expr.objectId);
+        if (this.isReadonlyArrayExpr(object) && this.isThisRooted(object)) {
+          return true;
+        }
+
+        return this.isUnderReadonlyArray(object);
+      }
+      case ExprKind.Cast:
+      case ExprKind.Unary:
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.isUnderReadonlyArray(operand);
+      case ExprKind.OptionalChain:
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.isUnderReadonlyArray(chain);
+      default:
+        return false;
+    }
+  }
+
+  private readonly isThisRooted(expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return expr.name == kThisName;
+      case ExprKind.Member:
+      case ExprKind.Index:
+        const object = tree.exprOf(expr.objectId);
+
+        return this.isThisRooted(object);
+      case ExprKind.Cast:
+      case ExprKind.Unary:
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.isThisRooted(operand);
+      case ExprKind.OptionalChain:
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.isThisRooted(chain);
+      default:
+        return false;
+    }
+  }
+
+  private isReadonlyChain(expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return true;
+      case ExprKind.Call:
+        return this.isFrozenLookup(expr);
+      case ExprKind.Member:
+        return (
+          this.isReadonlyMember(tree.exprOf(expr.objectId), expr.name) &&
+          this.isReadonlyChain(tree.exprOf(expr.objectId))
+        );
+      case ExprKind.Index:
+        return (
+          this.isReadonlyArrayExpr(tree.exprOf(expr.objectId)) &&
+          this.isReadonlyChain(tree.exprOf(expr.objectId))
+        );
+      case ExprKind.Cast:
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.isReadonlyChain(operand);
+      case ExprKind.OptionalChain:
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.isReadonlyChain(chain);
+      case ExprKind.Unary:
+        const operandExpr = tree.exprOf(expr.operandId);
+
+        return this.isReadonlyChain(operandExpr);
+      default:
+        return false;
+    }
+  }
+
+  private isFrozenLookup(call: CallExpr): boolean {
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
+    if (callee.kind != ExprKind.Member) {
+      return false;
+    }
+
+    const object = tree.exprOf(callee.objectId);
+    const owner = this.values.answers.typeOf(object);
+    const isCopied = tree
+      .argumentsOf(call.argsList)
+      .every((arg) => this.isCopyExpr(tree.exprOf(arg.exprId)));
+    if (
+      owner == undefined ||
+      !isCopied ||
+      !this.values.isDeepImmutable(owner)
+    ) {
+      return false;
+    }
+
+    const objectExpr = tree.exprOf(callee.objectId);
+
+    return this.isReadonlyChain(objectExpr);
+  }
+
+  private readonly isReadonlyMember(object: Expr, name: string): boolean {
+    const tree = this.values.types.program.tree;
+
+    const type = this.values.answers.typeOf(object);
+    if (type == undefined) {
+      return false;
+    }
+    if (type.kind == TypeKind.Object) {
+      const field = this.values.types.store
+        .fieldsOf(type)
+        .find((one) => one.name == name);
+
+      return field != undefined && field.readonly;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    if (decl == undefined) {
+      return false;
+    }
+
+    const field = tree
+      .fieldsOf(decl.fieldsList)
+      .find((one) => one.name == name);
+
+    return field != undefined && field.readonly;
+  }
+
+  private readonly isReadonlyArrayExpr(object: Expr): boolean {
+    const type = this.values.answers.typeOf(object);
+    if (type == undefined || type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    return type.readonly == true;
+  }
+}

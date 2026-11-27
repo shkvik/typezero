@@ -1,0 +1,232 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  ArgumentUse,
+  Callee,
+  Loan,
+  LoanKind,
+  Operand,
+  OperandKind,
+  ParamMode,
+  ResultMode,
+} from "../types/ownership-check.types.tz";
+import { kViewName } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private checkTwice(
+    receiver: Read<Operand | undefined>,
+    receiverExpr: Expr | undefined,
+    kind: LoanKind,
+    uses: Read<ArgumentUse[]>,
+  ): void {
+    const loans: Loan[] = [];
+    const exclusive: boolean[] = [];
+    const exprs: Expr[] = [];
+
+    if (receiver != undefined && receiverExpr != undefined) {
+      const isExclusive = kind == LoanKind.Exclusive;
+
+      this.notePlaces(
+        receiver,
+        isExclusive,
+        receiverExpr,
+        loans,
+        exclusive,
+        exprs,
+      );
+    }
+
+    for (const use of uses) {
+      const isExclusive =
+        use.mode != ParamMode.Read && use.mode != ParamMode.Lent;
+
+      this.notePlaces(
+        use.operand,
+        isExclusive,
+        use.expr,
+        loans,
+        exclusive,
+        exprs,
+      );
+    }
+
+    this.reportTwice(loans, exclusive, exprs);
+  }
+
+  private readonly notePlaces(
+    operand: Read<Operand>,
+    isExclusive: boolean,
+    expr: Expr,
+    loans: Loan[],
+    exclusive: boolean[],
+    exprs: Expr[],
+  ): void {
+    for (const loan of this.loansOf(operand)) {
+      loans.push(loan);
+      exclusive.push(isExclusive);
+      exprs.push(expr);
+    }
+  }
+
+  private reportTwice(
+    loans: Read<Loan[]>,
+    exclusive: Read<boolean[]>,
+    exprs: Read<Expr[]>,
+  ): void {
+    for (let second: int = 1; second < loans.length; second++) {
+      for (let first: int = 0; first < second; first++) {
+        const isConflict = this.isTwiceConflict(
+          loans,
+          exclusive,
+          first,
+          second,
+        );
+        const expr = exprs[second];
+        const earlier = exprs[first];
+        if (!isConflict || expr == undefined || earlier?.id == expr.id) {
+          continue;
+        }
+
+        const word = this.exprText(expr);
+
+        this.errors.write(this.home, expr.loc, Code.OwnArgumentTwice, { word });
+
+        return;
+      }
+    }
+  }
+
+  private readonly isTwiceConflict(
+    loans: Read<Loan[]>,
+    exclusive: Read<boolean[]>,
+    first: int,
+    second: int,
+  ): boolean {
+    const one = loans[first];
+    const two = loans[second];
+    const isOneExclusive = exclusive[first] == true;
+    const isTwoExclusive = exclusive[second] == true;
+    if (one == undefined || two == undefined) {
+      return false;
+    }
+    if (!isOneExclusive && !isTwoExclusive) {
+      return false;
+    }
+    if (this.isFrozenBelow(one, two, isTwoExclusive)) {
+      return false;
+    }
+    if (this.isFrozenBelow(two, one, isOneExclusive)) {
+      return false;
+    }
+
+    return this.overlaps(one.place, two.place);
+  }
+
+  private readonly isFrozenBelow(
+    looked: Loan,
+    changed: Loan,
+    isChangedExclusive: boolean,
+  ): boolean {
+    return (
+      looked.frozen &&
+      isChangedExclusive &&
+      changed.place.depth < looked.place.depth
+    );
+  }
+
+  private resultOf(
+    info: Callee,
+    expr: Expr,
+    receiver: Read<Operand | undefined>,
+    uses: Read<ArgumentUse[]>,
+  ): Operand {
+    const type = this.values.answers.typeOf(expr);
+    if (info.result == ResultMode.Copy || this.isCopyExpr(expr)) {
+      return this.copyOperand(expr.loc);
+    }
+    const isView = this.isViewCall(expr);
+    const isLent = info.decl != undefined && info.result != ResultMode.Element;
+    const isCopied = this.isArrayOfCopies(type) && !isView && !isLent;
+    if (info.result == ResultMode.Own || isCopied) {
+      return this.freshOperand(expr.loc);
+    }
+
+    const kind = this.resultLoanKind(info.result);
+    const loans = this.resultLoans(info, receiver, uses);
+    if (loans.length == 0) {
+      return this.emptyResult(info, receiver, uses, expr.loc);
+    }
+
+    const kinded = loans.map((loan) =>
+      this.loanOn(loan.place, kind, loan.frozen),
+    );
+    const isInferred = info.result == ResultMode.Element;
+    if (isInferred) {
+      return {
+        kind: OperandKind.Borrowed,
+        loans: kinded,
+        loc: expr.loc,
+        isInferred,
+      };
+    }
+
+    return this.borrowedOperand(kinded, expr.loc);
+  }
+
+  private isLentResult(call: Expr): boolean {
+    const type = this.values.answers.typeOf(call);
+    if (type == undefined || !this.values.types.store.isLentArray(type)) {
+      return false;
+    }
+
+    return !this.values.isCopy(this.values.types.store.itemOf(type));
+  }
+
+  private readonly isViewCall(expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
+    return this.calleeMember(expr)?.name == kViewName;
+  }
+
+  private isArrayOfCopies(type: Type | undefined): boolean {
+    if (type == undefined || type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    return this.values.isCopy(this.values.types.store.itemOf(type));
+  }
+
+  private readonly resultLoanKind(result: ResultMode): LoanKind {
+    if (result == ResultMode.Mut) {
+      return LoanKind.Exclusive;
+    }
+
+    return LoanKind.Shared;
+  }
+
+  private readonly resultLoans(
+    info: Read<Callee>,
+    receiver: Read<Operand | undefined>,
+    uses: Read<ArgumentUse[]>,
+  ): Loan[] {
+    const loans: Loan[] = [];
+    let hasLent = false;
+
+    for (const use of uses) {
+      if (use.mode == ParamMode.Lent) {
+        hasLent = true;
+        loans.push(...this.loansOf(use.operand));
+      }
+    }
+    if (hasLent) {
+      return loans;
+    }
+    if (receiver != undefined) {
+      return this.loansOf(receiver);
+    }
+
+    return [];
+  }
+}

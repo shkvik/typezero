@@ -19,11 +19,13 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    for (const part of expr.exprs) {
+    const tree = this.types.program.tree;
+
+    for (const part of tree.exprsOf(expr.exprsList)) {
       this.templatePart(part, module);
     }
 
-    return this.literals.templated(wanted);
+    return this.types.templated(wanted);
   }
 
   private templatePart(part: Expr, module: int): void {
@@ -37,17 +39,22 @@ partial class ExpressionTypes {
   }
 
   private childrenTyped(expr: Expr, module: int): Type {
-    for (const part of this.shapes.childrenOf(expr)) {
+    for (const part of this.types.childrenOf(expr)) {
       this.walkedPart(part, module);
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private walkedArguments(args: Read<CallArgument[]>, module: int): void {
+    const tree = this.types.program.tree;
+
     for (const arg of args) {
-      if (!this.answers.isVisited(arg.expr)) {
-        this.walkedPart(arg.expr, module);
+      const exprExpr = tree.exprOf(arg.exprId);
+      if (!this.answers.isVisited(exprExpr)) {
+        const expr = tree.exprOf(arg.exprId);
+
+        this.walkedPart(expr, module);
       }
     }
   }
@@ -61,13 +68,17 @@ partial class ExpressionTypes {
   }
 
   private readonly isHintNeeded(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.ArrayLit:
       case ExprKind.ObjectLit:
       case ExprKind.Undefined:
         return true;
       case ExprKind.Function:
-        return expr.fn.params.some((param) => param.type == undefined);
+        return tree
+          .paramsOf(tree.functionOf(expr.fnId).paramsList)
+          .some((param) => tree.typeRefAt(param.typeId) == undefined);
       case ExprKind.Name:
         return (
           this.isNullName(expr, module) ||
@@ -75,15 +86,18 @@ partial class ExpressionTypes {
         );
       case ExprKind.Conditional:
         return (
-          this.isHintNeeded(expr.thenExpr, module) ||
-          this.isHintNeeded(expr.elseExpr, module)
+          this.isHintNeeded(tree.exprOf(expr.thenExprId), module) ||
+          this.isHintNeeded(tree.exprOf(expr.elseExprId), module)
         );
       case ExprKind.Binary:
         return (
-          this.shapes.isLogicOp(expr.op) && this.isHintNeeded(expr.rhs, module)
+          this.types.isLogicOp(expr.op) &&
+          this.isHintNeeded(tree.exprOf(expr.rhsId), module)
         );
       case ExprKind.New: {
-        const isBare = expr.typeArgs.length == 0 && expr.args.length == 0;
+        const isBare =
+          tree.typeRefsOf(expr.typeArgsList).length == 0 &&
+          tree.argumentsOf(expr.argsList).length == 0;
 
         return isBare && !this.isPlainNew(expr, module);
       }
@@ -93,6 +107,8 @@ partial class ExpressionTypes {
   }
 
   private readonly isPlainNew(expr: NewExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     const form = expr.form;
     if (form.kind != NewKind.Named || form.member != undefined) {
       return false;
@@ -103,14 +119,18 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const opened = this.program.modules[target.module];
-    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    const opened = this.types.program.modules[target.module];
+    const declared = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == target.loc);
     if (declared != undefined) {
-      return declared.typeParams.length == 0;
+      return tree.typeParamsOf(declared.typeParamsList).length == 0;
     }
 
     const decl = this.record(target.module)?.classes.get(target.loc);
 
-    return decl != undefined && decl.typeParams.length == 0;
+    return (
+      decl != undefined && tree.typeParamsOf(decl.typeParamsList).length == 0
+    );
   }
 }

@@ -34,14 +34,21 @@ import {
 
 partial class ExpressionTypes {
   private listenerLife(expr: CallExpr, member: MemberExpr, module: int): void {
+    const tree = this.types.program.tree;
+
     const name = member.name;
-    const listener = expr.args[1]?.expr;
+    const listener = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     const isRemoving = name == kOffName || name == kRemoveListenerName;
     if (listener == undefined || isRemoving) {
       return;
     }
 
-    this.listenerLifeCheck(listener, member.object, false, module);
+    this.listenerLifeCheck(
+      listener,
+      tree.exprOf(member.objectId),
+      false,
+      module,
+    );
   }
 
   private listenerLifeCheck(
@@ -50,7 +57,7 @@ partial class ExpressionTypes {
     isTimer: boolean,
     module: int,
   ): void {
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return;
     }
 
@@ -76,14 +83,18 @@ partial class ExpressionTypes {
           Code.ListenerUnknown,
         );
 
-        return this.report(module, listener.loc, code, kNoDetails);
+        return this.errors.write(module, listener.loc, code, kNoDetails);
       }
       default:
         return;
     }
   }
 
-  private readonly lifeCode(isTimer: boolean, timer: Code, listener: Code): Code {
+  private readonly lifeCode(
+    isTimer: boolean,
+    timer: Code,
+    listener: Code,
+  ): Code {
     if (isTimer) {
       return timer;
     }
@@ -91,7 +102,7 @@ partial class ExpressionTypes {
     return listener;
   }
 
-  private readonly capturesReport(
+  private capturesReport(
     listener: Expr,
     captured: Read<Capture[]>,
     isTimer: boolean,
@@ -105,7 +116,7 @@ partial class ExpressionTypes {
           Code.ListenerKeeps,
         );
 
-        this.report(module, listener.loc, code, { word: one.name });
+        this.errors.write(module, listener.loc, code, { word: one.name });
 
         return;
       }
@@ -123,7 +134,7 @@ partial class ExpressionTypes {
       Code.ListenerCaptures,
     );
 
-    this.report(module, listener.loc, code, {
+    this.errors.write(module, listener.loc, code, {
       first: this.namesText(captured),
       second: this.namesText(others),
       other: kept.name,
@@ -143,8 +154,12 @@ partial class ExpressionTypes {
   }
 
   private listenerShape(listener: Expr, module: int): ListenerShape {
+    const tree = this.types.program.tree;
+
     if (listener.kind == ExprKind.Function) {
-      return this.listenerClosure(listener.fn, module);
+      const fnFn = tree.functionOf(listener.fnId);
+
+      return this.listenerClosure(fnFn, module);
     }
     if (listener.kind == ExprKind.Member) {
       return this.memberShape(listener, module);
@@ -171,8 +186,10 @@ partial class ExpressionTypes {
   }
 
   private memberShape(listener: MemberExpr, module: int): ListenerShape {
+    const tree = this.types.program.tree;
+
     const object = this.types.definedType(
-      this.peekType(listener.object, module),
+      this.peekType(tree.exprOf(listener.objectId), module),
     );
     const isMethod =
       object.kind == TypeKind.Instance &&
@@ -182,13 +199,15 @@ partial class ExpressionTypes {
       return { form: ListenerForm.Unknown, captured: [], isSelf: false };
     }
 
-    const isSelf = this.isThisName(listener.object, module);
+    const objectExpr = tree.exprOf(listener.objectId);
+    const isSelf = this.isThisName(objectExpr, module);
 
     return { form: ListenerForm.Receiver, captured: [], isSelf };
   }
 
   private readonly isOwnMethod(instance: InstanceType, name: string): boolean {
-    const entry = this.classMember(instance, name).entry;
+    const entryLookup = this.classMember(instance, name);
+    const entry = entryLookup.entry;
 
     return entry != undefined && entry.field == undefined && !entry.isStatic;
   }
@@ -213,7 +232,7 @@ partial class ExpressionTypes {
   }
 
   private capturesOf(fn: FunctionDecl, module: int): Capture[] {
-    const exprs = this.collector.functionExprs(fn, true);
+    const exprs = this.types.functionExprs(fn, true);
     let last = fn.loc;
 
     for (const expr of exprs) {
@@ -250,7 +269,8 @@ partial class ExpressionTypes {
       captured.push({
         name: expr.name,
         type:
-          this.valueOfName(expr, module) ?? this.store.plain(TypeKind.Error),
+          this.valueOfName(expr, module) ??
+          this.types.store.plain(TypeKind.Error),
         isChanged: changed.has(target.loc),
         isThis: false,
       });
@@ -264,7 +284,7 @@ partial class ExpressionTypes {
 
     return {
       name: kThisWord,
-      type: self ?? this.store.plain(TypeKind.Error),
+      type: self ?? this.types.store.plain(TypeKind.Error),
       isChanged: false,
       isThis: true,
     };
@@ -289,8 +309,10 @@ partial class ExpressionTypes {
   }
 
   private readonly changedTarget(expr: Expr): Expr | undefined {
+    const tree = this.types.program.tree;
+
     if (expr.kind == ExprKind.Update || expr.kind == ExprKind.Assign) {
-      return expr.target;
+      return tree.exprOf(expr.targetId);
     }
 
     return undefined;
@@ -307,17 +329,19 @@ partial class ExpressionTypes {
   }
 
   private readonly isModuleVariable(target: ValueTarget): boolean {
-    const opened = this.program.modules[target.module];
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[target.module];
     if (opened == undefined) {
       return false;
     }
 
-    return opened.file.items.some((item) =>
-      this.statements.isItemDeclaring(item, target.loc),
-    );
+    return tree
+      .stmtsOf(opened.file.itemsList)
+      .some((item) => this.types.isItemDeclaring(item, target.loc));
   }
 
-  private readonly canReceive(type: Type): boolean {
+  private canReceive(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Object) {
       return true;
@@ -364,7 +388,7 @@ partial class ExpressionTypes {
     this.eventMarks.droppedNews.push({ instance: type, loc: expr.loc, module });
   }
 
-  private readonly droppedNewsCheck(module: int): void {
+  private droppedNewsCheck(module: int): void {
     for (const dropped of this.eventMarks.droppedNews) {
       if (dropped.module != module) {
         continue;
@@ -383,7 +407,7 @@ partial class ExpressionTypes {
 
       const word = dropped.instance.name;
 
-      this.report(module, dropped.loc, Code.EmitterDropped, {
+      this.errors.write(module, dropped.loc, Code.EmitterDropped, {
         word,
         other: word.toLowerCase(),
       });
@@ -391,7 +415,9 @@ partial class ExpressionTypes {
   }
 
   private endlessWaitCheck(expr: CallExpr, name: string, module: int): void {
-    const first = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (first == undefined || this.isTimedWait(expr)) {
       return;
     }
@@ -409,19 +435,23 @@ partial class ExpressionTypes {
 
     const word = this.emitterWord(first);
 
-    this.report(module, first.loc, Code.EventsWaitEndless, {
+    this.errors.write(module, first.loc, Code.EventsWaitEndless, {
       word,
       first: name,
     });
   }
 
   private readonly isTimedWait(expr: CallExpr): boolean {
-    const options = expr.args[2]?.expr;
+    const tree = this.types.program.tree;
+
+    const options = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
       return false;
     }
 
-    return options.props.some((prop) => prop.name == kTimeoutField);
+    return tree
+      .propertiesOf(options.propsList)
+      .some((prop) => prop.name == kTimeoutField);
   }
 
   private readonly isEndingSource(given: InstanceType): boolean {
@@ -432,7 +462,7 @@ partial class ExpressionTypes {
           this.isEventsClass(one, kEmitterName) ||
           this.isEventsClass(one, kEmitterBaseName),
       );
-    const isLibrary = this.modules.isLibraryModule(given.module);
+    const isLibrary = this.types.isLibraryModule(given.module);
 
     return isLibrary && !this.isEventsClass(given, kEmitterName) && !isPlain;
   }

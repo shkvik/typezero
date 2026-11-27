@@ -1,10 +1,8 @@
 import {
   CallExpr,
-  IndexExpr,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
-import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
 import {
   IrIntPredicate,
   IrOpcode,
@@ -15,12 +13,9 @@ import {
   kBooleanType,
   kFlagType,
   kIntType,
-  kLengthMask,
   kPointerType,
   kStringType,
   kCStringFromText,
-  kTextCharAt,
-  kTextCodePointAt,
   kTextCharCode,
   kTextCodePoint,
   kTextEndsWith,
@@ -39,12 +34,7 @@ import {
   kTextUpper,
   kVoidType,
 } from "../const/lowering.const.tz";
-import {
-  Frame,
-  IrValue,
-  Place,
-  TextArguments,
-} from "../types/lowering.types.tz";
+import { Frame, IrValue, TextArguments } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private stringMethod(
@@ -52,7 +42,10 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const receiver = this.value(frame, member.object);
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const receiver = this.value(frame, object);
     const given = this.textArguments(frame, call);
     if (receiver == undefined || given == undefined) {
       return undefined;
@@ -73,12 +66,15 @@ partial class Lowering {
     frame: Frame,
     call: CallExpr,
   ): TextArguments | undefined {
+    const tree = this.values.types.program.tree;
+
     const texts: IrValue[] = [];
     const numbers: LLVMValue[] = [];
-    const int = this.store.integer(64, false);
+    const int = this.values.types.store.integer(64, false);
 
-    for (const argument of call.args) {
-      const given = this.value(frame, argument.expr);
+    for (const argument of tree.argumentsOf(call.argsList)) {
+      const expr = tree.exprOf(argument.exprId);
+      const given = this.value(frame, expr);
       if (given == undefined || argument.spread) {
         return undefined;
       }
@@ -88,7 +84,12 @@ partial class Lowering {
         continue;
       }
 
-      const number = this.converted(frame, given, int, argument.expr.loc);
+      const number = this.converted(
+        frame,
+        given,
+        int,
+        tree.exprOf(argument.exprId).loc,
+      );
       if (number == undefined) {
         return undefined;
       }
@@ -156,7 +157,7 @@ partial class Lowering {
     }
   }
 
-  private readonly cstringOf(
+  private cstringOf(
     frame: Read<Frame>,
     call: CallExpr,
     receiver: IrValue,
@@ -174,20 +175,23 @@ partial class Lowering {
   }
 
   private readonly textParts(frame: Read<Frame>, text: IrValue): LLVMValue[] {
-    return [frame.made.extract(text.value, 0), frame.made.extract(text.value, 1)];
+    return [
+      frame.made.extract(text.value, 0),
+      frame.made.extract(text.value, 1),
+    ];
   }
 
-  private readonly numberAt(given: Read<TextArguments>, index: int): LLVMValue {
+  private numberAt(given: Read<TextArguments>, index: int): LLVMValue {
     return given.numbers[index] ?? this.ir.zero(kIntType);
   }
 
-  private readonly flagAt(given: Read<TextArguments>, index: int): LLVMValue {
+  private flagAt(given: Read<TextArguments>, index: int): LLVMValue {
     const isGiven = index < given.numbers.length;
 
     return this.ir.integer(kFlagType, `${this.flagIf(isGiven, 1)}`);
   }
 
-  private readonly textOut(
+  private textOut(
     frame: Read<Frame>,
     name: string,
     params: Own<string[]>,
@@ -200,12 +204,12 @@ partial class Lowering {
     frame.made.call(callee, [out].concat(args));
 
     const value = frame.made.load(kStringType, out);
-    const tz = this.store.plain(TypeKind.String);
+    const tz = this.values.types.store.plain(TypeKind.String);
 
     return { type: kStringType, value, tz, owned: true };
   }
 
-  private readonly textSlice(
+  private textSlice(
     frame: Read<Frame>,
     name: string,
     receiver: IrValue,
@@ -223,7 +227,7 @@ partial class Lowering {
     return this.textOut(frame, runtime, params, args);
   }
 
-  private readonly textSearch(
+  private textSearch(
     frame: Read<Frame>,
     name: string,
     receiver: IrValue,
@@ -250,14 +254,18 @@ partial class Lowering {
     const found = frame.made.call(callee, args);
     if (name == "indexOf" || name == "lastIndexOf") {
       const value = frame.made.cast(IrOpcode.SExt, found, kIntType);
-      const tz = this.store.integer(64, false);
+      const tz = this.values.types.store.integer(64, false);
 
       return { type: kIntType, value, tz };
     }
 
     const zero = this.ir.zero(kFlagType);
-    const value = frame.made.integerCompare(IrIntPredicate.NotEqual, found, zero);
-    const tz = this.store.plain(TypeKind.Boolean);
+    const value = frame.made.integerCompare(
+      IrIntPredicate.NotEqual,
+      found,
+      zero,
+    );
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     return { type: kBooleanType, value, tz };
   }
@@ -277,7 +285,11 @@ partial class Lowering {
     }
   }
 
-  private readonly textCase(frame: Read<Frame>, name: string, receiver: IrValue): IrValue {
+  private textCase(
+    frame: Read<Frame>,
+    name: string,
+    receiver: IrValue,
+  ): IrValue {
     const isUpper = name == "toUpperCase";
     const runtime = this.pick(isUpper, kTextUpper, kTextLower);
     const args = this.textParts(frame, receiver);
@@ -285,7 +297,11 @@ partial class Lowering {
     return this.textOut(frame, runtime, [kPointerType, kIntType], args);
   }
 
-  private readonly textTrim(frame: Read<Frame>, name: string, receiver: IrValue): IrValue {
+  private textTrim(
+    frame: Read<Frame>,
+    name: string,
+    receiver: IrValue,
+  ): IrValue {
     const ends = this.trimEnds(name);
     const args = this.textParts(frame, receiver).concat([
       this.ir.integer(kFlagType, `${ends}`),
@@ -322,7 +338,7 @@ partial class Lowering {
     }
 
     const position = this.numberAt(given, 0);
-    const int = this.store.integer(64, false);
+    const int = this.values.types.store.integer(64, false);
     const isCode = name == "charCodeAt";
     const runtime = this.pick(isCode, kTextCharCode, kTextCodePoint);
     const callee = this.ir.declare(runtime, kFlagType, [
@@ -332,7 +348,11 @@ partial class Lowering {
     ]);
     if (this.optionalInner(result) == undefined) {
       const args = this.textParts(frame, receiver).concat([position]);
-      const code = frame.made.cast(IrOpcode.SExt, frame.made.call(callee, args), kIntType);
+      const code = frame.made.cast(
+        IrOpcode.SExt,
+        frame.made.call(callee, args),
+        kIntType,
+      );
 
       return { type: kIntType, value: code, tz: int };
     }
@@ -351,7 +371,11 @@ partial class Lowering {
     frame.made.open(read);
 
     const args = this.textParts(frame, receiver).concat([position]);
-    const code = frame.made.cast(IrOpcode.SExt, frame.made.call(callee, args), kIntType);
+    const code = frame.made.cast(
+      IrOpcode.SExt,
+      frame.made.call(callee, args),
+      kIntType,
+    );
     const found: IrValue = { type: kIntType, value: code, tz: int };
     const placed = this.somewhere(frame, found, result);
     const readEnd = frame.made.currentBlock();
@@ -369,186 +393,12 @@ partial class Lowering {
     return { type: resultIr, value, tz: result };
   }
 
-  private textAt(
-    frame: Frame,
-    call: CallExpr,
-    receiver: IrValue,
-    given: Read<TextArguments>,
-  ): IrValue | undefined {
-    const string = this.store.plain(TypeKind.String);
-    const empty = this.store.plain(TypeKind.Undefined);
-    const result = this.store.unionOf([string, empty]);
-    const index = this.numberAt(given, 0);
-    const length = this.textLength(frame, receiver);
-    const zero = this.ir.zero(kIntType);
-    const isFromEnd = frame.made.integerCompare(IrIntPredicate.SignedLess, index, zero);
-    const fromEnd = frame.made.binary(IrOpcode.Add, index, length);
-    const position = frame.made.select(isFromEnd, fromEnd, index);
-
-    return this.textCharOr(frame, receiver, position, result, call.loc);
-  }
-
-  private textIndexed(
-    frame: Frame,
-    expr: IndexExpr,
-    result: Type,
-  ): IrValue | undefined {
-    const text = this.value(frame, expr.object);
-    const index = this.value(frame, expr.index);
-    if (text == undefined || index == undefined) {
-      return undefined;
-    }
-
-    const position = this.toLong(frame, index).value;
-    const read = this.textCharOr(frame, text, position, result, expr.loc);
-
-    this.dropping(frame, text);
-
-    return read;
-  }
-
-  private textCharOr(
-    frame: Frame,
-    text: IrValue,
-    position: LLVMValue,
-    result: Type,
-    loc: int,
-  ): IrValue | undefined {
-    const resultIr = this.irType(result);
-    if (resultIr == undefined) {
-      return undefined;
-    }
-
-    const length = this.textLength(frame, text);
-    const isInside = frame.made.integerCompare(
-      IrIntPredicate.UnsignedLess,
-      position,
-      length,
-    );
-    const before = frame.made.currentBlock();
-    const read = frame.made.block("char.read");
-    const end = frame.made.block("char.end");
-
-    frame.made.conditionalBranch(isInside, read, end);
-    frame.made.open(read);
-
-    const args = this.textParts(frame, text).concat([position]);
-    const params = [kPointerType, kIntType, kIntType];
-    const char = this.textOut(frame, kTextCharAt, params, args);
-    const placed = this.converted(frame, char, result, loc);
-    const readEnd = frame.made.currentBlock();
-
-    frame.made.branch(end);
-    frame.made.open(end);
-
-    if (placed == undefined) {
-      return undefined;
-    }
-
-    const missing = this.ir.zero(resultIr);
-    const value = frame.made.phi(
-      resultIr,
-      [missing, placed.value],
-      [before, readEnd],
-    );
-
-    return { type: resultIr, value, tz: result, owned: true };
-  }
-
-  private textLoop(frame: Frame, statement: ForOfStmt): void {
-    const cond = frame.made.block("text.of.cond");
-    const body = frame.made.block("text.of.body");
-    const end = frame.made.block("text.of.end");
-    const string = this.store.plain(TypeKind.String);
-
-    this.openScope(frame);
-
-    const target = this.loopTarget(frame, end, cond);
-    const source = this.value(frame, statement.iterable);
-    if (source == undefined) {
-      return;
-    }
-
-    const holder: Place = {
-      pointer: frame.made.slot(kStringType, "for.text"),
-      type: kStringType,
-      tz: string,
-      owner: frame.id,
-    };
-    const counter = frame.made.slot(kIntType, "for.unit");
-
-    frame.made.entryStore(this.ir.zero(kStringType), holder.pointer);
-    this.keepPlace(frame, holder);
-    this.stored(frame, holder, source);
-    frame.made.store(this.ir.zero(kIntType), counter);
-    frame.made.open(cond);
-
-    const text = this.loaded(frame, holder);
-    const index = frame.made.load(kIntType, counter);
-    const length = this.textLength(frame, text);
-    const isInside = frame.made.integerCompare(
-      IrIntPredicate.UnsignedLess,
-      index,
-      length,
-    );
-
-    frame.made.conditionalBranch(isInside, body, end);
-    frame.made.open(body);
-    this.openScope(frame);
-
-    const out = frame.made.slot(kStringType, "text.point");
-    const params = [kPointerType, kPointerType, kIntType, kIntType];
-    const callee = this.ir.declare(kTextCodePointAt, kFlagType, params);
-    const args = [out].concat(this.textParts(frame, text)).concat([index]);
-    const units = frame.made.call(callee, args);
-    const step = frame.made.cast(IrOpcode.SExt, units, kIntType);
-
-    frame.made.store(frame.made.binary(IrOpcode.Add, index, step), counter);
-
-    const point = frame.made.load(kStringType, out);
-    const item: IrValue = {
-      type: kStringType,
-      value: point,
-      tz: string,
-      owned: true,
-    };
-
-    this.loopItem(frame, statement, item);
-    frame.loops.push(target);
-    this.statement(frame, statement.body);
-    frame.loops.pop();
-    this.closeScope(frame);
-    this.jumpTo(frame, cond);
-    frame.made.open(end);
-    this.closeScope(frame);
-  }
-
-  private readonly textLength(frame: Read<Frame>, text: IrValue): LLVMValue {
-    const meta = frame.made.extract(text.value, 1);
-    const mask = this.ir.hexInteger(kIntType, kLengthMask);
-
-    return frame.made.binary(IrOpcode.And, meta, mask);
-  }
-
-  private readonly textCharAt(
-    frame: Read<Frame>,
-    receiver: IrValue,
-    given: Read<TextArguments>,
-  ): IrValue {
-    const args = this.textParts(frame, receiver).concat([
-      this.numberAt(given, 0),
-    ]);
-    const params = [kPointerType, kIntType, kIntType];
-
-    return this.textOut(frame, kTextCharAt, params, args);
-  }
-
   private textSplit(
     frame: Read<Frame>,
     receiver: IrValue,
     given: Read<TextArguments>,
   ): IrValue | undefined {
-    const string = this.store.plain(TypeKind.String);
+    const string = this.values.types.store.plain(TypeKind.String);
     const descriptor = this.descriptor(string);
     if (descriptor == undefined) {
       return undefined;
@@ -577,12 +427,12 @@ partial class Lowering {
         this.flagAt(given, 0),
       ]);
     const value = frame.made.call(callee, args);
-    const tz = this.store.arrayOf(string);
+    const tz = this.values.types.store.arrayOf(string);
 
     return { type: kPointerType, value, tz, owned: true };
   }
 
-  private readonly separatorParts(
+  private separatorParts(
     frame: Read<Frame>,
     separator: IrValue | undefined,
   ): LLVMValue[] {
@@ -626,7 +476,7 @@ partial class Lowering {
     return this.textOut(frame, kTextReplace, params, args);
   }
 
-  private readonly textRepeat(
+  private textRepeat(
     frame: Read<Frame>,
     receiver: IrValue,
     given: Read<TextArguments>,
@@ -639,7 +489,7 @@ partial class Lowering {
     return this.textOut(frame, kTextRepeat, params, args);
   }
 
-  private readonly textPad(
+  private textPad(
     frame: Read<Frame>,
     name: string,
     receiver: IrValue,

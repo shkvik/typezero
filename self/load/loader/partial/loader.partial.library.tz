@@ -1,10 +1,6 @@
 import { join } from "node:path";
 import { Loader } from "../loader.tz";
-import {
-  ImportDecl,
-  ModulePath,
-  SourceFile,
-} from "../../../program/ast/types/ast.types.modules.tz";
+import { ModulePath } from "../../../program/ast/types/ast.types.modules.tz";
 import { kLibrary } from "../../../program/library/library-modules/const/library-modules.const.tz";
 import { kBuiltinSources } from "../../../program/library/library-modules/const/library-modules.const.tables.tz";
 import { LibraryModule } from "../../../program/library/library-modules/types/library-modules.types.tz";
@@ -13,13 +9,20 @@ import {
   BuiltinFile,
   LinkKind,
   ModuleLink,
-  ParsedFile,
+  ParsedFile as FlatParsedFile,
   SourcePiece,
   SourceText,
 } from "../../../program/module/types/module.types.tz";
 import { Token } from "../../token/types/token.types.tz";
 import { ModuleState, OpenModule } from "../types/loader.types.tz";
 import { kLineBreak, kMapLibrary } from "../const/loader.const.tz";
+import {
+  ParsedFile,
+} from "../../../program/syntax/types/syntax.types.files.tz";
+import {
+  ImportDecl,
+  SourceFile,
+} from "../../../program/syntax/types/syntax.types.modules.tz";
 
 partial class Loader {
   private linkedImplicit(from: ModulePath): ModuleLink {
@@ -35,7 +38,10 @@ partial class Loader {
     return this.linkedLibrary(from, library);
   }
 
-  private linkedLibrary(from: ModulePath, library: Read<LibraryModule>): ModuleLink {
+  private linkedLibrary(
+    from: ModulePath,
+    library: Read<LibraryModule>,
+  ): ModuleLink {
     const target = this.libraryId(library);
     if (target == undefined) {
       return { kind: LinkKind.Missing, from };
@@ -55,9 +61,9 @@ partial class Loader {
       return undefined;
     }
 
-    this.libraries.set(library.name, module.id);
+    this.libraries.set(library.name, module);
 
-    return module.id;
+    return module;
   }
 
   private loadGlobals(): int[] {
@@ -71,9 +77,8 @@ partial class Loader {
 
       ids.push(id);
 
-      const module = this.opened[id];
-      if (module != undefined && module.state == ModuleState.New) {
-        this.visit(module);
+      if (this.stateOf(id) == ModuleState.New) {
+        this.visit(id);
       }
     }
 
@@ -93,13 +98,12 @@ partial class Loader {
 
   private runtimeVisited(library: Read<LibraryModule>): void {
     const id = this.libraryId(library);
-    const module = this.opened[id ?? -1];
-    if (module != undefined && module.state == ModuleState.New) {
-      this.visit(module);
+    if (id != undefined && this.stateOf(id) == ModuleState.New) {
+      this.visit(id);
     }
   }
 
-  private openLibrary(library: Read<LibraryModule>): OpenModule | undefined {
+  private openLibrary(library: Read<LibraryModule>): int | undefined {
     const file = join(this.libraryDirectory, library.file);
     if (file.endsWith(kDeclarationExtension)) {
       return this.openDeclared(library, file);
@@ -116,7 +120,7 @@ partial class Loader {
   private openDeclared(
     library: Read<LibraryModule>,
     file: string,
-  ): OpenModule | undefined {
+  ): int | undefined {
     const path = this.slashed(file);
     const text = this.read(file, path);
     if (text == undefined) {
@@ -125,35 +129,35 @@ partial class Loader {
 
     const source: SourceText = { path, text, isLibrary: true };
     const declaration = this.parser.parseDeclaration(source);
-    const declared = declaration.file;
     const parsed: ParsedFile = {
-      source,
+      source: declaration.source,
       file: {
-        items: declared.items,
-        imports: declared.imports,
-        exports: declared.exports,
+        items: declaration.file.items,
+        imports: declaration.file.imports,
+        exports: declaration.file.exports,
         fieldNames: new Set<string>(),
         stringConstants: new Map<string, string[]>(),
       },
       errors: declaration.errors,
     };
+    const id = this.opened.length;
     const module: OpenModule = {
-      id: this.opened.length,
+      id,
       name: library.name,
       file,
       parsed,
       links: [],
       implicit: [],
-      parts: [],
+      partItems: [],
       isDeclarationOnly: true,
-      declared: declared.classes,
+      declared: declaration.file.classes,
       problems: [],
       state: ModuleState.New,
     };
 
     this.opened.push(module);
 
-    return module;
+    return id;
   }
 
   private librarySource(
@@ -197,15 +201,28 @@ partial class Loader {
   }
 
   private readonly implicitImports(
-    source: SourceText,
+    isLibrary: boolean,
     file: Read<SourceFile>,
-    tokens: readonly Token[],
+    tokens: Read<Token[]>,
   ): ImportDecl[] {
-    if (source.isLibrary) {
+    if (isLibrary) {
       return [];
     }
 
     return this.mentions.imports(tokens, file);
+  }
+
+  private flatParsed(parsed: Own<ParsedFile>): FlatParsedFile {
+    const ids = this.flattener.itemIds(parsed.file.items);
+    const itemsList = this.flattener.stmtIdList(ids);
+    const importsList = this.flattener.importsOf(parsed.file.imports);
+    const exportsList = this.flattener.exportsOf(parsed.file.exports);
+
+    return {
+      source: parsed.source,
+      file: { itemsList, importsList, exportsList },
+      errors: parsed.errors,
+    };
   }
 
   private builtins(): BuiltinFile[] {
@@ -218,8 +235,9 @@ partial class Loader {
       if (text != undefined) {
         const source: SourceText = { path, text, isLibrary: true };
         const parsed = this.parser.parseFile(source);
+        const flat = this.flatParsed(parsed);
 
-        files.push({ text: builtin.text, parsed });
+        files.push({ text: builtin.text, parsed: flat });
       }
     }
 

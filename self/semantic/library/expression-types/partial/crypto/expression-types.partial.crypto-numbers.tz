@@ -22,7 +22,9 @@ import {
 
 partial class ExpressionTypes {
   private randomSizeCheck(expr: CallExpr, module: int): void {
-    const size = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const size = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (size == undefined) {
       return;
     }
@@ -34,13 +36,20 @@ partial class ExpressionTypes {
   }
 
   private randomIntCheck(expr: CallExpr, module: int): void {
-    const count = expr.args.length;
-    const third = expr.args[2]?.expr;
+    const tree = this.types.program.tree;
+
+    const count = tree.argumentsOf(expr.argsList).length;
+    const third = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
     if (count == 3 && third != undefined) {
-      return this.report(module, third.loc, Code.CryptoRandomArgs, kNoDetails);
+      return this.errors.write(
+        module,
+        third.loc,
+        Code.CryptoRandomArgs,
+        kNoDetails,
+      );
     }
 
-    const max = expr.args[count - 1]?.expr;
+    const max = tree.exprAt(tree.argumentsOf(expr.argsList)[count - 1]?.exprId);
     const min = this.randomMinimum(expr);
     if (max == undefined) {
       return;
@@ -58,9 +67,9 @@ partial class ExpressionTypes {
         return;
       }
       if (this.types.definedType(given).kind != TypeKind.Int) {
-        const shown = this.text.of(given);
+        const shown = this.types.typeText(given);
 
-        return this.report(module, bound.loc, Code.CryptoRandomInt, {
+        return this.errors.write(module, bound.loc, Code.CryptoRandomInt, {
           word: shown,
         });
       }
@@ -70,11 +79,14 @@ partial class ExpressionTypes {
   }
 
   private readonly randomMinimum(expr: CallExpr): Expr | undefined {
-    if (expr.args.length != 2) {
+    const tree = this.types.program.tree;
+
+    const args = tree.argumentsOf(expr.argsList);
+    if (args.length != 2) {
       return undefined;
     }
 
-    return expr.args[0]?.expr;
+    return tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
   }
 
   private randomLessCheck(min: Expr | undefined, max: Expr, module: int): void {
@@ -85,12 +97,17 @@ partial class ExpressionTypes {
     }
 
     const leftText = this.lessText(min, module);
-    const rightText = this.sources.valueText(max, module);
+    const rightText = this.types.valueText(max, module);
 
-    this.report(module, max.loc, this.crypto.greaterCode(min != undefined), {
-      word: leftText,
-      other: rightText,
-    });
+    this.errors.write(
+      module,
+      max.loc,
+      this.types.greaterCode(min != undefined),
+      {
+        word: leftText,
+        other: rightText,
+      },
+    );
   }
 
   private lessSide(min: Expr | undefined, module: int): Linear | undefined {
@@ -106,7 +123,7 @@ partial class ExpressionTypes {
       return "0";
     }
 
-    return this.sources.valueText(min, module);
+    return this.types.valueText(min, module);
   }
 
   private readonly isLess(left: Linear, right: Linear): boolean {
@@ -120,7 +137,9 @@ partial class ExpressionTypes {
   }
 
   private fillSizeCheck(expr: CallExpr, module: int): void {
-    const offset = expr.args[1]?.expr;
+    const tree = this.types.program.tree;
+
+    const offset = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (offset == undefined || offset.kind == ExprKind.Undefined) {
       return;
     }
@@ -133,7 +152,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const size = expr.args[2]?.expr;
+    const size = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
     if (size == undefined || size.kind == ExprKind.Undefined) {
       return;
     }
@@ -146,7 +165,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const target = expr.args[0]?.expr;
+    const target = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (
       target == undefined ||
       this.isFillFitting(target, offset, size, module)
@@ -154,9 +173,9 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, size.loc, Code.CryptoFillFits, {
-      word: this.sources.valueText(size, module),
-      other: this.sources.valueText(offset, module),
+    this.errors.write(module, size.loc, Code.CryptoFillFits, {
+      word: this.types.valueText(size, module),
+      other: this.types.valueText(offset, module),
     });
   }
 
@@ -181,7 +200,10 @@ partial class ExpressionTypes {
     return this.isLinearUpTo(sum, length, 0);
   }
 
-  private readonly sumLinear(first: Linear, second: Linear): Linear | undefined {
+  private readonly sumLinear(
+    first: Linear,
+    second: Linear,
+  ): Linear | undefined {
     const offset = first.offset + second.offset;
     if (first.term == kZeroTerm) {
       return { term: second.term, offset };
@@ -194,8 +216,10 @@ partial class ExpressionTypes {
   }
 
   private secretKeyCheck(expr: CallExpr, shown: string, module: int): void {
-    const first = expr.args[0]?.expr;
-    if (expr.args.length != 2 || first == undefined) {
+    const tree = this.types.program.tree;
+
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (tree.argumentsOf(expr.argsList).length != 2 || first == undefined) {
       return;
     }
 
@@ -204,14 +228,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    const typeError = this.crypto.choiceError(
+    const typeError = this.types.choiceError(
       first.loc,
       kSecretTypeLabel,
       type,
       kSecretKeyTypes,
     );
     if (typeError != undefined) {
-      return this.reportFound(module, typeError);
+      return this.errors.writeFound(module, typeError);
     }
 
     const options = [kKeyLengthOption];
@@ -220,11 +244,16 @@ partial class ExpressionTypes {
     }
 
     const length = this.cryptoOptionAt(expr, 1, kKeyLengthOption);
-    const optionsArg = expr.args[1]?.expr;
+    const optionsArg = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (length == undefined && optionsArg != undefined) {
-      return this.report(module, optionsArg.loc, Code.CryptoKeyLengthNeeded, {
-        word: shown,
-      });
+      return this.errors.write(
+        module,
+        optionsArg.loc,
+        Code.CryptoKeyLengthNeeded,
+        {
+          word: shown,
+        },
+      );
     }
     if (length != undefined) {
       this.secretLengthCheck(length, type, module);
@@ -249,7 +278,12 @@ partial class ExpressionTypes {
         known == (192).toDecimal() ||
         known == (256).toDecimal());
     if (!isAesLength) {
-      this.report(module, length.loc, Code.CryptoAesKeyLength, kNoDetails);
+      this.errors.write(
+        module,
+        length.loc,
+        Code.CryptoAesKeyLength,
+        kNoDetails,
+      );
     }
   }
 }

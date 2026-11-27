@@ -1,0 +1,153 @@
+import { TypeStore } from "../type-store.tz";
+import { Type, TypeKind } from "../../types/type.types.tz";
+import { kParentDepthLimit } from "../const/type-store.const.tz";
+
+partial class TypeStore {
+  public unionOf(parts: Read<Type[]>): Type {
+    const single = this.singlePart(parts);
+    if (single != undefined) {
+      return single;
+    }
+
+    const flat = this.flatParts(parts);
+    const unknown = flat.find((part) => part.kind == TypeKind.Unknown);
+    if (unknown != undefined) {
+      return unknown;
+    }
+
+    const kept = this.orderedParts(flat);
+    const only = kept[0];
+    if (only == undefined) {
+      return this.plain(TypeKind.Never);
+    }
+    if (kept.length == 1) {
+      return only;
+    }
+
+    const sorted = kept.slice();
+
+    sorted.sort((first, second) => first.id - second.id);
+
+    const ids = this.idsText(sorted);
+    const key = `union ${ids}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Union, recursive: false };
+
+    this.partTable.set(id, kept);
+
+    return this.keep(key, made);
+  }
+
+  private readonly singlePart(parts: Read<Type[]>): Type | undefined {
+    const only = parts[0];
+    if (parts.length != 1 || only == undefined) {
+      return undefined;
+    }
+
+    const isPlain =
+      only.kind != TypeKind.Union &&
+      only.kind != TypeKind.Never &&
+      !this.isUninhabited(only);
+    if (!isPlain) {
+      return undefined;
+    }
+
+    return only;
+  }
+
+  private readonly flatParts(parts: Read<Type[]>): Type[] {
+    const flat: Type[] = [];
+    const seen = new Set<int>();
+
+    for (const part of parts) {
+      if (part.kind == TypeKind.Union && !part.recursive) {
+        const inner = this.partsOf(part);
+
+        this.addParts(flat, seen, inner);
+      } else {
+        this.addParts(flat, seen, [part]);
+      }
+    }
+
+    return flat;
+  }
+
+  private readonly addParts(
+    flat: Type[],
+    seen: Set<int>,
+    parts: Read<Type[]>,
+  ): void {
+    for (const part of parts) {
+      if (!seen.has(part.id)) {
+        seen.add(part.id);
+        flat.push(part);
+      }
+    }
+  }
+
+  private readonly orderedParts(flat: Read<Type[]>): Type[] {
+    const ordered: Type[] = [];
+    const absent: Type[] = [];
+    const ids = new Set<int>();
+
+    for (const part of flat) {
+      ids.add(part.id);
+    }
+
+    for (const part of flat) {
+      if (part.kind == TypeKind.Undefined) {
+        absent.push(part);
+
+        continue;
+      }
+
+      const isKept =
+        part.kind != TypeKind.Never &&
+        !this.isUninhabited(part) &&
+        !this.isAbsorbed(part, ids);
+      if (isKept) {
+        ordered.push(part);
+      }
+    }
+
+    for (const part of absent) {
+      ordered.push(part);
+    }
+
+    return ordered;
+  }
+
+  private readonly isAbsorbed(part: Type, ids: Read<Set<int>>): boolean {
+    let current = this.parentsOf(part);
+
+    for (let depth = 0; depth < kParentDepthLimit; depth++) {
+      if (current.length == 0) {
+        return false;
+      }
+      if (current.some((parent) => ids.has(parent.id))) {
+        return true;
+      }
+
+      current = current.flatMap((parent) => this.parentsOf(parent));
+    }
+
+    return false;
+  }
+
+  private readonly isUninhabited(part: Type): boolean {
+    if (part.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const fields = this.fieldTable.get(part.id) ?? [];
+
+    return fields.some(
+      (field) => !field.optional && field.type.kind == TypeKind.Never,
+    );
+  }
+}

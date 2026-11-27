@@ -2,12 +2,18 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import {
-  Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
-import { EnumMember } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  EnumMember,
+} from "../../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+import {
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 partial class FileParser {
   private typeAlias(): Stmt {

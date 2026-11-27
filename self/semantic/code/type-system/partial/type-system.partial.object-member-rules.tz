@@ -1,0 +1,480 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  MemberExpr,
+  ObjectLitExpr,
+  Property,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ObjectField,
+  ObjectType,
+  TupleType,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  FieldEntry,
+} from "../../expression-types/types/expression-types.types.tz";
+import {
+  kLengthName,
+} from "../../expression-shapes/const/expression-shapes.const.tz";
+import {
+  kConstructorName,
+  kPrototypeNames,
+  kRawName,
+  kStreamErrorName,
+  kWrappedValueName,
+} from "../../object-rules/const/object-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly isSized(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly isWrappedValue(type: Type, name: string): boolean {
+    return type.kind == TypeKind.Int && type.wraps && name == kWrappedValueName;
+  }
+
+  public readonly unsignedOf(type: Type): Type {
+    if (type.kind != TypeKind.Int) {
+      return type;
+    }
+
+    return this.store.integer(type.bits, true);
+  }
+
+  public readonly isTextList(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Array &&
+      this.store.itemOf(type).kind == TypeKind.String
+    );
+  }
+
+  public methodObjectName(
+    expr: ObjectLitExpr,
+    fields: Own<ObjectField[]>,
+  ): string {
+    const tree = this.program.tree;
+
+    const calls = tree.propertiesOf(expr.propsList)
+      .filter((property) => property.form.kind == PropertyKind.Method)
+      .map((property) => `${property.name}()`)
+      .join("; ");
+    if (fields.length == 0) {
+      return `{ ${calls} }`;
+    }
+
+    const plain = this.typeText(this.store.objectOf(fields));
+
+    return `${plain.slice(0, plain.length - 2)}; ${calls} }`;
+  }
+
+  public readonly plainMember(
+    goal: ObjectType | undefined,
+    name: string,
+  ): ObjectField | undefined {
+    const same =
+      this.store.fieldsOf(goal).filter((one) => one.name == name) ?? [];
+    if (same.length != 1) {
+      return undefined;
+    }
+
+    return same[0];
+  }
+
+  public objectMemberKeyError(
+    key: Expr,
+    keyType: Type,
+  ): SourceError | undefined {
+    const plain = this.definedType(keyType);
+    if (this.isNumeric(plain)) {
+      return { code: Code.NumberKey, loc: key.loc, details: kNoDetails };
+    }
+    if (keyType.kind == TypeKind.String) {
+      return { code: Code.RuntimeKey, loc: key.loc, details: kNoDetails };
+    }
+
+    const first = this.typeText(keyType);
+
+    return { code: Code.KeyNotString, loc: key.loc, details: { first } };
+  }
+
+  public readonly missingFieldError(
+    expr: MemberExpr,
+    object: Type,
+  ): SourceError | undefined {
+    const word = expr.name;
+    const first = this.typeText(object);
+
+    if (kPrototypeNames.includes(word)) {
+      return {
+        code: Code.PrototypeMember,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+        },
+      };
+    }
+
+    return {
+      code: Code.PropertyMissing,
+      loc: expr.loc,
+      details: { word, first },
+    };
+  }
+
+  public readonly noFieldError(
+    entry: FieldEntry,
+    target: Type,
+  ): SourceError | undefined {
+    if (!entry.named) {
+      return undefined;
+    }
+
+    const first = this.typeText(target);
+    const word = entry.name;
+    const loc = entry.property.loc;
+
+    if (first == kStreamErrorName) {
+      return {
+        code: Code.NoSuchStreamField,
+        loc,
+        details: { first, word },
+      };
+    }
+
+    return { code: Code.NoSuchField, loc, details: { first, word } };
+  }
+
+  public readonly unknownUseError(
+    value: Expr,
+    object: Type,
+    what: string,
+  ): SourceError | undefined {
+    const word = this.operandName(value);
+    const isObject = object.kind == TypeKind.AnyObject;
+    const code = this.unknownUseCode(isObject, what == "");
+
+    return { code, loc: value.loc, details: { word, other: what } };
+  }
+
+  public readonly voidFieldCheck(
+    value: Expr,
+    type: Type,
+    name: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (type.kind == TypeKind.Void) {
+      errors.push({
+        code: Code.VoidFieldValue,
+        loc: value.loc,
+        details: { word: name },
+      });
+    }
+
+    return errors;
+  }
+
+  public readonly unknownUseCode(isObject: boolean, isIndex: boolean): Code {
+    if (isObject && isIndex) {
+      return Code.ObjectIndexUnknown;
+    }
+    if (isObject) {
+      return Code.ObjectMemberUnknown;
+    }
+    if (isIndex) {
+      return Code.UnknownIndexed;
+    }
+
+    return Code.UnknownMember;
+  }
+
+  public readonly isUsableField(
+    entry: FieldEntry,
+    type: Type,
+  ): Checked<boolean> {
+    if (type.kind == TypeKind.Error) {
+      return { value: false };
+    }
+    if (type.kind != TypeKind.Undefined) {
+      return { value: true };
+    }
+
+    return {
+      value: false,
+      error: {
+        code: Code.UndefinedField,
+        loc: entry.value.loc,
+        details: {
+          word: entry.name,
+        },
+      },
+    };
+  }
+
+  public methodPropertyFits(
+    property: Property,
+    goal: ObjectType,
+    methods: Read<ObjectField[]>,
+    first: string,
+  ): Checked<boolean> {
+    const word = property.name;
+    const member = this.plainMember(goal, word);
+    if (member == undefined) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitNoField,
+          loc: property.loc,
+          details: {
+            first,
+            word,
+          },
+        },
+      };
+    }
+    if (property.form.kind != PropertyKind.Method) {
+      return { value: true };
+    }
+    if (member.type.kind != TypeKind.Function) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitNotMethod,
+          loc: property.loc,
+          details: {
+            first,
+            word,
+            second: this.typeText(member.type),
+          },
+        },
+      };
+    }
+    if (!member.readonly) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitReplaceable,
+          loc: property.loc,
+          details: {
+            first,
+            word,
+          },
+        },
+      };
+    }
+
+    const mine = methods.find((one) => one.name == word)?.type;
+    if (mine == undefined || mine.kind == TypeKind.Error) {
+      return { value: true };
+    }
+    if (this.converts(mine, member.type)) {
+      return { value: true };
+    }
+
+    return {
+      value: false,
+      error: {
+        code: Code.LiteralFitOtherType,
+        loc: property.loc,
+        details: {
+          first,
+          word,
+          second: this.typeText(mine),
+          other: this.typeText(member.type),
+        },
+      },
+    };
+  }
+
+  public readonly objectMemberTupleMember(
+    expr: MemberExpr,
+    tuple: TupleType,
+  ): Checked<Type> {
+    if (expr.name == kLengthName) {
+      return { value: this.store.integer(64, false) };
+    }
+
+    const word = expr.name;
+    const first = this.typeText(tuple);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.PropertyMissing,
+        loc: expr.loc,
+        details: { word, first },
+      },
+    };
+  }
+
+  public readonly valueMember(expr: MemberExpr, object: Type): Checked<Type> {
+    const name = expr.name;
+    const isSized = this.isSized(object);
+    if (isSized && name == kLengthName) {
+      return { value: this.store.integer(64, false) };
+    }
+    if (this.isWrappedValue(object, name)) {
+      return { value: this.unsignedOf(object) };
+    }
+    if (this.isTextList(object) && name == kRawName) {
+      return { value: this.store.plain(TypeKind.Error) };
+    }
+
+    const word = name;
+    const first = this.typeText(object);
+
+    if (isSized || object.kind == TypeKind.Iterator) {
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.MethodNotCalled,
+          loc: expr.loc,
+          details: { word, first },
+        },
+      };
+    }
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.PropertyMissing,
+        loc: expr.loc,
+        details: { word, first },
+      },
+    };
+  }
+
+  public readonly reportValueMember(
+    expr: MemberExpr,
+    union: UnionType,
+  ): Checked<Type> {
+    const head = this.store.partsOf(union)[0];
+    if (head != undefined) {
+      const word = expr.name;
+      const first = this.typeText(union);
+      const other = this.typeOfName(head);
+
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.UnionValueMember,
+          loc: expr.loc,
+          details: {
+            word,
+            first,
+            other,
+          },
+        },
+      };
+    }
+
+    return { value: this.store.plain(TypeKind.Error) };
+  }
+
+  public readonly unknownMemberCheck(
+    expr: MemberExpr,
+    object: Type,
+  ): Checked<boolean> {
+    const tree = this.program.tree;
+
+    if (!this.isUnknownValue(object)) {
+      return { value: false };
+    }
+    if (expr.name == kConstructorName) {
+      return {
+        value: true,
+        error: {
+          code: Code.ConstructorRefused,
+          loc: expr.loc,
+          details: kNoDetails,
+        },
+      };
+    }
+
+    const what = `property '${expr.name}'`;
+
+    const unknownUseError = this.unknownUseError(
+      tree.exprOf(expr.objectId),
+      object,
+      what,
+    );
+
+    return { value: true, error: unknownUseError };
+  }
+
+  public readonly isUnknownValue(type: Type): boolean {
+    return type.kind == TypeKind.Unknown || type.kind == TypeKind.AnyObject;
+  }
+
+  public methodTargetCheck(
+    expr: ObjectLitExpr,
+    goal: ObjectType,
+    methods: Read<ObjectField[]>,
+  ): Checked<boolean> {
+    const tree = this.program.tree;
+
+    const first = this.typeText(goal);
+
+    for (const property of tree.propertiesOf(expr.propsList)) {
+      const fitting = this.methodPropertyFits(property, goal, methods, first);
+      if (!fitting.value) {
+        return fitting;
+      }
+    }
+
+    for (const member of this.store.fieldsOf(goal)) {
+      const isGiven = tree.propertiesOf(expr.propsList).some(
+        (property) => property.name == member.name,
+      );
+      const isPlain = this.plainMember(goal, member.name) != undefined;
+      if (!isGiven && isPlain) {
+        return {
+          value: false,
+          error: {
+            code: Code.LiteralFitMissing,
+            loc: expr.loc,
+            details: { first, word: member.name },
+          },
+        };
+      }
+    }
+
+    const overloaded = this.store
+      .fieldsOf(goal)
+      .find(
+        (member) =>
+          this.store.fieldsOf(goal).filter((other) => other.name == member.name)
+            .length > 1,
+      );
+    if (overloaded != undefined) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitOverloads,
+          loc: expr.loc,
+          details: { first, word: overloaded.name },
+        },
+      };
+    }
+
+    return { value: true };
+  }
+}

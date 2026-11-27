@@ -2,47 +2,46 @@ import { Expr } from "../ast/types/ast.types.expressions.tz";
 import { Type } from "../type/types/type.types.tz";
 
 export class ExpressionAnswers {
-  private visited: Cell<Set<Expr>>;
-  private types: Cell<Map<Expr, Type>>;
-  private tried: Cell<Map<Expr, Type>>;
-  private folded: Cell<Map<Expr, decimal>>;
+  private visited: Set<int>;
+  private types: Map<int, Type>;
+  private tried: Map<int, Type>;
+  private folded: Map<int, decimal>;
 
   public constructor() {
-    this.visited = new Set<Expr>();
-    this.types = new Map<Expr, Type>();
-    this.tried = new Map<Expr, Type>();
-    this.folded = new Map<Expr, decimal>();
+    this.visited = new Set<int>();
+    this.types = new Map<int, Type>();
+    this.tried = new Map<int, Type>();
+    this.folded = new Map<int, decimal>();
   }
 
-  public readonly visit(expr: Expr): void {
-    this.visited.add(expr);
+  public visit(expr: Expr): void {
+    this.visited.add(expr.id);
   }
 
   public readonly isVisited(expr: Expr): boolean {
-    return this.visited.has(expr);
+    return this.visited.has(expr.id);
   }
 
-  public readonly answer(expr: Expr, type: Type): void {
-    this.types.set(expr, type);
+  public answer(expr: Expr, type: Type): void {
+    this.types.set(expr.id, type);
   }
 
-  public readonly tryAnswer(expr: Expr, type: Type): void {
-    if (!this.tried.has(expr)) {
-      this.tried.set(expr, type);
+  public tryAnswer(expr: Expr, type: Type): void {
+    if (!this.tried.has(expr.id)) {
+      this.tried.set(expr.id, type);
     }
   }
 
   public readonly typeOf(expr: Expr): Type | undefined {
-    return this.types.get(expr) ?? this.tried.get(expr);
+    return this.types.get(expr.id) ?? this.tried.get(expr.id);
   }
 
-  public readonly fold(expr: Expr, value: decimal): void {
-    this.folded.set(expr, value);
+  public fold(expr: Expr, value: decimal): void {
+    this.folded.set(expr.id, value);
   }
 
   public readonly foldedOf(expr: Expr): decimal | undefined {
-    return this.folded.get(expr);
+    return this.folded.get(expr.id);
   }
 }
 
-export type InternedExpressionAnswers = Interned<ExpressionAnswers>;

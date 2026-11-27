@@ -1,0 +1,157 @@
+import { TypeSystem } from "../../type-system.tz";
+import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
+import { kLibrary } from "../../../../../program/library/library-modules/const/library-modules.const.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kNamePoint,
+  kNullTypeName,
+} from "../../../type-resolver/const/type-resolver.const.tables.tz";
+import {
+  ClassHome,
+  TypeContext,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private global(ref: TypeRef, context: Read<TypeContext>): Type {
+    if (ref.name == kNullTypeName) {
+      return this.refusedNull(ref, context);
+    }
+
+    const builtin = this.builtin(ref.name, ref, context);
+    if (builtin != undefined) {
+      return builtin;
+    }
+
+    const point = ref.name.indexOf(kNamePoint);
+    if (point >= 0) {
+      const word = ref.name.slice(0, point);
+      const member = ref.name.slice(point + 1);
+      const inside = this.memberModule(word, member);
+
+      return this.fromModule(ref, inside, member, context);
+    }
+
+    const declaring = this.globals.get(ref.name);
+    if (declaring != undefined) {
+      return this.fromModule(ref, declaring, ref.name, context);
+    }
+
+    const mentioned = this.mentionedModule(ref.name);
+
+    return this.fromModule(ref, mentioned, ref.name, context);
+  }
+
+  public readonly namespaceModule(word: string): int | undefined {
+    return this.namespaces.get(word);
+  }
+
+  private readonly mentionedModule(name: string): int | undefined {
+    const row = kLibrary.global(name);
+    if (row == undefined) {
+      return undefined;
+    }
+
+    return this.moduleNamed(row.module);
+  }
+
+  private readonly memberModule(word: string, member: string): int | undefined {
+    const rows = kLibrary.members();
+    const row = rows.find((one) => one.owner == word && one.name == member);
+    if (row == undefined) {
+      return this.namespaces.get(word);
+    }
+
+    return this.moduleNamed(row.module);
+  }
+
+  private readonly moduleNamed(name: string): int | undefined {
+    const module = this.program.modules.find((one) => one.name == name);
+
+    return module?.id;
+  }
+
+  private fromModule(
+    ref: TypeRef,
+    module: int | undefined,
+    name: string,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    if (module == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const prefix = this.prefixes.get(module);
+    if (prefix != undefined) {
+      const builtin =
+        this.builtin(`${prefix}${name}`, ref, context) ??
+        this.builtin(name, ref, context);
+      if (builtin != undefined) {
+        return builtin;
+      }
+    }
+
+    const record = this.record(module);
+    const found = record?.declarations.get(name);
+    const declared = record?.classes.get(name);
+    if (found != undefined) {
+      return this.ofDeclaration(ref, module, found, context);
+    }
+    if (declared == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const params = tree.typeParamsOf(declared.typeParamsList);
+    const written = this.written(ref, name, params, context, true);
+    const fits =
+      written != undefined &&
+      this.resolverArgumentsFit(ref, module, name, params, written, context);
+    if (written == undefined || !fits) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    if (this.isWeakTargetWrong(ref, name, written, context)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const parents = this.parentRefs(
+      tree.typeRefAt(declared.baseId),
+      tree.typeRefsOf(declared.implementedList),
+    );
+    const home: ClassHome = { module, name, loc: declared.loc };
+
+    return this.instance(home, params, written, parents);
+  }
+
+  private isWeakTargetWrong(
+    ref: TypeRef,
+    name: string,
+    written: Read<Type[]>,
+    context: Read<TypeContext>,
+  ): boolean {
+    const tree = this.program.tree;
+
+    const target = written[0];
+    const place = tree.typeRefsOf(ref.argsList)[0];
+    const isWeak =
+      this.isWeakRefName(name) && !this.isLibrary(context.module);
+    if (!isWeak || target == undefined || place == undefined) {
+      return false;
+    }
+
+    const targetError = this.targetError(place.loc, target);
+    if (targetError == undefined) {
+      return false;
+    }
+
+    const { loc, code, details } = targetError;
+
+    this.report(context.module, loc, code, details);
+
+    return true;
+  }
+}

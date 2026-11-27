@@ -1,0 +1,83 @@
+import {
+  Access,
+  FieldKind,
+  FieldPresence,
+  MethodKind,
+} from "../../ast/types/ast.types.classes.tz";
+import { Span } from "../../ast/types/ast.types.span.tz";
+import { StmtKind } from "../../ast/types/ast.types.statements.tz";
+import { Expr } from "./syntax.types.expressions.tz";
+import { FunctionDecl } from "./syntax.types.functions.tz";
+import { TypeParamDecl, TypeRef } from "./syntax.types.types.tz";
+
+export type Decorator = { readonly loc: int; readonly expr: Expr };
+
+export type TypeAliasDecl = {
+  readonly kind: StmtKind.TypeAlias;
+  readonly loc: int;
+  readonly name: string;
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly type: TypeRef;
+  readonly bases: readonly TypeRef[];
+};
+
+export type HandleDecl = {
+  readonly kind: StmtKind.Handle;
+  readonly loc: int;
+  readonly name: string;
+  readonly typeParams: readonly TypeParamDecl[];
+};
+
+export type EnumMember = {
+  readonly name: string;
+  readonly loc: int;
+  readonly init?: Expr;
+};
+
+export type EnumDecl = {
+  readonly kind: StmtKind.Enum;
+  readonly loc: int;
+  readonly name: string;
+  readonly members: readonly EnumMember[];
+};
+
+export type ClassMember = {
+  readonly access: Access;
+  readonly isOverride: boolean;
+  readonly isReadonly: boolean;
+  readonly decorators: readonly Decorator[];
+  readonly method: MethodKind;
+};
+
+export type ClassField = {
+  readonly name: string;
+  readonly loc: int;
+  readonly type?: TypeRef;
+  readonly init?: Expr;
+  readonly form: FieldKind;
+  readonly presence: FieldPresence;
+  readonly readonly: boolean;
+  readonly isOverride: boolean;
+  readonly access: Access;
+  readonly decorators: readonly Decorator[];
+  readonly accessor: boolean;
+};
+
+export type ClassDecl = {
+  readonly kind: StmtKind.Class;
+  readonly loc: int;
+  readonly name?: string;
+  readonly isAbstract: boolean;
+  readonly isPartial: boolean;
+  readonly base?: TypeRef;
+  readonly baseExpr?: Expr;
+  readonly baseArgs: readonly TypeRef[];
+  readonly interfaces: readonly TypeRef[];
+  readonly fields: readonly ClassField[];
+  readonly methods: readonly FunctionDecl[];
+  readonly constructors: readonly FunctionDecl[];
+  readonly expression: boolean;
+  readonly decorators: readonly Decorator[];
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly source?: Span;
+};

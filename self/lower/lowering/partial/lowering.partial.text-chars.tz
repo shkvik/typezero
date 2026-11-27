@@ -1,0 +1,216 @@
+import {
+  CallExpr,
+  IndexExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kFlagType,
+  kIntType,
+  kLengthMask,
+  kPointerType,
+  kStringType,
+  kTextCharAt,
+  kTextCodePointAt,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  Place,
+  TextArguments,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private textAt(
+    frame: Frame,
+    call: CallExpr,
+    receiver: IrValue,
+    given: Read<TextArguments>,
+  ): IrValue | undefined {
+    const string = this.values.types.store.plain(TypeKind.String);
+    const empty = this.values.types.store.plain(TypeKind.Undefined);
+    const result = this.values.types.store.unionOf([string, empty]);
+    const index = this.numberAt(given, 0);
+    const length = this.textLength(frame, receiver);
+    const zero = this.ir.zero(kIntType);
+    const isFromEnd = frame.made.integerCompare(
+      IrIntPredicate.SignedLess,
+      index,
+      zero,
+    );
+    const fromEnd = frame.made.binary(IrOpcode.Add, index, length);
+    const position = frame.made.select(isFromEnd, fromEnd, index);
+
+    return this.textCharOr(frame, receiver, position, result, call.loc);
+  }
+
+  private textIndexed(
+    frame: Frame,
+    expr: IndexExpr,
+    result: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const text = this.value(frame, object);
+    const indexExpr = tree.exprOf(expr.indexId);
+    const index = this.value(frame, indexExpr);
+    if (text == undefined || index == undefined) {
+      return undefined;
+    }
+
+    const position = this.toLong(frame, index).value;
+    const read = this.textCharOr(frame, text, position, result, expr.loc);
+
+    this.dropping(frame, text);
+
+    return read;
+  }
+
+  private textCharOr(
+    frame: Frame,
+    text: IrValue,
+    position: LLVMValue,
+    result: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const resultIr = this.irType(result);
+    if (resultIr == undefined) {
+      return undefined;
+    }
+
+    const length = this.textLength(frame, text);
+    const isInside = frame.made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      position,
+      length,
+    );
+    const before = frame.made.currentBlock();
+    const read = frame.made.block("char.read");
+    const end = frame.made.block("char.end");
+
+    frame.made.conditionalBranch(isInside, read, end);
+    frame.made.open(read);
+
+    const args = this.textParts(frame, text).concat([position]);
+    const params = [kPointerType, kIntType, kIntType];
+    const char = this.textOut(frame, kTextCharAt, params, args);
+    const placed = this.converted(frame, char, result, loc);
+    const readEnd = frame.made.currentBlock();
+
+    frame.made.branch(end);
+    frame.made.open(end);
+
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const missing = this.ir.zero(resultIr);
+    const value = frame.made.phi(
+      resultIr,
+      [missing, placed.value],
+      [before, readEnd],
+    );
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private textLoop(frame: Frame, statement: ForOfStmt): void {
+    const tree = this.values.types.program.tree;
+
+    const cond = frame.made.block("text.of.cond");
+    const body = frame.made.block("text.of.body");
+    const end = frame.made.block("text.of.end");
+    const string = this.values.types.store.plain(TypeKind.String);
+
+    this.openScope(frame);
+
+    const target = this.loopTarget(frame, end, cond);
+    const iterable = tree.exprOf(statement.iterableId);
+    const source = this.value(frame, iterable);
+    if (source == undefined) {
+      return;
+    }
+
+    const holder: Place = {
+      pointer: frame.made.slot(kStringType, "for.text"),
+      type: kStringType,
+      tz: string,
+      owner: frame.id,
+    };
+    const counter = frame.made.slot(kIntType, "for.unit");
+
+    frame.made.entryStore(this.ir.zero(kStringType), holder.pointer);
+    this.keepPlace(frame, holder);
+    this.stored(frame, holder, source);
+    frame.made.store(this.ir.zero(kIntType), counter);
+    frame.made.open(cond);
+
+    const text = this.loaded(frame, holder);
+    const index = frame.made.load(kIntType, counter);
+    const length = this.textLength(frame, text);
+    const isInside = frame.made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      index,
+      length,
+    );
+
+    frame.made.conditionalBranch(isInside, body, end);
+    frame.made.open(body);
+    this.openScope(frame);
+
+    const out = frame.made.slot(kStringType, "text.point");
+    const params = [kPointerType, kPointerType, kIntType, kIntType];
+    const callee = this.ir.declare(kTextCodePointAt, kFlagType, params);
+    const args = [out].concat(this.textParts(frame, text)).concat([index]);
+    const units = frame.made.call(callee, args);
+    const step = frame.made.cast(IrOpcode.SExt, units, kIntType);
+
+    frame.made.store(frame.made.binary(IrOpcode.Add, index, step), counter);
+
+    const point = frame.made.load(kStringType, out);
+    const item: IrValue = {
+      type: kStringType,
+      value: point,
+      tz: string,
+      owned: true,
+    };
+
+    this.loopItem(frame, statement, item);
+    frame.loops.push(target);
+    const bodyStmt = tree.stmtOf(statement.bodyId);
+
+    this.statement(frame, bodyStmt);
+    frame.loops.pop();
+    this.closeScope(frame);
+    this.jumpTo(frame, cond);
+    frame.made.open(end);
+    this.closeScope(frame);
+  }
+
+  private textLength(frame: Read<Frame>, text: IrValue): LLVMValue {
+    const meta = frame.made.extract(text.value, 1);
+    const mask = this.ir.hexInteger(kIntType, kLengthMask);
+
+    return frame.made.binary(IrOpcode.And, meta, mask);
+  }
+
+  private textCharAt(
+    frame: Read<Frame>,
+    receiver: IrValue,
+    given: Read<TextArguments>,
+  ): IrValue {
+    const args = this.textParts(frame, receiver).concat([
+      this.numberAt(given, 0),
+    ]);
+    const params = [kPointerType, kIntType, kIntType];
+
+    return this.textOut(frame, kTextCharAt, params, args);
+  }
+}

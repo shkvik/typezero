@@ -13,12 +13,7 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../semantic/types/type-resolver/types/type-resolver.types.tz";
-import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
-import {
-  DictKind,
-  Type,
-  TypeKind,
-} from "../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import {
   IrIntPredicate,
   IrOpcode,
@@ -34,20 +29,12 @@ import {
   kArrayLayout,
   kArrayLengthField,
   kArrayNew,
-  kDescriptorLayout,
   kFlagType,
-  kHandleKind,
-  kHandleLayout,
   kIntType,
   kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
-import {
-  DescriptorShape,
-  Frame,
-  IrValue,
-  Place,
-} from "../types/lowering.types.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private arrayLiteral(frame: Frame, expr: ArrayLitExpr): IrValue | undefined {
@@ -88,14 +75,18 @@ partial class Lowering {
     expr: ArrayLitExpr,
     type: Type | undefined,
   ): IrValue | undefined {
-    const isPlain = expr.elements.every(
+    const tree = this.values.types.program.tree;
+
+    const isPlain = tree.elementsOf(expr.elementsList).every(
       (element) => !element.spread && !element.hole,
     );
     if (type != undefined && type.kind == TypeKind.Tuple && isPlain) {
       return this.tupleLiteral(frame, expr, type);
     }
 
-    const hasHoles = expr.elements.some((element) => element.hole);
+    const hasHoles = tree
+      .elementsOf(expr.elementsList)
+      .some((element) => element.hole);
     if (type != undefined && type.kind == TypeKind.Array && !hasHoles) {
       if (!isPlain) {
         return this.spreadArray(frame, expr, type);
@@ -109,7 +100,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const item = type.item;
+    const item = this.values.types.store.itemOf(type);
     const element = this.irType(item);
     const descriptor = this.descriptor(item);
     if (element == undefined || descriptor == undefined) {
@@ -118,22 +109,28 @@ partial class Lowering {
       return undefined;
     }
 
-    const count = expr.elements.length;
+    const count = tree.elementsOf(expr.elementsList).length;
     const array = this.newArray(frame, descriptor, count);
     const data = this.arrayData(frame, array);
 
     for (let index = 0; index < count; index++) {
-      const entry = expr.elements[index];
+      const entry = tree.elementsOf(expr.elementsList)[index];
       if (entry == undefined) {
         continue;
       }
 
-      const given = this.value(frame, entry.expr);
+      const exprExpr = tree.exprOf(entry.exprId);
+      const given = this.value(frame, exprExpr);
       if (given == undefined) {
         return undefined;
       }
 
-      const value = this.converted(frame, given, item, entry.expr.loc);
+      const value = this.converted(
+        frame,
+        given,
+        item,
+        tree.exprOf(entry.exprId).loc,
+      );
       if (value == undefined) {
         return undefined;
       }
@@ -153,6 +150,8 @@ partial class Lowering {
     expr: ArrayLitExpr,
     type: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const item = this.itemOf(type);
     if (item == undefined) {
       return undefined;
@@ -167,10 +166,11 @@ partial class Lowering {
 
     const array = this.emptyArray(frame, descriptor);
 
-    for (const element of expr.elements) {
+    for (const element of tree.elementsOf(expr.elementsList)) {
       const argument: CallArgument = {
-        expr: element.expr,
+        exprId: element.exprId,
         spread: element.spread,
+        hole: false,
       };
       const isAdded = this.itemAdded(frame, array, argument, type);
       if (!isAdded) {
@@ -181,27 +181,43 @@ partial class Lowering {
     return { type: kPointerType, value: array, tz: type, owned: true };
   }
 
-  private arrayOfLength(frame: Frame, expr: NewExpr, type: Type): IrValue | undefined {
-    const argument = expr.args[0];
+  private arrayOfLength(
+    frame: Frame,
+    expr: NewExpr,
+    type: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(expr.argsList)[0];
     const item = this.descriptorOfArray(type);
-    if (argument == undefined || item == undefined || expr.args.length != 1) {
+    if (
+      argument == undefined ||
+      item == undefined ||
+      tree.argumentsOf(expr.argsList).length != 1
+    ) {
       this.notLowered(frame.module, expr.loc, "this new");
 
       return undefined;
     }
 
-    const int = this.store.integer(64, false);
-    const given = this.wantedValue(frame, argument.expr, int);
+    const int = this.values.types.store.integer(64, false);
+    const exprExpr = tree.exprOf(argument.exprId);
+    const given = this.wantedValue(frame, exprExpr, int);
     if (given == undefined) {
       return undefined;
     }
 
-    const count = this.converted(frame, given, int, argument.expr.loc);
+    const count = this.converted(
+      frame,
+      given,
+      int,
+      tree.exprOf(argument.exprId).loc,
+    );
     if (count == undefined) {
       return undefined;
     }
 
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
     const args: IrValue[] = [
       { type: kPointerType, value: item, tz },
       count,
@@ -212,7 +228,7 @@ partial class Lowering {
     return { type: kPointerType, value, tz: type, owned: true };
   }
 
-  private readonly madeArrayType(type: Type | undefined): Type | undefined {
+  private madeArrayType(type: Type | undefined): Type | undefined {
     if (type == undefined) {
       return undefined;
     }
@@ -224,22 +240,31 @@ partial class Lowering {
       return undefined;
     }
 
-    const item = type.args[0];
-    if (item == undefined || type.args.length != 1) {
+    const item = this.values.types.store.argsOf(type)[0];
+    if (item == undefined || this.values.types.store.argsOf(type).length != 1) {
       return undefined;
     }
 
-    return this.store.arrayOf(item);
+    return this.values.types.store.arrayOf(item);
   }
 
-  private writtenArrayType(frame: Read<Frame>, expr: NewExpr): Type | undefined {
+  private writtenArrayType(
+    frame: Read<Frame>,
+    expr: NewExpr,
+  ): Type | undefined {
+    const tree = this.values.types.program.tree;
+
     const form = expr.form;
-    const written = expr.typeArgs[0];
+    const written = tree.typeRefsOf(expr.typeArgsList)[0];
     const isArray =
       form.kind == NewKind.Named &&
       form.name == kArrayClassName &&
       form.member == undefined;
-    if (!isArray || written == undefined || expr.typeArgs.length != 1) {
+    if (
+      !isArray ||
+      written == undefined ||
+      tree.typeRefsOf(expr.typeArgsList).length != 1
+    ) {
       return undefined;
     }
 
@@ -248,12 +273,12 @@ partial class Lowering {
       bindings: new Map<int, Type>(this.binding),
       place: TypePlace.Plain,
     };
-    const item = this.resolver.resolve(written, context);
+    const item = this.values.types.resolve(written, context);
     if (item.kind == TypeKind.Error) {
       return undefined;
     }
 
-    return this.store.arrayOf(item);
+    return this.values.types.store.arrayOf(item);
   }
 
   private descriptorOfArray(type: Type): LLVMValue | undefined {
@@ -261,11 +286,15 @@ partial class Lowering {
       return undefined;
     }
 
-    return this.descriptor(type.item);
+    return this.descriptor(this.values.types.store.itemOf(type));
   }
 
-  private readonly newArray(frame: Read<Frame>, descriptor: LLVMValue, count: int): LLVMValue {
-    const tz = this.store.integer(64, false);
+  private newArray(
+    frame: Read<Frame>,
+    descriptor: LLVMValue,
+    count: int,
+  ): LLVMValue {
+    const tz = this.values.types.store.integer(64, false);
     const size = this.ir.integer(kIntType, `${count}`);
     const args: IrValue[] = [
       { type: kPointerType, value: descriptor, tz },
@@ -276,7 +305,11 @@ partial class Lowering {
     return this.runtimeValue(frame, kArrayNew, kPointerType, args);
   }
 
-  private readonly arrayField(frame: Read<Frame>, array: LLVMValue, field: int): LLVMValue {
+  private readonly arrayField(
+    frame: Read<Frame>,
+    array: LLVMValue,
+    field: int,
+  ): LLVMValue {
     return frame.made.field(kArrayLayout, array, field);
   }
 
@@ -286,165 +319,14 @@ partial class Lowering {
     return frame.made.load(kPointerType, field);
   }
 
-  private readonly arrayLength(frame: Read<Frame>, array: LLVMValue): LLVMValue {
+  private readonly arrayLength(
+    frame: Read<Frame>,
+    array: LLVMValue,
+  ): LLVMValue {
     const field = this.arrayField(frame, array, kArrayLengthField);
     const short = frame.made.load(kFlagType, field);
 
     return frame.made.cast(IrOpcode.ZExt, short, kIntType);
-  }
-
-  private descriptor(type: Type): LLVMValue | undefined {
-    if (type.kind == TypeKind.Result) {
-      return this.resultDescriptor(type);
-    }
-
-    const plain = this.widened(type);
-    const known = this.descriptors.get(plain.id);
-    if (known != undefined) {
-      return known;
-    }
-
-    if (this.isHandleType(plain)) {
-      return this.handleDescriptor(plain);
-    }
-
-    const shape = this.descriptorShape(plain);
-    if (shape == undefined) {
-      return undefined;
-    }
-
-    const name = this.ir.uniqueName("tz.type.");
-    const inner = shape.inner ?? this.ir.zero(kPointerType);
-    const value = this.ir.constStruct([
-      this.ir.integer(kFlagType, `${shape.kind}`),
-      this.ir.integer(kFlagType, `${shape.size}`),
-      inner,
-    ]);
-    const global = this.ir.global(name, kDescriptorLayout, value, true);
-
-    this.descriptors.set(plain.id, global);
-
-    return global;
-  }
-
-  private handleDescriptor(type: Type): LLVMValue {
-    let label = "";
-
-    if (type.kind == TypeKind.Instance) {
-      label = type.name;
-    }
-
-    const name = this.ir.uniqueName("tz.type.");
-    const base = this.ir.constStruct([
-      this.ir.integer(kFlagType, `${kHandleKind}`),
-      this.ir.integer(kFlagType, "8"),
-      this.ir.zero(kPointerType),
-    ]);
-    const length = Buffer.from(label, "utf8").length;
-    const value = this.ir.constStruct([
-      base,
-      this.cText(label),
-      this.ir.integer(kFlagType, `${length}`),
-    ]);
-    const global = this.ir.global(name, kHandleLayout, value, true);
-
-    this.descriptors.set(type.id, global);
-
-    return global;
-  }
-
-  private descriptorShape(type: Type): DescriptorShape | undefined {
-    switch (type.kind) {
-      case TypeKind.Int:
-        return {
-          kind: this.integerKind(type.bits, type.unsigned),
-          size: type.bits >> 3,
-        };
-      case TypeKind.Double:
-        return { kind: 3, size: 8 };
-      case TypeKind.Boolean:
-        return { kind: 4, size: 1 };
-      case TypeKind.String:
-        return { kind: 5, size: 16 };
-      case TypeKind.Decimal:
-        return { kind: 11, size: 16 };
-      case TypeKind.Array: {
-        const inner = this.descriptor(type.item);
-        if (inner == undefined) {
-          return undefined;
-        }
-
-        return { kind: 6, size: 8, inner };
-      }
-      case TypeKind.Undefined:
-        return { kind: 8, size: 1 };
-      case TypeKind.Instance:
-      case TypeKind.Object:
-      case TypeKind.Tuple:
-      case TypeKind.Dict:
-        return { kind: 10, size: 8 };
-      case TypeKind.Union:
-        return this.unionShape(type);
-      default:
-        return undefined;
-    }
-  }
-
-  private unionShape(type: Type): DescriptorShape | undefined {
-    if (this.isObjectLike(type)) {
-      return { kind: 10, size: 8 };
-    }
-
-    return this.optionalShape(type);
-  }
-
-  private optionalShape(type: Type): DescriptorShape | undefined {
-    const inner = this.optionalInner(type);
-    if (inner == undefined) {
-      return undefined;
-    }
-
-    const described = this.descriptor(inner);
-    if (described == undefined) {
-      return undefined;
-    }
-
-    const size = this.optionalSize(this.widened(inner));
-
-    return { kind: 7, size, inner: described };
-  }
-
-  private optionalSize(inner: Type): int {
-    if (this.isReferenceLike(inner)) {
-      return 8;
-    }
-
-    switch (inner.kind) {
-      case TypeKind.Int:
-        return inner.bits >> 2;
-      case TypeKind.Boolean:
-        return 2;
-      case TypeKind.String:
-      case TypeKind.Decimal:
-        return 24;
-      case TypeKind.Instance:
-        return 8;
-      default:
-        return 16;
-    }
-  }
-
-  private readonly integerKind(bits: int, isUnsigned: boolean): int {
-    switch (bits) {
-      case 8:
-        return this.choose(isUnsigned, 20, 18);
-      case 16:
-        return this.choose(isUnsigned, 21, 19);
-      case 32:
-        return this.choose(isUnsigned, 22, 1);
-      default:
-        return this.choose(isUnsigned, 23, 2);
-    }
   }
 
   private readonly choose(isFirst: boolean, first: int, second: int): int {
@@ -456,7 +338,10 @@ partial class Lowering {
   }
 
   private indexValue(frame: Frame, expr: IndexExpr): IrValue | undefined {
-    const object = this.typeIn(frame, expr.object);
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(expr.objectId);
+    const object = this.typeIn(frame, objectExpr);
     const result = this.typeOf(expr);
     if (object == undefined || result == undefined) {
       this.notLowered(frame.module, expr.loc, "this index");
@@ -485,8 +370,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const array = this.value(frame, expr.object);
-    const index = this.value(frame, expr.index);
+    const exprObject = tree.exprOf(expr.objectId);
+    const array = this.value(frame, exprObject);
+    const indexExpr = tree.exprOf(expr.indexId);
+    const index = this.value(frame, indexExpr);
     if (array == undefined || index == undefined) {
       return undefined;
     }
@@ -512,7 +399,7 @@ partial class Lowering {
       return undefined;
     }
 
-    return object.item;
+    return this.values.types.store.itemOf(object);
   }
 
   private elementRead(
@@ -564,19 +451,26 @@ partial class Lowering {
     frame.made.open(end);
 
     const missing = this.ir.zero(type);
-    const value = frame.made.phi(type, [missing, placed.value], [before, readEnd]);
+    const value = frame.made.phi(
+      type,
+      [missing, placed.value],
+      [before, readEnd],
+    );
 
     return { type, value, tz: result, owned: loaded.owned };
   }
 
   private arrayMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
-    const array = this.value(frame, expr.object);
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const array = this.value(frame, object);
     if (array == undefined) {
       return undefined;
     }
 
     const length = this.arrayLength(frame, array.value);
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
 
     this.dropping(frame, array);
 
@@ -589,6 +483,8 @@ partial class Lowering {
     member: MemberExpr,
     object: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     if (object.kind != TypeKind.Array) {
       const name = this.calledName(call);
 
@@ -597,12 +493,13 @@ partial class Lowering {
       return undefined;
     }
 
-    const array = this.value(frame, member.object);
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
     if (array == undefined) {
       return undefined;
     }
 
-    for (const argument of call.args) {
+    for (const argument of tree.argumentsOf(call.argsList)) {
       const isAdded = this.itemAdded(frame, array.value, argument, object);
       if (!isAdded) {
         return undefined;
@@ -610,7 +507,7 @@ partial class Lowering {
     }
 
     const length = this.arrayLength(frame, array.value);
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
 
     this.dropping(frame, array);
 
@@ -623,13 +520,19 @@ partial class Lowering {
     argument: CallArgument,
     object: Type,
   ): boolean {
+    const tree = this.values.types.program.tree;
+
     if (object.kind != TypeKind.Array) {
       return false;
     }
 
-    const loc = argument.expr.loc;
+    const loc = tree.exprOf(argument.exprId).loc;
     if (argument.spread) {
-      const given = this.wantedValue(frame, argument.expr, object);
+      const given = this.wantedValue(
+        frame,
+        tree.exprOf(argument.exprId),
+        object,
+      );
       const other = this.convertedOrNone(frame, given, object, loc);
       if (other == undefined) {
         return false;
@@ -644,13 +547,34 @@ partial class Lowering {
       return true;
     }
 
-    const given = this.wantedValue(frame, argument.expr, object.item);
-    const item = this.convertedOrNone(frame, given, object.item, loc);
+    const given = this.wantedValue(
+      frame,
+      tree.exprOf(argument.exprId),
+      this.values.types.store.itemOf(object),
+    );
+    const item = this.convertedOrNone(
+      frame,
+      given,
+      this.values.types.store.itemOf(object),
+      loc,
+    );
     if (item == undefined) {
       return false;
     }
+    if (this.isLookingArray(object)) {
+      const looked: IrValue = {
+        type: item.type,
+        value: item.value,
+        tz: item.tz,
+        owned: true,
+      };
 
-    this.pushed(frame, array, item, object.item);
+      this.pushed(frame, array, looked, this.values.types.store.itemOf(object));
+
+      return true;
+    }
+
+    this.pushed(frame, array, item, this.values.types.store.itemOf(object));
 
     return true;
   }
@@ -697,149 +621,5 @@ partial class Lowering {
     frame.made.store(next, lengthField);
 
     return frame.made.cast(IrOpcode.ZExt, next, kIntType);
-  }
-
-  private forOfLoop(frame: Frame, statement: ForOfStmt): void {
-    const iterated = this.typeIn(frame, statement.iterable);
-    if (iterated != undefined && this.isString(iterated)) {
-      return this.textLoop(frame, statement);
-    }
-
-    const mapLoop = this.mapLoopOf(frame, statement);
-    if (mapLoop != undefined) {
-      return this.mapLoop(frame, statement, mapLoop);
-    }
-
-    const itemType = this.loopItemType(frame, statement.iterable);
-    const binding = statement.binding;
-    const isPlain = !statement.isAwait && !statement.keys;
-    if (itemType == undefined || !isPlain) {
-      return this.notLowered(frame.module, statement.loc, "this loop");
-    }
-
-    const iterable = this.store.arrayOf(itemType);
-
-    const cond = frame.made.block("for.of.cond");
-    const body = frame.made.block("for.of.body");
-    const end = frame.made.block("for.of.end");
-
-    this.openScope(frame);
-
-    const target = this.loopTarget(frame, end, cond);
-    const source = this.loopSourceValue(frame, statement.iterable);
-    const element = this.irType(itemType);
-    if (source == undefined || element == undefined) {
-      return;
-    }
-
-    const holder: Place = {
-      pointer: frame.made.slot(kPointerType, "for.iterable"),
-      type: kPointerType,
-      tz: iterable,
-      owner: frame.id,
-      flag: this.dropFlag(frame, true),
-    };
-    const counter = frame.made.slot(kIntType, "for.index");
-    const none = this.ir.zero(kPointerType);
-
-    frame.made.entryStore(none, holder.pointer);
-    this.keepPlace(frame, holder);
-    this.flaggedInitialized(frame, holder, source, source.ownedFlag);
-    frame.made.store(this.ir.zero(kIntType), counter);
-    frame.made.open(cond);
-
-    const array = frame.made.load(kPointerType, holder.pointer);
-    const index = frame.made.load(kIntType, counter);
-    const length = this.arrayLength(frame, array);
-    const isInside = frame.made.integerCompare(
-      IrIntPredicate.UnsignedLess,
-      index,
-      length,
-    );
-
-    frame.made.conditionalBranch(isInside, body, end);
-    frame.made.open(body);
-    this.openScope(frame);
-
-    const data = this.arrayData(frame, array);
-    const address = frame.made.element(element, data, index);
-    const item = frame.made.load(element, address);
-    const one = this.ir.integer(kIntType, "1");
-    const next = frame.made.binary(IrOpcode.Add, index, one);
-
-    frame.made.store(next, counter);
-
-    const isTaken = this.isTakenItem(source, statement.iterable, element, itemType);
-    if (isTaken) {
-      frame.made.store(this.ir.zero(element), address);
-    }
-
-    const looked: IrValue = { type: element, value: item, tz: itemType, owned: isTaken };
-    const staticItem = this.staticOrSame(looked, source.isStatic == true);
-
-    this.loopItem(frame, statement, staticItem);
-    frame.loops.push(target);
-    this.statement(frame, statement.body);
-    frame.loops.pop();
-    this.closeScope(frame);
-    this.jumpTo(frame, cond);
-    frame.made.open(end);
-    this.closeScope(frame);
-  }
-
-  private loopItemType(frame: Frame, expr: Expr): Type | undefined {
-    const type = this.typeIn(frame, expr);
-    const listed = this.listedDict(expr);
-    if (listed != undefined) {
-      const object = this.typeOf(listed.object);
-      if (object == undefined) {
-        return undefined;
-      }
-
-      return this.dictItemType(object, listed.name == "keys");
-    }
-    if (type == undefined) {
-      return undefined;
-    }
-    if (type.kind == TypeKind.Array) {
-      return type.item;
-    }
-    if (type.kind == TypeKind.Dict && type.dict == DictKind.Set) {
-      return type.key;
-    }
-    if (type.kind == TypeKind.Dict && type.dict == DictKind.Map) {
-      return this.store.plainTuple([type.key, type.value]);
-    }
-
-    return undefined;
-  }
-
-  private loopSource(frame: Frame, expr: Expr): IrValue | undefined {
-    const type = this.typeIn(frame, expr);
-    if (type != undefined && type.kind == TypeKind.Dict) {
-      if (type.dict == DictKind.Map) {
-        return this.dictEntries(frame, expr, type);
-      }
-
-      return this.dictItems(frame, expr, true);
-    }
-
-    return this.sourceItems(frame, expr);
-  }
-
-  private loopItem(frame: Frame, statement: ForOfStmt, item: IrValue): void {
-    const binding = statement.binding;
-    const variable = this.values.variableOf(frame.module, binding.loc);
-    const declared = this.boundOrNone(variable);
-    const isUnknown = declared == undefined || declared.kind == TypeKind.Error;
-    const place = this.boundPlace(frame, binding, item.tz, isUnknown);
-    if (place == undefined) {
-      return;
-    }
-
-    const value = this.converted(frame, item, place.tz, binding.loc);
-    if (value != undefined) {
-      this.initialized(frame, place, value);
-    }
   }
 }

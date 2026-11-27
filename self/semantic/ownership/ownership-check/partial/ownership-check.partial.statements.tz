@@ -41,9 +41,13 @@ partial class OwnershipCheck {
   }
 
   private walkStatement(stmt: Stmt): void {
+    const tree = this.values.types.program.tree;
+
     switch (stmt.kind) {
       case StmtKind.Block:
-        return this.walkStatements(stmt.body);
+        const body = tree.stmtsOf(stmt.bodyList);
+
+        return this.walkStatements(body);
       case StmtKind.VarDecl:
         return this.walkDeclaration(stmt);
       case StmtKind.Function:
@@ -51,24 +55,43 @@ partial class OwnershipCheck {
       case StmtKind.Class:
         return this.walkNestedClass(stmt);
       case StmtKind.Expr:
-        this.evaluate(stmt.expr);
+        const expr = tree.exprOf(stmt.exprId);
+
+        this.evaluate(expr);
         return;
       case StmtKind.If:
         return this.walkIf(stmt);
       case StmtKind.While:
-        return this.walkLoop(stmt.cond, stmt.body, undefined);
+        return this.walkLoop(
+          tree.exprOf(stmt.condId),
+          tree.stmtOf(stmt.bodyId),
+          undefined,
+        );
       case StmtKind.DoWhile:
-        return this.walkLoop(stmt.cond, stmt.body, undefined);
+        return this.walkLoop(
+          tree.exprOf(stmt.condId),
+          tree.stmtOf(stmt.bodyId),
+          undefined,
+        );
       case StmtKind.For:
-        return this.walkFor(stmt.init, stmt.cond, stmt.step, stmt.body);
+        return this.walkFor(
+          tree.stmtAt(stmt.initId),
+          tree.exprAt(stmt.condId),
+          tree.exprAt(stmt.stepId),
+          tree.stmtAt(stmt.bodyId),
+        );
       case StmtKind.ForOf:
         return this.walkForOf(stmt);
       case StmtKind.Switch:
         return this.walkSwitch(stmt);
       case StmtKind.Labeled:
-        return this.walkStatement(stmt.body);
+        const bodyStmt = tree.stmtOf(stmt.bodyId);
+
+        return this.walkStatement(bodyStmt);
       case StmtKind.Return:
-        return this.walkReturn(stmt.value, stmt.loc);
+        const value = tree.exprAt(stmt.valueId);
+
+        return this.walkReturn(value, stmt.loc);
       case StmtKind.Break:
       case StmtKind.Continue:
         this.state.isDead = true;
@@ -80,78 +103,84 @@ partial class OwnershipCheck {
 
   private walkNestedFunction(stmt: Stmt): void {
     const frame = this.frame();
-    if (stmt.kind != StmtKind.Function || frame == undefined || this.isModuleItem(stmt)) {
+    if (
+      stmt.kind != StmtKind.Function ||
+      frame == undefined ||
+      this.isModuleItem(stmt)
+    ) {
       return;
     }
 
-    this.checkFunction(stmt, frame.owner, CallbackMode.Local, frame);
+    const owner = frame.owner;
+
+    this.checkFunction(stmt, owner, CallbackMode.Local, true);
   }
 
   private walkNestedClass(stmt: Stmt): void {
-    const frame = this.frame();
-    if (stmt.kind != StmtKind.Class || frame == undefined || this.isModuleItem(stmt)) {
+    const isInside = this.frame() != undefined;
+    if (stmt.kind != StmtKind.Class || !isInside || this.isModuleItem(stmt)) {
       return;
     }
 
-    this.checkClass(stmt, frame);
+    this.checkClass(stmt, true);
   }
 
   private readonly isModuleItem(stmt: Stmt): boolean {
-    const home = this.program.modules[this.module];
+    const tree = this.values.types.program.tree;
 
-    return home != undefined && home.file.items.includes(stmt);
+    const home = this.values.types.program.modules[this.module];
+
+    return (
+      home != undefined &&
+      tree.stmtsOf(home.file.itemsList).some((one) => one.id == stmt.id)
+    );
   }
 
   private walkDeclaration(stmt: VarDeclStmt): void {
-    for (const declarator of stmt.decls) {
+    const tree = this.values.types.program.tree;
+
+    for (const declarator of tree.declaratorsOf(stmt.declsList)) {
       this.walkDeclarator(declarator);
     }
   }
 
   private walkDeclarator(declarator: VarDeclarator): void {
-    const variable = this.variableOf(declarator.loc);
-    const init = declarator.init;
+    const tree = this.values.types.program.tree;
+
+    const key = declarator.loc;
+    const variable = this.variableOf(key);
+    const init = tree.exprAt(declarator.initId);
     if (variable == undefined) {
       return;
     }
 
-    this.revive(variable.key);
+    const isBorrowArray = variable.isBorrowArray == true;
+
+    this.revive(key);
     if (init == undefined) {
-      variable.holding = this.declaredHolding(declarator.loc);
+      const holding = this.declaredHolding(key);
+
+      this.setHolding(key, holding);
 
       return;
     }
-    if (variable.isBorrowArray == true && init.kind == ExprKind.ArrayLit) {
-      return this.borrowsListed(variable, init);
+    if (isBorrowArray && init.kind == ExprKind.ArrayLit) {
+      return this.borrowsListed(key, init);
     }
-    if (this.isRecordCopy(declarator.loc, init)) {
+    if (this.isRecordCopy(key, init)) {
       this.evaluate(init);
-      variable.holding = Holding.Own;
-      variable.loans = [];
+      this.setHeld(key, Holding.Own, []);
 
       return;
     }
-    if (this.isFieldCopy(declarator.loc, init)) {
-      return this.fieldsLooked(variable, init);
+    if (this.isFieldCopy(key, init)) {
+      return this.fieldsLooked(key, init);
     }
 
     const operand = this.evaluateFor(init, CallbackMode.Local);
 
-    this.bind(variable, operand, init);
-    this.checkCellKept(variable, operand, init);
-    this.noteBorrowDecl(variable, declarator.loc);
-
-    if (this.isInternedPart(init) || this.isInternedFallback(init)) {
-      this.borrowDecls.add(`${this.module} ${declarator.loc}`);
-    }
-  }
-
-  private readonly isInternedFallback(init: Expr): boolean {
-    return (
-      init.kind == ExprKind.Binary &&
-      init.op == BinaryOp.Nullish &&
-      this.isInternedPart(init.lhs)
-    );
+    this.bind(key, operand, init);
+    this.noteBorrowDecl(key, key);
   }
 
   private readonly isRecordCopy(loc: int, init: Expr): boolean {
@@ -173,51 +202,61 @@ partial class OwnershipCheck {
       given != undefined &&
       target.kind == TypeKind.Object &&
       given.kind == TypeKind.Object &&
-      target != given;
+      target.id != given.id;
 
-    return isObjects && target != undefined && this.traits.isCopy(target, this.values);
+    return (
+      isObjects &&
+      target != undefined &&
+      this.values.isCopy(target)
+    );
   }
 
-  private fieldsLooked(variable: Variable, init: Expr): void {
+  private fieldsLooked(key: int, init: Expr): void {
     const operand = this.evaluate(init);
     const place = operand.place;
-    if (operand.kind != OperandKind.Place || place == undefined || this.isCopyExpr(init)) {
-      variable.holding = Holding.Own;
-      variable.loans = [];
+    if (
+      operand.kind != OperandKind.Place ||
+      place == undefined ||
+      this.isCopyExpr(init)
+    ) {
+      this.setHeld(key, Holding.Own, []);
 
       return;
     }
 
-    variable.holding = Holding.Borrow;
-    variable.loans = this.loansOfPlace(place);
+    const loans = this.loansOfPlace(place);
+
+    this.setHeld(key, Holding.Borrow, loans);
   }
 
-  private borrowsListed(variable: Variable, init: ArrayLitExpr): void {
+  private borrowsListed(key: int, init: ArrayLitExpr): void {
+    const tree = this.values.types.program.tree;
+
     let loans: Loan[] = [];
 
-    for (const element of init.elements) {
+    for (const element of tree.elementsOf(init.elementsList)) {
       if (element.hole) {
         continue;
       }
 
-      const operand = this.evaluate(element.expr);
+      const expr = tree.exprOf(element.exprId);
+      const operand = this.evaluate(expr);
 
       loans = loans.concat(this.loansOf(operand));
     }
 
-    variable.holding = Holding.Own;
-    variable.loans = loans;
+    this.setHeld(key, Holding.Own, loans);
   }
 
-  private noteBorrowDecl(variable: Read<Variable>, loc: int): void {
-    if (variable.holding == Holding.Borrow) {
+  private noteBorrowDecl(key: int, loc: int): void {
+    if (this.holdingOf(key) == Holding.Borrow) {
       this.borrowDecls.add(`${this.module} ${loc}`);
     }
   }
 
   private declaredHolding(loc: int): Holding {
     const type = this.values.variableOf(this.module, loc);
-    if (type != undefined && this.traits.isCopy(type, this.values)) {
+    if (type != undefined && this.values.isCopy(type)) {
       return Holding.Copy;
     }
 
@@ -225,18 +264,28 @@ partial class OwnershipCheck {
   }
 
   private walkIf(stmt: IfStmt): void {
-    this.evaluate(stmt.cond);
+    const tree = this.values.types.program.tree;
+
+    const cond = tree.exprOf(stmt.condId);
+
+    this.evaluate(cond);
 
     const before = this.copyState(this.state);
-    const thenEmpty = this.emptiedBorrow(stmt.cond, BinaryOp.Eq);
+    const condExpr = tree.exprOf(stmt.condId);
+    const thenEmpty = this.emptiedBorrow(condExpr, BinaryOp.Eq);
 
-    this.walkBranch(stmt.thenStmt, thenEmpty);
+    const thenStmt = tree.stmtOf(stmt.thenStmtId);
+
+    this.walkBranch(thenStmt, thenEmpty);
 
     const afterThen = replace(this.state, before);
 
-    const elseStmt = stmt.elseStmt;
+    const elseStmt = tree.stmtAt(stmt.elseStmtId);
     if (elseStmt != undefined) {
-      const elseEmpty = this.emptiedBorrow(stmt.cond, BinaryOp.Ne);
+      const elseEmpty = this.emptiedBorrow(
+        tree.exprOf(stmt.condId),
+        BinaryOp.Ne,
+      );
 
       this.walkBranch(elseStmt, elseEmpty);
     }
@@ -249,27 +298,23 @@ partial class OwnershipCheck {
       return this.walkStatement(stmt);
     }
 
-    const variable = this.variableOf(emptied);
-    if (variable == undefined) {
-      return this.walkStatement(stmt);
-    }
-
-    const loans = replace(variable.loans, []);
+    const loans = this.takeLoans(emptied);
 
     this.walkStatement(stmt);
-
-    const after = this.variableOf(emptied);
-    if (after != undefined) {
-      after.loans = loans;
-    }
+    this.setLoans(emptied, loans);
   }
 
   private readonly emptiedBorrow(cond: Expr, op: BinaryOp): int | undefined {
+    const tree = this.values.types.program.tree;
+
     if (cond.kind != ExprKind.Binary || cond.op != op) {
       return undefined;
     }
 
-    const name = this.comparedName(cond.lhs, cond.rhs);
+    const name = this.comparedName(
+      tree.exprOf(cond.lhsId),
+      tree.exprOf(cond.rhsId),
+    );
     if (name == undefined) {
       return undefined;
     }
@@ -280,7 +325,11 @@ partial class OwnershipCheck {
     }
 
     const variable = this.variableOf(key);
-    if (variable == undefined || !variable.isConst || variable.holding != Holding.Borrow) {
+    if (
+      variable == undefined ||
+      !variable.isConst ||
+      variable.holding != Holding.Borrow
+    ) {
       return undefined;
     }
 
@@ -361,46 +410,62 @@ partial class OwnershipCheck {
   }
 
   private walkForOf(stmt: ForOfStmt): void {
-    const frame = this.frame();
-    const binding = this.variableOf(stmt.binding.loc);
-    const operand = this.evaluate(stmt.iterable);
+    const tree = this.values.types.program.tree;
 
-    if (frame != undefined && binding != undefined) {
-      this.revive(binding.key);
-      frame.bindings.add(binding.key);
-      binding.lastUse = this.lastLocOf(stmt);
-      this.bindElement(binding.key, operand, stmt);
-      this.noteBorrowDecl(binding, stmt.binding.loc);
-      this.checkUsingElement(binding, stmt);
+    const key = stmt.binding.loc;
+    const isBound = this.hasVariable(key);
+    const iterable = tree.exprOf(stmt.iterableId);
+    const operand = this.evaluate(iterable);
+
+    if (isBound) {
+      const end = this.lastLocOf(stmt);
+
+      this.revive(key);
+      this.noteBinding(key);
+      this.setLastUse(key, end);
+      this.bindElement(key, operand, stmt);
+      this.noteBorrowDecl(key, key);
+      this.checkUsingElement(key, stmt);
     }
 
     const before = this.copyState(this.state);
-    const isGuarded = this.cellGuardFor(stmt.iterable, stmt.loc);
 
-    this.walkStatement(stmt.body);
+    const body = tree.stmtOf(stmt.bodyId);
+
+    this.walkStatement(body);
     this.state.isDead = false;
 
     const first = this.state;
 
     this.state = this.merged(before, first);
 
-    if (binding != undefined) {
-      this.revive(binding.key);
+    if (isBound) {
+      this.revive(key);
     }
 
-    this.walkStatement(stmt.body);
+    const bodyStmt = tree.stmtOf(stmt.bodyId);
+
+    this.walkStatement(bodyStmt);
     this.state = this.merged(before, this.state);
-    this.cellGuardDone(isGuarded);
   }
 
-  private readonly checkUsingElement(binding: Read<Variable>, stmt: ForOfStmt): void {
-    if (!stmt.isUsing || binding.holding != Holding.Borrow) {
+  private checkUsingElement(key: int, stmt: ForOfStmt): void {
+    const tree = this.values.types.program.tree;
+
+    const binding = this.variableOf(key);
+    const isBorrow = binding != undefined && binding.holding == Holding.Borrow;
+    if (!stmt.isUsing || binding == undefined || !isBorrow) {
       return;
     }
 
-    const other = this.exprText(stmt.iterable);
+    const word = binding.name;
+    const iterable = tree.exprOf(stmt.iterableId);
+    const other = this.exprText(iterable);
 
-    this.report(stmt.binding.loc, Code.OwnUsingBorrow, { word: binding.name, other });
+    this.errors.write(this.home, stmt.binding.loc, Code.OwnUsingBorrow, {
+      word,
+      other,
+    });
   }
 
   private loopSourceLoans(operand: Read<Operand>, iterable: Expr): Loan[] {
@@ -419,15 +484,19 @@ partial class OwnershipCheck {
   }
 
   private bindElement(key: int, operand: Read<Operand>, stmt: ForOfStmt): void {
-    const variable = this.variableOf(key);
-    if (variable == undefined) {
+    const tree = this.values.types.program.tree;
+
+    if (!this.hasVariable(key)) {
       return;
     }
 
+    const isChanged = this.isChangedVariable(key);
     const type = this.values.variableOf(this.module, stmt.binding.loc);
-    if (type != undefined && this.traits.isCopy(type, this.values)) {
-      variable.holding = Holding.Copy;
-      variable.loans = this.loopSourceLoans(operand, stmt.iterable);
+    if (type != undefined && this.values.isCopy(type)) {
+      const iterableExpr = tree.exprOf(stmt.iterableId);
+      const loans = this.loopSourceLoans(operand, iterableExpr);
+
+      this.setHeld(key, Holding.Copy, loans);
 
       return;
     }
@@ -435,25 +504,32 @@ partial class OwnershipCheck {
     const place = operand.place;
     if (operand.kind == OperandKind.Place && place != undefined) {
       const element = this.extended(place, kElementStep);
-      const kind = this.loanKindOf(variable.isChanged);
+      const kind = this.loanKindOf(isChanged);
 
       if (kind == LoanKind.Exclusive) {
         this.changePlaceExcept(element, stmt.loc, key);
       }
 
-      variable.holding = Holding.Borrow;
-      variable.loans = this.loansOfPlaceAs(element, kind, false);
+      const iterable = tree.exprOf(stmt.iterableId);
+      const isShared = kind == LoanKind.Shared;
+      const isFrozen = isShared && this.isFrozenExpr(iterable);
+      const loans = this.loansOfPlaceAs(element, kind, isFrozen);
+
+      this.setHeld(key, Holding.Borrow, loans);
 
       return;
     }
     if (operand.kind == OperandKind.Borrowed) {
-      variable.holding = Holding.Borrow;
-      variable.loans = this.inferredLoans(variable, operand, stmt.loc);
+      this.setHolding(key, Holding.Borrow);
+
+      const loans = this.inferredLoans(key, operand, stmt.loc);
+
+      this.setLoans(key, loans);
 
       return;
     }
 
-    variable.holding = Holding.Own;
+    this.setHolding(key, Holding.Own);
   }
 
   private readonly loanKindOf(isChanged: boolean): LoanKind {
@@ -465,20 +541,26 @@ partial class OwnershipCheck {
   }
 
   private walkSwitch(stmt: SwitchStmt): void {
-    this.evaluate(stmt.discriminant);
+    const tree = this.values.types.program.tree;
+
+    const discriminant = tree.exprOf(stmt.discriminantId);
+
+    this.evaluate(discriminant);
 
     const before = this.copyState(this.state);
     let after: FlowState = { moved: [], isDead: true };
 
-    for (const option of stmt.cases) {
+    for (const option of tree.casesOf(stmt.casesList)) {
       this.state = this.copyState(before);
 
-      const test = option.test;
+      const test = tree.exprAt(option.testId);
       if (test != undefined) {
         this.evaluate(test);
       }
 
-      this.walkStatements(option.body);
+      const body = tree.stmtsOf(option.bodyList);
+
+      this.walkStatements(body);
       after = this.merged(after, this.state);
     }
 

@@ -24,41 +24,60 @@ import {
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
 import { ClassFrame } from "../types/scope-traversal.types.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ScopeTraversal {
-  private traverseFunction(fn: FunctionDecl): void {
-    this.traverseDecorators(fn.role?.decorators ?? []);
+  private traverseFunction(program: Read<Program>, fn: FunctionDecl): void {
+    const tree = program.tree;
+
+    this.traverseDecorators(
+      program,
+      tree.decoratorsOf(fn.role?.decoratorsList) ?? [],
+    );
 
     this.scopes.open();
     this.scopes.enterFunction();
-    this.genericFunctions += this.genericMark(fn.typeParams.length);
+    this.genericFunctions += this.genericMark(
+      tree.typeParamsOf(fn.typeParamsList).length,
+    );
 
     this.declareOwnName(fn);
-    this.declareTypeParams(fn.typeParams);
+    const typeParams = tree.typeParamsOf(fn.typeParamsList);
 
-    for (const param of fn.params) {
+    this.declareTypeParams(program, typeParams);
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
       this.declareValue(
+        program,
         { name: param.name, kind: SymbolKind.Parameter, loc: param.loc },
         false,
       );
     }
 
-    for (const param of fn.params) {
-      this.traverseParam(param);
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      this.traverseParam(program, param);
     }
 
-    this.traverseOptionalType(fn.returnType);
+    const returnType = tree.typeRefAt(fn.returnTypeId);
 
-    const body = fn.body;
+    this.traverseOptionalType(program, returnType);
+
+    const body = tree.blockAt(fn.bodyId);
     const targets = replace(this.jumpTargets, []);
 
     if (body != undefined) {
-      this.declareStatements(body.body);
-      this.traverseStatements(body.body);
+      const bodyItem = tree.stmtsOf(body.bodyList);
+
+      this.declareStatements(program, bodyItem);
+      const bodyBody = tree.stmtsOf(body.bodyList);
+
+      this.traverseStatements(program, bodyBody);
     }
 
     this.jumpTargets = targets;
-    this.genericFunctions -= this.genericMark(fn.typeParams.length);
+    this.genericFunctions -= this.genericMark(
+      tree.typeParamsOf(fn.typeParamsList).length,
+    );
     this.scopes.leaveFunction();
     this.scopes.close();
   }
@@ -81,29 +100,52 @@ partial class ScopeTraversal {
     }
   }
 
-  private traverseParam(param: Param): void {
+  private traverseParam(program: Read<Program>, param: Param): void {
+    const tree = program.tree;
+
     const form = param.form;
 
-    this.traverseDecorators(param.decorators);
-    this.traverseOptionalType(param.type);
+    const decorators = tree.decoratorsOf(param.decoratorsList);
+
+    this.traverseDecorators(program, decorators);
+    const typeRef = tree.typeRefAt(param.typeId);
+
+    this.traverseOptionalType(program, typeRef);
 
     if (form.kind == ParamKind.Defaulted) {
       this.defaultOf = param.name;
-      this.traverseExpr(form.defaultValue);
+      const defaultValue = tree.exprOf(form.defaultValueId);
+
+      this.traverseExpr(program, defaultValue);
       this.defaultOf = "";
     }
 
     this.scopes.markLive(param.name);
   }
 
-  private traverseDecorators(decorators: Read<Decorator[]>): void {
+  private traverseDecorators(
+    program: Read<Program>,
+    decorators: Read<Decorator[]>,
+  ): void {
+    const tree = program.tree;
+
     for (const decorator of decorators) {
-      this.traverseExpr(decorator.expr);
+      const expr = tree.exprOf(decorator.exprId);
+
+      this.traverseExpr(program, expr);
     }
   }
 
-  private traverseClass(decl: ClassDecl, isExpression: boolean): void {
-    this.traverseDecorators(decl.decorators);
+  private traverseClass(
+    program: Read<Program>,
+    decl: ClassDecl,
+    isExpression: boolean,
+  ): void {
+    const tree = program.tree;
+
+    const decorators = tree.decoratorsOf(decl.decoratorsList);
+
+    this.traverseDecorators(program, decorators);
 
     const frame = this.classFrameOf(isExpression);
 
@@ -112,33 +154,53 @@ partial class ScopeTraversal {
 
     this.declareExpressionName(decl);
 
-    const methods = this.ownMethods(decl);
+    const methods = this.ownMethods(program, decl);
 
     this.scopes.open();
-    this.declareTypeParams(decl.typeParams);
-    this.traverseBase(decl.base, decl.name ?? "");
-    this.traverseOptionalExpr(decl.baseExpr);
-    this.traverseTypes(decl.baseArgs);
-    this.traverseTypes(decl.interfaces);
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
+
+    this.declareTypeParams(program, typeParams);
+    this.traverseBase(program, tree.typeRefAt(decl.baseId), decl.name ?? "");
+    const baseExpr = tree.exprAt(decl.baseExprId);
+
+    this.traverseOptionalExpr(program, baseExpr);
+    const baseArgs = tree.typeRefsOf(decl.baseArgsList);
+
+    this.traverseTypes(program, baseArgs);
+    const interfaces = tree.typeRefsOf(decl.interfacesList);
+
+    this.traverseTypes(program, interfaces);
+
+    const outer = frame.outer;
 
     this.classFrames.push(frame);
 
-    for (const field of decl.fields) {
-      this.traverseDecorators(field.decorators);
-      this.traverseOptionalType(field.type);
-      frame.place = this.fieldPlace(frame, field.form);
-      this.traverseOptionalExpr(field.init);
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      const place = this.fieldPlace(outer, field.form);
+
+      const decoratorsItem = tree.decoratorsOf(field.decoratorsList);
+
+      this.traverseDecorators(program, decoratorsItem);
+      const typeRef = tree.typeRefAt(field.typeId);
+
+      this.traverseOptionalType(program, typeRef);
+      this.setClassPlace(place);
+      const init = tree.exprAt(field.initId);
+
+      this.traverseOptionalExpr(program, init);
     }
 
-    frame.place = this.bodyPlace(frame);
+    const body = this.bodyPlace(outer);
 
-    for (const made of decl.constructors) {
-      this.traverseFunction(made);
+    this.setClassPlace(body);
+
+    for (const made of tree.functionsOf(decl.constructorsList)) {
+      this.traverseFunction(program, made);
     }
 
     for (const method of methods) {
       if (!this.isStatic(method)) {
-        this.traverseFunction(method);
+        this.traverseFunction(program, method);
       }
     }
 
@@ -146,7 +208,7 @@ partial class ScopeTraversal {
 
     for (const method of methods) {
       if (this.isStatic(method)) {
-        this.traverseFunction(method);
+        this.traverseFunction(program, method);
       }
     }
 
@@ -165,8 +227,15 @@ partial class ScopeTraversal {
     return { outer, place: CapturePlace.None, isGeneric };
   }
 
-  private readonly fieldPlace(frame: Read<ClassFrame>, form: FieldKind): CapturePlace {
-    if (frame.outer == 0) {
+  private setClassPlace(place: CapturePlace): void {
+    const frame = this.classFrames[this.classFrames.length - 1];
+    if (frame != undefined) {
+      frame.place = place;
+    }
+  }
+
+  private readonly fieldPlace(outer: int, form: FieldKind): CapturePlace {
+    if (outer == 0) {
       return CapturePlace.None;
     }
     if (form == FieldKind.Static) {
@@ -176,59 +245,94 @@ partial class ScopeTraversal {
     return CapturePlace.Later;
   }
 
-  private readonly bodyPlace(frame: Read<ClassFrame>): CapturePlace {
-    if (frame.outer == 0) {
+  private readonly bodyPlace(outer: int): CapturePlace {
+    if (outer == 0) {
       return CapturePlace.None;
     }
 
     return CapturePlace.Later;
   }
 
-  private readonly ownMethods(decl: ClassDecl): FunctionDecl[] {
+  private readonly ownMethods(
+    program: Read<Program>,
+    decl: ClassDecl,
+  ): FunctionDecl[] {
+    const tree = program.tree;
+
     if (decl.isPartial) {
-      return decl.methods.slice();
+      return tree.functionsOf(decl.methodsList).slice();
     }
 
-    return decl.methods.filter((method) => !this.partMethods.includes(method));
+    return tree
+      .functionsOf(decl.methodsList)
+      .filter((method) => !this.partMethods.some((one) => one.id == method.id));
   }
 
   private readonly isStatic(method: FunctionDecl): boolean {
     return method.role?.method == MethodKind.Static;
   }
 
-  private traverseDeclaredClass(decl: DeclaredClass): void {
+  private traverseDeclaredClass(
+    program: Read<Program>,
+    decl: DeclaredClass,
+  ): void {
+    const tree = program.tree;
+
     this.scopes.open();
     this.scopes.enterFunction();
 
-    this.declareTypeParams(decl.typeParams);
-    this.traverseBase(decl.base, decl.name);
-    this.traverseTypes(decl.implemented);
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
 
-    for (const member of decl.members) {
-      this.traverseDeclaredMember(member);
+    this.declareTypeParams(program, typeParams);
+    const base = tree.typeRefAt(decl.baseId);
+
+    this.traverseBase(program, base, decl.name);
+    const implemented = tree.typeRefsOf(decl.implementedList);
+
+    this.traverseTypes(program, implemented);
+
+    for (const member of tree.declaredMembersOf(decl.membersList)) {
+      this.traverseDeclaredMember(program, member);
     }
 
     this.scopes.leaveFunction();
     this.scopes.close();
   }
 
-  private traverseDeclaredMember(member: DeclaredMember): void {
+  private traverseDeclaredMember(
+    program: Read<Program>,
+    member: DeclaredMember,
+  ): void {
+    const tree = program.tree;
+
     const form = member.form;
 
     this.scopes.open();
     if (form.kind != DeclaredMemberKind.Field) {
-      this.declareTypeParams(form.typeParams);
+      const typeParams = tree.typeParamsOf(form.typeParamsList);
 
-      for (const param of form.params) {
-        this.traverseOptionalType(param.type);
+      this.declareTypeParams(program, typeParams);
+
+      for (const param of tree.paramsOf(form.paramsList)) {
+        const typeRef = tree.typeRefAt(param.typeId);
+
+        this.traverseOptionalType(program, typeRef);
       }
     }
 
-    this.traverseOptionalType(member.type);
+    const memberType = tree.typeRefAt(member.typeId);
+
+    this.traverseOptionalType(program, memberType);
     this.scopes.close();
   }
 
-  private traverseBase(base: TypeRef | undefined, owner: string): void {
+  private traverseBase(
+    program: Read<Program>,
+    base: TypeRef | undefined,
+    owner: string,
+  ): void {
+    const tree = program.tree;
+
     if (base == undefined) {
       return;
     }
@@ -241,11 +345,15 @@ partial class ScopeTraversal {
     if (this.isValueName(base.name)) {
       this.useValue(base.name, base.loc);
 
-      return this.traverseTypes(base.args);
+      const args = tree.typeRefsOf(base.argsList);
+
+      return this.traverseTypes(program, args);
     }
 
     this.useType(base.name, base.loc, Code.ClassNotFound);
-    this.traverseTypes(base.args);
+    const argsItem = tree.typeRefsOf(base.argsList);
+
+    this.traverseTypes(program, argsItem);
   }
 
   private declareExpressionName(decl: ClassDecl): void {

@@ -1,21 +1,11 @@
-import {
-  CallArgument,
-  CallExpr,
-  Expr,
-  ExprKind,
-  NameExpr,
-} from "../../../program/ast/types/ast.types.expressions.tz";
+import { replace } from "tz:mem";
+import { Expr } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
   BodySource,
   FunctionDecl,
   Param,
   ParamKind,
 } from "../../../program/ast/types/ast.types.functions.tz";
-import {
-  TypeRef,
-  TypeRefKind,
-} from "../../../program/ast/types/ast.types.types.tz";
-import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
 import {
   FunctionParameter,
   FunctionShape,
@@ -27,19 +17,19 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kBooleanType,
-  kDecimalName,
-  kErrName,
   kGivenModes,
-  kLendingResults,
-  kOkName,
-  kRuntimeModules,
   kVoidType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private functionDeclared(frame: Read<Frame>, fn: FunctionDecl): void {
-    if (fn.bodySource == BodySource.Foreign || fn.typeParams.length > 0) {
+    const tree = this.values.types.program.tree;
+
+    if (
+      fn.bodySource == BodySource.Foreign ||
+      tree.typeParamsOf(fn.typeParamsList).length > 0
+    ) {
       return;
     }
 
@@ -49,7 +39,9 @@ partial class Lowering {
   }
 
   private functionLowered(module: int, fn: FunctionDecl, name: string): void {
-    const body = fn.body;
+    const tree = this.values.types.program.tree;
+
+    const body = tree.blockAt(fn.bodyId);
     const shape = this.shapeOf(module, fn.loc);
     if (body == undefined || shape == undefined) {
       return this.notLowered(module, fn.loc, "this function");
@@ -59,7 +51,9 @@ partial class Lowering {
       !fn.isAsync &&
       !fn.isGenerator &&
       !shape.rest &&
-      fn.params.every((param) => this.isPlainParameter(param));
+      tree
+        .paramsOf(fn.paramsList)
+        .every((param) => this.isPlainParameter(param));
     if (!isPlain) {
       return this.notLowered(module, fn.loc, "this kind of function");
     }
@@ -86,7 +80,9 @@ partial class Lowering {
 
     this.openScope(inner);
     this.parametersStored(inner, fn, shape, params);
-    this.statements(inner, body.body);
+    const bodyItem = tree.stmtsOf(body.bodyList);
+
+    this.statements(inner, bodyItem);
     this.closeScope(inner);
     this.finished(made, result, shape.result);
   }
@@ -104,24 +100,39 @@ partial class Lowering {
     made.finishUnreachable();
   }
 
-  private fallenOff(made: IrFunction, tz: Type | undefined): LLVMValue | undefined {
-    if (tz == undefined || made.isClosed() || this.optionalInner(tz) == undefined) {
+  private fallenOff(
+    made: IrFunction,
+    tz: Type | undefined,
+  ): LLVMValue | undefined {
+    if (
+      tz == undefined ||
+      made.isClosed() ||
+      this.optionalInner(tz) == undefined
+    ) {
       return undefined;
     }
 
     return this.undefinedValue(tz)?.value;
   }
 
-  private readonly shapeOf(module: int, loc: int): FunctionShape | undefined {
+  private shapeOf(module: int, loc: int): FunctionShape | undefined {
     const type = this.values.functionOf(module, loc);
     if (type.kind != TypeKind.Function) {
       return undefined;
     }
     if (this.binding.size == 0) {
-      return type.shape;
+      return this.values.types.store.functionShapeOf(type);
     }
 
-    return this.shapeWith(type.shape, this.binding);
+    const binding = replace(this.binding, new Map<int, Type>());
+    const shape = this.shapeWith(
+      this.values.types.store.functionShapeOf(type),
+      binding,
+    );
+
+    this.binding = binding;
+
+    return shape;
   }
 
   private parameterTypes(
@@ -129,9 +140,11 @@ partial class Lowering {
     fn: FunctionDecl,
     shape: Read<FunctionShape>,
   ): string[] | undefined {
+    const tree = this.values.types.program.tree;
+
     const types: string[] = [];
 
-    for (let index = 0; index < fn.params.length; index++) {
+    for (let index = 0; index < tree.paramsOf(fn.paramsList).length; index++) {
       const param = shape.params[index];
       if (param == undefined) {
         return undefined;
@@ -158,14 +171,14 @@ partial class Lowering {
     return isTaken && param.pattern == undefined;
   }
 
-  private readonly passedType(param: FunctionParameter): Type {
+  private passedType(param: FunctionParameter): Type {
     if (!param.optional || this.optionalInner(param.type) != undefined) {
       return param.type;
     }
 
-    const empty = this.store.plain(TypeKind.Undefined);
+    const empty = this.values.types.store.plain(TypeKind.Undefined);
 
-    return this.store.unionOf([param.type, empty]);
+    return this.values.types.store.unionOf([param.type, empty]);
   }
 
   private parametersStored(
@@ -174,8 +187,10 @@ partial class Lowering {
     shape: Read<FunctionShape>,
     types: Read<string[]>,
   ): void {
-    for (let index = 0; index < fn.params.length; index++) {
-      const param = fn.params[index];
+    const tree = this.values.types.program.tree;
+
+    for (let index = 0; index < tree.paramsOf(fn.paramsList).length; index++) {
+      const param = tree.paramsOf(fn.paramsList)[index];
       const passed = shape.params[index];
       const type = types[index];
       if (param == undefined || passed == undefined || type == undefined) {
@@ -197,7 +212,12 @@ partial class Lowering {
       const form = param.form;
       const isOptional = this.optionalInner(tz) != undefined;
       if (form.kind == ParamKind.Defaulted && isOptional) {
-        this.defaultedStored(frame, param, form.defaultValue, given);
+        this.defaultedStored(
+          frame,
+          param,
+          tree.exprOf(form.defaultValueId),
+          given,
+        );
 
         continue;
       }
@@ -214,21 +234,23 @@ partial class Lowering {
   }
 
   private readonly isBorrowedParam(param: Param): boolean {
+    const tree = this.values.types.program.tree;
+
     const kind = param.form.kind;
     const isPlain =
       (kind == ParamKind.Required || kind == ParamKind.Optional) &&
       param.pattern == undefined &&
       param.property == undefined;
-    const ref = param.type;
+    const ref = tree.typeRefAt(param.typeId);
     const isGiven =
       ref != undefined &&
-      ref.args.length == 1 &&
+      tree.typeRefsOf(ref.argsList).length == 1 &&
       kGivenModes.includes(ref.name);
 
     return isPlain && !isGiven;
   }
 
-  private readonly dropFlag(
+  private dropFlag(
     frame: Read<Frame>,
     isBorrowed: boolean,
   ): LLVMValue | undefined {
@@ -320,362 +342,5 @@ partial class Lowering {
     }
 
     return `${name}.${this.instanceSuffix}`;
-  }
-
-  private callValue(frame: Frame, call: CallExpr): IrValue | undefined {
-    const callee = call.callee;
-    if (this.isSuperName(call)) {
-      return this.superCall(frame, call);
-    }
-
-    const superMember = this.isSuperMember(call);
-    if (superMember != undefined) {
-      return this.superMethodCall(frame, call, superMember);
-    }
-    if (callee.kind == ExprKind.Member) {
-      return this.memberCall(frame, call);
-    }
-    if (callee.kind != ExprKind.Name) {
-      return this.closureCall(frame, call, callee);
-    }
-
-    return this.namedCall(frame, call, callee);
-  }
-
-  private namedCall(
-    frame: Frame,
-    call: CallExpr,
-    callee: NameExpr,
-  ): IrValue | undefined {
-    const target = this.values.valueTargetOf(callee, frame.module);
-    const opened = this.program.modules[target?.module ?? -1];
-    const isValue =
-      target != undefined &&
-      opened != undefined &&
-      !opened.source.isLibrary &&
-      (target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter);
-    if (isValue) {
-      return this.closureCall(frame, call, callee);
-    }
-
-    const isOwn =
-      target != undefined &&
-      target.kind == SymbolKind.Function &&
-      opened != undefined &&
-      (!opened.source.isLibrary || kRuntimeModules.includes(opened.name));
-    if (callee.name == kDecimalName && !isOwn) {
-      return this.decimalOf(frame, call);
-    }
-    if (callee.name == kOkName && !isOwn) {
-      return this.resultMade(frame, call, true);
-    }
-    if (callee.name == kErrName && !isOwn) {
-      return this.resultMade(frame, call, false);
-    }
-    if (target != undefined && !isOwn) {
-      return this.libraryCall(frame, call, callee, target.module);
-    }
-    if (target == undefined) {
-      this.notLowered(frame.module, call.loc, "a call of this function");
-
-      return undefined;
-    }
-
-    const shape = this.shapeOf(target.module, target.loc);
-    if (shape == undefined) {
-      this.notLowered(frame.module, call.loc, "this call");
-
-      return undefined;
-    }
-
-    const foreign = this.declaredFunction(target.module, target.loc);
-    if (foreign != undefined && foreign.bodySource == BodySource.Foreign) {
-      return this.foreignCall(frame, call, foreign, shape);
-    }
-    if (foreign != undefined && foreign.typeParams.length > 0) {
-      return this.genericCall(frame, call, callee, foreign, target.module);
-    }
-
-    const known = this.values.functionDeclAt(target.module, target.loc);
-    const calleeDecl = known ?? foreign;
-    const kept: IrValue[] = [];
-    const args = this.callArguments(
-      frame,
-      call.args,
-      shape,
-      call.loc,
-      calleeDecl,
-      kept,
-    );
-    const result = this.irType(shape.result);
-    const params = this.shapeTypes(shape);
-    if (args == undefined || result == undefined || params == undefined) {
-      return undefined;
-    }
-
-    const name = this.functionName(target.module, target.loc);
-    const declared = this.ir.declare(name, result, params);
-    const value = frame.made.call(declared, args);
-    const answer: IrValue = { type: result, value, tz: shape.result };
-    const made = this.callResult(frame, answer, calleeDecl, kept);
-
-    if (opened != undefined && opened.source.isLibrary && calleeDecl != undefined) {
-      this.instanceWanted({
-        module: target.module,
-        fn: calleeDecl,
-        name,
-        params: [],
-        args: [],
-      });
-    }
-
-    this.droppedAll(frame, kept);
-
-    return made;
-  }
-
-  private readonly isLending(fn: FunctionDecl | undefined): boolean {
-    const ref = fn?.returnType;
-    if (ref == undefined) {
-      return false;
-    }
-
-    return this.isLendingRef(ref);
-  }
-
-  private readonly isLendingRef(ref: TypeRef): boolean {
-    if (ref.form.kind == TypeRefKind.Union) {
-      return ref.args.some((part) => this.isLendingRef(part));
-    }
-
-    return ref.args.length == 1 && kLendingResults.includes(ref.name);
-  }
-
-  private callResult(
-    frame: Read<Frame>,
-    answer: IrValue,
-    decl: FunctionDecl | undefined,
-    temporaries: Read<IrValue[]>,
-  ): IrValue {
-    const { type, value, tz } = answer;
-    if (!this.isLending(decl)) {
-      return { type, value, tz, owned: true };
-    }
-
-    const lent: IrValue = { type, value, tz, owned: false };
-    const isFromTemporary = temporaries.some(
-      (one) => (one.owned == true || one.ownedFlag != undefined) && this.isManaged(one.tz),
-    );
-    if (!isFromTemporary) {
-      return lent;
-    }
-
-    return this.owning(frame, lent);
-  }
-
-  private shapeProblem(shape: Read<FunctionShape>): string {
-    const types = [shape.result].concat(shape.params.map((one) => one.type));
-    const failed = types.find((type) => this.irType(type) == undefined);
-    if (failed == undefined) {
-      return "optional parameter";
-    }
-
-    return this.kindName(failed);
-  }
-
-  private shapeTypes(shape: Read<FunctionShape>): string[] | undefined {
-    const types: string[] = [];
-
-    for (const param of shape.params) {
-      const type = this.irType(this.passedType(param));
-      if (type == undefined) {
-        return undefined;
-      }
-
-      types.push(type);
-    }
-
-    return types;
-  }
-
-  private callArguments(
-    frame: Frame,
-    passed: Read<CallArgument[]>,
-    shape: Read<FunctionShape>,
-    loc: int,
-    callee: FunctionDecl | undefined,
-    kept: IrValue[],
-  ): LLVMValue[] | undefined {
-    const args: LLVMValue[] = [];
-    if (passed.length > shape.params.length) {
-      this.notLowered(frame.module, loc, "these arguments");
-
-      return undefined;
-    }
-
-    for (let index = 0; index < shape.params.length; index++) {
-      const arg = passed[index];
-      const param = shape.params[index];
-      if (param == undefined) {
-        return undefined;
-      }
-
-      const wanted = this.passedType(param);
-      if (arg == undefined) {
-        const missing = this.missingArgument(frame, param, wanted, loc);
-        if (missing == undefined) {
-          return undefined;
-        }
-
-        args.push(missing);
-
-        continue;
-      }
-      if (arg.spread) {
-        this.notLowered(frame.module, loc, "a spread argument");
-
-        return undefined;
-      }
-
-      const declared = callee?.params[index];
-      const isLent =
-        declared != undefined &&
-        this.isBorrowedParam(declared) &&
-        this.isManaged(wanted);
-      const given = this.argumentValue(frame, arg.expr, wanted, isLent);
-      if (given == undefined) {
-        return undefined;
-      }
-
-      const value = this.converted(frame, given, wanted, arg.expr.loc);
-      if (value == undefined) {
-        return undefined;
-      }
-      if (isLent) {
-        const lent = this.withOwnedFlag(value, given.ownedFlag);
-
-        kept.push(lent);
-        args.push(value.value);
-
-        continue;
-      }
-
-      const owned = this.owning(frame, value);
-
-      args.push(owned.value);
-    }
-
-    return args;
-  }
-
-  private missingArgument(
-    frame: Read<Frame>,
-    param: FunctionParameter,
-    wanted: Type,
-    loc: int,
-  ): LLVMValue | undefined {
-    const type = this.irType(wanted);
-    if (!param.optional || type == undefined) {
-      this.notLowered(frame.module, loc, "these arguments");
-
-      return undefined;
-    }
-
-    return this.ir.zero(type);
-  }
-
-  private memberCall(frame: Frame, call: CallExpr): IrValue | undefined {
-    const isError = this.printStream(frame, call);
-    if (isError != undefined) {
-      return this.printed(frame, call, isError);
-    }
-
-    const callee = call.callee;
-    if (callee.kind == ExprKind.Member) {
-      if (this.isBufferName(callee.object)) {
-        return this.bufferStatic(frame, call, callee);
-      }
-      if (this.isArrayFrom(callee)) {
-        return this.arrayFrom(frame, call);
-      }
-      if (this.isBitHolder(frame, callee.object)) {
-        return this.bitCall(frame, call, callee);
-      }
-      if (this.isStaticHolder(frame, callee.object)) {
-        return this.staticCall(frame, call, callee);
-      }
-
-      const object = this.typeIn(frame, callee.object);
-      if (object != undefined && this.isBytesType(object)) {
-        return this.bytesMethod(frame, call, callee);
-      }
-      if (object != undefined && object.kind == TypeKind.Array) {
-        return this.arrayMethod(frame, call, callee, object);
-      }
-      if (object != undefined && this.isFileKindCall(object, callee)) {
-        return this.fileKindCall(frame, callee);
-      }
-      if (object != undefined && object.kind == TypeKind.Instance) {
-        return this.methodCall(frame, call, callee, object);
-      }
-      if (object != undefined && object.kind == TypeKind.Dict) {
-        return this.dictCall(frame, call, callee, object);
-      }
-      if (object != undefined && this.isString(object)) {
-        return this.stringMethod(frame, call, callee);
-      }
-      if (object != undefined && this.isDecimal(object)) {
-        return this.decimalMethod(frame, call, callee);
-      }
-      if (object != undefined && object.kind == TypeKind.Result) {
-        return this.resultMethod(frame, call, callee);
-      }
-
-      const isNumber =
-        object != undefined &&
-        (this.isInteger(object) || this.isDouble(object));
-      if (isNumber) {
-        return this.numberMethod(frame, call, callee);
-      }
-    }
-
-    const name = this.calledName(call);
-
-    this.notLowered(frame.module, call.loc, `a call of method ${name}`);
-
-    return undefined;
-  }
-
-  private readonly calledName(call: CallExpr): string {
-    const callee = call.callee;
-    if (callee.kind != ExprKind.Member) {
-      return "?";
-    }
-
-    const object = this.typeOf(callee.object);
-    const kind = this.kindName(object);
-
-    return `${kind}.${callee.name}`;
-  }
-
-  private readonly runtimeCall(made: IrFunction, name: string, args: Read<IrValue[]>): void {
-    const params = args.map((arg) => arg.type);
-    const given = args.map((arg) => arg.value);
-    const callee = this.ir.declare(name, kVoidType, params);
-
-    made.call(callee, given);
-  }
-
-  private readonly runtimeValue(
-    frame: Read<Frame>,
-    name: string,
-    result: string,
-    args: Read<IrValue[]>,
-  ): LLVMValue {
-    const params = args.map((arg) => arg.type);
-    const given = args.map((arg) => arg.value);
-    const callee = this.ir.declare(name, result, params);
-
-    return frame.made.call(callee, given);
   }
 }

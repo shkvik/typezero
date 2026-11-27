@@ -24,7 +24,9 @@ import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.t
 
 partial class ExpressionTypes {
   public checkModule(module: int): void {
-    const opened = this.program.modules[module];
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[module];
     if (opened == undefined || this.checkedModules.has(module)) {
       return;
     }
@@ -38,7 +40,9 @@ partial class ExpressionTypes {
     };
 
     this.checkedModules.add(module);
-    this.walkStatements(opened.file.items, frame, module);
+    const items = tree.stmtsOf(opened.file.itemsList);
+
+    this.walkStatements(items, frame, module);
   }
 
   private walkStatements(
@@ -75,67 +79,116 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     switch (statement.kind) {
       case StmtKind.Block:
-        return this.walkStatements(statement.body, frame, module);
+        return this.walkStatements(
+          tree.stmtsOf(statement.bodyList),
+          frame,
+          module,
+        );
       case StmtKind.VarDecl:
-        for (const decl of statement.decls) {
-          this.iterableAnnotationCheck(decl.typeAnn, module);
+        for (const decl of tree.declaratorsOf(statement.declsList)) {
+          const typeAnn = tree.typeRefAt(decl.typeAnnId);
+
+          this.iterableAnnotationCheck(typeAnn, module);
           this.declaredFact(module, decl.loc);
           this.declaredBounds(decl, module);
         }
 
         return;
       case StmtKind.Function:
-        const nestedGenericError = this.genericCalls.nestedGenericCheck(
+        const nestedGenericError = this.types.nestedGenericCheck(
           statement,
           frame,
         );
 
-        this.reportFound(module, nestedGenericError);
+        this.errors.writeFound(module, nestedGenericError);
         this.functionType(statement, module);
 
         return;
       case StmtKind.Class:
-        this.walkedClasses.add(statement);
+        this.walkedClasses.add(statement.id);
         this.classPlaceCheck(statement, module);
         this.walkClass(statement, module);
         this.disposeCheck(statement, module);
 
         return;
       case StmtKind.Expr: {
-        if (statement.expr.kind == ExprKind.Yield) {
-          this.unusedYields.add(statement.expr);
+        const exprExpr = tree.exprOf(statement.exprId);
+        if (exprExpr.kind == ExprKind.Yield) {
+          const expr = tree.exprOf(statement.exprId);
+
+          this.unusedYields.add(expr.id);
         }
 
-        return this.statementUsed(statement.expr, statement.loc, module);
+        return this.statementUsed(
+          tree.exprOf(statement.exprId),
+          statement.loc,
+          module,
+        );
       }
       case StmtKind.If:
-        this.bodyCheck(statement.thenStmt, module);
-        this.optionalBodyCheck(statement.elseStmt, module);
+        const thenStmt = tree.stmtOf(statement.thenStmtId);
+
+        this.bodyCheck(thenStmt, module);
+        const elseStmt = tree.stmtAt(statement.elseStmtId);
+
+        this.optionalBodyCheck(elseStmt, module);
 
         return this.walkIf(statement, frame, module);
       case StmtKind.While:
-        this.bodyCheck(statement.body, module);
-        this.forgetLooped(statement, module);
-        this.branchCheck(statement.cond, TruthUse.Condition, module);
+        const body = tree.stmtOf(statement.bodyId);
 
-        return this.walkLoop(statement.cond, statement.body, frame, module);
+        this.bodyCheck(body, module);
+        this.forgetLooped(statement, module);
+        this.branchCheck(
+          tree.exprOf(statement.condId),
+          TruthUse.Condition,
+          module,
+        );
+
+        return this.walkLoop(
+          tree.exprOf(statement.condId),
+          tree.stmtOf(statement.bodyId),
+          frame,
+          module,
+        );
       case StmtKind.DoWhile:
-        this.bodyCheck(statement.body, module);
-        this.forgetLooped(statement, module);
-        this.branchCheck(statement.cond, TruthUse.Condition, module);
+        const bodyStmt = tree.stmtOf(statement.bodyId);
 
-        return this.walkLoop(undefined, statement.body, frame, module);
-      case StmtKind.For:
-        this.optionalBodyCheck(statement.body, module);
-        this.walkOptionalStatement(statement.init, frame, module);
+        this.bodyCheck(bodyStmt, module);
         this.forgetLooped(statement, module);
-        this.conditionCheck(statement.cond, module);
+        this.branchCheck(
+          tree.exprOf(statement.condId),
+          TruthUse.Condition,
+          module,
+        );
+
+        return this.walkLoop(
+          undefined,
+          tree.stmtOf(statement.bodyId),
+          frame,
+          module,
+        );
+      case StmtKind.For:
+        const statementBody = tree.stmtAt(statement.bodyId);
+
+        this.optionalBodyCheck(statementBody, module);
+        this.walkOptionalStatement(
+          tree.stmtAt(statement.initId),
+          frame,
+          module,
+        );
+        this.forgetLooped(statement, module);
+        const cond = tree.exprAt(statement.condId);
+
+        this.conditionCheck(cond, module);
 
         return this.walkFor(statement, frame, module);
       case StmtKind.ForOf: {
-        this.bodyCheck(statement.body, module);
+        this.bodyCheck(tree.stmtOf(statement.bodyId), module);
         this.forAwaitCheck(statement, module);
         this.loopVariableCheck(statement, module);
         this.localDoor(module, statement.binding.loc);
@@ -144,7 +197,7 @@ partial class ExpressionTypes {
 
         const before = this.factsCopy();
 
-        this.walkStatement(statement.body, frame, module);
+        this.walkStatement(tree.stmtOf(statement.bodyId), frame, module);
         this.facts = before;
 
         return;
@@ -152,7 +205,7 @@ partial class ExpressionTypes {
       case StmtKind.Switch:
         return this.walkSwitch(statement, frame, module);
       case StmtKind.Labeled:
-        return this.walkStatement(statement.body, frame, module);
+        return this.walkStatement(tree.stmtOf(statement.bodyId), frame, module);
       case StmtKind.Return:
         return this.walkReturn(statement, frame, module);
       default:
@@ -167,14 +220,17 @@ partial class ExpressionTypes {
       return;
     }
 
-    const isNarrower = door.type.kind == TypeKind.Union && given != door.type;
+    const isNarrower =
+      door.type.kind == TypeKind.Union && given.id != door.type.id;
     if (isNarrower) {
-      this.facts = this.flows.withFact(this.facts, `${module} ${loc}`, given);
+      this.facts = this.types.withFact(this.facts, `${module} ${loc}`, given);
     }
   }
 
   private walkIf(statement: IfStmt, frame: FunctionFrame, module: int): void {
-    const cond = statement.cond;
+    const tree = this.types.program.tree;
+
+    const cond = tree.exprOf(statement.condId);
 
     this.branchCheck(cond, TruthUse.Condition, module);
 
@@ -183,7 +239,9 @@ partial class ExpressionTypes {
     const before = this.underFacts(thenFacts);
     const thenStart = this.factsCopy();
 
-    this.walkStatement(statement.thenStmt, frame, module);
+    const thenStmt = tree.stmtOf(statement.thenStmtId);
+
+    this.walkStatement(thenStmt, frame, module);
 
     const thenEnd = replace(this.facts, new Map<string, Type>(before));
 
@@ -191,11 +249,21 @@ partial class ExpressionTypes {
 
     const elseStart = this.factsCopy();
 
-    this.walkOptionalStatement(statement.elseStmt, frame, module);
+    this.walkOptionalStatement(
+      tree.stmtAt(statement.elseStmtId),
+      frame,
+      module,
+    );
 
     const elseEnd = replace(this.facts, new Map<string, Type>(before));
-    const isThenLeaving = this.isLeaving(statement.thenStmt, module);
-    const isElseLeaving = this.isLeaving(statement.elseStmt, module);
+    const isThenLeaving = this.isLeaving(
+      tree.stmtOf(statement.thenStmtId),
+      module,
+    );
+    const isElseLeaving = this.isLeaving(
+      tree.stmtAt(statement.elseStmtId),
+      module,
+    );
 
     if (isThenLeaving && isElseLeaving) {
       return;
@@ -211,7 +279,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.facts = this.flows.branchesJoined(
+    this.facts = this.types.branchesJoined(
       before,
       thenStart,
       thenEnd,
@@ -220,7 +288,12 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly isLeaving(statement: Stmt | undefined, module: int): boolean {
+  private readonly isLeaving(
+    statement: Stmt | undefined,
+    module: int,
+  ): boolean {
+    const tree = this.types.program.tree;
+
     if (statement == undefined) {
       return false;
     }
@@ -233,11 +306,13 @@ partial class ExpressionTypes {
       case StmtKind.Continue:
         return true;
       case StmtKind.Block:
-        return statement.body.some((one) => this.isLeaving(one, module));
+        return tree
+          .stmtsOf(statement.bodyList)
+          .some((one) => this.isLeaving(one, module));
       case StmtKind.If:
         return (
-          this.isLeaving(statement.thenStmt, module) &&
-          this.isLeaving(statement.elseStmt, module)
+          this.isLeaving(tree.stmtOf(statement.thenStmtId), module) &&
+          this.isLeaving(tree.stmtAt(statement.elseStmtId), module)
         );
       default:
         return false;
@@ -258,11 +333,18 @@ partial class ExpressionTypes {
   }
 
   private walkFor(statement: ForStmt, frame: FunctionFrame, module: int): void {
-    const facts = this.loopFacts(statement.cond, module);
+    const tree = this.types.program.tree;
+
+    const cond = tree.exprAt(statement.condId);
+    const facts = this.loopFacts(cond, module);
     const before = this.underFacts(facts);
 
-    this.walkOptionalStatement(statement.body, frame, module);
-    this.stepCheck(statement.step, module);
+    const body = tree.stmtAt(statement.bodyId);
+
+    this.walkOptionalStatement(body, frame, module);
+    const step = tree.exprAt(statement.stepId);
+
+    this.stepCheck(step, module);
     this.facts = before;
   }
 
@@ -273,6 +355,8 @@ partial class ExpressionTypes {
   }
 
   private statementUsed(expr: Expr, at: int | undefined, module: int): void {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Sequence) {
       const type = this.typed(expr, undefined, module);
 
@@ -281,9 +365,9 @@ partial class ExpressionTypes {
       return this.usedCheck(expr, type, at, module);
     }
 
-    let last = this.store.plain(TypeKind.Error);
+    let last = this.types.store.plain(TypeKind.Error);
 
-    for (const part of expr.exprs) {
+    for (const part of tree.exprsOf(expr.exprsList)) {
       last = this.typed(part, undefined, module);
     }
 
@@ -311,7 +395,13 @@ partial class ExpressionTypes {
   }
 
   private loopItem(loop: ForOfStmt, module: int): Type {
-    const iterable = this.typed(loop.iterable, undefined, module);
+    const tree = this.types.program.tree;
+
+    const iterable = this.typed(
+      tree.exprOf(loop.iterableId),
+      undefined,
+      module,
+    );
     if (loop.keys) {
       return this.forInKeys(loop, iterable, module);
     }
@@ -322,13 +412,13 @@ partial class ExpressionTypes {
     const base = this.types.apparent(iterable);
 
     this.loopCannotCheck(loop, base, module);
-    const resumedError = this.functions.resumedCheck(
-      loop.iterable,
+    const resumedError = this.types.resumedCheck(
+      tree.exprOf(loop.iterableId),
       iterable,
       Code.ForOfResumes,
     );
 
-    this.reportFound(module, resumedError);
+    this.errors.writeFound(module, resumedError);
 
     const matched = this.matchItem(base);
     if (matched != undefined) {
@@ -339,62 +429,78 @@ partial class ExpressionTypes {
       case TypeKind.Tuple:
         return this.tupleLoopItem(loop, base, module);
       case TypeKind.Array:
-        return base.item;
+        return this.types.store.itemOf(base);
       case TypeKind.String:
       case TypeKind.Template:
-        return this.store.plain(TypeKind.String);
+        return this.types.store.plain(TypeKind.String);
       case TypeKind.Iterator:
-        return base.shape.yielded;
+        return this.types.store.iteratorShapeOf(base).yielded;
       case TypeKind.Dict:
-        return this.statements.dictItem(base.dict, base.key, base.value);
+        return this.types.dictItem(
+          base.dict,
+          this.types.store.keyOf(base),
+          this.types.store.valueOf(base),
+        );
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
     }
   }
 
-  private readonly tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
-    const checked = this.statements.tupleLoopItem(loop, tuple);
+  private tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
+    const checked = this.types.tupleLoopItem(loop, tuple);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly loopVariableCheck(loop: ForOfStmt, module: int): void {
-    const written = loop.binding.typeAnn;
+  private loopVariableCheck(loop: ForOfStmt, module: int): void {
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(loop.binding.typeAnnId);
     if (written == undefined) {
       return;
     }
 
-    const word = this.statements.loopWord(loop);
+    const word = this.types.loopWord(loop);
 
-    this.report(module, written.loc, Code.LoopVariableTyped, { word });
+    this.errors.write(module, written.loc, Code.LoopVariableTyped, { word });
   }
 
-  private readonly classPlaceCheck(statement: ClassDecl, module: int): void {
-    const opened = this.program.modules[module];
-    if (opened == undefined || opened.file.items.includes(statement)) {
+  private classPlaceCheck(statement: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[module];
+    if (
+      opened == undefined ||
+      tree.stmtsOf(opened.file.itemsList).some((one) => one.id == statement.id)
+    ) {
       return;
     }
 
-    this.report(module, statement.loc, Code.ClassNotTopLevel, {
+    this.errors.write(module, statement.loc, Code.ClassNotTopLevel, {
       word: statement.name ?? "",
     });
   }
 
-  private readonly optionalBodyCheck(body: Stmt | undefined, module: int): void {
+  private optionalBodyCheck(body: Stmt | undefined, module: int): void {
     if (body != undefined) {
       this.bodyCheck(body, module);
     }
   }
 
-  private readonly bodyCheck(body: Stmt, module: int): void {
+  private bodyCheck(body: Stmt, module: int): void {
     switch (body.kind) {
       case StmtKind.VarDecl:
       case StmtKind.TypeAlias:
       case StmtKind.Enum:
       case StmtKind.Function:
-        return this.report(module, body.loc, Code.BodyDeclared, kNoDetails);
+        return this.errors.write(
+          module,
+          body.loc,
+          Code.BodyDeclared,
+          kNoDetails,
+        );
       default:
         return;
     }

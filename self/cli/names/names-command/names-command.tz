@@ -38,50 +38,60 @@ export class NamesCommand {
       return;
     }
 
-    const binder = new ModuleBinder(loaded.program);
-    const bound = binder.run();
+    const binder = new ModuleBinder();
+    const bound = binder.run(loaded.program);
 
     for (const names of bound) {
       this.printNames(loaded.program, names);
     }
 
     for (const names of bound) {
-      this.report.sourceErrors(names.module.source, names.errors);
+      const module = loaded.program.modules[names.module];
+      if (module != undefined) {
+        this.report.sourceErrors(module.source, names.errors);
+      }
     }
   }
 
-  private readonly printNames(program: Program, names: Read<ModuleNames>): void {
-    if (program.ambient.includes(names.module)) {
+  private readonly printNames(
+    program: Read<Program>,
+    names: Read<ModuleNames>,
+  ): void {
+    const module = program.modules[names.module];
+    if (module == undefined || program.ambient.includes(names.module)) {
       return;
     }
-    if (names.module.source.isLibrary) {
-      console.log(`${names.module.name}${kLibraryMark}`);
+    if (module.source.isLibrary) {
+      console.log(`${module.name}${kLibraryMark}`);
 
       return;
     }
 
-    console.log(names.module.name);
+    console.log(module.name);
 
     const declared = Array.from(names.declared.keys());
     if (declared.length > 0) {
       console.log(`  declared ${declared.join(" ")}`);
     }
 
-    for (const [name, exported] of new Map(names.exports)) {
+    for (const [name, exported] of names.exports) {
       const target = this.targetText(program, exported.target);
       const star = this.starText(exported);
 
       console.log(`  export ${name} -> ${target}${star}`);
     }
 
-    for (const [name, imported] of new Map(names.imports)) {
+    for (const [name, imported] of names.imports) {
       const target = this.targetText(program, imported.target);
 
       console.log(`  import ${name} -> ${target}`);
     }
   }
 
-  private readonly targetText(program: Program, target: NameTarget): string {
+  private readonly targetText(
+    program: Read<Program>,
+    target: NameTarget,
+  ): string {
     const module = program.modules[target.module];
     if (module == undefined) {
       return target.name;

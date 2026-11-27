@@ -1,0 +1,142 @@
+import "./partial/ast-tree.partial.lists.tz";
+import "./partial/ast-tree.partial.synthetic.tz";
+import "./partial/ast-tree.partial.search.tz";
+import { AstTables } from "./types/ast-tree.types.tz";
+import {
+  kMissingBlockStmt,
+  kMissingClassDecl,
+  kMissingExpr,
+  kMissingFunctionDecl,
+  kMissingStmt,
+  kMissingTypeRef,
+} from "./const/ast-tree.const.tz";
+import { ClassDecl } from "../types/ast.types.classes.tz";
+import { Expr } from "../types/ast.types.expressions.tz";
+import { FunctionDecl } from "../types/ast.types.functions.tz";
+import { BlockStmt, Stmt, StmtKind } from "../types/ast.types.statements.tz";
+import { TypeRef } from "../types/ast.types.types.tz";
+
+export class AstTree {
+  private readonly tables: AstTables;
+
+  public constructor(tables: Own<AstTables>) {
+    this.tables = tables;
+  }
+
+  public readonly exprOf(id: int): Expr {
+    const expr = this.tables.exprs[id];
+    if (expr == undefined) {
+      return kMissingExpr;
+    }
+
+    return expr;
+  }
+
+  public readonly exprAt(id: int | undefined): Expr | undefined {
+    if (id == undefined) {
+      return undefined;
+    }
+
+    return this.tables.exprs[id];
+  }
+
+  public readonly stmtOf(id: int): Stmt {
+    const stmt = this.tables.stmts[id];
+    if (stmt == undefined) {
+      return kMissingStmt;
+    }
+
+    return stmt;
+  }
+
+  public readonly stmtAt(id: int | undefined): Stmt | undefined {
+    if (id == undefined) {
+      return undefined;
+    }
+
+    return this.tables.stmts[id];
+  }
+
+  public readonly typeRefOf(id: int): TypeRef {
+    const typeRef = this.tables.typeRefs[id];
+    if (typeRef == undefined) {
+      return kMissingTypeRef;
+    }
+
+    return typeRef;
+  }
+
+  public readonly typeRefAt(id: int | undefined): TypeRef | undefined {
+    if (id == undefined) {
+      return undefined;
+    }
+
+    return this.tables.typeRefs[id];
+  }
+
+  public readonly functionOf(id: int): FunctionDecl {
+    const stmt = this.tables.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Function) {
+      return kMissingFunctionDecl;
+    }
+
+    return stmt;
+  }
+
+  public readonly functionAt(id: int | undefined): FunctionDecl | undefined {
+    if (id == undefined) {
+      return undefined;
+    }
+
+    const stmt = this.tables.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Function) {
+      return undefined;
+    }
+
+    return stmt;
+  }
+
+  public readonly classOf(id: int): ClassDecl {
+    const stmt = this.tables.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Class) {
+      return kMissingClassDecl;
+    }
+
+    return stmt;
+  }
+
+  public readonly classAt(id: int | undefined): ClassDecl | undefined {
+    if (id == undefined) {
+      return undefined;
+    }
+
+    const stmt = this.tables.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Class) {
+      return undefined;
+    }
+
+    return stmt;
+  }
+
+  public readonly blockOf(id: int): BlockStmt {
+    const stmt = this.tables.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Block) {
+      return kMissingBlockStmt;
+    }
+
+    return stmt;
+  }
+
+  public readonly blockAt(id: int | undefined): BlockStmt | undefined {
+    if (id == undefined) {
+      return undefined;
+    }
+
+    const stmt = this.tables.stmts[id];
+    if (stmt == undefined || stmt.kind != StmtKind.Block) {
+      return undefined;
+    }
+
+    return stmt;
+  }
+}

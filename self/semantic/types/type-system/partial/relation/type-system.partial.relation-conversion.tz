@@ -1,0 +1,418 @@
+import { TypeSystem } from "../../type-system.tz";
+import {
+  ClassType,
+  DictKind,
+  LiteralKind,
+  ObjectField,
+  ResultType,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../../program/type/types/type.types.tz";
+import { kWideBits } from "../../../type-relation/const/type-relation.const.tz";
+
+partial class TypeSystem {
+  public converts(from: Type, to: Type): boolean {
+    if (from.id == to.id || from.kind == TypeKind.Never) {
+      return true;
+    }
+    if (from.kind == TypeKind.Error || to.kind == TypeKind.Error) {
+      return true;
+    }
+
+    switch (to.kind) {
+      case TypeKind.Unknown:
+        return from.kind != TypeKind.Void;
+      case TypeKind.AnyObject:
+        return this.isObjectValue(from);
+      case TypeKind.Json:
+        return this.jsonHolds(from);
+      case TypeKind.Union:
+        return this.intoUnion(from, to);
+      default:
+        return this.fromSource(from, to);
+    }
+  }
+
+  public readonly baseOf(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Literal) {
+      return undefined;
+    }
+
+    switch (type.literal) {
+      case LiteralKind.String:
+        return this.store.plain(TypeKind.String);
+      case LiteralKind.Boolean:
+        return this.store.plain(TypeKind.Boolean);
+      case LiteralKind.Double:
+        return this.store.plain(TypeKind.Double);
+      default:
+        return this.store.integer(64, false);
+    }
+  }
+
+  private readonly isObjectValue(from: Type): boolean {
+    switch (from.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Iterator:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+      case TypeKind.Class:
+        return true;
+      case TypeKind.Union:
+        return this.store
+          .partsOf(from)
+          .every((part) => this.isObjectValue(part));
+      case TypeKind.TypeParameter: {
+        const constraint = this.store.constraintOf(from);
+
+        return constraint != undefined && this.isObjectValue(constraint);
+      }
+      default:
+        return false;
+    }
+  }
+
+  private jsonHolds(from: Type): boolean {
+    switch (from.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Boolean:
+      case TypeKind.Literal:
+        return true;
+      case TypeKind.Array:
+        return this.store.itemOf(from).kind == TypeKind.Json;
+      case TypeKind.Dict: {
+        const value = this.defined(this.store.valueOf(from));
+        const isRecord =
+          from.dict == DictKind.Record &&
+          this.store.keyOf(from).kind == TypeKind.String;
+        if (!isRecord || this.isWideInteger(value)) {
+          return false;
+        }
+
+        return this.converts(value, this.store.plain(TypeKind.Json));
+      }
+      default:
+        return false;
+    }
+  }
+
+  private readonly isWideInteger(type: Type): boolean {
+    return type.kind == TypeKind.Int && type.bits >= kWideBits;
+  }
+
+  private intoUnion(from: Type, to: UnionType): boolean {
+    const sources = this.partsOf(from);
+
+    if (
+      !this.store.partsOf(to).some((part) => part.kind == TypeKind.Undefined)
+    ) {
+      return sources.every((source) => this.memberFits(source, to));
+    }
+
+    const present = this.defined(from);
+    const wanted = this.defined(to);
+
+    if (present.kind == TypeKind.Undefined) {
+      return true;
+    }
+
+    return this.converts(present, wanted);
+  }
+
+  private memberFits(member: Type, to: UnionType): boolean {
+    const base = this.baseOf(member);
+    const exact =
+      this.store.partsOf(to).some((one) => one.id == member.id) ||
+      (base != undefined &&
+        this.store.partsOf(to).some((one) => one.id == base.id));
+    if (exact) {
+      return true;
+    }
+    if (member.kind == TypeKind.TypeParameter) {
+      return false;
+    }
+
+    return this.store
+      .partsOf(to)
+      .some(
+        (part) =>
+          part.kind != TypeKind.TypeParameter && this.converts(member, part),
+      );
+  }
+
+  private fromSource(from: Type, to: Type): boolean {
+    switch (from.kind) {
+      case TypeKind.Union:
+        return this.fromUnion(from, to);
+      case TypeKind.Template:
+        return to.kind == TypeKind.String;
+      case TypeKind.Literal: {
+        const base = this.baseOf(from);
+        const isText = from.literal == LiteralKind.String;
+
+        if (to.kind == TypeKind.Template) {
+          return isText && this.templateFits(from.text, to);
+        }
+        if (to.kind == TypeKind.Literal || base == undefined) {
+          return false;
+        }
+
+        return this.converts(base, to);
+      }
+      case TypeKind.TypeParameter: {
+        const constraint = this.store.constraintOf(from);
+
+        return constraint != undefined && this.converts(constraint, to);
+      }
+      default:
+        return this.plainConverts(from, to);
+    }
+  }
+
+  private fromUnion(from: UnionType, to: Type): boolean {
+    const parts = this.store.partsOf(from);
+    const refused = parts.some(
+      (part) =>
+        part.kind == TypeKind.Undefined || part.kind == TypeKind.TypeParameter,
+    );
+    if (refused || this.isTagged(parts)) {
+      return false;
+    }
+
+    return parts.every((part) => this.converts(part, to));
+  }
+
+  private plainConverts(from: Type, to: Type): boolean {
+    if (from.kind == TypeKind.Array && to.kind == TypeKind.Array) {
+      return this.sameReference(this.store.itemOf(from), this.store.itemOf(to));
+    }
+    if (from.kind == TypeKind.Iterator && to.kind == TypeKind.Iterator) {
+      const own = this.store.iteratorShapeOf(from);
+      const wide = this.store.iteratorShapeOf(to);
+      const nothing = this.store.plain(TypeKind.Void);
+
+      return (
+        own.async == wide.async &&
+        own.yielded.id == wide.yielded.id &&
+        (own.returned.id == wide.returned.id ||
+          wide.returned.id == nothing.id) &&
+        (own.sent.id == wide.sent.id || wide.sent.id == nothing.id)
+      );
+    }
+    if (from.kind == TypeKind.Promise && to.kind == TypeKind.Promise) {
+      return this.store.valueOf(from).kind == TypeKind.Never;
+    }
+    if (from.kind == TypeKind.Instance) {
+      return this.descends(from, to);
+    }
+    if (from.kind == TypeKind.Class && to.kind == TypeKind.Class) {
+      return this.classConverts(from, to);
+    }
+    if (from.kind == TypeKind.Object && to.kind == TypeKind.Object) {
+      const isClassLike = this.store
+        .fieldsOf(from)
+        .some((field) => field.method ?? false);
+      if (isClassLike) {
+        return this.descends(from, to);
+      }
+
+      if (
+        this.descends(from, to) ||
+        this.sameFields(this.store.fieldsOf(from), this.store.fieldsOf(to))
+      ) {
+        return true;
+      }
+
+      return this.copiedFields(
+        this.store.fieldsOf(from),
+        this.store.fieldsOf(to),
+      );
+    }
+    if (from.kind == TypeKind.Tuple && to.kind == TypeKind.Tuple) {
+      return (
+        from.rest == to.rest &&
+        from.required == to.required &&
+        this.sameItems(this.store.itemsOf(from), this.store.itemsOf(to))
+      );
+    }
+    if (from.kind == TypeKind.Object && to.kind == TypeKind.Dict) {
+      const isRecord =
+        to.dict == DictKind.Record &&
+        this.store.keyOf(to).kind == TypeKind.String;
+
+      return (
+        isRecord &&
+        this.copiesInto(this.store.fieldsOf(from), this.store.valueOf(to))
+      );
+    }
+    if (from.kind == TypeKind.Result && to.kind == TypeKind.Result) {
+      return this.halvesConvert(from, to);
+    }
+
+    return false;
+  }
+
+  private classConverts(from: ClassType, to: ClassType): boolean {
+    if (to.exact) {
+      return false;
+    }
+    if (this.store.classInstanceOf(to).kind == TypeKind.AnyObject) {
+      return true;
+    }
+
+    return this.converts(
+      this.store.classInstanceOf(from),
+      this.store.classInstanceOf(to),
+    );
+  }
+
+  private readonly descends(from: Type, to: Type): boolean {
+    if (from.id == to.id) {
+      return true;
+    }
+
+    for (const parent of this.store.parentsOf(from)) {
+      if (this.descends(parent, to)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private readonly sameFields(
+    own: Read<ObjectField[]>,
+    wide: Read<ObjectField[]>,
+  ): boolean {
+    if (own.length != wide.length) {
+      return false;
+    }
+
+    for (const field of own) {
+      const other = wide.find((one) => one.name == field.name);
+      const same =
+        other != undefined &&
+        other.type.id == field.type.id &&
+        other.optional == field.optional;
+      if (!same) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly copiedFields(
+    own: Read<ObjectField[]>,
+    wide: Read<ObjectField[]>,
+  ): boolean {
+    const isCopyTarget = wide.every(
+      (field) => field.readonly && this.isPlainCopy(field.type),
+    );
+    if (!isCopyTarget || own.length <= wide.length) {
+      return false;
+    }
+
+    for (const field of wide) {
+      const other = own.find((one) => one.name == field.name);
+      const same =
+        other != undefined &&
+        other.type.id == field.type.id &&
+        other.optional == field.optional;
+      if (!same) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly isPlainCopy(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Boolean:
+      case TypeKind.Double:
+      case TypeKind.Int:
+      case TypeKind.String:
+      case TypeKind.Literal:
+      case TypeKind.Undefined:
+        return true;
+      case TypeKind.Union:
+        return this.store.partsOf(type).every((part) => this.isPlainCopy(part));
+      default:
+        return false;
+    }
+  }
+
+  private readonly sameItems(own: Read<Type[]>, wide: Read<Type[]>): boolean {
+    if (own.length != wide.length) {
+      return false;
+    }
+
+    for (let index = 0; index < own.length; index++) {
+      if (own[index].id != wide[index].id) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private copiesInto(fields: Read<ObjectField[]>, value: Type): boolean {
+    for (const field of fields) {
+      const isMethod = field.type.kind == TypeKind.Function;
+      if (isMethod || !this.converts(field.type, value)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private halvesConvert(from: ResultType, to: ResultType): boolean {
+    return (
+      this.halfConverts(this.store.valueOf(from), this.store.valueOf(to)) &&
+      this.halfConverts(this.store.errorOf(from), this.store.errorOf(to))
+    );
+  }
+
+  private halfConverts(from: Type, to: Type): boolean {
+    if (from.id == to.id || from.kind == TypeKind.Never) {
+      return true;
+    }
+    if (from.kind == TypeKind.Void || to.kind == TypeKind.Void) {
+      return false;
+    }
+
+    return this.converts(from, to);
+  }
+
+  private readonly partsOf(type: Type): Type[] {
+    if (type.kind == TypeKind.Union) {
+      return this.store.partsOf(type);
+    }
+
+    return [type];
+  }
+
+  private defined(type: Type): Type {
+    const kept: Type[] = [];
+
+    for (const part of this.partsOf(type)) {
+      if (part.kind != TypeKind.Undefined) {
+        kept.push(part);
+      }
+    }
+
+    if (kept.length == 0) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return this.store.unionOf(kept);
+  }
+}

@@ -1,0 +1,328 @@
+import { FileParser } from "../file-parser.tz";
+import {
+  DeclaredField,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  ParamKind,
+  PlainParam,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  ClassDecl,
+  ClassField,
+  ClassMember,
+  Decorator,
+  EnumDecl,
+  EnumMember,
+  HandleDecl,
+  TypeAliasDecl,
+} from "../../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+  DeclaredMemberForm,
+  DeclaredSignature,
+} from "../../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  DefaultedParam,
+  FunctionDecl,
+  Param,
+  ParamForm,
+  UnsafeMark,
+} from "../../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+} from "../../../../program/syntax/types/syntax.types.modules.tz";
+
+partial class FileParser {
+  private readonly copyDecorator(node: Read<Decorator>): Decorator {
+    const expr = this.copyExpr(node.expr);
+
+    return { loc: node.loc, expr };
+  }
+
+  private readonly copyTypeAliasDecl(node: Read<TypeAliasDecl>): TypeAliasDecl {
+    const typeParams = node.typeParams.map((one) =>
+      this.copyTypeParamDecl(one),
+    );
+    const type = this.copyTypeRef(node.type);
+    const bases = node.bases.map((one) => this.copyTypeRef(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      name: node.name,
+      typeParams,
+      type,
+      bases,
+    };
+  }
+
+  private readonly copyHandleDecl(node: Read<HandleDecl>): HandleDecl {
+    const typeParams = node.typeParams.map((one) =>
+      this.copyTypeParamDecl(one),
+    );
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      name: node.name,
+      typeParams,
+    };
+  }
+
+  private readonly copyEnumMember(node: Read<EnumMember>): EnumMember {
+    const init = this.copyExprAt(node.init);
+
+    return { name: node.name, loc: node.loc, init };
+  }
+
+  private readonly copyEnumDecl(node: Read<EnumDecl>): EnumDecl {
+    const members = node.members.map((one) => this.copyEnumMember(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      name: node.name,
+      members,
+    };
+  }
+
+  private readonly copyClassMember(node: Read<ClassMember>): ClassMember {
+    const decorators = node.decorators.map((one) => this.copyDecorator(one));
+
+    return {
+      access: node.access,
+      isOverride: node.isOverride,
+      isReadonly: node.isReadonly,
+      decorators,
+      method: node.method,
+    };
+  }
+
+  private readonly copyClassField(node: Read<ClassField>): ClassField {
+    const type = this.copyTypeRefAt(node.type);
+    const init = this.copyExprAt(node.init);
+    const decorators = node.decorators.map((one) => this.copyDecorator(one));
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      type,
+      init,
+      form: node.form,
+      presence: node.presence,
+      readonly: node.readonly,
+      isOverride: node.isOverride,
+      access: node.access,
+      decorators,
+      accessor: node.accessor,
+    };
+  }
+
+  private readonly copyClassDecl(node: Read<ClassDecl>): ClassDecl {
+    const base = this.copyTypeRefAt(node.base);
+    const baseExpr = this.copyExprAt(node.baseExpr);
+    const baseArgs = node.baseArgs.map((one) => this.copyTypeRef(one));
+    const interfaces = node.interfaces.map((one) => this.copyTypeRef(one));
+    const fields = node.fields.map((one) => this.copyClassField(one));
+    const methods = node.methods.map((one) => this.copyFunctionDecl(one));
+    const constructors = node.constructors.map((one) =>
+      this.copyFunctionDecl(one),
+    );
+    const decorators = node.decorators.map((one) => this.copyDecorator(one));
+    const typeParams = node.typeParams.map((one) =>
+      this.copyTypeParamDecl(one),
+    );
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      name: node.name,
+      isAbstract: node.isAbstract,
+      isPartial: node.isPartial,
+      base,
+      baseExpr,
+      baseArgs,
+      interfaces,
+      fields,
+      methods,
+      constructors,
+      expression: node.expression,
+      decorators,
+      typeParams,
+      source: node.source,
+    };
+  }
+
+  private readonly copyDeclaredField(node: Read<DeclaredField>): DeclaredField {
+    return {
+      kind: node.kind,
+      readonly: node.readonly,
+      optional: node.optional,
+    };
+  }
+
+  private readonly copyDeclaredSignature(
+    node: Read<DeclaredSignature>,
+  ): DeclaredSignature {
+    const typeParams = node.typeParams.map((one) =>
+      this.copyTypeParamDecl(one),
+    );
+    const params = node.params.map((one) => this.copyParam(one));
+
+    return { kind: node.kind, typeParams, params };
+  }
+
+  private readonly copyDeclaredMemberForm(
+    node: Read<DeclaredMemberForm>,
+  ): DeclaredMemberForm {
+    switch (node.kind) {
+      case DeclaredMemberKind.Field:
+        return this.copyDeclaredField(node);
+      case DeclaredMemberKind.Method:
+      case DeclaredMemberKind.Constructor:
+        return this.copyDeclaredSignature(node);
+    }
+
+    return { kind: DeclaredMemberKind.Field, readonly: false, optional: false };
+  }
+
+  private readonly copyDeclaredMember(
+    node: Read<DeclaredMember>,
+  ): DeclaredMember {
+    const form = this.copyDeclaredMemberForm(node.form);
+    const type = this.copyTypeRefAt(node.type);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      access: node.access,
+      accessWritten: node.accessWritten,
+      isStatic: node.isStatic,
+      form,
+      type,
+    };
+  }
+
+  private readonly copyDeclaredClass(node: Read<DeclaredClass>): DeclaredClass {
+    const typeParams = node.typeParams.map((one) =>
+      this.copyTypeParamDecl(one),
+    );
+    const base = this.copyTypeRefAt(node.base);
+    const implemented = node.implemented.map((one) => this.copyTypeRef(one));
+    const members = node.members.map((one) => this.copyDeclaredMember(one));
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      isAbstract: node.isAbstract,
+      typeParams,
+      base,
+      implemented,
+      members,
+    };
+  }
+
+  private readonly copyPlainParam(node: Read<PlainParam>): PlainParam {
+    return { kind: node.kind };
+  }
+
+  private readonly copyDefaultedParam(
+    node: Read<DefaultedParam>,
+  ): DefaultedParam {
+    const defaultValue = this.copyExpr(node.defaultValue);
+
+    return { kind: node.kind, defaultValue };
+  }
+
+  private readonly copyParamForm(node: Read<ParamForm>): ParamForm {
+    switch (node.kind) {
+      case ParamKind.Required:
+      case ParamKind.Optional:
+      case ParamKind.Rest:
+        return this.copyPlainParam(node);
+      case ParamKind.Defaulted:
+        return this.copyDefaultedParam(node);
+    }
+
+    return { kind: ParamKind.Required };
+  }
+
+  private readonly copyParam(node: Read<Param>): Param {
+    const type = this.copyTypeRefAt(node.type);
+    const form = this.copyParamForm(node.form);
+    const decorators = node.decorators.map((one) => this.copyDecorator(one));
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      type,
+      form,
+      property: node.property,
+      pattern: node.pattern,
+      decorators,
+    };
+  }
+
+  private readonly copyUnsafeMark(node: Read<UnsafeMark>): UnsafeMark {
+    const options = this.copyExprAt(node.options);
+
+    return { loc: node.loc, options };
+  }
+
+  private readonly copyFunctionDecl(node: Read<FunctionDecl>): FunctionDecl {
+    const typeParams = node.typeParams.map((one) =>
+      this.copyTypeParamDecl(one),
+    );
+    const params = node.params.map((one) => this.copyParam(one));
+    const returnType = this.copyTypeRefAt(node.returnType);
+    const body = this.copyBlockStmtAt(node.body);
+    const role = this.copyClassMemberAt(node.role);
+    const unsafe = this.copyUnsafeMarkAt(node.unsafe);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      name: node.name,
+      typeParams,
+      params,
+      returnType,
+      body,
+      source: node.source,
+      isArrow: node.isArrow,
+      concise: node.concise,
+      ownName: node.ownName,
+      place: node.place,
+      bodySource: node.bodySource,
+      isGenerator: node.isGenerator,
+      isAsync: node.isAsync,
+      role,
+      unsafe,
+    };
+  }
+
+  private readonly copyImportDecl(node: Read<ImportDecl>): ImportDecl {
+    const names = node.names.slice();
+
+    return {
+      loc: node.loc,
+      names,
+      from: node.from,
+      whole: node.whole,
+      isPartList: node.isPartList,
+    };
+  }
+
+  private readonly copyExportDecl(node: Read<ExportDecl>): ExportDecl {
+    const names = node.names.slice();
+
+    return {
+      loc: node.loc,
+      form: node.form,
+      names,
+      from: node.from,
+    };
+  }
+}

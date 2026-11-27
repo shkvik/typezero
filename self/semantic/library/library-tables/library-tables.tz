@@ -1,0 +1,58 @@
+import { kChildOptions } from "../child-rules/const/child-rules.const.tz";
+import { kCryptoClassShapes } from "../crypto-rules/const/crypto-rules.const.tz";
+import { CryptoClass } from "../crypto-rules/types/crypto-rules.types.tz";
+import { kFsCalls } from "../fs-rules/const/fs-rules.const.tz";
+import { FsCall } from "../fs-rules/types/fs-rules.types.tz";
+import {
+  kDateOptions,
+  kIntlServices,
+  kNormalizationForms,
+  kRelativeUnits,
+  kSupportedService,
+} from "../intl-rules/const/intl-rules.const.tz";
+import {
+  DateOption,
+  IntlOption,
+  IntlService,
+} from "../intl-rules/types/intl-rules.types.tz";
+
+export class LibraryTables {
+  public readonly childOptions(): Read<string[]> {
+    return kChildOptions;
+  }
+
+  public readonly cryptoClass(name: string): Read<CryptoClass> | undefined {
+    return kCryptoClassShapes.find((one) => one.name == name);
+  }
+
+  public readonly fsCall(name: string): Read<FsCall> | undefined {
+    return kFsCalls.find((one) => one.name == name);
+  }
+
+  public readonly dateOption(name: string): Read<DateOption> | undefined {
+    return kDateOptions.find((one) => one.name == name);
+  }
+
+  public readonly intlService(name: string): Read<IntlService> | undefined {
+    return kIntlServices.find((one) => one.name == name);
+  }
+
+  public readonly supportedService(): Read<IntlService> {
+    return kSupportedService;
+  }
+
+  public readonly intlOption(
+    service: Lent<IntlService>,
+    name: string,
+  ): Read<IntlOption> | undefined {
+    return service.options.find((one) => one.name == name);
+  }
+
+  public readonly relativeUnits(): Read<string[]> {
+    return kRelativeUnits;
+  }
+
+  public readonly normalizationForms(): Read<string[]> {
+    return kNormalizationForms;
+  }
+}

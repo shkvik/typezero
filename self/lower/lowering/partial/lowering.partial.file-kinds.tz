@@ -19,7 +19,7 @@ partial class Lowering {
       return false;
     }
 
-    const opened = this.program.modules[object.module];
+    const opened = this.values.types.program.modules[object.module];
     if (opened == undefined || !opened.source.isLibrary) {
       return false;
     }
@@ -28,8 +28,11 @@ partial class Lowering {
   }
 
   private fileKindCall(frame: Frame, member: MemberExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const kind = kFileKinds.get(member.name);
-    const stats = this.value(frame, member.object);
+    const object = tree.exprOf(member.objectId);
+    const stats = this.value(frame, object);
     if (kind == undefined || stats == undefined) {
       return undefined;
     }
@@ -49,8 +52,12 @@ partial class Lowering {
     const mask = this.ir.integer(place.type, `${kFileKindMask}`);
     const masked = frame.made.binary(IrOpcode.And, mode, mask);
     const wanted = this.ir.integer(place.type, `${kind}`);
-    const value = frame.made.integerCompare(IrIntPredicate.Equal, masked, wanted);
-    const tz = this.store.plain(TypeKind.Boolean);
+    const value = frame.made.integerCompare(
+      IrIntPredicate.Equal,
+      masked,
+      wanted,
+    );
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     this.dropping(frame, stats);
 

@@ -27,7 +27,9 @@ partial class Lowering {
     call: CallExpr,
     given: IrValue,
   ): IrValue | undefined {
-    const tz = this.store.integer(64, false);
+    const tree = this.values.types.program.tree;
+
+    const tz = this.values.types.store.integer(64, false);
     if (this.isBytesType(given.tz)) {
       const length = this.bytesLength(frame, given.value);
 
@@ -36,7 +38,10 @@ partial class Lowering {
       return { type: kIntType, value: length, tz };
     }
 
-    const encoding = this.encodingOf(frame, call.args[1]?.expr);
+    const encoding = this.encodingOf(
+      frame,
+      tree.exprAt(tree.argumentsOf(call.argsList)[1]?.exprId),
+    );
     const params = [kPointerType, kIntType, kFlagType];
     const callee = this.ir.declare(kBufferByteLength, kFlagType, params);
     const args = this.textParts(frame, given).concat([encoding]);
@@ -74,13 +79,17 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const bytes = this.value(frame, member.object);
-    const needle = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const bytes = this.value(frame, object);
+    const needle = tree.argumentsOf(call.argsList)[0];
     if (bytes == undefined || needle == undefined) {
       return undefined;
     }
 
-    const given = this.value(frame, needle.expr);
+    const expr = tree.exprOf(needle.exprId);
+    const given = this.value(frame, expr);
     const from = this.integerArgument(frame, call, 1);
     if (given == undefined || from == undefined || !this.isString(given.tz)) {
       this.notLowered(frame.module, call.loc, "this search in bytes");
@@ -88,7 +97,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const encoding = this.encodingOf(frame, call.args[2]?.expr);
+    const encoding = this.encodingOf(
+      frame,
+      tree.exprAt(tree.argumentsOf(call.argsList)[2]?.exprId),
+    );
     const params = [
       kPointerType,
       kPointerType,
@@ -111,14 +123,18 @@ partial class Lowering {
 
     if (member.name == "includes") {
       const zero = this.ir.zero(kFlagType);
-      const value = frame.made.integerCompare(IrIntPredicate.NotEqual, found, zero);
-      const tz = this.store.plain(TypeKind.Boolean);
+      const value = frame.made.integerCompare(
+        IrIntPredicate.NotEqual,
+        found,
+        zero,
+      );
+      const tz = this.values.types.store.plain(TypeKind.Boolean);
 
       return { type: kBooleanType, value, tz };
     }
 
     const value = frame.made.cast(IrOpcode.SExt, found, kIntType);
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
 
     return { type: kIntType, value, tz };
   }
@@ -128,15 +144,19 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
-    const bytes = this.value(frame, member.object);
-    const first = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const bytes = this.value(frame, object);
+    const first = tree.argumentsOf(call.argsList)[0];
     const offset = this.integerArgument(frame, call, 1);
     if (bytes == undefined || first == undefined || offset == undefined) {
       return undefined;
     }
 
-    const given = this.value(frame, first.expr);
-    const double = this.store.plain(TypeKind.Double);
+    const expr = tree.exprOf(first.exprId);
+    const given = this.value(frame, expr);
+    const double = this.values.types.store.plain(TypeKind.Double);
     const number = this.convertedOrNone(frame, given, double, call.loc);
     if (number == undefined) {
       return undefined;
@@ -158,14 +178,14 @@ partial class Lowering {
 
     const size = this.ir.integer(kIntType, "8");
     const value = frame.made.binary(IrOpcode.Add, offset.value, size);
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
 
     this.dropping(frame, bytes);
 
     return { type: kIntType, value, tz };
   }
 
-  private readonly byteShift(index: int, isBig: boolean): LLVMValue {
+  private byteShift(index: int, isBig: boolean): LLVMValue {
     let place = index;
 
     if (isBig) {

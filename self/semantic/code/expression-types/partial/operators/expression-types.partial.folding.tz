@@ -15,6 +15,8 @@ import { kRoundDown } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private foldBinary(expr: BinaryExpr, type: Type, module: int): void {
+    const tree = this.types.program.tree;
+
     if (type.kind != TypeKind.Int || type.wraps) {
       return;
     }
@@ -22,8 +24,10 @@ partial class ExpressionTypes {
       return this.foldUnsigned(expr, type, module);
     }
 
-    const left = this.intConstant(expr.lhs, type, module);
-    const right = this.intConstant(expr.rhs, type, module);
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.intConstant(lhs, type, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.intConstant(rhs, type, module);
     if (left == undefined || right == undefined) {
       return;
     }
@@ -50,8 +54,12 @@ partial class ExpressionTypes {
   }
 
   private foldUnsigned(expr: BinaryExpr, type: IntType, module: int): void {
-    const left = this.rawConstant(expr.lhs, type, module);
-    const right = this.rawConstant(expr.rhs, type, module);
+    const tree = this.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.rawConstant(lhs, type, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.rawConstant(rhs, type, module);
     if (left == undefined || right == undefined) {
       return;
     }
@@ -66,22 +74,25 @@ partial class ExpressionTypes {
       return;
     }
 
-    const overflowError = this.operators.overflowError(
+    const overflowError = this.types.overflowError(
       expr,
       type,
       `${value}`,
       0,
     );
 
-    this.reportFound(module, overflowError);
+    this.errors.writeFound(module, overflowError);
   }
 
   private foldUnary(expr: UnaryExpr, type: Type, module: int): void {
+    const tree = this.types.program.tree;
+
     if (type.kind != TypeKind.Int || type.wraps) {
       return;
     }
 
-    const value = this.intConstant(expr.operand, type, module);
+    const operand = tree.exprOf(expr.operandId);
+    const value = this.intConstant(operand, type, module);
     if (value == undefined) {
       return;
     }
@@ -106,7 +117,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly settle(expr: Expr, type: IntType, value: decimal, module: int): void {
+  private settle(expr: Expr, type: IntType, value: decimal, module: int): void {
     if (this.integers.isInside(value, type)) {
       this.answers.fold(expr, value);
 
@@ -115,17 +126,17 @@ partial class ExpressionTypes {
 
     const wrapped = this.integers.wrapTo(value, type);
 
-    const overflowError = this.operators.overflowError(
+    const overflowError = this.types.overflowError(
       expr,
       type,
       `${value}`,
       wrapped,
     );
 
-    this.reportFound(module, overflowError);
+    this.errors.writeFound(module, overflowError);
   }
 
-  private readonly foldDivision(
+  private foldDivision(
     expr: BinaryExpr,
     type: IntType,
     left: decimal,
@@ -144,7 +155,7 @@ partial class ExpressionTypes {
     this.settle(expr, type, quotient, module);
   }
 
-  private readonly foldPower(
+  private foldPower(
     expr: BinaryExpr,
     type: IntType,
     base: decimal,
@@ -165,17 +176,17 @@ partial class ExpressionTypes {
     const shown = this.integers.powerShown(exact, base, exponent);
     const wrapped = this.integers.wrappedPower(base, exponent, type);
 
-    const overflowError = this.operators.overflowError(
+    const overflowError = this.types.overflowError(
       expr,
       type,
       shown,
       wrapped,
     );
 
-    this.reportFound(module, overflowError);
+    this.errors.writeFound(module, overflowError);
   }
 
-  private readonly foldBits(
+  private foldBits(
     expr: BinaryExpr,
     type: IntType,
     left: decimal,
@@ -203,7 +214,7 @@ partial class ExpressionTypes {
     this.answers.fold(expr, value);
   }
 
-  private readonly foldShift(
+  private foldShift(
     expr: BinaryExpr,
     shifted: IntType,
     value: decimal,
@@ -228,13 +239,13 @@ partial class ExpressionTypes {
       return;
     }
 
-    const overflowError = this.operators.overflowError(
+    const overflowError = this.types.overflowError(
       expr,
       shifted,
       `${exact}`,
       0,
     );
 
-    this.reportFound(module, overflowError);
+    this.errors.writeFound(module, overflowError);
   }
 }

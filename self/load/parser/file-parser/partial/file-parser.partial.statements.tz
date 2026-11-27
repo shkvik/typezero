@@ -6,15 +6,19 @@ import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  Expr,
   ExprKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
   BlockStmt,
   Stmt,
-  StmtKind,
-  SwitchCase,
-} from "../../../../program/ast/types/ast.types.statements.tz";
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+import { Pattern } from "../types/file-parser.types.patterns.tz";
 
 partial class FileParser {
   private statement(topLevel: boolean): Stmt {
@@ -394,32 +398,28 @@ partial class FileParser {
     const expr = this.sequence();
 
     this.statementStart = outer;
-    const assignment = this.destructuringAssignment(loc, expr);
+    const statement = this.destructuringAssignment(loc, expr);
 
     this.cursor.expectSemicolon();
-    if (assignment != undefined) {
-      return assignment;
-    }
 
-    return { kind: StmtKind.Expr, loc, expr };
+    return statement;
   }
 
-  private destructuringAssignment(loc: int, expr: Expr): Stmt | undefined {
-    if (expr.kind != ExprKind.Assign) {
-      return undefined;
-    }
-    if (expr.op != undefined) {
-      return undefined;
+  private destructuringAssignment(loc: int, expr: Own<Expr>): Stmt {
+    if (expr.kind != ExprKind.Assign || expr.op != undefined) {
+      return { kind: StmtKind.Expr, loc, expr };
     }
 
-    const target = expr.target;
-    if (target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit) {
-      const pattern = this.patternFromLiteral(target);
-
-      return this.assignPattern(loc, pattern, expr.value);
+    const isLiteral =
+      expr.target.kind == ExprKind.ArrayLit ||
+      expr.target.kind == ExprKind.ObjectLit;
+    if (!isLiteral) {
+      return { kind: StmtKind.Expr, loc, expr };
     }
 
-    return undefined;
+    const pattern = this.literalPattern(expr.target);
+
+    return this.assignPattern(loc, pattern, expr.value);
   }
 
   private skipDeclaration(
@@ -474,136 +474,6 @@ partial class FileParser {
     this.cursor.next();
 
     return target.text;
-  }
-
-  private switchStatement(): Stmt {
-    const keyword = this.cursor.next();
-    const loc = keyword.start;
-
-    this.cursor.expect(TokenKind.LParen, Code.ExpectedAfterSwitch);
-    const discriminant = this.sequence();
-
-    this.cursor.expect(TokenKind.RParen, Code.ExpectedAfterSwitchValue);
-    const cases: SwitchCase[] = [];
-    const opened = this.cursor.expect(
-      TokenKind.LBrace,
-      Code.ExpectedSwitchCasesStart,
-    );
-    if (!opened) {
-      return { kind: StmtKind.Switch, loc, discriminant, cases };
-    }
-
-    let hasDefault = false;
-
-    while (
-      this.cursor.is(TokenKind.Case) ||
-      this.cursor.is(TokenKind.Default)
-    ) {
-      const label = this.cursor.peek();
-      const isDefault = label.kind == TokenKind.Default;
-      if (isDefault && hasDefault) {
-        this.cursor.report(label.start, Code.OneDefaultInSwitch);
-      }
-      if (isDefault) {
-        hasDefault = true;
-      }
-
-      const clause = this.switchCase();
-
-      cases.push(clause);
-    }
-
-    this.closeSwitch();
-
-    return { kind: StmtKind.Switch, loc, discriminant, cases };
-  }
-
-  private closeSwitch(): void {
-    if (this.cursor.insideList(TokenKind.RBrace)) {
-      const token = this.cursor.peek();
-
-      return this.skipBraced(token.start, Code.ExpectedCaseOrDefault, {
-        found: token.kind,
-      });
-    }
-
-    this.cursor.expect(TokenKind.RBrace, Code.ExpectedSwitchClose);
-  }
-
-  private switchCase(): SwitchCase {
-    const label = this.cursor.next();
-    const loc = label.start;
-
-    if (label.kind == TokenKind.Default) {
-      this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterDefault);
-      const body = this.caseBody();
-
-      return { loc, test: undefined, body };
-    }
-
-    const first = this.cursor.peek();
-    const test = this.expression();
-
-    this.rejectCaseList(first.start);
-    this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterCaseValue);
-    const body = this.caseBody();
-
-    return { loc, test, body };
-  }
-
-  private rejectCaseList(start: int): void {
-    const comma = this.cursor.peek();
-    if (comma.kind != TokenKind.Comma) {
-      return;
-    }
-
-    const word = this.writtenFrom(start);
-
-    this.cursor.next();
-    const second = this.cursor.peek();
-
-    this.expression();
-    const other = this.writtenFrom(second.start);
-
-    this.cursor.report(comma.start, Code.CaseValueList, { word, other });
-
-    while (this.cursor.accept(TokenKind.Comma)) {
-      this.expression();
-    }
-  }
-
-  private readonly writtenFrom(start: int): string {
-    const span = this.cursor.spanFrom(start);
-
-    return this.written(span.start, span.end);
-  }
-
-  private statementWithRecovery(topLevel: boolean): Stmt {
-    const start = this.cursor.mark();
-    const statement = this.statement(topLevel);
-
-    if (this.cursor.isRecovering()) {
-      this.cursor.recoverStatement(start);
-    }
-
-    return statement;
-  }
-
-  private caseBody(): Stmt[] {
-    const body: Stmt[] = [];
-
-    while (
-      !this.cursor.is(TokenKind.Case) &&
-      !this.cursor.is(TokenKind.Default) &&
-      !this.cursor.is(TokenKind.RBrace) &&
-      !this.cursor.is(TokenKind.End)
-    ) {
-      const statement = this.statementWithRecovery(false);
-
-      body.push(statement);
-    }
-
-    return body;
   }
 
   private block(ofIf: boolean = false): BlockStmt {
@@ -731,7 +601,10 @@ partial class FileParser {
     return block;
   }
 
-  private readonly marker(kind: StmtKind.Empty | StmtKind.Debugger, loc: int): Stmt {
+  private readonly marker(
+    kind: StmtKind.Empty | StmtKind.Debugger,
+    loc: int,
+  ): Stmt {
     return { kind, loc };
   }
 
@@ -749,5 +622,13 @@ partial class FileParser {
     }
 
     return this.sequence();
+  }
+
+  private literalPattern(target: Read<Expr>): Pattern {
+    if (target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit) {
+      return this.patternFromLiteral(target);
+    }
+
+    return { loc: target.loc, object: false, elements: [] };
   }
 }

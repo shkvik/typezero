@@ -1,17 +1,13 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   BindingForm,
   BindingKind,
   NameOrigin,
-  VarDeclarator,
 } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
-  Stmt,
   StmtKind,
-  VarDeclStmt,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { ExpressionPlace } from "../types/file-parser.types.context.tz";
 import {
@@ -20,6 +16,16 @@ import {
   ForTargetKind,
 } from "../types/file-parser.types.loops.tz";
 import { Pattern } from "../types/file-parser.types.patterns.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  Stmt,
+  VarDeclStmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
 
 partial class FileParser {
   private whileStatement(): Stmt {
@@ -148,14 +154,14 @@ partial class FileParser {
     return Code.ForOfNeedsNewVariable;
   }
 
-  private brokenFor(loc: int, init?: Stmt): Stmt {
+  private brokenFor(loc: int, init?: Own<Stmt>): Stmt {
     this.cursor.skipToClosingParen();
 
     return { kind: StmtKind.For, loc, init };
   }
 
   private forDeclarators(
-    target: Read<ForTarget>,
+    target: Own<ForTarget>,
     isConst: boolean,
   ): VarDeclarator[] | undefined {
     const decls: VarDeclarator[] = [];
@@ -172,7 +178,9 @@ partial class FileParser {
       const value = this.initializer();
 
       decls.push({
-        ...target.binding,
+        name: target.binding.name,
+        loc: target.binding.loc,
+        typeAnn: target.binding.typeAnn,
         origin: NameOrigin.Written,
         init: value,
         form: { kind: BindingKind.Plain },
@@ -206,7 +214,7 @@ partial class FileParser {
   private classicFor(
     loc: int,
     awaitLoc: int | undefined,
-    init: Stmt | undefined,
+    init: Own<Stmt | undefined>,
   ): Stmt {
     if (this.cursor.is(TokenKind.In) || this.cursor.is(TokenKind.Of)) {
       const token = this.cursor.peek();
@@ -238,7 +246,7 @@ partial class FileParser {
     loc: int,
     awaitLoc: int | undefined,
     declaration: ForDeclaration,
-    target: Read<ForTarget>,
+    target: Own<ForTarget>,
   ): Stmt {
     const word = this.cursor.next();
     const keys = word.kind == TokenKind.In;
@@ -261,8 +269,9 @@ partial class FileParser {
 
     this.cursor.expect(TokenKind.RParen, Code.ExpectedLoopHeaderClose);
     const statement = this.statement(false);
-    const binding = this.forOfBinding(target, keys);
-    const body = this.forOfBody(target, keys, isConst, binding.name, statement);
+    const name = this.forOfName(target);
+    const body = this.forOfBody(target, keys, isConst, name, statement);
+    const binding = this.forOfBinding(target, keys, name);
 
     return {
       kind: StmtKind.ForOf,
@@ -277,17 +286,30 @@ partial class FileParser {
     };
   }
 
-  private forOfBinding(target: Read<ForTarget>, keys: boolean): VarDeclarator {
+  private forOfName(target: Read<ForTarget>): string {
+    if (target.kind == ForTargetKind.Name) {
+      return target.binding.name;
+    }
+
+    return this.hiddenName();
+  }
+
+  private forOfBinding(
+    target: Own<ForTarget>,
+    keys: boolean,
+    name: string,
+  ): VarDeclarator {
     if (target.kind == ForTargetKind.Name) {
       return {
-        ...target.binding,
+        name: target.binding.name,
+        loc: target.binding.loc,
+        typeAnn: target.binding.typeAnn,
         origin: NameOrigin.Written,
         form: { kind: BindingKind.Plain },
       };
     }
 
     const pattern = target.pattern;
-    const name = this.hiddenName();
     const form = this.forOfForm(pattern, keys);
 
     return {
@@ -298,7 +320,10 @@ partial class FileParser {
     };
   }
 
-  private readonly forOfForm(pattern: Read<Pattern>, keys: boolean): BindingForm {
+  private readonly forOfForm(
+    pattern: Read<Pattern>,
+    keys: boolean,
+  ): BindingForm {
     if (keys) {
       return { kind: BindingKind.Plain };
     }
@@ -314,7 +339,7 @@ partial class FileParser {
     keys: boolean,
     isConst: boolean,
     name: string,
-    statement: Stmt,
+    statement: Own<Stmt>,
   ): Stmt {
     if (target.kind == ForTargetKind.Name) {
       return statement;

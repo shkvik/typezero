@@ -22,8 +22,8 @@ export class SourceLines {
   private readonly source: Buffer;
   private readonly starts: int[];
 
-  public constructor(source: Own<Buffer>) {
-    this.source = source;
+  public constructor(source: Read<Buffer>) {
+    this.source = Buffer.from(source);
     this.starts = [0];
 
     for (let offset = 0; offset < this.source.length; offset++) {
@@ -207,5 +207,3 @@ export class SourceLines {
     return value.toInt();
   }
 }
-
-export type InternedSourceLines = Interned<SourceLines>;

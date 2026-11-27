@@ -39,9 +39,7 @@ export type NameUse = {
 };
 
 export type ModuleScopes = {
-  readonly module: Module;
+  readonly module: int;
   readonly uses: readonly NameUse[];
   readonly errors: readonly SourceError[];
 };
-
-export type InternedScopes = Interned<ModuleScopes>;

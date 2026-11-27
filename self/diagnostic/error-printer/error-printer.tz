@@ -11,7 +11,7 @@ import { SourceView } from "./types/error-printer.types.tz";
 export class ErrorPrinter {
   private readonly views: SourceView[];
 
-  public constructor(source: SourceText) {
+  public constructor(source: Read<SourceText>) {
     this.views = [];
 
     const whole: SourcePiece = { path: source.path, start: 0 };
@@ -56,7 +56,7 @@ export class ErrorPrinter {
     return `${headline}\n${line}\n${indent}${kPointer}`;
   }
 
-  private readonly viewAt(loc: int): SourceView | undefined {
+  private readonly viewAt(loc: int): Read<SourceView> | undefined {
     let found = this.views[0];
 
     for (const view of this.views) {

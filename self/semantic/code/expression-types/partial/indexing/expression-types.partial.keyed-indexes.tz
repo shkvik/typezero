@@ -1,0 +1,454 @@
+import {
+  BinaryExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  UnaryExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  DictKind,
+  DictType,
+  LiteralKind,
+  ObjectType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+
+partial class ExpressionTypes {
+  private objectIndexed(
+    expr: IndexExpr,
+    object: ObjectType,
+    module: int,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const index = tree.exprOf(expr.indexId);
+    const key = this.typed(index, undefined, module);
+    const error = this.types.store.plain(TypeKind.Error);
+
+    if (key.kind == TypeKind.Error || this.types.isLibraryShape(object)) {
+      return error;
+    }
+
+    const indexExpr = tree.exprOf(expr.indexId);
+    const name = this.constantKeyOf(indexExpr, key, module);
+    if (name != undefined) {
+      const member = this.types.keyedMember(expr, name);
+
+      return this.memberOf(member, object, module);
+    }
+
+    const exprIndex = tree.exprOf(expr.indexId);
+    const choices = this.keyChoices(exprIndex, key, module);
+    const chosen = this.chosenField(object, choices);
+    if (chosen != undefined) {
+      return chosen;
+    }
+
+    const first = this.types.typeText(object);
+    const defined = this.types.definedType(key);
+    if (this.types.isNumber(defined)) {
+      this.errors.write(module, expr.loc, Code.ObjectNumberedKey, { first });
+
+      return error;
+    }
+    if (defined.kind == TypeKind.String || defined.kind == TypeKind.Template) {
+      this.errors.write(module, expr.loc, Code.ObjectRuntimeKey, { first });
+
+      return error;
+    }
+    if (defined.kind == TypeKind.Boolean) {
+      const shown = this.types.typeText(key);
+
+      this.errors.write(
+        module,
+        tree.exprOf(expr.indexId).loc,
+        Code.ObjectKeyNotString,
+        {
+          first: shown,
+        },
+      );
+    }
+
+    return error;
+  }
+
+  private chosenField(
+    object: ObjectType,
+    choices: Type | undefined,
+  ): Type | undefined {
+    if (choices == undefined) {
+      return undefined;
+    }
+
+    return this.keyedFieldType(object, choices);
+  }
+
+  private keyChoices(index: Expr, key: Type, module: int): Type | undefined {
+    if (this.isTextChoice(key)) {
+      return key;
+    }
+    if (index.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const texts = this.doorTextsOfName(index, module);
+    if (texts == undefined) {
+      return undefined;
+    }
+
+    const literals = texts.map((text) =>
+      this.types.store.literal(LiteralKind.String, text),
+    );
+
+    return this.types.store.unionOf(literals);
+  }
+
+  private readonly isTextChoice(key: Type): boolean {
+    const parts = this.types.partsOfType(key);
+
+    return parts.every(
+      (part) =>
+        part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
+    );
+  }
+
+  private keyedFieldType(object: ObjectType, key: Type): Type | undefined {
+    let common: Type | undefined = undefined;
+
+    for (const part of this.types.partsOfType(key)) {
+      if (part.kind != TypeKind.Literal) {
+        return undefined;
+      }
+
+      const name = part.text;
+      const field = this.types.store
+        .fieldsOf(object)
+        .find((one) => one.name == name);
+      if (field == undefined) {
+        return undefined;
+      }
+
+      const type = this.types.fieldWanted(field);
+      if (common != undefined && type.id != common.id) {
+        return undefined;
+      }
+
+      common = type;
+    }
+
+    return common;
+  }
+
+  private keyedWriteCheck(target: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    if (target.kind != ExprKind.Index) {
+      return false;
+    }
+
+    const objectExpr = tree.exprOf(target.objectId);
+    const holder = this.peekType(objectExpr, module);
+    const object = this.types.definedType(holder);
+    if (object.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const index = tree.exprOf(target.indexId);
+    const key = this.peekType(index, module);
+    if (
+      this.constantKeyOf(tree.exprOf(target.indexId), key, module) != undefined
+    ) {
+      return false;
+    }
+    if (this.isEnumKey(key)) {
+      return false;
+    }
+
+    const indexExpr = tree.exprOf(target.indexId);
+    const choices = this.keyChoices(indexExpr, key, module);
+    const field = this.chosenField(object, choices);
+    if (choices == undefined || field == undefined) {
+      return false;
+    }
+
+    const names: string[] = [];
+
+    for (const part of this.types.partsOfType(choices)) {
+      if (part.kind == TypeKind.Literal) {
+        names.push(part.text);
+      }
+    }
+
+    return this.keyedFieldWrite(target, object, field, names, module);
+  }
+
+  private readonly isEnumKey(key: Type): boolean {
+    const label = this.types.store.labelOf(key);
+    if (label == undefined) {
+      return false;
+    }
+
+    for (let index = 0; index < this.types.program.modules.length; index++) {
+      const opened = this.types.program.modules[index];
+      if (opened == undefined || opened.source.isLibrary) {
+        continue;
+      }
+
+      const record = this.record(index);
+      if (record == undefined) {
+        continue;
+      }
+
+      for (const decl of record.enums.values()) {
+        if (decl.name == label) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private keyedFieldWrite(
+    target: Expr,
+    object: ObjectType,
+    field: Type,
+    names: Read<string[]>,
+    module: int,
+  ): boolean {
+    const isReadonly = this.types.store.fieldsOf(object).some(
+      (one) => names.includes(one.name) && one.readonly,
+    );
+    if (isReadonly) {
+      this.errors.write(module, target.loc, Code.KeyedReadonly, kNoDetails);
+
+      return true;
+    }
+
+    const assigned = this.assignedFieldNames();
+    const isKnown = names.every((name) => assigned.has(name));
+    const isLoose =
+      this.types.isOptional(field) ||
+      field.kind == TypeKind.Union ||
+      field.kind == TypeKind.Literal;
+    if (!isLoose || isKnown) {
+      return false;
+    }
+
+    this.errors.write(module, target.loc, Code.KeyedByName, {
+      word: this.types.typeText(field),
+    });
+
+    return true;
+  }
+
+  private constantKeyOf(
+    index: Expr,
+    key: Type,
+    module: int,
+  ): string | undefined {
+    if (index.kind == ExprKind.StringLit) {
+      return index.value;
+    }
+    if (key.kind == TypeKind.Literal && key.literal == LiteralKind.String) {
+      return key.text;
+    }
+    if (index.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const door = this.doorOfName(index, module);
+    const literal = door?.literal;
+    if (literal == undefined || literal.kind != LiteralKind.String) {
+      return undefined;
+    }
+
+    return literal.text;
+  }
+
+  private dictIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const word = this.types.sourceTupleText(object);
+    const error = this.types.store.plain(TypeKind.Error);
+
+    switch (dict.dict) {
+      case DictKind.Map:
+        const index = tree.exprOf(expr.indexId);
+
+        this.walkedPart(index, module);
+        this.errors.write(module, expr.loc, Code.MapIndex, { word });
+
+        return error;
+      case DictKind.Set:
+        const indexExpr = tree.exprOf(expr.indexId);
+
+        this.walkedPart(indexExpr, module);
+        this.errors.write(module, expr.loc, Code.SetIndex, { word });
+
+        return error;
+      default:
+        return this.recordIndexed(expr, dict, module);
+    }
+  }
+
+  private recordIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
+    const tree = this.types.program.tree;
+
+    const key = this.typed(
+      tree.exprOf(expr.indexId),
+      this.types.store.keyOf(dict),
+      module,
+    );
+    const defined = this.types.definedType(key);
+    if (defined.kind == TypeKind.Int || defined.kind == TypeKind.Double) {
+      const first = this.types.typeText(key);
+
+      this.errors.write(
+        module,
+        tree.exprOf(expr.indexId).loc,
+        Code.RecordNumberKey,
+        {
+          first,
+        },
+      );
+
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    return this.types.optional(this.types.store.valueOf(dict));
+  }
+
+  private keyInTyped(expr: BinaryExpr, module: int): Type {
+    const tree = this.types.program.tree;
+
+    const boolean = this.types.store.plain(TypeKind.Boolean);
+    const rhs = tree.exprOf(expr.rhsId);
+    const object = this.typed(rhs, undefined, module);
+
+    const lhsExpr = tree.exprOf(expr.lhsId);
+
+    this.walkedPart(lhsExpr, module);
+
+    if (this.dictInCheck(expr, object, module)) {
+      return boolean;
+    }
+    if (this.listInCheck(expr, object, module)) {
+      return boolean;
+    }
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const isUnion = object.kind == TypeKind.Union;
+
+    if (lhs.kind == ExprKind.StringLit && object.kind == TypeKind.Union) {
+      this.unionInCheck(expr, lhs.value, object, module);
+    }
+    if (lhs.kind != ExprKind.StringLit || object.kind != TypeKind.Object) {
+      return boolean;
+    }
+    if (isUnion || this.types.isLibraryShape(object)) {
+      return boolean;
+    }
+
+    const name = lhs.value;
+    const field = this.types.store
+      .fieldsOf(object)
+      .find((one) => one.name == name);
+    if (field == undefined) {
+      const first = this.types.typeText(object);
+
+      this.errors.write(module, expr.loc, Code.InObjectFalse, {
+        word: name,
+        first,
+      });
+
+      return boolean;
+    }
+    if (field.optional || this.types.isOptional(field.type)) {
+      const rhsExpr = tree.exprOf(expr.rhsId);
+      const word = `${this.types.sourceTupleText(rhsExpr)}.${name}`;
+
+      this.errors.write(module, expr.loc, Code.InObjectMaybe, { word });
+
+      return boolean;
+    }
+
+    this.errors.write(module, expr.loc, Code.InObjectTrue, kNoDetails);
+
+    return boolean;
+  }
+
+  private deleteTyped(expr: UnaryExpr, module: int): Type {
+    const tree = this.types.program.tree;
+
+    const target = tree.exprOf(expr.operandId);
+    const boolean = this.types.store.plain(TypeKind.Boolean);
+
+    if (this.dictDeleteCheck(expr, module)) {
+      return boolean;
+    }
+    if (this.plainDeleteCheck(expr, target, module)) {
+      return boolean;
+    }
+    if (target.kind == ExprKind.Index) {
+      if (this.indexDeleteCheck(expr, target, module)) {
+        return boolean;
+      }
+    }
+
+    const name = this.deletedName(target, module);
+    const holder = this.types.deletedHolder(target);
+    if (name == undefined || holder == undefined) {
+      return boolean;
+    }
+
+    const object = this.typed(holder, undefined, module);
+    if (
+      object.kind != TypeKind.Object ||
+      this.types.isLibraryShape(object)
+    ) {
+      return boolean;
+    }
+
+    const field = this.types.store
+      .fieldsOf(object)
+      .find((one) => one.name == name);
+    if (field == undefined) {
+      return boolean;
+    }
+    if (field.optional || this.types.isOptional(field.type)) {
+      const first = `${this.types.sourceTupleText(holder)}.${name}`;
+
+      this.errors.write(module, expr.loc, Code.DeleteOptional, {
+        word: name,
+        first,
+      });
+
+      return boolean;
+    }
+
+    this.errors.write(module, expr.loc, Code.DeleteRequired, { word: name });
+
+    return boolean;
+  }
+
+  private deletedName(target: Expr, module: int): string | undefined {
+    const tree = this.types.program.tree;
+
+    if (target.kind == ExprKind.Member) {
+      return target.name;
+    }
+    if (target.kind == ExprKind.Index) {
+      const index = tree.exprOf(target.indexId);
+
+      return this.constantKey(index, module);
+    }
+
+    return undefined;
+  }
+}

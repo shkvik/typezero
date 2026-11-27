@@ -27,18 +27,18 @@ partial class ExpressionTypes {
     }
 
     const guard = frame.guard;
-    const isTrue = this.shapes.isLiteralTruth(value, true);
-    const isFalse = this.shapes.isLiteralTruth(value, false);
+    const isTrue = this.types.isLiteralTruth(value, true);
+    const isFalse = this.types.isLiteralTruth(value, false);
 
     if (!isFalse) {
       const whenTrue = this.exitFacts(value, true, module);
 
-      guard.whenTrue = this.narrowings.joinedSide(guard.whenTrue, whenTrue);
+      guard.whenTrue = this.types.joinedSide(guard.whenTrue, whenTrue);
     }
     if (!isTrue) {
       const whenFalse = this.exitFacts(value, false, module);
 
-      guard.whenFalse = this.narrowings.joinedSide(guard.whenFalse, whenFalse);
+      guard.whenFalse = this.types.joinedSide(guard.whenFalse, whenFalse);
     }
   }
 
@@ -53,7 +53,7 @@ partial class ExpressionTypes {
 
     this.errors.endTrial();
 
-    return this.narrowings.mergedFacts(this.facts, facts);
+    return this.types.mergedFacts(this.facts, facts);
   }
 
   private rememberGuard(
@@ -61,11 +61,15 @@ partial class ExpressionTypes {
     frame: Read<FunctionFrame>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (fn.isGenerator) {
       return;
     }
 
-    const params = fn.params.map((param) => `${module} ${param.loc}`);
+    const params = tree
+      .paramsOf(fn.paramsList)
+      .map((param) => `${module} ${param.loc}`);
     const guard = frame.guard;
     const whenTrue = this.projectedSide(guard, true, params);
     const whenFalse = this.projectedSide(guard, false, params);
@@ -79,7 +83,17 @@ partial class ExpressionTypes {
     isTrue: boolean,
     params: Read<string[]>,
   ): Map<string, Type> | undefined {
-    const side = this.narrowings.guardSide(guard, isTrue);
+    if (isTrue) {
+      return this.projected(guard.whenTrue, params);
+    }
+
+    return this.projected(guard.whenFalse, params);
+  }
+
+  private readonly projected(
+    side: Read<Map<string, Type> | undefined>,
+    params: Read<string[]>,
+  ): Map<string, Type> | undefined {
     if (side == undefined) {
       return undefined;
     }
@@ -88,7 +102,7 @@ partial class ExpressionTypes {
 
     for (const [key, type] of side) {
       const isParam = params.some((param) =>
-        this.narrowings.isParamPath(key, param),
+        this.types.isParamPath(key, param),
       );
       if (isParam || this.isParamBound(key, params)) {
         projected.set(key, type);
@@ -99,7 +113,7 @@ partial class ExpressionTypes {
   }
 
   private readonly isParamBound(key: string, params: Read<string[]>): boolean {
-    const terms = this.bounds.boundTerms(key);
+    const terms = this.types.boundTerms(key);
     if (terms.length == 0) {
       return false;
     }
@@ -121,12 +135,35 @@ partial class ExpressionTypes {
     module: int,
   ): Map<string, Type> | undefined {
     const type = this.functionAt(home, fn.loc);
-    const summary = this.guardSummaries.get(`${home} ${fn.loc}`);
-    if (summary == undefined || !this.narrowings.isBooleanFunction(type)) {
+    const summary = this.summaryAt(`${home} ${fn.loc}`);
+    if (summary == undefined || !this.types.isBooleanFunction(type)) {
       return undefined;
     }
 
     return this.summaryApplied(call, summary, isTrue, module);
+  }
+
+  private readonly summaryAt(key: string): GuardSummary | undefined {
+    const summary = this.guardSummaries.get(key);
+    if (summary == undefined) {
+      return undefined;
+    }
+
+    const params = summary.params.slice();
+    const whenTrue = this.sideCopy(summary.whenTrue);
+    const whenFalse = this.sideCopy(summary.whenFalse);
+
+    return { params, whenTrue, whenFalse };
+  }
+
+  private readonly sideCopy(
+    facts: Read<Map<string, Type> | undefined>,
+  ): Map<string, Type> | undefined {
+    if (facts == undefined) {
+      return undefined;
+    }
+
+    return new Map<string, Type>(facts);
   }
 
   private summaryApplied(
@@ -136,15 +173,31 @@ partial class ExpressionTypes {
     module: int,
   ): Map<string, Type> {
     const facts = new Map<string, Type>();
-    const side = this.narrowings.summarySide(summary, isTrue);
+
+    if (isTrue) {
+      this.sideApplied(call, summary, summary.whenTrue, facts, module);
+    } else {
+      this.sideApplied(call, summary, summary.whenFalse, facts, module);
+    }
+
+    return facts;
+  }
+
+  private sideApplied(
+    call: CallExpr,
+    summary: Read<GuardSummary>,
+    side: Read<Map<string, Type> | undefined>,
+    facts: Map<string, Type>,
+    module: int,
+  ): void {
     if (side == undefined) {
-      return facts;
+      return;
     }
 
     const moves = this.boundMoves(call, summary, module);
 
     for (const [key, narrowed] of side) {
-      const moved = this.bounds.movedBound(key, moves);
+      const moved = this.types.movedBound(key, moves);
       if (moved != "") {
         facts.set(moved, narrowed);
 
@@ -153,8 +206,6 @@ partial class ExpressionTypes {
 
       this.appliedFact(call, summary, key, narrowed, facts, module);
     }
-
-    return facts;
   }
 
   private boundMoves(
@@ -162,16 +213,19 @@ partial class ExpressionTypes {
     summary: Read<GuardSummary>,
     module: int,
   ): Map<string, string> {
+    const tree = this.types.program.tree;
+
     const moves = new Map<string, string>();
 
     for (let index = 0; index < summary.params.length; index++) {
       const param = summary.params[index];
-      const arg = call.args[index];
+      const arg = tree.argumentsOf(call.argsList)[index];
       if (param == undefined || arg == undefined || arg.spread) {
         continue;
       }
 
-      const key = this.pathKey(arg.expr, module);
+      const expr = tree.exprOf(arg.exprId);
+      const key = this.pathKey(expr, module);
       if (key == undefined) {
         continue;
       }
@@ -191,16 +245,19 @@ partial class ExpressionTypes {
     facts: Map<string, Type>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const index = summary.params.findIndex((param) =>
-      this.narrowings.isParamPath(key, param),
+      this.types.isParamPath(key, param),
     );
     const param = summary.params[index];
-    const arg = call.args[index];
+    const arg = tree.argumentsOf(call.argsList)[index];
     if (param == undefined || arg == undefined || arg.spread) {
       return;
     }
 
-    const slot = this.narrowable(arg.expr, module);
+    const expr = tree.exprOf(arg.exprId);
+    const slot = this.narrowable(expr, module);
     if (slot == undefined || narrowed.kind == TypeKind.Error) {
       return;
     }
@@ -220,7 +277,11 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly currentOf(place: string, path: string, type: Type): Type | undefined {
+  private readonly currentOf(
+    place: string,
+    path: string,
+    type: Type,
+  ): Type | undefined {
     if (path == "") {
       return type;
     }
@@ -228,21 +289,21 @@ partial class ExpressionTypes {
     return this.knownFact(place);
   }
 
-  private readonly keptByGuard(now: Type, narrowed: Type): Type | undefined {
-    if (now.kind == TypeKind.Error || this.relation.converts(now, narrowed)) {
+  private keptByGuard(now: Type, narrowed: Type): Type | undefined {
+    if (now.kind == TypeKind.Error || this.types.converts(now, narrowed)) {
       return undefined;
     }
-    if (this.relation.converts(narrowed, now)) {
+    if (this.types.converts(narrowed, now)) {
       return narrowed;
     }
 
     const kept = this.types
       .unionMembers(now)
-      .filter((part) => this.relation.converts(part, narrowed));
+      .filter((part) => this.types.converts(part, narrowed));
     if (kept.length == 0) {
       return undefined;
     }
 
-    return this.store.unionOf(kept);
+    return this.types.store.unionOf(kept);
   }
 }

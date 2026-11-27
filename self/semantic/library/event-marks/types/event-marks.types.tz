@@ -15,8 +15,6 @@ export type FirstEmit = {
   readonly place: string;
 };
 
-export type InternedFirstEmit = Interned<FirstEmit>;
-
 export type EventListen = {
   readonly key: string;
   readonly event: string;

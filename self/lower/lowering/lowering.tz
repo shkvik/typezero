@@ -2,6 +2,7 @@ import { replace } from "tz:mem";
 import "./partial/lowering.partial.statements.tz";
 import "./partial/lowering.partial.loops.tz";
 import "./partial/lowering.partial.functions.tz";
+import "./partial/lowering.partial.calls.tz";
 import "./partial/lowering.partial.expressions.tz";
 import "./partial/lowering.partial.operators.tz";
 import "./partial/lowering.partial.comparisons.tz";
@@ -11,17 +12,28 @@ import "./partial/lowering.partial.strings.tz";
 import "./partial/lowering.partial.console.tz";
 import "./partial/lowering.partial.types.tz";
 import "./partial/lowering.partial.memory.tz";
+import "./partial/lowering.partial.own-drops.tz";
 import "./partial/lowering.partial.texts.tz";
 import "./partial/lowering.partial.arrays.tz";
+import "./partial/lowering.partial.descriptors.tz";
+import "./partial/lowering.partial.array-loops.tz";
 import "./partial/lowering.partial.optionals.tz";
 import "./partial/lowering.partial.classes.tz";
+import "./partial/lowering.partial.class-objects.tz";
+import "./partial/lowering.partial.layouts.tz";
 import "./partial/lowering.partial.objects.tz";
+import "./partial/lowering.partial.mixed-fields.tz";
 import "./partial/lowering.partial.switches.tz";
 import "./partial/lowering.partial.dictionaries.tz";
+import "./partial/lowering.partial.dict-sources.tz";
 import "./partial/lowering.partial.callbacks.tz";
 import "./partial/lowering.partial.array-methods.tz";
+import "./partial/lowering.partial.array-order.tz";
+import "./partial/lowering.partial.array-slices.tz";
+import "./partial/lowering.partial.array-callbacks.tz";
 import "./partial/lowering.partial.chains.tz";
 import "./partial/lowering.partial.string-methods.tz";
+import "./partial/lowering.partial.text-chars.tz";
 import "./partial/lowering.partial.decimals.tz";
 import "./partial/lowering.partial.number-methods.tz";
 import "./partial/lowering.partial.results.tz";
@@ -47,12 +59,10 @@ import "./partial/lowering.partial.closures.tz";
 import "./partial/lowering.partial.field-inits.tz";
 import "./partial/lowering.partial.arena.tz";
 import "./partial/lowering.partial.map-loops.tz";
-import { ExpressionAnswers } from "../../program/expression-answers/expression-answers.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
-import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
-import { TypeTraits } from "../../semantic/ownership/type-traits/type-traits.tz";
+import { TypeSystem } from "../../semantic/types/type-system/type-system.tz";
 import { IrFunction } from "../ir-function/ir-function.tz";
 import { IrCallee } from "../ir-function/types/ir-function.types.tz";
 import { IrModule } from "../ir-module/ir-module.tz";
@@ -71,6 +81,8 @@ import {
 } from "./const/lowering.const.tz";
 import {
   ClassLayout,
+  LayoutField,
+  LayoutShape,
   DictLayout,
   Frame,
   IrValue,
@@ -82,11 +94,7 @@ import {
 } from "./types/lowering.types.tz";
 
 export class Lowering {
-  private readonly program: Program;
-  private readonly store: TypeStore;
   private readonly values: ExpressionTypes;
-  private readonly resolver: TypeResolver;
-  private readonly answers: ExpressionAnswers;
   public readonly ir: IrModule;
   private unlowered: Unlowered[];
   private readonly places: Map<string, Place>;
@@ -94,10 +102,13 @@ export class Lowering {
   private readonly strings: Map<string, LLVMValue>;
   private readonly descriptors: Map<int, LLVMValue>;
   private readonly layouts: Map<int, ClassLayout>;
+  private readonly layoutFields: Map<int, LayoutField[]>;
+  private readonly layoutShapes: Map<int, LayoutShape>;
+  private readonly layoutSlots: Map<int, LLVMValue[]>;
   private readonly dictLayouts: Map<int, DictLayout>;
   private readonly cTexts: Map<string, LLVMValue>;
-  private readonly knownTypes: Map<Expr, Type>;
-  private readonly evaluated: Map<Expr, IrValue>;
+  private readonly knownTypes: Map<int, Type>;
+  private readonly evaluated: Map<int, IrValue>;
   private readonly chainExits: LLVMBlock[];
   private readonly sites: Map<string, LLVMValue>;
   private readonly lines: Map<int, SourceLines>;
@@ -117,10 +128,11 @@ export class Lowering {
   private instanceStart: int;
   private instanceEnd: int;
   private instanceSuffix: string;
-  private readonly moves: Set<Expr>;
+  private readonly moves: Set<int>;
+  private readonly lentClosures: Set<int>;
   private readonly borrows: Set<string>;
-  private readonly traits: TypeTraits;
   private isAuditing: boolean;
+  private isCheckingCounts: boolean;
   private readonly audited: string[];
   private statementLoc: int;
   private readonly pendingClosures: PendingClosure[];
@@ -131,20 +143,14 @@ export class Lowering {
   private readonly noInits: Set<int>;
 
   public constructor(
-    store: TypeStore,
-    program: Own<Program>,
-    resolver: TypeResolver,
     values: Own<ExpressionTypes>,
-    moves: Own<Set<Expr>>,
+    moves: Own<Set<int>>,
     borrows: Own<Set<string>>,
+    closures: Own<Set<int>>,
   ) {
-    const name = program.modules[0]?.name ?? "";
+    const name = values.types.program.modules[0]?.name ?? "";
 
-    this.program = program;
-    this.store = store;
     this.values = values;
-    this.resolver = resolver;
-    this.answers = this.values.answers;
     this.ir = new IrModule(name);
     this.unlowered = [];
     this.places = new Map<string, Place>();
@@ -152,10 +158,13 @@ export class Lowering {
     this.strings = new Map<string, LLVMValue>();
     this.descriptors = new Map<int, LLVMValue>();
     this.layouts = new Map<int, ClassLayout>();
+    this.layoutFields = new Map<int, LayoutField[]>();
+    this.layoutShapes = new Map<int, LayoutShape>();
+    this.layoutSlots = new Map<int, LLVMValue[]>();
     this.dictLayouts = new Map<int, DictLayout>();
     this.cTexts = new Map<string, LLVMValue>();
-    this.knownTypes = new Map<Expr, Type>();
-    this.evaluated = new Map<Expr, IrValue>();
+    this.knownTypes = new Map<int, Type>();
+    this.evaluated = new Map<int, IrValue>();
     this.chainExits = [];
     this.sites = new Map<string, LLVMValue>();
     this.lines = new Map<int, SourceLines>();
@@ -177,8 +186,9 @@ export class Lowering {
     this.instanceSuffix = "";
     this.moves = moves;
     this.borrows = borrows;
-    this.traits = new TypeTraits(store, this.program);
+    this.lentClosures = closures;
     this.isAuditing = false;
+    this.isCheckingCounts = false;
     this.audited = [];
     this.statementLoc = 0;
     this.pendingClosures = [];
@@ -193,8 +203,16 @@ export class Lowering {
     this.isAuditing = true;
   }
 
+  public checkCounts(): void {
+    this.isCheckingCounts = true;
+  }
+
   public readonly lateWork(): string[] {
     return this.values.lateWorkList();
+  }
+
+  public readonly sourceProgram(): Read<Program> {
+    return this.values.types.program;
   }
 
   public auditedCounts(): string[] {
@@ -202,8 +220,10 @@ export class Lowering {
   }
 
   public run(): LoweredProgram {
+    const tree = this.values.types.program.tree;
+
     const main = new IrFunction(this.ir, kMainName, kFlagType, []);
-    const modules = this.program.order.filter((module) =>
+    const modules = this.values.types.program.order.filter((module) =>
       this.isProgramModule(module),
     );
 
@@ -217,12 +237,14 @@ export class Lowering {
       const frame: Frame = {
         made: main,
         id: kMainFrame,
-        module: module.id,
+        module: module,
         loops: [],
         scopes: [],
       };
 
-      for (const statement of module.file.items) {
+      const items = this.values.types.program.modules[module]?.file.itemsList;
+
+      for (const statement of tree.stmtsOf(items)) {
         this.statement(frame, statement);
       }
     }
@@ -253,7 +275,12 @@ export class Lowering {
     this.cleanupsTo(frame, 0);
   }
 
-  private readonly isProgramModule(module: Module): boolean {
+  private readonly isProgramModule(id: int): boolean {
+    const module = this.values.types.program.modules[id];
+    if (module == undefined) {
+      return false;
+    }
+
     return !module.source.isLibrary && !module.isDeclarationOnly;
   }
 

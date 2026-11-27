@@ -24,13 +24,17 @@ import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private comparison(frame: Frame, expr: BinaryExpr): IrValue | undefined {
-    const left = this.value(frame, expr.lhs);
-    const right = this.value(frame, expr.rhs);
+    const tree = this.values.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.value(frame, lhs);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.value(frame, rhs);
     if (left == undefined || right == undefined) {
       return undefined;
     }
 
-    const tz = this.store.plain(TypeKind.Boolean);
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
     const value = this.compared(frame, expr, left, right);
     if (value == undefined) {
       return undefined;
@@ -75,8 +79,7 @@ partial class Lowering {
       return this.stringsCompared(frame, expr.op, left, right);
     }
 
-    const isReference =
-      left.type == kPointerType && right.type == kPointerType;
+    const isReference = left.type == kPointerType && right.type == kPointerType;
     if (isEquality && isReference) {
       const predicate = this.integerPredicate(expr.op, false);
 
@@ -123,16 +126,19 @@ partial class Lowering {
     left: IrValue,
     right: IrValue,
   ): LLVMValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const leftHas = this.hasValue(frame, left);
     const rightHas = this.hasValue(frame, right);
     const first = this.presentPart(frame, left);
     const second = this.presentPart(frame, right);
     const same: BinaryExpr = {
       kind: ExprKind.Binary,
+      id: expr.id,
       loc: expr.loc,
       op: BinaryOp.Eq,
-      lhs: expr.lhs,
-      rhs: expr.rhs,
+      lhsId: expr.lhsId,
+      rhsId: expr.rhsId,
     };
     const isInnerEqual = this.compared(frame, same, first, second);
     if (isInnerEqual == undefined) {
@@ -169,10 +175,22 @@ partial class Lowering {
     left: IrValue,
     right: IrValue,
   ): LLVMValue | undefined {
+    const tree = this.values.types.program.tree;
+
     if (this.isDouble(left.tz) || this.isDouble(right.tz)) {
-      const double = this.store.plain(TypeKind.Double);
-      const first = this.converted(frame, left, double, expr.lhs.loc);
-      const second = this.converted(frame, right, double, expr.rhs.loc);
+      const double = this.values.types.store.plain(TypeKind.Double);
+      const first = this.converted(
+        frame,
+        left,
+        double,
+        tree.exprOf(expr.lhsId).loc,
+      );
+      const second = this.converted(
+        frame,
+        right,
+        double,
+        tree.exprOf(expr.rhsId).loc,
+      );
       if (first == undefined || second == undefined) {
         return undefined;
       }
@@ -205,7 +223,7 @@ partial class Lowering {
     return frame.made.cast(opcode, value.value, kWideType);
   }
 
-  private readonly stringsCompared(
+  private stringsCompared(
     frame: Read<Frame>,
     op: BinaryOp,
     left: IrValue,
@@ -230,7 +248,7 @@ partial class Lowering {
   }
 
   private readonly stringParts(frame: Read<Frame>, value: IrValue): IrValue[] {
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
     const pointer = frame.made.extract(value.value, 0);
     const meta = frame.made.extract(value.value, 1);
 
@@ -265,7 +283,10 @@ partial class Lowering {
     }
   }
 
-  private readonly integerPredicate(op: BinaryOp, isUnsigned: boolean): IrIntPredicate {
+  private readonly integerPredicate(
+    op: BinaryOp,
+    isUnsigned: boolean,
+  ): IrIntPredicate {
     switch (op) {
       case BinaryOp.Lt:
         return this.predicateFor(

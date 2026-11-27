@@ -12,7 +12,6 @@ import {
 import {
   LinkKind,
   ModuleLink,
-  ParsedDeclaration,
   SourceText,
 } from "../../../program/module/types/module.types.tz";
 import { JsonModule } from "../../json-module/json-module.tz";
@@ -28,6 +27,10 @@ import {
 } from "../const/loader.const.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  ParsedDeclaration,
+} from "../../../program/syntax/types/syntax.types.files.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
 
 partial class Loader {
   private linkedFile(from: ModulePath, file: string, owner: int): ModuleLink {
@@ -48,9 +51,9 @@ partial class Loader {
       return { kind: LinkKind.Missing, from };
     }
 
-    this.packageOf.set(module.id, owner);
+    this.packageOf.set(module, owner);
 
-    return { kind: LinkKind.Module, from, target: module.id };
+    return { kind: LinkKind.Module, from, target: module };
   }
 
   private linkedJson(from: ModulePath, file: string): ModuleLink {
@@ -77,9 +80,9 @@ partial class Loader {
     const source: SourceText = { path, text, isLibrary: false };
     const module = this.openSource(source, file, name);
 
-    this.byFile.set(key, module.id);
+    this.byFile.set(key, module);
 
-    return { kind: LinkKind.Module, from, target: module.id };
+    return { kind: LinkKind.Module, from, target: module };
   }
 
   private open(
@@ -87,7 +90,7 @@ partial class Loader {
     key: string,
     name: string,
     path: string,
-  ): OpenModule | undefined {
+  ): int | undefined {
     const text = this.read(file, path);
     if (text == undefined) {
       return undefined;
@@ -96,52 +99,59 @@ partial class Loader {
     const source: SourceText = { path, text, isLibrary: false };
     const module = this.openSource(source, file, name);
 
-    this.byFile.set(key, module.id);
+    this.byFile.set(key, module);
 
     return module;
   }
 
   private openSource(
-    source: SourceText,
+    source: Own<SourceText>,
     file: string,
     name: string,
-  ): OpenModule {
+  ): int {
     const lexer = new Lexer(source.text);
     const lexed = lexer.run();
-    const parsed = this.parser.parseLexed(source, lexed);
-    const implicit = this.implicitImports(source, parsed.file, lexed.tokens);
+    const isLibrary = source.isLibrary;
     const declaration = this.declarationOf(file, source);
+    const rejected = this.referenceProblems(source.text);
+    const lexedFile = this.parser.parseLexed(source, lexed);
+    const implicit = this.implicitImports(
+      isLibrary,
+      lexedFile.parsed.file,
+      lexedFile.tokens,
+    );
+    const id = this.opened.length;
     const module: OpenModule = {
-      id: this.opened.length,
+      id,
       name,
       file,
-      parsed,
+      parsed: lexedFile.parsed,
       declaration,
       links: [],
       implicit,
-      parts: [],
+      partItems: [],
       isDeclarationOnly: false,
       declared: [],
-      problems: [],
+      problems: rejected,
       state: ModuleState.New,
     };
 
     this.opened.push(module);
-    this.rejectReferences(module, source.text);
 
-    return module;
+    return id;
   }
 
-  private readonly rejectReferences(module: OpenModule, text: Read<Buffer>): void {
+  private readonly referenceProblems(text: Read<Buffer>): SourceError[] {
+    const found: SourceError[] = [];
     let from = 0;
 
     while (from < text.length) {
       const at = text.indexOf(kTripleSlash, from);
       if (at < 0) {
-        return;
+        return found;
       }
       if (this.isReferenceAt(text, at)) {
-        module.problems.push({
+        found.push({
           code: Code.ReferenceDirective,
           loc: at,
           details: kNoDetails,
@@ -150,6 +160,8 @@ partial class Loader {
 
       from = at + kTripleSlash.length;
     }
+
+    return found;
   }
 
   private readonly isReferenceAt(text: Read<Buffer>, at: int): boolean {
@@ -209,7 +221,7 @@ partial class Loader {
 
   private declarationOf(
     file: string,
-    module: SourceText,
+    module: Read<SourceText>,
   ): ParsedDeclaration | undefined {
     const declarationFile = this.declarationPath(file);
     if (!existsSync(declarationFile)) {

@@ -7,15 +7,15 @@ import {
   ModuleName,
   ModulePath,
 } from "../../program/ast/types/ast.types.modules.tz";
-import {
-  Stmt,
-  StmtKind,
-} from "../../program/ast/types/ast.types.statements.tz";
+import { StmtKind } from "../../program/ast/types/ast.types.statements.tz";
 import {
   LinkKind,
   Module,
   ModuleLink,
+  ParsedDeclaration,
 } from "../../program/module/types/module.types.tz";
+import { AstFlattener } from "../ast-flattener/ast-flattener.tz";
+import { PartJoin } from "../partial-classes/types/partial-classes.types.tz";
 import { LibraryMentions } from "../library-mentions/library-mentions.tz";
 import { ManifestReader } from "../manifest-reader/manifest-reader.tz";
 import { ModuleResolver } from "../module-resolver/module-resolver.tz";
@@ -30,18 +30,23 @@ import {
   Overlay,
   Request,
 } from "./types/loader.types.tz";
+import {
+  ParsedDeclaration as SyntaxParsedDeclaration,
+} from "../../program/syntax/types/syntax.types.files.tz";
+import { Stmt } from "../../program/syntax/types/syntax.types.statements.tz";
 
 export class Loader {
   private readonly entryPath: string;
   private readonly entryDirectory: string;
   private readonly libraryDirectory: string;
   private readonly parser: Parser;
+  private readonly flattener: AstFlattener;
   private readonly resolver: ModuleResolver;
   private readonly mentions: LibraryMentions;
-  private readonly opened: OpenModule[];
+  private opened: OpenModule[];
   private readonly byFile: Map<string, int>;
   private readonly libraries: Map<string, int>;
-  private readonly order: OpenModule[];
+  private readonly order: int[];
   private unreadable: string[];
   private packageErrors: string[];
   private readonly packageOf: Map<int, int>;
@@ -63,9 +68,10 @@ export class Loader {
     this.entryPath = entryPath;
     this.entryDirectory = entryDirectory;
     this.libraryDirectory = libraryDirectory;
-    this.parser = new Parser([]);
+    this.parser = new Parser();
+    this.flattener = new AstFlattener();
     this.packageErrors = packages.errors();
-    this.resolver = new ModuleResolver(packages);
+    this.resolver = new ModuleResolver(packages.takePackages());
     this.packageOf = new Map<int, int>();
     this.mentions = new LibraryMentions();
     this.opened = [];
@@ -97,32 +103,49 @@ export class Loader {
     if (this.isBuilt) {
       this.loadRuntime();
     }
-    const parts = new PartialClasses(this.order.slice());
+
+    const opened = replace(this.opened, []);
+    const parts = new PartialClasses(opened, this.order.slice());
 
     parts.join();
+    this.opened = parts.takeModules();
 
-    const order = this.order.map((module) => this.finished(module));
-    const modules = order.slice();
+    const joins = parts.takeJoins();
+    const visited = new Set<int>(this.order);
+    const modules: Module[] = [];
+    const items = new Map<int, int[]>();
 
-    modules.sort((first, second) => first.id - second.id);
+    for (const module of this.opened.drain()) {
+      if (visited.has(module.id)) {
+        const ids = this.flattener.itemIds(module.parsed.file.items);
+        const finished = this.finished(module, ids);
 
-    const globals = order.filter((module) => globalIds.includes(module.id));
+        items.set(finished.id, ids);
+        modules.push(finished);
+      }
+    }
+
+    this.joinParts(joins, items);
+
+    const order = this.orderedModules(modules);
+    const globals = order.filter((id) => globalIds.includes(id));
     const ambient = order.filter(
-      (module) => module.id >= reached || globalIds.includes(module.id),
+      (id) => id >= reached || globalIds.includes(id),
     );
     const builtins = this.builtins();
+    const tree = this.flattener.takeTree();
 
     return {
-      program: { modules, order, globals, ambient, builtins },
+      program: { modules, order, globals, ambient, builtins, tree },
       unreadable: replace(this.unreadable, []),
       packageErrors: replace(this.packageErrors, []),
     };
   }
 
-  private visit(module: Own<OpenModule>): void {
-    module.state = ModuleState.Loading;
+  private visit(id: int): void {
+    this.setState(id, ModuleState.Loading);
 
-    const requests = this.requests(module);
+    const requests = this.requests(id);
 
     for (let index = 0; index < requests.length; index++) {
       const request = requests[index];
@@ -130,41 +153,73 @@ export class Loader {
       if (target == undefined) {
         continue;
       }
-      if (target.state == ModuleState.New) {
+      if (this.stateOf(target) == ModuleState.New) {
         this.visit(target);
       }
 
       const asked = this.askedRequests(target, request.names);
 
-      for (const one of asked) {
+      for (const one of asked.drain()) {
         requests.push(one);
       }
     }
 
-    module.state = ModuleState.Loaded;
-    this.order.push(module);
+    this.setState(id, ModuleState.Loaded);
+    this.order.push(id);
   }
 
-  private linkedTarget(request: Request): OpenModule | undefined {
-    const link = this.linked(request);
+  private setState(id: int, state: ModuleState): void {
+    const module = this.opened[id];
+    if (module != undefined) {
+      module.state = state;
+    }
+  }
 
-    request.owner.links.push(link);
+  private readonly stateOf(id: int): ModuleState | undefined {
+    return this.opened[id]?.state;
+  }
+
+  private readonly orderedModules(modules: Read<Module[]>): int[] {
+    const known = new Set<int>();
+
+    for (const module of modules) {
+      known.add(module.id);
+    }
+
+    return this.order.filter((id) => known.has(id));
+  }
+
+  private linkedTarget(request: Read<Request>): int | undefined {
+    const link = this.linked(request);
+    const target = this.linkTarget(link);
+
+    this.opened[request.owner]?.links.push(link);
+
+    return target;
+  }
+
+  private readonly linkTarget(link: Read<ModuleLink>): int | undefined {
     if (link.kind != LinkKind.Module) {
       return undefined;
     }
 
-    return this.opened[link.target];
+    return link.target;
   }
 
-  private readonly requests(module: Own<OpenModule>): Request[] {
-    const file = module.parsed.file;
+  private readonly requests(id: int): Request[] {
     const requests: Request[] = [];
+    const module = this.opened[id];
+    if (module == undefined) {
+      return requests;
+    }
+
+    const file = module.parsed.file;
 
     for (const decl of file.imports) {
       const names = this.askedNames(decl.names);
 
       requests.push({
-        owner: module,
+        owner: id,
         from: decl.from,
         names,
         isImplicit: false,
@@ -176,7 +231,7 @@ export class Loader {
       if (from != undefined && !module.isDeclarationOnly) {
         const names = this.askedNames(decl.names);
 
-        requests.push({ owner: module, from, names, isImplicit: false });
+        requests.push({ owner: id, from, names, isImplicit: false });
       }
     }
 
@@ -184,7 +239,7 @@ export class Loader {
       const names = this.askedNames(decl.names);
 
       requests.push({
-        owner: module,
+        owner: id,
         from: decl.from,
         names,
         isImplicit: true,
@@ -196,10 +251,10 @@ export class Loader {
     return requests;
   }
 
-  private readonly askedRequests(module: Own<OpenModule>, names: Read<string[]>): Request[] {
+  private readonly askedRequests(id: int, names: Read<string[]>): Request[] {
     const requests: Request[] = [];
-
-    if (!module.isDeclarationOnly) {
+    const module = this.opened[id];
+    if (module == undefined || !module.isDeclarationOnly) {
       return requests;
     }
 
@@ -214,7 +269,7 @@ export class Loader {
         const theirs = this.askedNames(asked);
 
         requests.push({
-          owner: module,
+          owner: id,
           from,
           names: theirs,
           isImplicit: false,
@@ -229,21 +284,25 @@ export class Loader {
     return names.map((name) => name.name);
   }
 
-  private readonly isLinked(module: Read<OpenModule>, from: ModulePath): boolean {
+  private readonly isLinked(
+    module: Read<OpenModule>,
+    from: ModulePath,
+  ): boolean {
     return module.links.some((link) => link.from.loc == from.loc);
   }
 
   private linked(request: Read<Request>): ModuleLink {
-    const module = request.owner;
+    const id = request.owner;
     const from = request.from;
 
     if (request.isImplicit) {
       return this.linkedImplicit(from);
     }
 
-    const directory = dirname(module.file);
-    const fromLibrary = module.parsed.source.isLibrary;
-    const home = this.packageOf.get(module.id) ?? 0;
+    const file = this.opened[id]?.file ?? "";
+    const directory = dirname(file);
+    const fromLibrary = this.opened[id]?.parsed.source.isLibrary == true;
+    const home = this.packageOf.get(id) ?? 0;
     const resolution = this.resolver.resolve(
       directory,
       from.path,
@@ -257,7 +316,7 @@ export class Loader {
       return this.linkedNamed(from, resolution.name);
     }
     if (resolution.kind == ResolutionKind.Problem) {
-      module.problems.push({
+      this.opened[id]?.problems.push({
         code: resolution.code,
         loc: from.loc,
         details: resolution.details,
@@ -269,45 +328,113 @@ export class Loader {
     return { kind: LinkKind.Package, from };
   }
 
-  private readonly finished(module: Read<OpenModule>): Module {
-    const parsed = module.parsed;
-    const file = parsed.file;
+  private finished(module: Own<OpenModule>, ids: Read<int[]>): Module {
     module.problems.sort((first, second) => first.loc - second.loc);
 
-    const errors = this.mergedByPlace(parsed.errors, module.problems.slice());
-    const items = this.withoutParts(file.items);
+    const kept = this.withoutParts(module.parsed.file.items, ids);
+    const partIds = this.partIds(module.partItems, ids);
+    const itemsList = this.flattener.stmtIdList(kept);
+    const partsList = this.flattener.stmtIdList(partIds);
+    const importsList = this.flattener.importsOf(module.parsed.file.imports);
+    const exportsList = this.flattener.exportsOf(module.parsed.file.exports);
+    const implicitList = this.flattener.importsOf(module.implicit);
+    const declaredList = this.flattener.declaredClassesOf(module.declared);
+    const declaration = this.flatDeclaration(module.declaration);
+    const errors = this.mergedByPlace(module.parsed.errors, module.problems);
 
     return {
       id: module.id,
       name: module.name,
-      source: parsed.source,
-      file: {
-        items,
-        imports: file.imports,
-        exports: file.exports,
-        fieldNames: file.fieldNames,
-        stringConstants: file.stringConstants,
-      },
+      source: module.parsed.source,
+      file: { itemsList, importsList, exportsList },
       errors,
-      declaration: module.declaration,
-      links: module.links.slice(),
-      implicit: module.implicit,
-      parts: module.parts.slice(),
+      declaration,
+      links: module.links,
+      implicitList,
+      partsList,
       isDeclarationOnly: module.isDeclarationOnly,
-      declared: module.declared,
+      declaredList,
     };
   }
 
-  private readonly withoutParts(items: Read<Stmt[]>): Stmt[] {
-    const kept: Stmt[] = [];
+  private flatDeclaration(
+    declaration: Own<SyntaxParsedDeclaration | undefined>,
+  ): ParsedDeclaration | undefined {
+    if (declaration == undefined) {
+      return undefined;
+    }
 
-    for (const item of items) {
+    const file = this.flattener.declarationOf(declaration.file);
+
+    return {
+      source: declaration.source,
+      file,
+      errors: declaration.errors,
+    };
+  }
+
+  private readonly withoutParts(items: Read<Stmt[]>, ids: Read<int[]>): int[] {
+    const kept: int[] = [];
+
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      const id = ids[index];
+      if (item == undefined || id == undefined) {
+        continue;
+      }
       if (item.kind != StmtKind.Class || !item.isPartial) {
-        kept.push(item);
+        kept.push(id);
       }
     }
 
     return kept;
+  }
+
+  private readonly partIds(partItems: Read<int[]>, ids: Read<int[]>): int[] {
+    const found: int[] = [];
+
+    for (const item of partItems) {
+      const id = ids[item];
+      if (id != undefined) {
+        found.push(id);
+      }
+    }
+
+    return found;
+  }
+
+  private joinParts(
+    joins: Read<PartJoin[]>,
+    items: Read<Map<int, int[]>>,
+  ): void {
+    const methods = new Map<int, int[]>();
+
+    for (const join of joins) {
+      const classId = items.get(join.target.module)?.[join.target.item];
+      const partId = items.get(join.part.module)?.[join.part.item];
+      if (classId == undefined || partId == undefined) {
+        continue;
+      }
+
+      const partMethods = this.flattener.methodIds(partId);
+      const methodId = partMethods[join.method];
+      if (methodId == undefined) {
+        continue;
+      }
+      if (!methods.has(classId)) {
+        const own = this.flattener.methodIds(classId);
+
+        methods.set(classId, own);
+      }
+
+      methods.get(classId)?.push(methodId);
+    }
+
+    for (const classId of methods.keys()) {
+      const ids = methods.get(classId) ?? [];
+
+      this.flattener.setMethods(classId, ids);
+    }
   }
 
   private readonly mergedByPlace(

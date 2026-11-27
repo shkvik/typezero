@@ -7,53 +7,39 @@ import { ExpressionTypes } from "../../semantic/code/expression-types/expression
 import { DeclarationTypes } from "../../semantic/declaration/declaration-types/declaration-types.tz";
 import { ModuleBinder } from "../../semantic/declaration/module-binder/module-binder.tz";
 import { NameResolver } from "../../semantic/declaration/name-resolver/name-resolver.tz";
-import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
+import { TypeSystem } from "../../semantic/types/type-system/type-system.tz";
 import { kRecoverableCodes } from "./const/front-end.const.tz";
+import { kEmptyList } from "../../program/ast/ast-tree/const/ast-tree.const.tz";
 import { kCheckedLibraries } from "../../semantic/declaration/module-questions/const/module-questions.const.tz";
 import { CheckedProgram, ModuleProblems } from "./types/front-end.types.tz";
 
 export class FrontEnd {
-  private readonly store: TypeStore;
-  private readonly program: Program;
-
-  public constructor(store: TypeStore, program: Own<Program>) {
-    this.store = store;
-    this.program = program;
-  }
-
   public readonly isCheckable(loaded: Read<LoadResult>): boolean {
     const isReadable =
       loaded.unreadable.length == 0 && loaded.packageErrors.length == 0;
 
-    return isReadable && this.isRecoverable();
+    return isReadable && this.isRecoverable(loaded.program);
   }
 
-  public readonly run(): CheckedProgram {
-    const binder = new ModuleBinder(this.program);
-    const names = binder.run();
-    const resolver = new NameResolver(this.program, names.slice());
-    const resolved = resolver.run();
-    const types = new TypeResolver(this.store, this.program, resolved);
-    const values = new ExpressionTypes(
-      this.store,
-      types,
-      this.program,
-      resolved,
-    );
+  public readonly run(program: Own<Program>): CheckedProgram {
+    const binder = new ModuleBinder();
+    const names = binder.run(program);
+    const resolver = new NameResolver(names);
+    const resolved = resolver.run(program);
+    const modules = resolved.map((scopes) => scopes.module);
+    const checked = modules.filter((id) => this.isChecked(program, id));
+    const store = new TypeStore();
+    const types = new TypeSystem(store, program, resolved);
+    const values = new ExpressionTypes(types);
 
     values.prepare();
 
     const steps: DeclarationTypes[] = [];
 
-    for (const scopes of resolved) {
-      const module = scopes.module;
-      if (!this.isChecked(module)) {
-        continue;
-      }
+    for (const module of checked) {
+      const declarations = this.declarationsOf(values.types.program, module);
 
-      const declarations = new DeclarationTypes(types, module);
-
-      declarations.resolveAliases();
+      declarations.resolveAliases(values.types);
       steps.push(declarations);
     }
 
@@ -65,19 +51,41 @@ export class FrontEnd {
 
     values.finish();
 
-    return { names, resolved, types, values, typed };
+    return { modules, values, typed };
   }
 
-  private readonly valueProblems(checked: Read<CheckedProgram>, module: Module): SourceError[] {
-    if (!this.isChecked(module)) {
+  private readonly declarationsOf(
+    program: Read<Program>,
+    id: int,
+  ): DeclarationTypes {
+    const module = program.modules[id];
+    if (module == undefined) {
+      const empty = {
+        itemsList: kEmptyList,
+        importsList: kEmptyList,
+        exportsList: kEmptyList,
+      };
+
+      return new DeclarationTypes(id, empty, true);
+    }
+
+    return new DeclarationTypes(id, module.file, module.source.isLibrary);
+  }
+
+  private readonly valueProblems(
+    checked: Read<CheckedProgram>,
+    module: int,
+  ): SourceError[] {
+    if (!this.isChecked(checked.values.types.program, module)) {
       return [];
     }
 
-    return checked.values.problems(module.id);
+    return checked.values.problems(module);
   }
 
-  private readonly isChecked(module: Module): boolean {
-    if (!module.source.isLibrary) {
+  private readonly isChecked(program: Read<Program>, id: int): boolean {
+    const module = program.modules[id];
+    if (module == undefined || !module.source.isLibrary) {
       return true;
     }
 
@@ -87,46 +95,47 @@ export class FrontEnd {
   public readonly problems(checked: Read<CheckedProgram>): ModuleProblems[] {
     const found: ModuleProblems[] = [];
 
-    for (let index = 0; index < checked.resolved.length; index++) {
-      const names = checked.names[index];
-      const scopes = checked.resolved[index];
-      if (names == undefined || scopes == undefined) {
-        continue;
-      }
-
-      const module = scopes.module;
-      const typeErrors = checked.types.problems(module.id);
+    for (const module of checked.modules) {
+      const scopeErrors = checked.values.types.scopeErrors(module);
+      const typeErrors = checked.values.types.problems(module);
       const valueErrors = this.valueProblems(checked, module);
-      const errors: SourceError[] = names.errors.concat(
-        scopes.errors,
-        typeErrors,
-        valueErrors,
-      );
+      const errors: SourceError[] = scopeErrors.concat(typeErrors, valueErrors);
 
       errors.sort((first, second) => first.loc - second.loc);
-      found.push({ source: module.source, errors });
+      found.push({ module, errors });
     }
 
     return found;
   }
 
-  private readonly isRecoverable(): boolean {
-    const hasBroken = this.program.builtins.some(
+  private readonly isRecoverable(program: Read<Program>): boolean {
+    const hasBroken = program.builtins.some(
       (builtin) => builtin.parsed.errors.length > 0,
     );
     if (hasBroken) {
       return false;
     }
 
-    return this.program.order.every((module) =>
-      this.isRecoverableModule(module),
+    return program.order.every((id) =>
+      this.isRecoverableModule(program.modules[id]),
     );
   }
 
-  private readonly isRecoverableModule(module: Module): boolean {
-    const declared = module.declaration?.errors ?? [];
-    const errors = module.errors.concat(declared);
+  private readonly isRecoverableModule(
+    module: Read<Module | undefined>,
+  ): boolean {
+    if (module == undefined) {
+      return true;
+    }
 
-    return errors.every((error) => kRecoverableCodes.includes(error.code));
+    const isOwnRecoverable = module.errors.every((error) =>
+      kRecoverableCodes.includes(error.code),
+    );
+    const declared = module.declaration?.errors;
+    const isDeclaredRecoverable =
+      declared == undefined ||
+      declared.every((error) => kRecoverableCodes.includes(error.code));
+
+    return isOwnRecoverable && isDeclaredRecoverable;
   }
 }

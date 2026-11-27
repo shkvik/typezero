@@ -1,0 +1,52 @@
+import {
+  BodySource,
+  FunctionPlace,
+  ParamKind,
+  ParamProperty,
+  PlainParam,
+} from "../../ast/types/ast.types.functions.tz";
+import { Span } from "../../ast/types/ast.types.span.tz";
+import { StmtKind } from "../../ast/types/ast.types.statements.tz";
+import { ClassMember, Decorator } from "./syntax.types.classes.tz";
+import { Expr } from "./syntax.types.expressions.tz";
+import { BlockStmt } from "./syntax.types.statements.tz";
+import { TypeParamDecl, TypeRef } from "./syntax.types.types.tz";
+
+export type DefaultedParam = {
+  readonly kind: ParamKind.Defaulted;
+  readonly defaultValue: Expr;
+};
+
+export type ParamForm = PlainParam | DefaultedParam;
+
+export type Param = {
+  readonly name: string;
+  readonly loc: int;
+  readonly type?: TypeRef;
+  readonly form: ParamForm;
+  readonly property?: ParamProperty;
+  readonly pattern?: Span;
+  readonly decorators: readonly Decorator[];
+};
+
+export type UnsafeMark = { readonly loc: int; readonly options?: Expr };
+
+export type FunctionDecl = {
+  readonly kind: StmtKind.Function;
+  readonly loc: int;
+  readonly name: string;
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly params: readonly Param[];
+  readonly returnType?: TypeRef;
+  readonly body?: BlockStmt;
+  readonly source?: Span;
+  readonly isArrow: boolean;
+  readonly concise: boolean;
+  readonly ownName: string;
+  readonly place: FunctionPlace;
+  readonly bodySource: BodySource;
+  readonly isGenerator: boolean;
+  readonly isAsync: boolean;
+  readonly role?: ClassMember;
+  readonly unsafe?: UnsafeMark;
+};

@@ -21,34 +21,39 @@ import { ClassMemberEntry } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private contractChecks(decl: ClassDecl, module: int): void {
-    if (decl.typeParams.length > 0) {
+    const tree = this.types.program.tree;
+
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
+    if (typeParams.length > 0) {
       return;
     }
 
-    const instance = this.resolver.classInstance(module, decl, []);
+    const instance = this.types.classInstance(module, decl, []);
     if (instance.kind != TypeKind.Instance) {
       return;
     }
 
     this.extendsCheck(decl, module);
-    const abstractMethodsErrors = this.overrides.abstractMethodsCheck(decl);
+    const abstractMethodsErrors = this.types.abstractMethodsCheck(decl);
 
-    this.reportAll(module, abstractMethodsErrors);
+    this.errors.writeAll(module, abstractMethodsErrors);
     this.abstractParentsCheck(decl, instance, module);
 
-    for (const ref of decl.interfaces) {
+    for (const ref of tree.typeRefsOf(decl.interfacesList)) {
       this.implementsCheck(decl, instance, ref, module);
     }
   }
 
-  private readonly extendsCheck(decl: ClassDecl, module: int): void {
-    const base = decl.base;
+  private extendsCheck(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
+    const base = tree.typeRefAt(decl.baseId);
     if (base == undefined) {
       return;
     }
 
-    const context = this.classes.contextOf(module, TypePlace.Base);
-    const type = this.resolver.resolve(base, context);
+    const context = this.types.contextOf(module, TypePlace.Base);
+    const type = this.types.resolve(base, context);
     if (type.kind != TypeKind.Object) {
       return;
     }
@@ -56,7 +61,7 @@ partial class ExpressionTypes {
     const word = base.name;
     const first = decl.name ?? "";
 
-    this.report(module, base.loc, Code.ExtendsNotClass, { word, first });
+    this.errors.write(module, base.loc, Code.ExtendsNotClass, { word, first });
   }
 
   private abstractParentsCheck(
@@ -64,38 +69,40 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (decl.isAbstract) {
       return;
     }
 
     const done = new Set<string>();
-    const parent = this.classes.parentOf(instance, decl);
+    const parent = this.types.parentOf(instance, decl);
 
-    for (const method of decl.methods) {
+    for (const method of tree.functionsOf(decl.methodsList)) {
       const hook = this.streamHookVariant(method, decl, parent, module);
       if (hook == undefined) {
         done.add(method.name);
       }
     }
 
-    const seen = new Set<ClassDecl>();
+    const seen = new Set<int>();
 
-    seen.add(decl);
-    let current: InstanceType | undefined = this.classes.parentOf(
+    seen.add(decl.id);
+    let current: InstanceType | undefined = this.types.parentOf(
       instance,
       decl,
     );
     let owner: ClassDecl | undefined = this.parentDeclOf(current);
 
     while (owner != undefined && current != undefined) {
-      if (seen.has(owner)) {
+      if (seen.has(owner.id)) {
         return;
       }
 
-      seen.add(owner);
+      seen.add(owner.id);
       this.abstractOwnerCheck(decl, owner, current, done, module);
 
-      const parent = this.classes.parentOf(current, owner);
+      const parent = this.types.parentOf(current, owner);
 
       current = parent;
       owner = this.parentDeclOf(parent);
@@ -119,14 +126,16 @@ partial class ExpressionTypes {
     done: Set<string>,
     module: int,
   ): void {
-    for (const method of owner.methods) {
+    const tree = this.types.program.tree;
+
+    for (const method of tree.functionsOf(owner.methodsList)) {
       const isAbstract = method.role?.method == MethodKind.Abstract;
-      if (!isAbstract && !this.classes.isStaticMethod(method)) {
+      if (!isAbstract && !this.types.isStaticMethod(method)) {
         done.add(method.name);
       }
     }
 
-    for (const method of owner.methods) {
+    for (const method of tree.functionsOf(owner.methodsList)) {
       const isAbstract = method.role?.method == MethodKind.Abstract;
       if (isAbstract && !done.has(method.name)) {
         this.reportAbstract(decl, owner, instance, method, module);
@@ -155,9 +164,9 @@ partial class ExpressionTypes {
 
     const first = decl.name ?? "";
     const second = owner.name ?? "";
-    const other = this.classes.variantText(method, type);
+    const other = this.types.variantText(method, type);
 
-    this.report(module, decl.loc, Code.AbstractNotImplemented, {
+    this.errors.write(module, decl.loc, Code.AbstractNotImplemented, {
       first,
       second,
       other,
@@ -170,20 +179,20 @@ partial class ExpressionTypes {
     ref: TypeRef,
     module: int,
   ): void {
-    const context = this.classes.contextOf(module, TypePlace.Base);
-    const type = this.resolver.resolve(ref, context);
+    const context = this.types.contextOf(module, TypePlace.Base);
+    const type = this.types.resolve(ref, context);
     const word = ref.name;
 
     if (
       type.kind == TypeKind.Instance &&
-      !this.modules.isLibraryModule(type.module)
+      !this.types.isLibraryModule(type.module)
     ) {
-      const implementsClassError = this.overrides.implementsClassError(
+      const implementsClassError = this.types.implementsClassError(
         decl,
         ref,
       );
 
-      return this.reportFound(module, implementsClassError);
+      return this.errors.writeFound(module, implementsClassError);
     }
     if (type.kind != TypeKind.Object) {
       return;
@@ -191,8 +200,10 @@ partial class ExpressionTypes {
 
     const done = new Set<string>();
 
-    for (const field of type.fields) {
-      const same = type.fields.filter((one) => one.name == field.name);
+    for (const field of this.types.store.fieldsOf(type)) {
+      const same = this.types.store
+        .fieldsOf(type)
+        .filter((one) => one.name == field.name);
       if (same.length == 1) {
         this.contractMember(decl, instance, word, field, module);
       }
@@ -219,13 +230,13 @@ partial class ExpressionTypes {
     }
     if (entry == undefined) {
       if (!field.optional) {
-        const missingMemberError = this.overrides.missingMemberError(
+        const missingMemberError = this.types.classOverrideMissingMemberError(
           decl,
           iface,
           field,
         );
 
-        this.reportFound(module, missingMemberError);
+        this.errors.writeFound(module, missingMemberError);
       }
 
       return;
@@ -241,18 +252,23 @@ partial class ExpressionTypes {
       return;
     }
 
-    const wanted = this.objects.fieldWanted(field);
+    const wanted = this.types.fieldWanted(field);
     const word = field.name;
     if (wanted.kind != TypeKind.Function) {
-      return this.report(module, method.loc, Code.ImplementsFieldAsMethod, {
-        word,
-        first: iface,
-        second: first,
-        other: this.text.of(wanted),
-      });
+      return this.errors.write(
+        module,
+        method.loc,
+        Code.ImplementsFieldAsMethod,
+        {
+          word,
+          first: iface,
+          second: first,
+          other: this.types.typeText(wanted),
+        },
+      );
     }
     if (!field.readonly) {
-      return this.report(module, method.loc, Code.ImplementsMustField, {
+      return this.errors.write(module, method.loc, Code.ImplementsMustField, {
         word,
         first: iface,
         second: first,
@@ -276,18 +292,18 @@ partial class ExpressionTypes {
 
     const type = this.fieldTypeOf(entry, own);
     const isPlain =
-      this.classes.isScalarField(type) &&
-      this.classes.isScalarField(field.type);
-    if (type == field.type || !isPlain) {
+      this.types.isScalarField(type) &&
+      this.types.isScalarField(field.type);
+    if (type.id == field.type.id || !isPlain) {
       return;
     }
 
-    this.report(module, own.loc, Code.ImplementsFieldType, {
+    this.errors.write(module, own.loc, Code.ImplementsFieldType, {
       word: field.name,
       first,
       second: iface,
-      other: this.text.of(field.type),
-      place: this.text.of(type),
+      other: this.types.typeText(field.type),
+      place: this.types.typeText(type),
     });
   }
 
@@ -304,19 +320,19 @@ partial class ExpressionTypes {
     if (wanted.kind != TypeKind.Function || type.kind != TypeKind.Function) {
       return;
     }
-    if (!this.classes.isSameParameters(type, wanted)) {
-      this.report(module, method.loc, Code.ImplementsParameters, {
+    if (!this.types.isSameParameters(type, wanted)) {
+      this.errors.write(module, method.loc, Code.ImplementsParameters, {
         word: field.name,
         first,
         second: iface,
-        other: this.text.of(wanted),
-        place: this.classes.variantText(method, type),
+        other: this.types.typeText(wanted),
+        place: this.types.variantText(method, type),
       });
 
       return;
     }
 
-    const contractResultError = this.overrides.contractResultError(
+    const contractResultError = this.types.contractResultError(
       method,
       type,
       wanted,
@@ -324,7 +340,7 @@ partial class ExpressionTypes {
       first,
     );
 
-    this.reportFound(module, contractResultError);
+    this.errors.writeFound(module, contractResultError);
   }
 
   private superMethodCall(
@@ -333,19 +349,24 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const owner = this.ownerClasses[this.ownerClasses.length - 1];
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
 
-    if (owner == undefined || owner.decl.typeParams.length > 0) {
+    const owner = this.ownerClasses[this.ownerClasses.length - 1];
+    const error = this.types.store.plain(TypeKind.Error);
+
+    if (
+      owner == undefined ||
+      tree.typeParamsOf(owner.decl.typeParamsList).length > 0
+    ) {
       return error;
     }
 
-    const self = this.resolver.classInstance(owner.module, owner.decl, []);
+    const self = this.types.classInstance(owner.module, owner.decl, []);
     if (self.kind != TypeKind.Instance) {
       return error;
     }
 
-    const parent = this.classes.parentOf(self, owner.decl);
+    const parent = this.types.parentOf(self, owner.decl);
     if (parent == undefined) {
       return error;
     }
@@ -356,7 +377,7 @@ partial class ExpressionTypes {
     if (isAbstract && lookup.entry != undefined) {
       const first = lookup.entry.owner.name ?? "";
 
-      this.report(module, member.loc, Code.SuperAbstract, {
+      this.errors.write(module, member.loc, Code.SuperAbstract, {
         word: member.name,
         first,
       });

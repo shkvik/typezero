@@ -26,26 +26,26 @@ partial class ExpressionTypes {
     if (target != undefined && target.kind == TypeKind.Json) {
       return this.jsonObject(expr, target, module);
     }
-    if (target != undefined && this.dictionaries.isRecord(target)) {
+    if (target != undefined && this.types.isRecord(target)) {
       return this.recordObject(expr, target, module);
     }
 
     const draft = this.objectKeys(expr, module);
 
-    const uniqueErrors = this.objects.uniqueErrors(draft);
+    const uniqueErrors = this.types.uniqueErrors(draft);
 
-    this.reportAll(module, uniqueErrors);
+    this.errors.writeAll(module, uniqueErrors);
 
-    if (draft.deferred && this.objects.hasMethods(expr)) {
+    if (draft.deferred && this.types.hasMethods(expr)) {
       return this.methodObject(expr, target, module);
     }
-    if (draft.deferred && this.shapes.isSpreadOnly(expr)) {
+    if (draft.deferred && this.types.isSpreadOnly(expr)) {
       return this.spreadObject(expr, target, module);
     }
     if (draft.deferred) {
       this.keyedLiteralCheck(expr, target, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (target == undefined) {
       return this.inferredObject(draft, module);
@@ -70,13 +70,17 @@ partial class ExpressionTypes {
       return this.inferredObject(draft, module);
     }
 
-    const member = this.literalMember(draft, target.parts, module);
+    const member = this.literalMember(
+      draft,
+      this.types.store.partsOf(target),
+      module,
+    );
     if (member != undefined) {
       return this.targetedObject(expr, draft, member, module);
     }
 
-    const record = target.parts.find((part) =>
-      this.dictionaries.isRecord(part),
+    const record = this.types.store.partsOf(target).find((part) =>
+      this.types.isRecord(part),
     );
     if (record != undefined) {
       return this.recordObject(expr, record, module);
@@ -86,9 +90,11 @@ partial class ExpressionTypes {
   }
 
   private objectKeys(expr: ObjectLitExpr, module: int): ObjectDraft {
+    const tree = this.types.program.tree;
+
     const draft: ObjectDraft = { entries: [], typed: true, deferred: false };
 
-    for (const property of expr.props) {
+    for (const property of tree.propertiesOf(expr.propsList)) {
       const entry = this.keyEntry(property, draft, module);
 
       draft.entries.push(entry);
@@ -102,8 +108,10 @@ partial class ExpressionTypes {
     draft: ObjectDraft,
     module: int,
   ): FieldEntry {
+    const tree = this.types.program.tree;
+
     const name = property.name;
-    const value = property.value;
+    const value = tree.exprOf(property.valueId);
     const form = property.form;
 
     switch (form.kind) {
@@ -115,15 +123,15 @@ partial class ExpressionTypes {
       case PropertyKind.Method:
         draft.deferred = true;
         const literalMethodError =
-          this.genericCalls.literalMethodCheck(property);
+          this.types.literalMethodCheck(property);
 
-        this.reportFound(module, literalMethodError);
+        this.errors.writeFound(module, literalMethodError);
 
         return { property, name, value, named: true };
       case PropertyKind.Defaulted: {
-        const fallback = this.objects.fallbackOf(value);
+        const fallback = this.types.fallbackOf(value);
 
-        this.report(module, property.loc, Code.DefaultedProperty, {
+        this.errors.write(module, property.loc, Code.DefaultedProperty, {
           word: name,
         });
         draft.typed = false;
@@ -131,7 +139,12 @@ partial class ExpressionTypes {
         return { property, name, value: fallback, named: true };
       }
       case PropertyKind.Computed:
-        return this.computedEntry(property, form.key, draft, module);
+        return this.computedEntry(
+          property,
+          tree.exprOf(form.keyId),
+          draft,
+          module,
+        );
       default:
         return { property, name, value, named: true };
     }
@@ -143,7 +156,9 @@ partial class ExpressionTypes {
     draft: ObjectDraft,
     module: int,
   ): FieldEntry {
-    const value = property.value;
+    const tree = this.types.program.tree;
+
+    const value = tree.exprOf(property.valueId);
     const keyType = this.typed(key, undefined, module);
     const constant = this.constantKey(key, module);
     if (constant != undefined) {
@@ -152,7 +167,7 @@ partial class ExpressionTypes {
 
     const entry: FieldEntry = { property, name: "", value, named: false };
     const isUnknown = keyType.kind == TypeKind.Error;
-    if (isUnknown || this.objects.isLiteralKeys(keyType)) {
+    if (isUnknown || this.types.isLiteralKeys(keyType)) {
       draft.deferred = true;
 
       return entry;
@@ -160,23 +175,26 @@ partial class ExpressionTypes {
 
     draft.typed = false;
 
-    const keyError = this.objectMembers.keyError(key, keyType);
+    const keyError = this.types.objectMemberKeyError(key, keyType);
 
-    this.reportFound(module, keyError);
+    this.errors.writeFound(module, keyError);
 
     return entry;
   }
 
   private constantKey(key: Expr, module: int): string | undefined {
+    const tree = this.types.program.tree;
+
     switch (key.kind) {
       case ExprKind.StringLit:
         return key.value;
       case ExprKind.Template:
-        if (key.exprs.length > 0) {
+        const exprs = tree.exprsOf(key.exprsList);
+        if (exprs.length > 0) {
           return undefined;
         }
 
-        return key.quasis[0];
+        return tree.textsOf(key.quasisList)[0];
       case ExprKind.Name: {
         const literal = this.doorOfName(key, module)?.literal;
         if (literal == undefined || literal.kind != LiteralKind.String) {
@@ -208,13 +226,13 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const voidFieldErrors = this.objectMembers.voidFieldCheck(
+      const voidFieldErrors = this.types.voidFieldCheck(
         entry.value,
         type,
         entry.name,
       );
 
-      this.reportAll(module, voidFieldErrors);
+      this.errors.writeAll(module, voidFieldErrors);
 
       if (!this.isUsableField(entry, type, module)) {
         draft.typed = false;
@@ -229,16 +247,16 @@ partial class ExpressionTypes {
     }
 
     if (!draft.typed) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.store.objectOf(fields);
+    return this.types.store.objectOf(fields);
   }
 
-  private readonly isUsableField(entry: FieldEntry, type: Type, module: int): boolean {
-    const checked = this.objectMembers.isUsableField(entry, type);
+  private isUsableField(entry: FieldEntry, type: Type, module: int): boolean {
+    const checked = this.types.isUsableField(entry, type);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -254,38 +272,40 @@ partial class ExpressionTypes {
     }
 
     for (const entry of draft.entries) {
-      const field = target.fields.find((one) => one.name == entry.name);
+      const field = this.types.store
+        .fieldsOf(target)
+        .find((one) => one.name == entry.name);
       if (!entry.named || field == undefined) {
-        const noFieldError = this.objectMembers.noFieldError(entry, target);
+        const noFieldError = this.types.noFieldError(entry, target);
 
-        this.reportFound(module, noFieldError);
+        this.errors.writeFound(module, noFieldError);
         this.typed(entry.value, undefined, module);
 
         continue;
       }
 
-      const wanted = this.objects.fieldWanted(field);
-      const place = this.objects.fieldPlace(entry.name);
+      const wanted = this.types.fieldWanted(field);
+      const place = this.types.fieldPlace(entry.name);
 
       this.checked(entry.value, wanted, module, place);
     }
 
-    const first = this.text.of(target);
+    const first = this.types.typeText(target);
 
-    for (const field of target.fields) {
+    for (const field of this.types.store.fieldsOf(target)) {
       const isGiven = draft.entries.some((entry) => entry.name == field.name);
-      if (!isGiven && !this.objects.isOptionalField(field)) {
-        this.report(module, expr.loc, Code.FieldMissing, {
+      if (!isGiven && !this.types.isOptionalField(field)) {
+        this.errors.write(module, expr.loc, Code.FieldMissing, {
           word: field.name,
           first,
         });
       }
     }
 
-    const overloaded = this.objects.overloadedNames(target);
+    const overloaded = this.types.overloadedNames(target);
 
     for (const word of overloaded) {
-      this.report(module, expr.loc, Code.LiteralOverloadsTarget, {
+      this.errors.write(module, expr.loc, Code.LiteralOverloadsTarget, {
         first,
         word,
       });
@@ -332,7 +352,7 @@ partial class ExpressionTypes {
     member: Type,
     module: int,
   ): int | undefined {
-    if (!this.objects.hasFittingNames(draft, member)) {
+    if (!this.types.hasFittingNames(draft, member)) {
       return undefined;
     }
 
@@ -359,7 +379,9 @@ partial class ExpressionTypes {
       return 0;
     }
 
-    const field = member.fields.find((one) => one.name == entry.name);
+    const field = this.types.store
+      .fieldsOf(member)
+      .find((one) => one.name == entry.name);
     const tag = this.propertyTag(entry.value, module);
     if (field == undefined || tag == undefined) {
       return 0;
@@ -367,8 +389,8 @@ partial class ExpressionTypes {
 
     const fieldType = this.types.definedType(field.type);
     const isChoice =
-      this.objects.isLiteralSet(fieldType) || fieldType.kind == TypeKind.Union;
-    const isConvertible = this.objects.isTagConvertible(tag, fieldType);
+      this.types.isLiteralSet(fieldType) || fieldType.kind == TypeKind.Union;
+    const isConvertible = this.types.isTagConvertible(tag, fieldType);
     if (!isConvertible && isChoice) {
       return undefined;
     }
@@ -378,8 +400,10 @@ partial class ExpressionTypes {
 
     const hasAtoms =
       fieldType.kind == TypeKind.Union &&
-      fieldType.parts.some((part) => part.kind == TypeKind.Literal);
-    if (this.objects.isLiteralSet(fieldType) || hasAtoms) {
+      this.types.store
+        .partsOf(fieldType)
+        .some((part) => part.kind == TypeKind.Literal);
+    if (this.types.isLiteralSet(fieldType) || hasAtoms) {
       return 1;
     }
 
@@ -398,7 +422,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.store.literal(literal.kind, literal.text);
+    return this.types.store.literal(literal.kind, literal.text);
   }
 
   private knownLiteralSet(value: Expr, module: int): Type | undefined {
@@ -407,7 +431,7 @@ partial class ExpressionTypes {
     }
 
     const type = this.valueOfName(value, module);
-    if (type == undefined || !this.objects.isLiteralSet(type)) {
+    if (type == undefined || !this.types.isLiteralSet(type)) {
       return undefined;
     }
 

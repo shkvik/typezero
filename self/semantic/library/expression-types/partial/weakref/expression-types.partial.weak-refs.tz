@@ -19,77 +19,103 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     if (
-      !this.weakRefs.isWeakRefName(name) ||
-      this.modules.isLibraryModule(module)
+      !this.types.isWeakRefName(name) ||
+      this.types.isLibraryModule(module)
     ) {
       return undefined;
     }
 
-    const value = expr.args[0];
-    if (value == undefined || expr.args.length != 1 || value.spread) {
-      this.reportFound(module, this.weakRefs.oneObjectError(expr.loc));
-      this.looseArguments(expr.args, module);
+    const value = tree.argumentsOf(expr.argsList)[0];
+    if (
+      value == undefined ||
+      tree.argumentsOf(expr.argsList).length != 1 ||
+      value.spread
+    ) {
+      this.errors.writeFound(module, this.types.oneObjectError(expr.loc));
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (expr.typeArgs.length > 1) {
-      this.reportFound(module, this.weakRefs.typeArgumentsError(expr.loc));
-      this.looseArguments(expr.args, module);
+    const typeArgs = tree.typeRefsOf(expr.typeArgsList);
+    if (typeArgs.length > 1) {
+      this.errors.writeFound(module, this.types.typeArgumentsError(expr.loc));
+      const argsItem = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(argsItem, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const written = this.writtenArguments(expr.typeArgs, module);
+    const written = this.writtenArguments(
+      tree.typeRefsOf(expr.typeArgsList),
+      module,
+    );
     if (written == undefined) {
-      this.looseArguments(expr.args, module);
+      const exprArgs = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(exprArgs, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const expected = written[0] ?? this.weakTargetOf(wanted);
-    const given = this.typed(value.expr, expected, module);
+    const exprExpr = tree.exprOf(value.exprId);
+    const given = this.typed(exprExpr, expected, module);
     const object = expected ?? given;
     if (given.kind == TypeKind.Error) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const targetError = this.weakRefs.targetError(value.expr.loc, object);
+    const targetError = this.types.targetError(
+      tree.exprOf(value.exprId).loc,
+      object,
+    );
     if (targetError != undefined) {
-      this.reportFound(module, targetError);
+      this.errors.writeFound(module, targetError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    this.coerce(value.expr, given, object, module, "");
+    const valueExpr = tree.exprOf(value.exprId);
+
+    this.coerce(valueExpr, given, object, module, "");
 
     return this.weakRefOf(target, object);
   }
 
-  private readonly weakTargetOf(wanted: Type | undefined): Type | undefined {
+  private weakTargetOf(wanted: Type | undefined): Type | undefined {
     if (wanted == undefined) {
       return undefined;
     }
 
     const base = this.types.definedType(wanted);
-    if (base.kind != TypeKind.Instance || !this.weakRefs.isWeakRef(base)) {
+    if (base.kind != TypeKind.Instance || !this.types.isWeakRef(base)) {
       return undefined;
     }
 
-    return base.args[0];
+    return this.types.store.argsOf(base)[0];
   }
 
-  private readonly weakRefOf(target: ValueTarget, object: Type): Type {
+  private weakRefOf(target: ValueTarget, object: Type): Type {
+    const tree = this.types.program.tree;
+
     const home = target.module;
-    const opened = this.program.modules[home];
-    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    const opened = this.types.program.modules[home];
+    const declared = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == target.loc);
     if (declared == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const made = this.resolver.declaredInstance(home, declared, [object]);
+    const made = this.types.declaredInstance(home, declared, [object]);
 
-    return made ?? this.store.plain(TypeKind.Error);
+    return made ?? this.types.store.plain(TypeKind.Error);
   }
 
   private weakRefCall(
@@ -98,38 +124,46 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     if (
-      !this.weakRefs.isWeakRef(instance) ||
-      this.weakRefs.isDeref(member.name)
+      !this.types.isWeakRef(instance) ||
+      this.types.isDeref(member.name)
     ) {
       return undefined;
     }
 
-    const noMethodError = this.weakRefs.noMethodError(
+    const noMethodError = this.types.noMethodError(
       member.loc,
       member.name,
       instance,
     );
 
-    this.reportFound(module, noMethodError);
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, noMethodError);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly weakRefRead(
+  private weakRefRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    if (!this.weakRefs.isWeakRef(instance)) {
+    if (!this.types.isWeakRef(instance)) {
       return undefined;
     }
 
-    const valueError = this.weakRefs.readError(expr.loc, expr.name, instance);
+    const valueError = this.types.weakRefReadError(
+      expr.loc,
+      expr.name,
+      instance,
+    );
 
-    this.reportFound(module, valueError);
+    this.errors.writeFound(module, valueError);
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 }

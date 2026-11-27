@@ -29,18 +29,18 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const list = this.record(module)?.destinations.get(variable.decl.loc);
+    const list = this.destinationsOf(module, variable.decl.loc);
     let chosen: Type | undefined = undefined;
 
-    for (const one of list ?? []) {
+    for (const one of list) {
       const type = this.destinationType(one, module);
       if (type == undefined || !this.isLiteralPlace(init, type, module)) {
         continue;
       }
-      if (this.parts.mentionsParameter(type)) {
+      if (this.types.mentionsParameter(type)) {
         return undefined;
       }
-      if (chosen != undefined && chosen != type && !isResult) {
+      if (chosen != undefined && chosen.id != type.id && !isResult) {
         return undefined;
       }
 
@@ -68,30 +68,32 @@ partial class ExpressionTypes {
     init: Expr,
     module: int,
   ): Type[] {
+    const tree = this.types.program.tree;
+
     const isLiteral =
       init.kind == ExprKind.ObjectLit || init.kind == ExprKind.ArrayLit;
-    if (!isLiteral || variable.decl.typeAnn != undefined) {
+    if (!isLiteral || tree.typeRefAt(variable.decl.typeAnnId) != undefined) {
       return [];
     }
 
-    const list = this.record(module)?.destinations.get(variable.decl.loc);
+    const list = this.destinationsOf(module, variable.decl.loc);
     const places: Type[] = [];
 
-    for (const one of list ?? []) {
+    for (const one of list) {
       const type = this.destinationType(one, module);
       if (type == undefined || !this.isLiteralPlace(init, type, module)) {
         continue;
       }
-      if (this.parts.mentionsParameter(type)) {
+      if (this.types.mentionsParameter(type)) {
         return [];
       }
-      if (!places.includes(type)) {
+      if (!places.some((one) => one.id == type.id)) {
         places.push(type);
       }
     }
 
     const common = places.find((candidate) =>
-      places.every((other) => this.relation.converts(candidate, other)),
+      places.every((other) => this.types.converts(candidate, other)),
     );
     if (places.length < 2 || common != undefined) {
       return [];
@@ -100,34 +102,42 @@ partial class ExpressionTypes {
     return places;
   }
 
-  private readonly chosenPlace(chosen: Type | undefined, type: Type): Type | undefined {
-    if (chosen == undefined || chosen == type) {
+  private chosenPlace(chosen: Type | undefined, type: Type): Type | undefined {
+    if (chosen == undefined || chosen.id == type.id) {
       return type;
     }
     if (chosen.kind != TypeKind.Result || type.kind != TypeKind.Result) {
       return undefined;
     }
 
-    const value = this.resultHalfJoin(chosen.value, type.value);
-    const error = this.resultHalfJoin(chosen.error, type.error);
+    const value = this.resultHalfJoin(
+      this.types.store.valueOf(chosen),
+      this.types.store.valueOf(type),
+    );
+    const error = this.resultHalfJoin(
+      this.types.store.errorOf(chosen),
+      this.types.store.errorOf(type),
+    );
     if (value == undefined || error == undefined) {
       return undefined;
     }
 
-    return this.store.resultOf(value, error);
+    return this.types.store.resultOf(value, error);
   }
 
   private readonly isResultLiteral(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Call) {
       return false;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Name) {
       return false;
     }
 
-    const args = expr.args;
+    const args = tree.argumentsOf(expr.argsList);
     const isPlain = args.length <= 1 && args.every((arg) => !arg.spread);
 
     return isPlain && this.isResultMakerCall(callee, module);
@@ -139,14 +149,14 @@ partial class ExpressionTypes {
     const trial = this.typed(init, wanted, module);
     const isClean = this.errors.endTrial();
 
-    return isClean && this.relation.converts(trial, wanted);
+    return isClean && this.types.converts(trial, wanted);
   }
 
-  private readonly placedType(given: Type, destination: Type | undefined): Type {
+  private placedType(given: Type, destination: Type | undefined): Type {
     if (destination == undefined || destination.kind == TypeKind.Union) {
       return given;
     }
-    if (!this.relation.converts(given, destination)) {
+    if (!this.types.converts(given, destination)) {
       return given;
     }
 
@@ -163,7 +173,11 @@ partial class ExpressionTypes {
     return this.writtenDestination(one, context, module);
   }
 
-  private readonly isLiteralPlace(init: Expr, type: Type, module: int): boolean {
+  private readonly isLiteralPlace(
+    init: Expr,
+    type: Type,
+    module: int,
+  ): boolean {
     if (this.isResultLiteral(init, module)) {
       return type.kind == TypeKind.Result;
     }
@@ -171,7 +185,9 @@ partial class ExpressionTypes {
       return type.kind == TypeKind.Array;
     }
     if (type.kind == TypeKind.Union) {
-      return type.parts.some((part) => part.kind == TypeKind.Object);
+      return this.types.store
+        .partsOf(type)
+        .some((part) => part.kind == TypeKind.Object);
     }
 
     return type.kind == TypeKind.Object;
@@ -179,9 +195,11 @@ partial class ExpressionTypes {
 
   private writtenDestination(
     one: Destination,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const written = one.written;
     const fn = one.fn;
 
@@ -191,16 +209,16 @@ partial class ExpressionTypes {
           return undefined;
         }
 
-        return this.resolver.value(written, context);
+        return this.types.value(written, context);
       case DestinationKind.Returned: {
-        const result = fn?.returnType;
+        const result = tree.typeRefAt(fn?.returnTypeId);
         if (fn == undefined || result == undefined) {
           return undefined;
         }
 
-        const type = this.resolver.returnType(result, context);
+        const type = this.types.returnType(result, context);
 
-        return this.functions.innerResult(type, fn);
+        return this.types.innerResult(type, fn);
       }
       case DestinationKind.Assigned:
         return this.assignedDestination(one, module);
@@ -221,7 +239,9 @@ partial class ExpressionTypes {
   }
 
   private argumentDestination(one: Destination, module: int): Type | undefined {
-    const callee = one.call?.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprAt(one.call?.calleeId);
     if (callee == undefined) {
       return undefined;
     }
@@ -247,8 +267,8 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const shape = type.shape;
-    const params = this.calls.directParams(shape.params, shape.self);
+    const shape = this.types.store.functionShapeOf(type);
+    const params = this.types.directParams(shape.params, shape.self);
 
     return params[one.index]?.type;
   }
@@ -258,14 +278,23 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    if (member.object.kind != ExprKind.Name) {
+    const tree = this.types.program.tree;
+
+    const memberObject = tree.exprOf(member.objectId);
+    if (memberObject.kind != ExprKind.Name) {
       return undefined;
     }
 
-    const peeked = this.peekType(member.object, module);
+    const objectExpr = tree.exprOf(member.objectId);
+    const peeked = this.peekType(objectExpr, module);
 
     const object = this.types.definedType(peeked);
 
-    return this.destinations.memberParameter(object, member.name, one.index);
+    return this.destinations.memberParameter(
+      this.types.store,
+      object,
+      member.name,
+      one.index,
+    );
   }
 }

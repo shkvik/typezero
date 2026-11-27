@@ -1,16 +1,16 @@
-import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  ExpressionTypes,
+} from "../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   CallArgument,
   Expr,
   ExprKind,
-  FunctionExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   FunctionParameter,
   FunctionShape,
-  FunctionType,
   LiteralKind,
   Type,
   TypeKind,
@@ -19,7 +19,9 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import { kNoPlace } from "../../../code/expression-types/const/expression-types.const.tz";
+import {
+  kNoPlace,
+} from "../../../code/expression-types/const/expression-types.const.tz";
 import {
   ArgumentForm,
   CallTarget,
@@ -27,32 +29,35 @@ import {
   GenericDraft,
   GenericTarget,
 } from "../../../code/expression-types/types/expression-types.types.tz";
+import { AstList } from "../../../../program/ast/types/ast.types.span.tz";
 
 partial class ExpressionTypes {
   private genericCall(
     target: Own<GenericTarget>,
+    list: AstList | undefined,
     args: Own<CallArgument[]>,
     wanted: Type | undefined,
     module: int,
   ): Type {
     const hasLists = target.params.some((param) =>
-      this.parts.isListParameter(param),
+      this.types.isListParameter(param),
     );
     const shape = target.shape;
     const isOpaque = this.hasOperationParameter(shape);
     if (hasLists) {
       this.splitListsCheck(target, module);
     }
-    if (hasLists || isOpaque || this.generics.isListRest(shape)) {
-      return this.store.plain(TypeKind.Error);
+    if (hasLists || isOpaque || this.types.isListRest(shape)) {
+      return this.types.store.plain(TypeKind.Error);
     }
     if (!this.isGenericArity(target, args, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const draft = this.generics.genericDraft(target, args, wanted);
+    const isExplicit = target.typeArgs.length > 0;
+    const draft = this.types.genericDraft(target, list, args, wanted);
 
-    if (target.typeArgs.length > 0) {
+    if (isExplicit) {
       return this.explicitCall(draft, module);
     }
 
@@ -65,19 +70,18 @@ partial class ExpressionTypes {
     return this.boundCall(draft, module);
   }
 
-  private readonly splitListsCheck(target: Own<GenericTarget>, module: int): void {
+  private splitListsCheck(target: Read<GenericTarget>, module: int): void {
     if (target.typeArgs.length > 0 || target.isLenient) {
       return;
     }
 
-    const lists = this.genericCalls.splitLists(target.shape);
-    const draft = this.generics.genericDraft(target, [], undefined);
+    const lists = this.types.splitLists(target.shape);
 
     for (const param of target.params) {
-      if (lists.includes(param)) {
-        const error = this.genericCalls.uninferredError(draft, param);
+      if (lists.some((one) => one.id == param.id)) {
+        const error = this.types.uninferredError(target, param);
 
-        this.reportFound(module, error);
+        this.errors.writeFound(module, error);
       }
     }
   }
@@ -87,9 +91,11 @@ partial class ExpressionTypes {
     args: Read<CallArgument[]>,
     module: int,
   ): boolean {
-    const call = this.generics.genericCallTarget(target);
-    const fixed = this.calls.fixedCount(call);
-    const limit = this.calls.spreadLimit(call, fixed, args.length);
+    const tree = this.types.program.tree;
+
+    const call = this.types.genericCallTarget(target);
+    const fixed = this.types.callFixedCount(call);
+    const limit = this.types.spreadLimit(call, fixed, args.length);
     const spread = args.find((arg, index) => arg.spread && index < limit);
     if (spread != undefined && !this.isArraySpread(spread, module)) {
       return false;
@@ -98,13 +104,18 @@ partial class ExpressionTypes {
       return false;
     }
     if (spread != undefined) {
-      this.report(module, spread.expr.loc, Code.SpreadNotRest, kNoDetails);
+      this.errors.write(
+        module,
+        tree.exprOf(spread.exprId).loc,
+        Code.SpreadNotRest,
+        kNoDetails,
+      );
       this.looseArguments(args, module);
 
       return false;
     }
 
-    const least = this.calls.leastArguments(call);
+    const least = this.types.leastArguments(call);
     const most = call.params.length;
     const count = args.length;
     const isTooMany = !call.rest && count > most;
@@ -115,16 +126,19 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const word = this.calls.argumentCountText(least, most, call.rest);
+    const word = this.types.argumentCountText(least, most, call.rest);
     const other = `${count}`;
 
-    this.report(module, target.loc, Code.ArgumentCount, { word, other });
+    this.errors.write(module, target.loc, Code.ArgumentCount, { word, other });
 
     return false;
   }
 
   private isArraySpread(spread: CallArgument, module: int): boolean {
-    const type = this.typed(spread.expr, undefined, module);
+    const tree = this.types.program.tree;
+
+    const expr = tree.exprOf(spread.exprId);
+    const type = this.typed(expr, undefined, module);
 
     return type.kind == TypeKind.Array;
   }
@@ -135,9 +149,9 @@ partial class ExpressionTypes {
     const total = target.params.length;
     if (written.length > total) {
       const typeArgumentCountErrors =
-        this.genericCalls.typeArgumentCountErrors(target);
+        this.types.typeArgumentCountErrors(target);
 
-      this.reportAll(module, typeArgumentCountErrors);
+      this.errors.writeAll(module, typeArgumentCountErrors);
 
       draft.isInferred = false;
     }
@@ -152,7 +166,7 @@ partial class ExpressionTypes {
     for (let index = 0; index < count; index++) {
       const ref = written[index];
       if (ref != undefined) {
-        const type = this.resolver.resolve(ref, context);
+        const type = this.types.resolve(ref, context);
 
         draft.bound.set(index, type);
       }
@@ -163,7 +177,7 @@ partial class ExpressionTypes {
     if (!draft.isInferred) {
       this.uncheckedArguments(draft, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.rememberTypeArguments(draft, module);
@@ -176,7 +190,7 @@ partial class ExpressionTypes {
       isLenient: target.isLenient,
     };
 
-    this.argumentsCheck(draft.args, call, module);
+    this.argumentsCheck(draft.argsList, draft.args, call, module);
 
     return shape.result;
   }
@@ -196,17 +210,15 @@ partial class ExpressionTypes {
     arg: CallArgument,
     module: int,
   ): void {
-    const expr = arg.expr;
-    const pattern = this.generics.patternAt(
-      draft.target.shape,
-      index,
-      arg.spread,
-    );
+    const tree = this.types.program.tree;
+
+    const expr = tree.exprOf(arg.exprId);
+    const pattern = this.types.patternAt(draft.target.shape, index, arg.spread);
     const form = this.argumentForm(draft, expr, pattern, module);
     switch (form) {
       case ArgumentForm.Plain: {
         const shape = draft.target.shape;
-        const slot = this.generics.slotAt(shape, index, arg.spread);
+        const slot = this.types.slotAt(shape, index, arg.spread);
 
         return this.plainArgument(draft, index, expr, slot, module);
       }
@@ -218,14 +230,20 @@ partial class ExpressionTypes {
 
         return;
       case ArgumentForm.Shape: {
-        const error = this.store.plain(TypeKind.Error);
+        const error = this.types.store.plain(TypeKind.Error);
         const shape = this.literalShapeOf(expr) ?? error;
         const isWhole = this.isWholeArgument(expr, shape, module);
         const strength = CandidateStrength.Weak;
 
         draft.literals.push(index);
 
-        return this.inferArgument(draft.inference, pattern, shape, strength, isWhole);
+        return this.inferArgument(
+          draft.inference,
+          pattern,
+          shape,
+          strength,
+          isWhole,
+        );
       }
       default: {
         if (draft.target.isLenient && this.isSkippedNull(expr, module)) {
@@ -244,12 +262,18 @@ partial class ExpressionTypes {
 
         draft.given.set(index, given);
 
-        return this.inferArgument(draft.inference, pattern, inferred, strength, isWhole);
+        return this.inferArgument(
+          draft.inference,
+          pattern,
+          inferred,
+          strength,
+          isWhole,
+        );
       }
     }
   }
 
-  private readonly optionalGiven(
+  private optionalGiven(
     draft: Read<GenericDraft>,
     index: int,
     pattern: Type,
@@ -300,7 +324,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const literal = this.store.literal(LiteralKind.String, expr.value);
+    const literal = this.types.store.literal(LiteralKind.String, expr.value);
     const given = this.checked(expr, literal, module, kNoPlace);
     const set = draft.inference;
     const strength = CandidateStrength.Strong;
@@ -311,7 +335,7 @@ partial class ExpressionTypes {
     this.inferArgument(set, pattern, literal, strength, false);
   }
 
-  private readonly argumentForm(
+  private argumentForm(
     draft: Read<GenericDraft>,
     expr: Expr,
     pattern: Type,
@@ -321,7 +345,7 @@ partial class ExpressionTypes {
     if (!this.isMentioning(pattern, params)) {
       return ArgumentForm.Plain;
     }
-    if (this.generics.isLiteralText(expr, pattern, params)) {
+    if (this.types.isLiteralText(expr, pattern, params)) {
       return ArgumentForm.LiteralText;
     }
     if (this.isContextual(expr, module)) {
@@ -343,217 +367,11 @@ partial class ExpressionTypes {
     return ArgumentForm.Inferred;
   }
 
-  private contextualArguments(draft: GenericDraft, module: int): void {
-    for (const index of draft.contextual.slice()) {
-      const arg = draft.args[index];
-      if (arg != undefined) {
-        this.contextualArgument(draft, index, arg, module);
-      }
-    }
-  }
-
-  private contextualArgument(
-    draft: GenericDraft,
-    index: int,
-    arg: CallArgument,
-    module: int,
-  ): void {
-    const expr = arg.expr;
-    const pattern = this.generics.patternAt(
-      draft.target.shape,
-      index,
-      arg.spread,
-    );
-    const bound = this.generics.boundById(draft);
-    const partial = this.resolver.substitute(pattern, bound);
-    const callback = this.types.definedType(partial);
-
-    if (callback.kind == TypeKind.Function) {
-      this.callbackArgument(draft, index, expr, callback, module);
-    } else {
-      this.literalArgument(draft, index, expr, pattern, module);
-    }
-
-    this.moreCandidates(draft, index, pattern, module);
-  }
-
-  private callbackArgument(
-    draft: GenericDraft,
-    index: int,
-    expr: Expr,
-    callback: FunctionType,
-    module: int,
-  ): void {
-    const signature = this.callbackSignature(draft, callback);
-
-    if (expr.kind == ExprKind.Function) {
-      this.callbackParameters(draft, expr, callback, module);
-    }
-
-    const given = this.typed(expr, signature, module);
-
-    draft.given.set(index, given);
-  }
-
-  private readonly callbackSignature(draft: Read<GenericDraft>, callback: FunctionType): Type {
-    const open = this.generics.openParameters(draft);
-    const error = this.store.plain(TypeKind.Error);
-    const shape = callback.shape;
-    const params: FunctionParameter[] = shape.params.map((param) => ({
-      type: this.closedOr(param.type, open, error),
-      optional: param.optional,
-    }));
-    const rest = shape.rest;
-    const result = this.closedOr(shape.result, open, error);
-    const self = shape.self;
-
-    if (self == undefined) {
-      return this.store.functionOf({ params, rest, result });
-    }
-
-    return this.store.functionOf({ params, rest, self, result });
-  }
-
-  private readonly closedOr(type: Type, open: Read<Type[]>, fallback: Type): Type {
-    if (this.isMentioning(type, open)) {
-      return fallback;
-    }
-
-    return type;
-  }
-
-  private readonly callbackParameters(
-    draft: GenericDraft,
-    closure: FunctionExpr,
-    callback: FunctionType,
-    module: int,
-  ): void {
-    const written = closure.fn.params;
-    const params = callback.shape.params;
-
-    for (let position = 0; position < params.length; position++) {
-      const own = written[position];
-      const param = params[position];
-      const isWritten = own != undefined && own.type != undefined;
-      if (!isWritten && param != undefined) {
-        this.callbackParameter(draft, closure, param.type, position, module);
-      }
-    }
-  }
-
-  private readonly callbackParameter(
-    draft: GenericDraft,
-    closure: FunctionExpr,
-    type: Type,
-    position: int,
-    module: int,
-  ): void {
-    const target = draft.target;
-
-    for (let index = 0; index < target.params.length; index++) {
-      const param = target.params[index];
-      const isOpen = param != undefined && !draft.bound.has(index);
-      if (isOpen && param != undefined && this.isMentioning(type, [param])) {
-        const callbackError = this.genericCalls.callbackError(
-          draft,
-          closure,
-          param,
-          position,
-        );
-
-        this.reportFound(module, callbackError);
-        this.generics.failParameter(draft, index);
-      }
-    }
-  }
-
-  private literalArgument(
-    draft: GenericDraft,
-    index: int,
-    expr: Expr,
-    pattern: Type,
-    module: int,
-  ): void {
-    const params = draft.target.params;
-    const bound = this.generics.boundById(draft);
-    const partial = this.resolver.substitute(pattern, bound);
-    const isOpen = this.isMentioning(partial, params);
-    const isDefaulted = isOpen && this.fillDefaults(draft);
-    const hint = this.hintAfterDefaults(draft, pattern, partial, isDefaulted);
-    const isStillOpen = this.isMentioning(hint, params);
-
-    if (isDefaulted && draft.target.isLenient) {
-      return;
-    }
-    if (isStillOpen) {
-      const given = this.typed(expr, undefined, module);
-
-      draft.given.set(index, given);
-
-      return;
-    }
-    if (draft.target.isLenient) {
-      const given = this.typed(expr, hint, module);
-
-      draft.given.set(index, given);
-
-      return;
-    }
-
-    const given = this.checked(expr, hint, module, kNoPlace);
-
-    draft.given.set(index, given);
-    draft.settled.add(index);
-  }
-
-  private readonly hintAfterDefaults(
-    draft: Read<GenericDraft>,
-    pattern: Type,
-    partial: Type,
-    isDefaulted: boolean,
-  ): Type {
-    if (!isDefaulted) {
-      return partial;
-    }
-
-    const bound = this.generics.boundById(draft);
-
-    return this.resolver.substitute(pattern, bound);
-  }
-
-  private readonly moreCandidates(
-    draft: GenericDraft,
-    index: int,
-    pattern: Type,
-    module: int,
-  ): void {
-    const given = draft.given.get(index);
-    if (given == undefined) {
-      return;
-    }
-
-    const params = draft.target.params;
-    const more = this.generics.inferenceSet(params);
-
-    this.inferPair(more, pattern, given);
-
-    if (more.isUnmatched) {
-      draft.inference.isUnmatched = true;
-    }
-
-    for (let typeIndex = 0; typeIndex < params.length; typeIndex++) {
-      if (!draft.bound.has(typeIndex)) {
-        this.generics.adoptCandidates(draft.inference, typeIndex, more);
-        this.settleParameter(draft, typeIndex, module);
-      }
-    }
-  }
-
   private boundCall(draft: GenericDraft, module: int): Type {
     if (draft.inference.isUnmatched) {
       this.uncheckedArguments(draft, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.finishTypeArguments(draft, module);
@@ -561,10 +379,10 @@ partial class ExpressionTypes {
     if (!draft.isInferred) {
       this.uncheckedArguments(draft, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.growingCheck(draft, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.literalArguments(draft, module);
@@ -582,7 +400,9 @@ partial class ExpressionTypes {
   }
 
   private literalArguments(draft: GenericDraft, module: int): void {
-    const bound = this.generics.boundById(draft);
+    const tree = this.types.program.tree;
+
+    const bound = this.types.boundById(draft);
     const shape = draft.target.shape;
 
     for (const index of draft.literals) {
@@ -591,9 +411,14 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const slot = this.generics.slotAt(shape, index, arg.spread);
-      const hint = this.resolver.substituteValue(slot, bound);
-      const given = this.literalChecked(draft, arg.expr, hint, module);
+      const slot = this.types.slotAt(shape, index, arg.spread);
+      const hint = this.types.substituteValue(slot, bound);
+      const given = this.literalChecked(
+        draft,
+        tree.exprOf(arg.exprId),
+        hint,
+        module,
+      );
 
       draft.given.set(index, given);
       draft.settled.add(index);
@@ -618,19 +443,25 @@ partial class ExpressionTypes {
     shape: Read<FunctionShape>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     for (let index = 0; index < draft.args.length; index++) {
       const arg = draft.args[index];
       const given = draft.given.get(index);
       const isOpen = arg != undefined && !draft.settled.has(index);
       if (isOpen && arg != undefined && given != undefined) {
-        const to = this.generics.slotAt(shape, index, arg.spread);
+        const to = this.types.slotAt(shape, index, arg.spread);
 
-        this.coerce(arg.expr, given, to, module, kNoPlace);
+        const expr = tree.exprOf(arg.exprId);
+
+        this.coerce(expr, given, to, module, kNoPlace);
       }
     }
   }
 
   private uncheckedArguments(draft: Read<GenericDraft>, module: int): void {
+    const tree = this.types.program.tree;
+
     if (draft.target.isLenient) {
       return;
     }
@@ -638,15 +469,14 @@ partial class ExpressionTypes {
     for (let index = 0; index < draft.args.length; index++) {
       const arg = draft.args[index];
       if (arg != undefined && !draft.given.has(index)) {
-        this.typed(arg.expr, undefined, module);
+        const expr = tree.exprOf(arg.exprId);
+
+        this.typed(expr, undefined, module);
       }
     }
   }
 
-  private rememberTypeArguments(
-    draft: Read<GenericDraft>,
-    module: int,
-  ): void {
+  private rememberTypeArguments(draft: Read<GenericDraft>, module: int): void {
     const target = draft.target;
     const types: Type[] = [];
 
@@ -663,25 +493,25 @@ partial class ExpressionTypes {
     this.typeArguments.set(`${module} ${target.loc}`, types);
   }
 
-  private readonly boundShape(draft: Read<GenericDraft>): FunctionShape {
+  private boundShape(draft: Read<GenericDraft>): FunctionShape {
     const shape = draft.target.shape;
-    const bound = this.generics.boundById(draft);
+    const bound = this.types.boundById(draft);
     const params: FunctionParameter[] = shape.params.map((param) => ({
-      type: this.resolver.substituteValue(param.type, bound),
+      type: this.types.substituteValue(param.type, bound),
       optional: param.optional,
     }));
     const rest = shape.rest;
-    const result = this.resolver.substitute(shape.result, bound);
+    const result = this.types.substitute(shape.result, bound);
 
     return { params, rest, result };
   }
 
-  private readonly growingCheck(draft: Read<GenericDraft>, module: int): boolean {
+  private growingCheck(draft: Read<GenericDraft>, module: int): boolean {
     const params = draft.target.params;
 
     for (const [index, type] of draft.bound) {
       const param = params[index];
-      if (param == undefined || type == param) {
+      if (param == undefined || type.id == param.id) {
         continue;
       }
       if (param.kind != TypeKind.TypeParameter) {
@@ -690,16 +520,16 @@ partial class ExpressionTypes {
 
       const probe = new Map<int, Type>();
 
-      probe.set(param.id, this.store.plain(TypeKind.Never));
+      probe.set(param.id, this.types.store.plain(TypeKind.Never));
 
-      if (this.resolver.substitute(type, probe) == type) {
+      if (this.types.substitute(type, probe).id == type.id) {
         continue;
       }
 
-      this.report(module, draft.target.loc, Code.GenericGrowingSelf, {
+      this.errors.write(module, draft.target.loc, Code.GenericGrowingSelf, {
         word: draft.target.name,
-        first: this.text.of(type),
-        other: this.text.of(param),
+        first: this.types.typeText(type),
+        other: this.types.typeText(param),
       });
 
       return true;

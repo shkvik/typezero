@@ -1,0 +1,487 @@
+import {
+  CallArgument,
+  CallExpr,
+  ExprKind,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BodySource,
+  FunctionDecl,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionParameter,
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kDecimalName,
+  kErrName,
+  kLendingResults,
+  kLentName,
+  kOkName,
+  kRuntimeModules,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private callValue(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
+    if (this.isSuperName(call)) {
+      return this.superCall(frame, call);
+    }
+
+    const superMember = this.isSuperMember(call);
+    if (superMember != undefined) {
+      return this.superMethodCall(frame, call, superMember);
+    }
+    if (callee.kind == ExprKind.Member) {
+      return this.memberCall(frame, call);
+    }
+    if (callee.kind != ExprKind.Name) {
+      return this.closureCall(frame, call, callee);
+    }
+
+    return this.namedCall(frame, call, callee);
+  }
+
+  private namedCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const target = this.values.valueTargetOf(callee, frame.module);
+    const opened = this.values.types.program.modules[target?.module ?? -1];
+    const isValue =
+      target != undefined &&
+      opened != undefined &&
+      !opened.source.isLibrary &&
+      (target.kind == SymbolKind.Variable ||
+        target.kind == SymbolKind.Parameter);
+    if (isValue) {
+      return this.closureCall(frame, call, callee);
+    }
+
+    const isOwn =
+      target != undefined &&
+      target.kind == SymbolKind.Function &&
+      opened != undefined &&
+      (!opened.source.isLibrary || kRuntimeModules.includes(opened.name));
+    if (callee.name == kDecimalName && !isOwn) {
+      return this.decimalOf(frame, call);
+    }
+    if (callee.name == kOkName && !isOwn) {
+      return this.resultMade(frame, call, true);
+    }
+    if (callee.name == kErrName && !isOwn) {
+      return this.resultMade(frame, call, false);
+    }
+    if (target != undefined && !isOwn) {
+      return this.libraryCall(frame, call, callee, target.module);
+    }
+    if (target == undefined) {
+      this.notLowered(frame.module, call.loc, "a call of this function");
+
+      return undefined;
+    }
+
+    const shape = this.shapeOf(target.module, target.loc);
+    if (shape == undefined) {
+      this.notLowered(frame.module, call.loc, "this call");
+
+      return undefined;
+    }
+
+    const foreign = this.declaredFunction(target.module, target.loc);
+    if (foreign != undefined && foreign.bodySource == BodySource.Foreign) {
+      return this.foreignCall(frame, call, foreign, shape);
+    }
+    if (
+      foreign != undefined &&
+      tree.typeParamsOf(foreign.typeParamsList).length > 0
+    ) {
+      return this.genericCall(frame, call, callee, foreign, target.module);
+    }
+
+    const known = this.values.functionDeclAt(target.module, target.loc);
+    const calleeDecl = known ?? foreign;
+    const kept: IrValue[] = [];
+    const args = this.callArguments(
+      frame,
+      tree.argumentsOf(call.argsList),
+      shape,
+      call.loc,
+      calleeDecl,
+      kept,
+    );
+    const result = this.irType(shape.result);
+    const params = this.shapeTypes(shape);
+    if (args == undefined || result == undefined || params == undefined) {
+      return undefined;
+    }
+
+    const name = this.functionName(target.module, target.loc);
+    const declared = this.ir.declare(name, result, params);
+    const value = frame.made.call(declared, args);
+    const answer: IrValue = { type: result, value, tz: shape.result };
+    const made = this.callResult(frame, answer, calleeDecl, kept);
+
+    if (
+      opened != undefined &&
+      opened.source.isLibrary &&
+      calleeDecl != undefined
+    ) {
+      this.instanceWanted({
+        module: target.module,
+        fn: calleeDecl,
+        name,
+        params: [],
+        args: [],
+      });
+    }
+
+    this.droppedAll(frame, kept);
+
+    return made;
+  }
+
+  private readonly isLending(fn: FunctionDecl | undefined): boolean {
+    const tree = this.values.types.program.tree;
+
+    const ref = tree.typeRefAt(fn?.returnTypeId);
+    if (ref == undefined) {
+      return false;
+    }
+
+    return this.isLendingRef(ref);
+  }
+
+  private readonly isLendingRef(ref: TypeRef): boolean {
+    const tree = this.values.types.program.tree;
+
+    if (ref.form.kind == TypeRefKind.Union) {
+      return tree
+        .typeRefsOf(ref.argsList)
+        .some((part) => this.isLendingRef(part));
+    }
+
+    return (
+      tree.typeRefsOf(ref.argsList).length == 1 &&
+      kLendingResults.includes(ref.name)
+    );
+  }
+
+  private receiverResult(
+    frame: Read<Frame>,
+    answer: IrValue,
+    decl: FunctionDecl | undefined,
+    temporaries: Read<IrValue[]>,
+    receiver: Read<IrValue>,
+  ): IrValue {
+    if (!this.isLendingThis(decl)) {
+      return this.callResult(frame, answer, decl, temporaries);
+    }
+
+    const { type, value, tz } = answer;
+    const lent: IrValue = { type, value, tz, owned: false };
+    if (receiver.isStatic == true) {
+      return this.staticValue(lent);
+    }
+
+    const isTemporary =
+      receiver.owned == true || receiver.ownedFlag != undefined;
+    if (isTemporary && this.isManaged(receiver.tz)) {
+      return this.owning(frame, lent);
+    }
+
+    return lent;
+  }
+
+  private readonly isLendingThis(fn: FunctionDecl | undefined): boolean {
+    const tree = this.values.types.program.tree;
+
+    if (fn == undefined || !this.isLending(fn)) {
+      return false;
+    }
+
+    return !tree
+      .paramsOf(fn.paramsList)
+      .some((param) => this.isLentRef(tree.typeRefAt(param.typeId)));
+  }
+
+  private readonly isLentRef(ref: TypeRef | undefined): boolean {
+    const tree = this.values.types.program.tree;
+
+    return (
+      ref != undefined &&
+      ref.name == kLentName &&
+      tree.typeRefsOf(ref.argsList).length == 1
+    );
+  }
+
+  private callResult(
+    frame: Read<Frame>,
+    answer: IrValue,
+    decl: FunctionDecl | undefined,
+    temporaries: Read<IrValue[]>,
+  ): IrValue {
+    const { type, value, tz } = answer;
+    if (!this.isLending(decl)) {
+      return { type, value, tz, owned: true };
+    }
+
+    const lent: IrValue = { type, value, tz, owned: false };
+    const isFromTemporary = temporaries.some(
+      (one) =>
+        (one.owned == true || one.ownedFlag != undefined) &&
+        this.isManaged(one.tz),
+    );
+    if (!isFromTemporary) {
+      return lent;
+    }
+
+    return this.owning(frame, lent);
+  }
+
+  private shapeProblem(shape: Read<FunctionShape>): string {
+    const types = [shape.result].concat(shape.params.map((one) => one.type));
+    const failed = types.find((type) => this.irType(type) == undefined);
+    if (failed == undefined) {
+      return "optional parameter";
+    }
+
+    return this.kindName(failed);
+  }
+
+  private shapeTypes(shape: Read<FunctionShape>): string[] | undefined {
+    const types: string[] = [];
+
+    for (const param of shape.params) {
+      const type = this.irType(this.passedType(param));
+      if (type == undefined) {
+        return undefined;
+      }
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private callArguments(
+    frame: Frame,
+    passed: Read<CallArgument[]>,
+    shape: Read<FunctionShape>,
+    loc: int,
+    callee: FunctionDecl | undefined,
+    kept: IrValue[],
+  ): LLVMValue[] | undefined {
+    const tree = this.values.types.program.tree;
+
+    const args: LLVMValue[] = [];
+    if (passed.length > shape.params.length) {
+      this.notLowered(frame.module, loc, "these arguments");
+
+      return undefined;
+    }
+
+    for (let index = 0; index < shape.params.length; index++) {
+      const arg = passed[index];
+      const param = shape.params[index];
+      if (param == undefined) {
+        return undefined;
+      }
+
+      const wanted = this.passedType(param);
+      if (arg == undefined) {
+        const missing = this.missingArgument(frame, param, wanted, loc);
+        if (missing == undefined) {
+          return undefined;
+        }
+
+        args.push(missing);
+
+        continue;
+      }
+      if (arg.spread) {
+        this.notLowered(frame.module, loc, "a spread argument");
+
+        return undefined;
+      }
+
+      const declared = tree.paramsOf(callee?.paramsList)[index];
+      const isLent =
+        declared != undefined &&
+        this.isBorrowedParam(declared) &&
+        this.isManaged(wanted);
+      const given = this.argumentValue(
+        frame,
+        tree.exprOf(arg.exprId),
+        wanted,
+        isLent,
+      );
+      if (given == undefined) {
+        return undefined;
+      }
+
+      const value = this.converted(
+        frame,
+        given,
+        wanted,
+        tree.exprOf(arg.exprId).loc,
+      );
+      if (value == undefined) {
+        return undefined;
+      }
+      if (isLent) {
+        const lent = this.withOwnedFlag(value, given.ownedFlag);
+
+        kept.push(lent);
+        args.push(value.value);
+
+        continue;
+      }
+
+      const owned = this.owning(frame, value);
+
+      args.push(owned.value);
+    }
+
+    return args;
+  }
+
+  private missingArgument(
+    frame: Read<Frame>,
+    param: FunctionParameter,
+    wanted: Type,
+    loc: int,
+  ): LLVMValue | undefined {
+    const type = this.irType(wanted);
+    if (!param.optional || type == undefined) {
+      this.notLowered(frame.module, loc, "these arguments");
+
+      return undefined;
+    }
+
+    return this.ir.zero(type);
+  }
+
+  private memberCall(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const isError = this.printStream(frame, call);
+    if (isError != undefined) {
+      return this.printed(frame, call, isError);
+    }
+
+    const callee = tree.exprOf(call.calleeId);
+    if (callee.kind == ExprKind.Member) {
+      const calleeObject = tree.exprOf(callee.objectId);
+      if (this.isBufferName(calleeObject)) {
+        return this.bufferStatic(frame, call, callee);
+      }
+      if (this.isArrayFrom(callee)) {
+        return this.arrayFrom(frame, call);
+      }
+      if (this.isBitHolder(frame, tree.exprOf(callee.objectId))) {
+        return this.bitCall(frame, call, callee);
+      }
+      if (this.isStaticHolder(frame, tree.exprOf(callee.objectId))) {
+        return this.staticCall(frame, call, callee);
+      }
+
+      const objectExpr = tree.exprOf(callee.objectId);
+      const object = this.typeIn(frame, objectExpr);
+      if (object != undefined && this.isBytesType(object)) {
+        return this.bytesMethod(frame, call, callee);
+      }
+      if (object != undefined && object.kind == TypeKind.Array) {
+        return this.arrayMethod(frame, call, callee, object);
+      }
+      if (object != undefined && this.isFileKindCall(object, callee)) {
+        return this.fileKindCall(frame, callee);
+      }
+      if (object != undefined && object.kind == TypeKind.Instance) {
+        return this.methodCall(frame, call, callee, object);
+      }
+      if (object != undefined && object.kind == TypeKind.Dict) {
+        return this.dictCall(frame, call, callee, object);
+      }
+      if (object != undefined && this.isString(object)) {
+        return this.stringMethod(frame, call, callee);
+      }
+      if (object != undefined && this.isDecimal(object)) {
+        return this.decimalMethod(frame, call, callee);
+      }
+      if (object != undefined && object.kind == TypeKind.Result) {
+        return this.resultMethod(frame, call, callee);
+      }
+
+      const isNumber =
+        object != undefined &&
+        (this.isInteger(object) || this.isDouble(object));
+      if (isNumber) {
+        return this.numberMethod(frame, call, callee);
+      }
+    }
+
+    const name = this.calledName(call);
+
+    this.notLowered(frame.module, call.loc, `a call of method ${name}`);
+
+    return undefined;
+  }
+
+  private calledName(call: CallExpr): string {
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
+    if (callee.kind != ExprKind.Member) {
+      return "?";
+    }
+
+    const objectExpr = tree.exprOf(callee.objectId);
+    const object = this.typeOf(objectExpr);
+    const kind = this.kindName(object);
+
+    return `${kind}.${callee.name}`;
+  }
+
+  private runtimeCall(
+    made: IrFunction,
+    name: string,
+    args: Read<IrValue[]>,
+  ): void {
+    const params = args.map((arg) => arg.type);
+    const given = args.map((arg) => arg.value);
+    const callee = this.ir.declare(name, kVoidType, params);
+
+    made.call(callee, given);
+  }
+
+  private runtimeValue(
+    frame: Read<Frame>,
+    name: string,
+    result: string,
+    args: Read<IrValue[]>,
+  ): LLVMValue {
+    const params = args.map((arg) => arg.type);
+    const given = args.map((arg) => arg.value);
+    const callee = this.ir.declare(name, result, params);
+
+    return frame.made.call(callee, given);
+  }
+}

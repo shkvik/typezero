@@ -1,0 +1,35 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
+import {
+  kCheckedLibraries,
+  kTypedLibraries,
+} from "../../module-questions/const/module-questions.const.tz";
+
+partial class TypeSystem {
+  public readonly isLibraryModule(module: int): boolean {
+    const opened = this.program.modules[module];
+    if (module < 0 || opened == undefined) {
+      return true;
+    }
+
+    return opened.source.isLibrary;
+  }
+
+  public readonly isTypedLibrary(module: int): boolean {
+    const opened = this.program.modules[module];
+    if (opened == undefined || !opened.source.isLibrary) {
+      return false;
+    }
+
+    return kTypedLibraries.includes(opened.name);
+  }
+
+  public readonly isCheckedLibrary(module: int): boolean {
+    const opened = this.program.modules[module];
+    if (opened == undefined || !opened.source.isLibrary) {
+      return false;
+    }
+
+    return kCheckedLibraries.includes(opened.name);
+  }
+}

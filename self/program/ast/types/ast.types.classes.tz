@@ -1,8 +1,5 @@
-import { Span } from "./ast.types.span.tz";
-import { TypeParamDecl, TypeRef } from "./ast.types.types.tz";
-import { Expr } from "./ast.types.expressions.tz";
+import { AstList, Span } from "./ast.types.span.tz";
 import { StmtKind } from "./ast.types.statements.tz";
-import { FunctionDecl } from "./ast.types.functions.tz";
 
 export enum Access {
   Public,
@@ -30,79 +27,78 @@ export enum FieldPresence {
   Definite,
 }
 
-export type Decorator = {
-  readonly loc: int;
-  readonly expr: Expr;
-};
+export type Decorator = { readonly loc: int; readonly exprId: int };
 
 export type TypeAliasDecl = {
   readonly kind: StmtKind.TypeAlias;
+  readonly id: int;
   readonly loc: int;
   readonly name: string;
-  readonly typeParams: readonly TypeParamDecl[];
-  readonly type: TypeRef;
-  readonly bases: readonly TypeRef[];
+  readonly typeParamsList: AstList;
+  readonly typeId: int;
+  readonly basesList: AstList;
 };
 
 export type HandleDecl = {
   readonly kind: StmtKind.Handle;
+  readonly id: int;
   readonly loc: int;
   readonly name: string;
-  readonly typeParams: readonly TypeParamDecl[];
+  readonly typeParamsList: AstList;
 };
 
 export type EnumMember = {
   readonly name: string;
   readonly loc: int;
-  readonly init?: Expr;
+  readonly initId?: int;
 };
 
 export type EnumDecl = {
   readonly kind: StmtKind.Enum;
+  readonly id: int;
   readonly loc: int;
   readonly name: string;
-  readonly members: readonly EnumMember[];
+  readonly membersList: AstList;
 };
 
 export type ClassMember = {
   readonly access: Access;
   readonly isOverride: boolean;
   readonly isReadonly: boolean;
-  readonly decorators: readonly Decorator[];
+  readonly decoratorsList: AstList;
   readonly method: MethodKind;
 };
 
 export type ClassField = {
   readonly name: string;
   readonly loc: int;
-  readonly type?: TypeRef;
-  readonly init?: Expr;
+  readonly typeId?: int;
+  readonly initId?: int;
   readonly form: FieldKind;
   readonly presence: FieldPresence;
   readonly readonly: boolean;
   readonly isOverride: boolean;
   readonly access: Access;
-  readonly decorators: readonly Decorator[];
+  readonly decoratorsList: AstList;
   readonly accessor: boolean;
 };
 
 export type ClassDecl = {
   readonly kind: StmtKind.Class;
+  readonly id: int;
   readonly loc: int;
   readonly name?: string;
   readonly isAbstract: boolean;
   readonly isPartial: boolean;
-  readonly base?: TypeRef;
-  readonly baseExpr?: Expr;
-  readonly baseArgs: readonly TypeRef[];
-  readonly interfaces: readonly TypeRef[];
-  readonly fields: readonly ClassField[];
-  methods: Cell<readonly FunctionDecl[]>;
-  readonly constructors: readonly FunctionDecl[];
+  readonly baseId?: int;
+  readonly baseExprId?: int;
+  readonly baseArgsList: AstList;
+  readonly interfacesList: AstList;
+  readonly fieldsList: AstList;
+  readonly methodsList: AstList;
+  readonly constructorsList: AstList;
   readonly expression: boolean;
-  readonly decorators: readonly Decorator[];
-  readonly typeParams: readonly TypeParamDecl[];
+  readonly decoratorsList: AstList;
+  readonly typeParamsList: AstList;
   readonly source?: Span;
 };
-
-export type InternedMethods = Interned<readonly FunctionDecl[]>;

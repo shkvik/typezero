@@ -1,0 +1,236 @@
+import {
+  CallExpr,
+  Expr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrIntPredicate,
+  IrRealPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kArrayModule,
+  kArrayReverse,
+  kArraySort,
+  kArraySortWith,
+  kDoubleType,
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kReverseName,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  Place,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private sortedArray(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const callback = tree.argumentsOf(call.argsList)[0];
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    if (callback == undefined) {
+      const sorting = this.ir.declare(kArraySort, kVoidType, [kPointerType]);
+
+      frame.made.call(sorting, [array.value]);
+
+      return array;
+    }
+
+    const compare = this.comparator(
+      frame,
+      tree.exprOf(callback.exprId),
+      this.values.types.store.itemOf(object),
+    );
+    if (compare == undefined) {
+      return undefined;
+    }
+
+    const params = [kPointerType, kPointerType, kPointerType];
+    const sorting = this.ir.declare(kArraySortWith, kVoidType, params);
+    const context = this.comparatorContext(frame);
+
+    frame.made.call(sorting, [array.value, compare, context]);
+
+    return array;
+  }
+
+  private comparatorContext(frame: Read<Frame>): LLVMValue {
+    const self = frame.self;
+    if (self == undefined) {
+      return this.ir.zero(kPointerType);
+    }
+
+    return frame.made.load(kPointerType, self.pointer);
+  }
+
+  private comparator(
+    frame: Read<Frame>,
+    callback: Expr,
+    item: Type,
+  ): LLVMValue | undefined {
+    const element = this.irType(item);
+    if (element == undefined || !this.isInlineable(callback)) {
+      this.notLowered(frame.module, callback.loc, "this comparison");
+
+      return undefined;
+    }
+
+    const name = this.ir.uniqueName("tz.compare.");
+    const params = [kPointerType, kPointerType, kPointerType];
+    const made = new IrFunction(this.ir, name, kFlagType, params);
+    const self = this.comparatorSelf(made, frame.self);
+    const inner: Frame = {
+      made,
+      id: this.frameId(),
+      module: frame.module,
+      loops: [],
+      scopes: [],
+      self,
+      place: frame.place,
+    };
+    const first: IrValue = {
+      type: element,
+      value: made.load(element, made.param(1)),
+      tz: item,
+    };
+    const second: IrValue = {
+      type: element,
+      value: made.load(element, made.param(2)),
+      tz: item,
+    };
+
+    this.openScope(inner);
+
+    const returned = this.inlineCall(inner, callback, [first, second]);
+    if (returned == undefined) {
+      return undefined;
+    }
+
+    const sign = this.signOf(inner, returned);
+
+    this.dropping(inner, returned);
+    this.closeScope(inner);
+    made.finishValue(sign);
+
+    return made.callee.fn;
+  }
+
+  private readonly comparatorSelf(
+    made: IrFunction,
+    outer: Place | undefined,
+  ): Place | undefined {
+    if (outer == undefined) {
+      return undefined;
+    }
+
+    const pointer = made.slot(kPointerType, "this");
+
+    made.store(made.param(0), pointer);
+
+    return { pointer, type: kPointerType, tz: outer.tz, owner: -1 };
+  }
+
+  private signOf(frame: Read<Frame>, value: IrValue): LLVMValue {
+    const one = this.ir.integer(kFlagType, "1");
+    const minus = this.ir.integer(kFlagType, "-1");
+    const zero = this.ir.zero(kFlagType);
+    if (this.isDouble(value.tz)) {
+      const none = this.ir.zero(kDoubleType);
+      const above = frame.made.realCompare(
+        IrRealPredicate.OrderedGreater,
+        value.value,
+        none,
+      );
+      const below = frame.made.realCompare(
+        IrRealPredicate.OrderedLess,
+        value.value,
+        none,
+      );
+      const low = frame.made.select(below, minus, zero);
+
+      return frame.made.select(above, one, low);
+    }
+
+    const long = this.toLong(frame, value).value;
+    const none = this.ir.zero(kIntType);
+    const above = frame.made.integerCompare(
+      IrIntPredicate.SignedGreater,
+      long,
+      none,
+    );
+    const below = frame.made.integerCompare(
+      IrIntPredicate.SignedLess,
+      long,
+      none,
+    );
+    const low = frame.made.select(below, minus, zero);
+
+    return frame.made.select(above, one, low);
+  }
+
+  private reversedArray(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    if (array == undefined) {
+      return undefined;
+    }
+    if (
+      object.kind == TypeKind.Array &&
+      this.isPlainElement(this.values.types.store.itemOf(object))
+    ) {
+      const items = [this.values.types.store.itemOf(object)];
+      const target: RuntimeTarget = {
+        module: kArrayModule,
+        name: kReverseName,
+      };
+      const reversed = this.runtimeFunctionCall(
+        frame,
+        target,
+        items,
+        [array],
+        call.loc,
+      );
+      if (reversed == undefined) {
+        return undefined;
+      }
+
+      return array;
+    }
+
+    const params = [kPointerType];
+    const reversing = this.ir.declare(kArrayReverse, kVoidType, params);
+
+    frame.made.call(reversing, [array.value]);
+
+    return array;
+  }
+}

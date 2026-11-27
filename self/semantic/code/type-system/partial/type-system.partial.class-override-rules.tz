@@ -1,0 +1,365 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  FunctionType,
+  InstanceType,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  ClassMemberEntry,
+} from "../../expression-types/types/expression-types.types.tz";
+import {
+  ClassDecl,
+  ClassField,
+  FieldKind,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+
+partial class TypeSystem {
+  public readonly contractFieldResult(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return this.store.returnTypeOf(type);
+  }
+
+  public readonly overriddenCode(site: MemberExpr, call: MemberExpr): Code {
+    if (site.id == call.id) {
+      return Code.ConstructorCallsOverride;
+    }
+
+    return Code.ConstructorReachesOverride;
+  }
+
+  public readonly overridingChild(
+    children: Read<ClassDecl[]>,
+    name: string,
+  ): ClassDecl | undefined {
+    const tree = this.program.tree;
+
+    return children.find((child) =>
+      this.classMethodsNamed(child, name).some(
+        (method) => !this.isStaticMethod(method),
+      ),
+    );
+  }
+
+  public readonly abstractMethodsCheck(decl: ClassDecl): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+
+    if (decl.isAbstract) {
+      return errors;
+    }
+
+    for (const method of tree.functionsOf(decl.methodsList)) {
+      if (method.role?.method == MethodKind.Abstract) {
+        const word = method.name;
+        const first = decl.name ?? "";
+
+        errors.push({
+          code: Code.AbstractNeedsClass,
+          loc: method.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public readonly memberNameErrors(decl: ClassDecl, index: int): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+
+    const field = tree.fieldsOf(decl.fieldsList)[index];
+    if (field == undefined) {
+      return errors;
+    }
+
+    const word = field.name;
+    const first = decl.name ?? "";
+    const isStatic = field.form == FieldKind.Static;
+    const earlier = tree.fieldsOf(decl.fieldsList)
+      .slice(0, index)
+      .find(
+        (one) => one.name == word && (one.form == FieldKind.Static) == isStatic,
+      );
+
+    if (earlier != undefined) {
+      errors.push({
+        code: Code.DuplicateMember,
+        loc: field.loc,
+        details: { word, first },
+      });
+    }
+
+    for (const method of tree.functionsOf(decl.methodsList)) {
+      const isSame =
+        method.name == word && this.isStaticMethod(method) == isStatic;
+      if (isSame) {
+        errors.push({
+          code: Code.FieldMethodClash,
+          loc: method.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public contractResultError(
+    method: FunctionDecl,
+    type: FunctionType,
+    wanted: FunctionType,
+    iface: string,
+    first: string,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const mine = this.store.returnTypeOf(type);
+    const theirs = this.store.returnTypeOf(wanted);
+
+    const returnType = tree.typeRefAt(method.returnTypeId);
+    if (returnType == undefined) {
+      return undefined;
+    }
+
+    const isFitting =
+      mine.id == theirs.id ||
+      mine.kind == TypeKind.Error ||
+      this.converts(mine, theirs);
+    if (isFitting) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ImplementsReturns,
+      loc: method.loc,
+      details: {
+        word: method.name,
+        first: this.typeText(mine),
+        second: iface,
+        other: first,
+        place: this.typeText(theirs),
+      },
+    };
+  }
+
+  public readonly lonelyOverrideCheck(
+    decl: ClassDecl,
+    field: ClassField,
+    hasParent: boolean,
+  ): SourceError | undefined {
+    if (!field.isOverride || hasParent) {
+      return undefined;
+    }
+
+    const word = field.name;
+    const first = decl.name ?? "";
+
+    return {
+      code: Code.FieldOverrideNoParent,
+      loc: field.loc,
+      details: {
+        word,
+        first,
+      },
+    };
+  }
+
+  public readonly newFieldCheck(
+    field: ClassField,
+    parent: InstanceType,
+  ): SourceError | undefined {
+    if (!field.isOverride) {
+      return undefined;
+    }
+
+    const word = field.name;
+    const first = parent.name;
+
+    return {
+      code: Code.FieldOverrideMissing,
+      loc: field.loc,
+      details: { word, first },
+    };
+  }
+
+  public readonly overrideAccessCheck(
+    method: FunctionDecl,
+    theirs: FunctionDecl,
+    parent: InstanceType,
+  ): SourceError | undefined {
+    const own = this.classAccessOf(method);
+    const their = this.classAccessOf(theirs);
+    if (this.accessRank(own) <= this.accessRank(their)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.OverrideAccess,
+      loc: method.loc,
+      details: {
+        word: method.name,
+        first: this.accessWord(their),
+        second: parent.name,
+        other: this.accessWord(own),
+      },
+    };
+  }
+
+  public readonly overrideResultCheck(
+    method: FunctionDecl,
+    decl: ClassDecl,
+    own: FunctionType,
+    theirs: FunctionType,
+    parent: InstanceType,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const mine = this.store.returnTypeOf(own);
+    const other = this.store.returnTypeOf(theirs);
+    const isSame = mine.id == other.id || mine.kind == TypeKind.Error;
+    if (isSame || tree.typeRefAt(method.returnTypeId) == undefined) {
+      return undefined;
+    }
+
+    return {
+      code: Code.OverrideReturns,
+      loc: method.loc,
+      details: {
+        word: method.name,
+        first: this.typeText(mine),
+        second: decl.name ?? "",
+        other: this.typeText(other),
+        place: parent.name,
+      },
+    };
+  }
+
+  public readonly redeclaredValueCheck(
+    decl: ClassDecl,
+    field: ClassField,
+    owner: string,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const isGiven =
+      tree.exprAt(field.initId) != undefined ||
+      field.form == FieldKind.Parameter;
+    if (isGiven || tree.countOf(decl.constructorsList) > 0) {
+      return undefined;
+    }
+
+    return {
+      code: Code.FieldRedeclaredNoValue,
+      loc: field.loc,
+      details: {
+        word: field.name,
+        first: owner,
+      },
+    };
+  }
+
+  public readonly implementsClassError(
+    decl: ClassDecl,
+    ref: TypeRef,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const word = ref.name;
+
+    if (
+      tree.typeRefAt(decl.baseId) != undefined ||
+      tree.exprAt(decl.baseExprId) != undefined
+    ) {
+      return {
+        code: Code.ImplementsClassExtended,
+        loc: ref.loc,
+        details: { word },
+      };
+    }
+
+    return { code: Code.ImplementsClass, loc: ref.loc, details: { word } };
+  }
+
+  public readonly classOverrideMissingMemberError(
+    decl: ClassDecl,
+    iface: string,
+    field: ObjectField,
+  ): SourceError | undefined {
+    const word = field.name;
+    const first = decl.name ?? "";
+    const text = this.typeText(field.type);
+    const other = `${word}: ${text}`;
+
+    return {
+      code: Code.ImplementsMissing,
+      loc: decl.loc,
+      details: {
+        word,
+        first,
+        second: iface,
+        other,
+      },
+    };
+  }
+
+  public readonly methodOverFieldCheck(
+    method: FunctionDecl,
+    entry: Read<ClassMemberEntry>,
+    parent: InstanceType,
+  ): Checked<boolean> {
+    const field = entry.field;
+    if (field == undefined || entry.isStatic) {
+      return { value: false };
+    }
+
+    const word = method.name;
+    const first = entry.owner.name ?? parent.name;
+
+    if (this.isArrowField(field)) {
+      return {
+        value: true,
+        error: {
+          code: Code.ArrowOverride,
+          loc: method.loc,
+          details: { word, first },
+        },
+      };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.MethodOverField,
+        loc: method.loc,
+        details: { word, first },
+      },
+    };
+  }
+}

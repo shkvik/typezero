@@ -37,7 +37,7 @@ partial class ExpressionTypes {
   }
 
   private underFacts(facts: Read<Map<string, Type>>): Map<string, Type> {
-    const merged = this.narrowings.mergedFacts(this.facts, facts);
+    const merged = this.types.mergedFacts(this.facts, facts);
 
     return replace(this.facts, merged);
   }
@@ -47,13 +47,17 @@ partial class ExpressionTypes {
   }
 
   private factsOf(cond: Expr, isTrue: boolean, module: int): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     switch (cond.kind) {
       case ExprKind.Unary:
         if (cond.op != UnaryOp.Not) {
           return new Map<string, Type>();
         }
 
-        return this.factsOf(cond.operand, !isTrue, module);
+        const operand = tree.exprOf(cond.operandId);
+
+        return this.factsOf(operand, !isTrue, module);
       case ExprKind.Name:
       case ExprKind.Member:
       case ExprKind.OptionalChain:
@@ -74,9 +78,9 @@ partial class ExpressionTypes {
     module: int,
   ): Map<string, Type> {
     const facts = new Map<string, Type>();
-    const path = this.narrowings.comparedPath(cond);
+    const path = this.types.comparedPath(cond);
     if (path.kind == ExprKind.Member) {
-      const literal = this.store.literal(LiteralKind.Boolean, kTrueText);
+      const literal = this.types.store.literal(LiteralKind.Boolean, kTrueText);
 
       this.literalTagFacts(path, literal, isTrue, facts, module);
     }
@@ -95,14 +99,18 @@ partial class ExpressionTypes {
   }
 
   private linkFacts(expr: Expr, facts: Map<string, Type>, module: int): void {
+    const tree = this.types.program.tree;
+
     if (expr.kind == ExprKind.OptionalChain) {
-      return this.linkFacts(expr.chain, facts, module);
+      const chain = tree.exprOf(expr.chainId);
+
+      return this.linkFacts(chain, facts, module);
     }
     if (expr.kind != ExprKind.Member) {
       return;
     }
 
-    const object = expr.object;
+    const object = tree.exprOf(expr.objectId);
     const slot = this.narrowable(object, module);
     if (
       expr.optional &&
@@ -122,6 +130,8 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     switch (cond.op) {
       case BinaryOp.LogAnd:
         if (isTrue) {
@@ -136,16 +146,26 @@ partial class ExpressionTypes {
 
         return this.bothFacts(cond, false, module);
       case BinaryOp.Eq: {
-        const facts = this.equalityFacts(cond.lhs, cond.rhs, isTrue, module);
+        const facts = this.equalityFacts(
+          tree.exprOf(cond.lhsId),
+          tree.exprOf(cond.rhsId),
+          isTrue,
+          module,
+        );
         const bounds = this.comparisonBounds(cond, isTrue, module);
 
-        return this.narrowings.mergedFacts(facts, bounds);
+        return this.types.mergedFacts(facts, bounds);
       }
       case BinaryOp.Ne: {
-        const facts = this.equalityFacts(cond.lhs, cond.rhs, !isTrue, module);
+        const facts = this.equalityFacts(
+          tree.exprOf(cond.lhsId),
+          tree.exprOf(cond.rhsId),
+          !isTrue,
+          module,
+        );
         const bounds = this.comparisonBounds(cond, isTrue, module);
 
-        return this.narrowings.mergedFacts(facts, bounds);
+        return this.types.mergedFacts(facts, bounds);
       }
       case BinaryOp.Lt:
       case BinaryOp.Le:
@@ -153,9 +173,19 @@ partial class ExpressionTypes {
       case BinaryOp.Ge:
         return this.comparisonBounds(cond, isTrue, module);
       case BinaryOp.InstanceOf:
-        return this.instanceFacts(cond.lhs, cond.rhs, isTrue, module);
+        return this.instanceFacts(
+          tree.exprOf(cond.lhsId),
+          tree.exprOf(cond.rhsId),
+          isTrue,
+          module,
+        );
       case BinaryOp.In:
-        return this.keyFacts(cond.lhs, cond.rhs, isTrue, module);
+        return this.keyFacts(
+          tree.exprOf(cond.lhsId),
+          tree.exprOf(cond.rhsId),
+          isTrue,
+          module,
+        );
       default:
         return new Map<string, Type>();
     }
@@ -180,14 +210,20 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    facts.set(slot.key, this.store.unionOf(kept));
+    facts.set(slot.key, this.types.store.unionOf(kept));
 
     return facts;
   }
 
-  private readonly isKeyKept(part: Type, name: string, isTrue: boolean): boolean {
+  private readonly isKeyKept(
+    part: Type,
+    name: string,
+    isTrue: boolean,
+  ): boolean {
     if (part.kind == TypeKind.Object) {
-      const field = part.fields.find((one) => one.name == name);
+      const field = this.types.store
+        .fieldsOf(part)
+        .find((one) => one.name == name);
       if (field == undefined) {
         return !isTrue;
       }
@@ -211,13 +247,17 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
-    const left = this.factsOf(cond.lhs, isTrue, module);
+    const tree = this.types.program.tree;
+
+    const lhs = tree.exprOf(cond.lhsId);
+    const left = this.factsOf(lhs, isTrue, module);
     const before = this.underFacts(left);
-    const right = this.factsOf(cond.rhs, isTrue, module);
+    const rhs = tree.exprOf(cond.rhsId);
+    const right = this.factsOf(rhs, isTrue, module);
 
     this.facts = before;
 
-    return this.narrowings.mergedFacts(left, right);
+    return this.types.mergedFacts(left, right);
   }
 
   private eitherFacts(
@@ -226,14 +266,19 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
-    const left = this.factsOf(cond.lhs, isTrue, module);
-    const passed = this.factsOf(cond.lhs, isLeftTrue, module);
+    const tree = this.types.program.tree;
+
+    const lhs = tree.exprOf(cond.lhsId);
+    const left = this.factsOf(lhs, isTrue, module);
+    const lhsExpr = tree.exprOf(cond.lhsId);
+    const passed = this.factsOf(lhsExpr, isLeftTrue, module);
     const before = this.underFacts(passed);
-    const right = this.factsOf(cond.rhs, isTrue, module);
+    const rhs = tree.exprOf(cond.rhsId);
+    const right = this.factsOf(rhs, isTrue, module);
 
     this.facts = before;
 
-    return this.narrowings.joinedFacts(left, right);
+    return this.types.joinedFacts(left, right);
   }
 
   private equalityFacts(
@@ -248,11 +293,11 @@ partial class ExpressionTypes {
       return typeofFacts;
     }
 
-    const left = this.narrowings.comparedPath(lhs);
-    const right = this.narrowings.comparedPath(rhs);
+    const left = this.types.comparedPath(lhs);
+    const right = this.types.comparedPath(rhs);
     const isPathLeft = this.pathKey(left, module) != undefined;
-    const name = this.narrowings.sideOf(isPathLeft, left, right);
-    const other = this.narrowings.sideOf(isPathLeft, right, left);
+    const name = this.types.sideOf(isPathLeft, left, right);
+    const other = this.types.sideOf(isPathLeft, right, left);
     const slot = this.narrowable(name, module);
     if (slot == undefined) {
       return facts;
@@ -271,7 +316,7 @@ partial class ExpressionTypes {
       this.linkFacts(name, facts, module);
     }
 
-    const tag = this.narrowings.tagOf(name);
+    const tag = this.types.tagOf(name);
     if (tag != undefined) {
       this.tagFacts(tag, other, isEqual, facts, module);
     }
@@ -301,17 +346,20 @@ partial class ExpressionTypes {
     facts: Map<string, Type>,
     module: int,
   ): void {
-    const owner = this.narrowable(tag.object, module);
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(tag.objectId);
+    const owner = this.narrowable(object, module);
     if (owner == undefined) {
       return;
     }
 
-    const parts = this.narrowings.flatMembers(owner.type);
+    const parts = this.types.flatMembers(owner.type);
     const kept = parts.filter((part) =>
       this.isTagKept(part, tag.name, literal, isEqual),
     );
     if (kept.length == 0 && !isEqual) {
-      facts.set(owner.key, this.store.plain(TypeKind.Never));
+      facts.set(owner.key, this.types.store.plain(TypeKind.Never));
 
       return;
     }
@@ -319,7 +367,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const union = this.store.unionOf(kept);
+    const union = this.types.store.unionOf(kept);
 
     facts.set(owner.key, union);
   }
@@ -335,13 +383,13 @@ partial class ExpressionTypes {
       return !isEqual;
     }
     if (!isEqual) {
-      return tag != literal;
+      return tag.id != literal.id;
     }
 
-    const base = this.relation.baseOf(literal);
-    const isOpen = tag == base || tag.kind == TypeKind.Error;
+    const base = this.types.baseOf(literal);
+    const isOpen = tag.id == base?.id || tag.kind == TypeKind.Error;
 
-    return isOpen || this.objects.holdsLiteral(tag, literal);
+    return isOpen || this.types.holdsLiteral(tag, literal);
   }
 
   private comparedType(
@@ -351,7 +399,7 @@ partial class ExpressionTypes {
     module: int,
   ): Type | undefined {
     if (other.kind == ExprKind.Undefined) {
-      return this.narrowings.undefinedCompared(type, isEqual);
+      return this.types.undefinedCompared(type, isEqual);
     }
 
     const literal = this.comparedLiteral(other, module);
@@ -359,10 +407,10 @@ partial class ExpressionTypes {
       return undefined;
     }
     if (isEqual) {
-      return this.narrowings.literalPart(type, literal);
+      return this.types.literalPart(type, literal);
     }
 
-    return this.narrowings.withoutPart(type, literal);
+    return this.types.withoutPart(type, literal);
   }
 
   private comparedLiteral(other: Expr, module: int): Type | undefined {
@@ -377,7 +425,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.store.literal(literal.kind, literal.text);
+    return this.types.store.literal(literal.kind, literal.text);
   }
 
   private typeofFacts(
@@ -386,9 +434,11 @@ partial class ExpressionTypes {
     isEqual: boolean,
     module: int,
   ): Map<string, Type> | undefined {
+    const tree = this.types.program.tree;
+
     const isTypeofLeft = lhs.kind == ExprKind.Unary && lhs.op == UnaryOp.TypeOf;
-    const tested = this.narrowings.sideOf(isTypeofLeft, lhs, rhs);
-    const other = this.narrowings.sideOf(isTypeofLeft, rhs, lhs);
+    const tested = this.types.sideOf(isTypeofLeft, lhs, rhs);
+    const other = this.types.sideOf(isTypeofLeft, rhs, lhs);
     const isTypeof =
       tested.kind == ExprKind.Unary && tested.op == UnaryOp.TypeOf;
     if (!isTypeof || tested.kind != ExprKind.Unary) {
@@ -396,16 +446,13 @@ partial class ExpressionTypes {
     }
 
     const facts = new Map<string, Type>();
-    const slot = this.narrowable(tested.operand, module);
+    const operand = tree.exprOf(tested.operandId);
+    const slot = this.narrowable(operand, module);
     if (slot == undefined || other.kind != ExprKind.StringLit) {
       return facts;
     }
 
-    const narrowed = this.narrowings.typeofType(
-      slot.type,
-      other.value,
-      isEqual,
-    );
+    const narrowed = this.types.typeofType(slot.type, other.value, isEqual);
     if (narrowed != undefined) {
       facts.set(slot.key, narrowed);
     }
@@ -427,7 +474,7 @@ partial class ExpressionTypes {
 
     const valueClass = this.valueClassOf(rhs, module);
     if (valueClass != undefined && isTrue) {
-      facts.set(slot.key, valueClass.instance);
+      facts.set(slot.key, this.types.store.classInstanceOf(valueClass));
     }
     if (valueClass != undefined) {
       return facts;
@@ -436,7 +483,7 @@ partial class ExpressionTypes {
     const name = rhs.name;
     const parts = this.types.unionMembers(slot.type);
     const kept = parts.filter(
-      (part) => this.narrowings.isInstanceOf(part, name) == isTrue,
+      (part) => this.types.isInstanceOf(part, name) == isTrue,
     );
     if (kept.length == 0 && isTrue) {
       const derived =
@@ -452,21 +499,19 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    const union = this.store.unionOf(kept);
+    const union = this.types.store.unionOf(kept);
 
     facts.set(slot.key, union);
 
     return facts;
   }
 
-  private readonly libraryNarrowed(
+  private libraryNarrowed(
     rhs: Expr,
     parts: Read<Type[]>,
     module: int,
   ): Type | undefined {
-    const isOpen = parts.some((part) =>
-      this.objectMembers.isUnknownValue(part),
-    );
+    const isOpen = parts.some((part) => this.types.isUnknownValue(part));
     if (rhs.kind != ExprKind.Name || !isOpen) {
       return undefined;
     }
@@ -474,16 +519,18 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const instance = this.resolver.libraryInstance(rhs.name, []);
+    const instance = this.types.libraryInstance(rhs.name, []);
 
-    return instance ?? this.store.plain(TypeKind.Error);
+    return instance ?? this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly derivedInstance(
+  private derivedInstance(
     rhs: Expr,
     parts: Read<Type[]>,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     if (rhs.kind != ExprKind.Name) {
       return undefined;
     }
@@ -497,14 +544,15 @@ partial class ExpressionTypes {
     }
 
     const decl = this.record(target.module)?.classes.get(target.loc);
-    if (decl == undefined || decl.typeParams.length > 0) {
+    if (
+      decl == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return undefined;
     }
 
-    const instance = this.resolver.classInstance(target.module, decl, []);
-    const isDerived = parts.some((part) =>
-      this.relation.converts(instance, part),
-    );
+    const instance = this.types.classInstance(target.module, decl, []);
+    const isDerived = parts.some((part) => this.types.converts(instance, part));
     if (!isDerived) {
       return undefined;
     }
@@ -512,15 +560,13 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private readonly libraryDerived(name: string, parts: Read<Type[]>): Type | undefined {
-    const instance = this.resolver.libraryInstance(name, []);
+  private libraryDerived(name: string, parts: Read<Type[]>): Type | undefined {
+    const instance = this.types.libraryInstance(name, []);
     if (instance == undefined || instance.kind != TypeKind.Instance) {
       return undefined;
     }
 
-    const isDerived = parts.some((part) =>
-      this.relation.converts(instance, part),
-    );
+    const isDerived = parts.some((part) => this.types.converts(instance, part));
     if (!isDerived) {
       return undefined;
     }

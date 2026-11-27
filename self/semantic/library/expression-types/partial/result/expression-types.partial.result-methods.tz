@@ -22,8 +22,10 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     const facts = new Map<string, Type>();
-    const object = callee.object;
+    const object = tree.exprOf(callee.objectId);
     const isTest = callee.name == "isOk" || callee.name == "isErr";
     if (!isTest || object.kind != ExprKind.Name) {
       return facts;
@@ -39,27 +41,33 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    const never = this.store.plain(TypeKind.Never);
+    const never = this.types.store.plain(TypeKind.Never);
     const isOk = (callee.name == "isOk") == isTrue;
     if (isOk) {
-      facts.set(slot.key, this.store.resultOf(base.value, never));
+      facts.set(
+        slot.key,
+        this.types.store.resultOf(this.types.store.valueOf(base), never),
+      );
 
       return facts;
     }
 
-    facts.set(slot.key, this.store.resultOf(never, base.error));
+    facts.set(
+      slot.key,
+      this.types.store.resultOf(never, this.types.store.errorOf(base)),
+    );
 
     return facts;
   }
 
-  private readonly resultMemberRead(
+  private resultMemberRead(
     expr: MemberExpr,
     result: ResultType,
     module: int,
   ): Type {
-    const checked = this.results.resultMemberRead(expr, result);
+    const checked = this.types.resultMemberRead(expr, result);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -71,9 +79,13 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
-    if (expr.args.some((arg) => arg.spread)) {
-      this.looseArguments(expr.args, module);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    if (tree.argumentsOf(expr.argsList).some((arg) => arg.spread)) {
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return error;
     }
@@ -81,24 +93,26 @@ partial class ExpressionTypes {
     const name = member.name;
     const method = kResultMethods.find((one) => one.name == name);
     if (method == undefined) {
-      this.report(module, member.loc, Code.PropertyMissing, {
+      this.errors.write(module, member.loc, Code.PropertyMissing, {
         word: name,
-        first: this.text.of(result),
+        first: this.types.typeText(result),
       });
-      this.looseArguments(expr.args, module);
+      const argsItem = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(argsItem, module);
 
       return error;
     }
 
-    const count = expr.args.length;
+    const count = tree.argumentsOf(expr.argsList).length;
     if (count != method.count) {
-      const word = this.calls.argumentCountText(
+      const word = this.types.argumentCountText(
         method.count,
         method.count,
         false,
       );
 
-      this.report(module, member.loc, Code.ArgumentCount, {
+      this.errors.write(module, member.loc, Code.ArgumentCount, {
         word,
         other: `${count}`,
       });
@@ -116,10 +130,12 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const name = member.name;
-    const first = expr.args[0]?.expr;
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (name == "isOk" || name == "isErr" || first == undefined) {
-      return this.store.plain(TypeKind.Boolean);
+      return this.types.store.plain(TypeKind.Boolean);
     }
     if (name == "unwrapOr") {
       return this.unwrapOrTyped(first, result, module);
@@ -129,9 +145,9 @@ partial class ExpressionTypes {
     }
 
     const isOnError = name == "mapErr" || name == "orElse" || name == "orTee";
-    const half = this.results.resultHalf(result, isOnError);
+    const half = this.types.resultHalf(result, isOnError);
     const isTee = name == "andTee" || name == "orTee";
-    const hint = this.results.resultCallbackHint(name, wanted, isOnError);
+    const hint = this.types.resultCallbackHint(name, wanted, isOnError);
     const returned = this.resultCallback(
       first,
       half,
@@ -141,7 +157,7 @@ partial class ExpressionTypes {
       module,
     );
     if (returned == undefined || returned.kind == TypeKind.Error) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.resultCallTyped(name, first, result, returned, module);
@@ -156,24 +172,24 @@ partial class ExpressionTypes {
     module: int,
   ): Type | undefined {
     const isFunction = arg.kind == ExprKind.Function;
-    const params = [{ type: this.results.halfParam(half), optional: false }];
-    const result = this.results.callbackResult(isFunction, hint, isTee);
-    const wanted = this.store.functionOf({ params, rest: false, result });
+    const params = [{ type: this.types.halfParam(half), optional: false }];
+    const result = this.types.callbackResult(isFunction, hint, isTee);
+    const wanted = this.types.store.functionOf({ params, rest: false, result });
     const typed = this.typed(arg, wanted, module);
     if (typed.kind == TypeKind.Function) {
-      return typed.shape.result;
+      return this.types.store.returnTypeOf(typed);
     }
     if (typed.kind != TypeKind.Error) {
-      this.report(module, arg.loc, Code.ResultNeedsFunction, {
+      this.errors.write(module, arg.loc, Code.ResultNeedsFunction, {
         word: name,
-        first: this.text.of(typed),
+        first: this.types.typeText(typed),
       });
     }
 
     return undefined;
   }
 
-  private readonly resultCallTyped(
+  private resultCallTyped(
     name: string,
     arg: Expr,
     result: ResultType,
@@ -182,9 +198,15 @@ partial class ExpressionTypes {
   ): Type {
     switch (name) {
       case "map":
-        return this.store.resultOf(returned, result.error);
+        return this.types.store.resultOf(
+          returned,
+          this.types.store.errorOf(result),
+        );
       case "mapErr":
-        return this.store.resultOf(result.value, returned);
+        return this.types.store.resultOf(
+          this.types.store.valueOf(result),
+          returned,
+        );
       case "andThen":
       case "andThrough":
         return this.chainedTyped(name, arg, result, returned, module);
@@ -195,7 +217,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly chainedTyped(
+  private chainedTyped(
     name: string,
     arg: Expr,
     result: ResultType,
@@ -207,25 +229,31 @@ partial class ExpressionTypes {
       return this.notResultReport(name, arg, returned, module);
     }
 
-    const common = this.resultHalfJoin(result.error, next.error);
+    const common = this.resultHalfJoin(
+      this.types.store.errorOf(result),
+      this.types.store.errorOf(next),
+    );
     if (common == undefined) {
-      this.report(module, arg.loc, Code.ResultErrorsNoUnion, {
-        first: this.text.of(result.error),
+      this.errors.write(module, arg.loc, Code.ResultErrorsNoUnion, {
+        first: this.types.typeText(this.types.store.errorOf(result)),
         word: name,
-        second: this.text.of(next.error),
-        other: this.resultUnionWhy(result.error, next.error),
+        second: this.types.typeText(this.types.store.errorOf(next)),
+        other: this.resultUnionWhy(
+          this.types.store.errorOf(result),
+          this.types.store.errorOf(next),
+        ),
       });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (name == "andThen") {
-      return this.store.resultOf(next.value, common);
+      return this.types.store.resultOf(this.types.store.valueOf(next), common);
     }
 
-    return this.store.resultOf(result.value, common);
+    return this.types.store.resultOf(this.types.store.valueOf(result), common);
   }
 
-  private readonly orElseTyped(
+  private orElseTyped(
     arg: Expr,
     result: ResultType,
     returned: Type,
@@ -236,35 +264,41 @@ partial class ExpressionTypes {
       return this.notResultReport("orElse", arg, returned, module);
     }
 
-    const common = this.resultHalfJoin(result.value, next.value);
+    const common = this.resultHalfJoin(
+      this.types.store.valueOf(result),
+      this.types.store.valueOf(next),
+    );
     if (common == undefined) {
-      this.report(module, arg.loc, Code.ResultValuesNoUnion, {
-        first: this.text.of(result.value),
-        second: this.text.of(next.value),
-        other: this.resultUnionWhy(result.value, next.value),
+      this.errors.write(module, arg.loc, Code.ResultValuesNoUnion, {
+        first: this.types.typeText(this.types.store.valueOf(result)),
+        second: this.types.typeText(this.types.store.valueOf(next)),
+        other: this.resultUnionWhy(
+          this.types.store.valueOf(result),
+          this.types.store.valueOf(next),
+        ),
       });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.store.resultOf(common, next.error);
+    return this.types.store.resultOf(common, this.types.store.errorOf(next));
   }
 
-  private readonly notResultReport(
+  private notResultReport(
     name: string,
     arg: Expr,
     returned: Type,
     module: int,
   ): Type {
-    const checked = this.results.notResultReport(name, arg, returned);
+    const checked = this.types.notResultReport(name, arg, returned);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly resultHalfJoin(first: Type, second: Type): Type | undefined {
-    if (first == second || second.kind == TypeKind.Never) {
+  private resultHalfJoin(first: Type, second: Type): Type | undefined {
+    if (first.id == second.id || second.kind == TypeKind.Never) {
       return first;
     }
     if (first.kind == TypeKind.Never) {
@@ -274,24 +308,24 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const joined = this.unifier.unionUnify(first, second);
+    const joined = this.types.unionUnify(first, second);
     if (joined == undefined || joined.kind == TypeKind.Error) {
       return undefined;
     }
-    if (this.resolver.unionProblem(joined) != undefined) {
+    if (this.types.unionProblem(joined) != undefined) {
       return undefined;
     }
 
     return joined;
   }
 
-  private readonly resultUnionWhy(first: Type, second: Type): string {
+  private resultUnionWhy(first: Type, second: Type): string {
     if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
       return ": one of them is nothing, 'ok()'";
     }
 
-    const both = this.store.unionOf([first, second]);
-    const problem = this.resolver.unionProblem(both);
+    const both = this.types.store.unionOf([first, second]);
+    const problem = this.types.unionProblem(both);
     if (problem == undefined) {
       return "";
     }
@@ -303,23 +337,23 @@ partial class ExpressionTypes {
   }
 
   private unwrapOrTyped(arg: Expr, result: ResultType, module: int): Type {
-    const value = result.value;
+    const value = this.types.store.valueOf(result);
     const isGiving =
       value.kind != TypeKind.Never && value.kind != TypeKind.Void;
-    const hint = this.results.givingHint(isGiving, value);
+    const hint = this.types.givingHint(isGiving, value);
     const other = this.typed(arg, hint, module);
     if (other.kind == TypeKind.Error) {
       return other;
     }
 
-    const joined = this.results.unwrapJoin(value, other);
+    const joined = this.types.unwrapJoin(value, other);
     if (joined == undefined) {
-      this.report(module, arg.loc, Code.ResultUnwrapOrTypes, {
-        first: this.text.of(value),
-        second: this.text.of(other),
+      this.errors.write(module, arg.loc, Code.ResultUnwrapOrTypes, {
+        first: this.types.typeText(value),
+        second: this.types.typeText(other),
       });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return joined;
@@ -332,17 +366,19 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const onOk = expr.args[0]?.expr;
-    const onErr = expr.args[1]?.expr;
+    const tree = this.types.program.tree;
+
+    const onOk = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const onErr = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (onOk == undefined || onErr == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const goal = this.results.resultWanted(wanted);
-    const both = this.results.matchGoal(goal);
+    const goal = this.types.resultWanted(wanted);
+    const both = this.types.matchGoal(goal);
     const first = this.resultCallback(
       onOk,
-      result.value,
+      this.types.store.valueOf(result),
       both,
       false,
       "match",
@@ -350,31 +386,31 @@ partial class ExpressionTypes {
     );
     const second = this.resultCallback(
       onErr,
-      result.error,
+      this.types.store.errorOf(result),
       both,
       false,
       "match",
       module,
     );
     if (first == undefined || second == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (first.kind == TypeKind.Error || second.kind == TypeKind.Error) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.matchJoined(member, first, second, module);
   }
 
-  private readonly matchJoined(
+  private matchJoined(
     member: MemberExpr,
     first: Type,
     second: Type,
     module: int,
   ): Type {
-    const checked = this.results.matchJoined(member, first, second);
+    const checked = this.types.matchJoined(member, first, second);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

@@ -15,7 +15,10 @@ partial class Lowering {
     expr: AssignExpr,
     target: IndexExpr,
   ): IrValue | undefined {
-    const object = this.typeIn(frame, target.object);
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.typeIn(frame, objectExpr);
     const isBytes = object != undefined && this.isBytesType(object);
     if (object == undefined || (expr.op != undefined && isBytes)) {
       this.notLowered(frame.module, expr.loc, "an assignment to this element");
@@ -37,14 +40,22 @@ partial class Lowering {
       return this.elementUpdated(frame, expr, target, item, element);
     }
 
-    const array = this.value(frame, target.object);
-    const index = this.value(frame, target.index);
-    const given = this.wantedValue(frame, expr.value, item);
+    const targetObject = tree.exprOf(target.objectId);
+    const array = this.value(frame, targetObject);
+    const indexExpr = tree.exprOf(target.indexId);
+    const index = this.value(frame, indexExpr);
+    const valueExpr = tree.exprOf(expr.valueId);
+    const given = this.wantedValue(frame, valueExpr, item);
     if (array == undefined || index == undefined || given == undefined) {
       return undefined;
     }
 
-    const value = this.converted(frame, given, item, expr.value.loc);
+    const value = this.converted(
+      frame,
+      given,
+      item,
+      tree.exprOf(expr.valueId).loc,
+    );
     if (value == undefined) {
       return undefined;
     }
@@ -65,6 +76,8 @@ partial class Lowering {
     item: Type,
     element: string,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const isPlain =
       this.isInteger(item) || this.isDouble(item) || this.isString(item);
     if (!isPlain) {
@@ -73,8 +86,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const array = this.value(frame, target.object);
-    const index = this.value(frame, target.index);
+    const object = tree.exprOf(target.objectId);
+    const array = this.value(frame, object);
+    const indexExpr = tree.exprOf(target.indexId);
+    const index = this.value(frame, indexExpr);
     if (array == undefined || index == undefined) {
       return undefined;
     }
@@ -132,15 +147,25 @@ partial class Lowering {
     expr: AssignExpr,
     target: IndexExpr,
   ): IrValue | undefined {
-    const bytes = this.value(frame, target.object);
-    const index = this.value(frame, target.index);
-    const given = this.value(frame, expr.value);
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(target.objectId);
+    const bytes = this.value(frame, object);
+    const indexExpr = tree.exprOf(target.indexId);
+    const index = this.value(frame, indexExpr);
+    const valueExpr = tree.exprOf(expr.valueId);
+    const given = this.value(frame, valueExpr);
     if (bytes == undefined || index == undefined || given == undefined) {
       return undefined;
     }
 
-    const byte = this.store.integer(8, true);
-    const value = this.converted(frame, given, byte, expr.value.loc);
+    const byte = this.values.types.store.integer(8, true);
+    const value = this.converted(
+      frame,
+      given,
+      byte,
+      tree.exprOf(expr.valueId).loc,
+    );
     if (value == undefined) {
       return undefined;
     }

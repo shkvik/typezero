@@ -1,16 +1,26 @@
-import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import {
-  ImportDecl,
   ModuleName,
+  ModulePath,
 } from "../../../program/ast/types/ast.types.modules.tz";
-import { OpenModule } from "../../loader/types/loader.types.tz";
 
 export type PartTarget = {
-  readonly decl: ClassDecl;
-  readonly module: OpenModule;
+  readonly module: int;
+  readonly item: int;
+};
+
+export type PartSearch = {
+  readonly target?: PartTarget;
+  readonly problem?: SourceError;
 };
 
 export type ImportedClass = {
-  readonly decl: ImportDecl;
+  readonly from: ModulePath;
   readonly name: ModuleName;
+};
+
+export type PartJoin = {
+  readonly target: PartTarget;
+  readonly part: PartTarget;
+  readonly method: int;
 };

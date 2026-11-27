@@ -4,6 +4,7 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import {
   kElementMethods,
   kFillMethod,
@@ -13,15 +14,18 @@ import {
 
 export class DestinationRules {
   public readonly memberParameter(
+    store: Read<TypeStore>,
     object: Type,
     name: string,
     index: int,
   ): Type | undefined {
     if (object.kind == TypeKind.Array) {
-      return this.arrayParameter(object.item, name, index);
+      const item = store.itemOf(object);
+
+      return this.arrayParameter(item, name, index);
     }
     if (object.kind == TypeKind.Dict) {
-      return this.dictParameter(object, name, index);
+      return this.dictParameter(store, object, name, index);
     }
 
     return undefined;
@@ -43,29 +47,34 @@ export class DestinationRules {
   }
 
   private readonly dictParameter(
+    store: Read<TypeStore>,
     dict: DictType,
     name: string,
     index: int,
   ): Type | undefined {
     const isMap = dict.dict == DictKind.Map;
     if (isMap && name == kSetMethod) {
-      return this.pairPart(dict, index);
+      return this.pairPart(store, dict, index);
     }
 
     const isKeyed = dict.dict != DictKind.Record && kKeyMethods.includes(name);
     if (isKeyed && index == 0) {
-      return dict.key;
+      return store.keyOf(dict);
     }
 
     return undefined;
   }
 
-  private readonly pairPart(dict: DictType, index: int): Type | undefined {
+  private readonly pairPart(
+    store: Read<TypeStore>,
+    dict: DictType,
+    index: int,
+  ): Type | undefined {
     switch (index) {
       case 0:
-        return dict.key;
+        return store.keyOf(dict);
       case 1:
-        return dict.value;
+        return store.valueOf(dict);
       default:
         return undefined;
     }

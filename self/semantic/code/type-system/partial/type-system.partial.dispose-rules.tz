@@ -1,0 +1,233 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  ClassDecl,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  VarDeclStmt,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  kDisposeKey,
+  kDisposeName,
+  kSuperName,
+  kSymbolName,
+  kThisName,
+} from "../../dispose-rules/const/dispose-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly ownDispose(decl: ClassDecl): FunctionDecl | undefined {
+    const tree = this.program.tree;
+
+    return this.classMethodNamed(decl, kDisposeKey);
+  }
+
+  public readonly isDisposeMethod(fn: FunctionDecl | undefined): boolean {
+    return fn != undefined && fn.name == kDisposeKey;
+  }
+
+  public readonly disposeErrors(
+    dispose: FunctionDecl,
+    isGivingValue: boolean,
+    inherited: string | undefined,
+  ): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+    const loc = dispose.loc;
+    const isStatic = dispose.role?.method == MethodKind.Static;
+    const isWrong =
+      tree.paramsOf(dispose.paramsList).length > 0 ||
+      isStatic ||
+      dispose.isAsync ||
+      dispose.isGenerator ||
+      isGivingValue;
+    if (isWrong) {
+      errors.push({ code: Code.DisposeShape, loc, details: kNoDetails });
+    }
+    if (inherited != undefined && this.hasSuperDisposeCall(dispose)) {
+      errors.push({
+        code: Code.DisposeNoSuper,
+        loc,
+        details: { word: inherited },
+      });
+    }
+    if (this.isLeavingThis(dispose)) {
+      errors.push({ code: Code.DisposeThisLeaves, loc, details: kNoDetails });
+    }
+
+    return errors;
+  }
+
+  public readonly outlivesErrors(
+    statement: VarDeclStmt,
+    following: Read<Stmt[]>,
+  ): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+
+    for (const decl of tree.declaratorsOf(statement.declsList)) {
+      const isEscaping = following.some((one) =>
+        this.isEscaping(decl.name, one),
+      );
+      if (isEscaping) {
+        errors.push({
+          code: Code.UsingOutlives,
+          loc: decl.loc,
+          details: { word: decl.name },
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public readonly isDisposeCall(expr: CallExpr): boolean {
+    const tree = this.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Index) {
+      return false;
+    }
+
+    const index = tree.exprOf(callee.indexId);
+
+    return this.isDisposeKey(index);
+  }
+
+  public readonly isSuperDisposeCall(expr: CallExpr): boolean {
+    const tree = this.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind == ExprKind.Member) {
+      return callee.name == kDisposeKey;
+    }
+    if (callee.kind != ExprKind.Index) {
+      return false;
+    }
+
+    return (
+      this.isDisposeKey(tree.exprOf(callee.indexId)) &&
+      this.isNamed(tree.exprOf(callee.objectId), kSuperName)
+    );
+  }
+
+  private readonly isDisposeKey(key: Expr): boolean {
+    const tree = this.program.tree;
+
+    if (key.kind != ExprKind.Member || key.name != kDisposeName) {
+      return false;
+    }
+
+    const object = tree.exprOf(key.objectId);
+
+    return this.isNamed(object, kSymbolName);
+  }
+
+  private readonly hasSuperDisposeCall(dispose: FunctionDecl): boolean {
+    const exprs = this.functionExprs(dispose, false);
+
+    return exprs.some(
+      (expr) => expr.kind == ExprKind.Call && this.isSuperDisposeCall(expr),
+    );
+  }
+
+  private readonly isLeavingThis(dispose: FunctionDecl): boolean {
+    const tree = this.program.tree;
+
+    const exprs = this.functionExprs(dispose, false);
+    const reads = new Set<int>();
+
+    for (const expr of exprs) {
+      if (
+        expr.kind == ExprKind.Member &&
+        this.isNamed(tree.exprOf(expr.objectId), kThisName)
+      ) {
+        const object = tree.exprOf(expr.objectId);
+
+        reads.add(object.id);
+      }
+    }
+
+    return exprs.some((expr) => {
+      const isLoose = this.isNamed(expr, kThisName) && !reads.has(expr.id);
+
+      return isLoose || this.isCaptured(expr, kThisName);
+    });
+  }
+
+  private readonly isEscaping(name: string, statement: Stmt): boolean {
+    const exprs: Expr[] = [];
+    const values: Expr[] = [];
+
+    this.statementExprs(statement, exprs, values, false);
+
+    if (values.some((value) => this.isNamed(value, name))) {
+      return true;
+    }
+
+    return exprs.some((expr) => {
+      const isHeld = this.heldParts(expr).some((part) =>
+        this.isNamed(part, name),
+      );
+
+      return isHeld || this.isCaptured(expr, name);
+    });
+  }
+
+  private readonly isCaptured(expr: Expr, name: string): boolean {
+    const tree = this.program.tree;
+
+    if (expr.kind != ExprKind.Function) {
+      return false;
+    }
+
+    const fn = tree.functionOf(expr.fnId);
+    const inner = this.functionExprs(fn, true);
+
+    return inner.some((one) => this.isNamed(one, name));
+  }
+
+  private readonly heldParts(expr: Expr): Expr[] {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Assign:
+        return [tree.exprOf(expr.valueId)];
+      case ExprKind.ArrayLit:
+        return tree
+          .elementsOf(expr.elementsList)
+          .map((element) => tree.exprOf(element.exprId));
+      case ExprKind.ObjectLit:
+        return tree
+          .propertiesOf(expr.propsList)
+          .map((property) => tree.exprOf(property.valueId));
+      case ExprKind.New:
+        return tree
+          .argumentsOf(expr.argsList)
+          .map((arg) => tree.exprOf(arg.exprId));
+      case ExprKind.Yield:
+        const value = tree.exprAt(expr.valueId);
+
+        return this.optionalPart(value);
+      default:
+        return [];
+    }
+  }
+
+  private readonly isNamed(expr: Expr, name: string): boolean {
+    return expr.kind == ExprKind.Name && expr.name == name;
+  }
+}

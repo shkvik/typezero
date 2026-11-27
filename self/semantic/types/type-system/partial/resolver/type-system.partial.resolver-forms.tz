@@ -1,0 +1,339 @@
+import { TypeSystem } from "../../type-system.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  kBooleanTypeName,
+  kStringTypeName,
+} from "../../../../../program/ast/const/ast.const.tz";
+import {
+  ParamKind,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionTypeForm,
+  LiteralTypeForm,
+  ObjectTypeField,
+  ObjectTypeForm,
+  TupleTypeForm,
+  TypeRef,
+  TypeRefKind,
+} from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  LiteralKind,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private tuple(
+    ref: TypeRef,
+    form: TupleTypeForm,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    const items: Type[] = [];
+    const spreads: int[] = [];
+
+    for (const element of tree.tupleElementsOf(form.elementsList)) {
+      if (!element.spread) {
+        const typeRef = tree.typeRefOf(element.typeId);
+        const item = this.value(typeRef, context);
+
+        const elementType = tree.typeRefOf(element.typeId);
+
+        this.typeListCheck(item, elementType.loc, context);
+        items.push(item);
+
+        continue;
+      }
+
+      const item = this.resolve(tree.typeRefOf(element.typeId), context);
+      if (item.kind == TypeKind.Tuple && item.rest < 0) {
+        for (const inner of this.store.itemsOf(item)) {
+          items.push(inner);
+        }
+
+        continue;
+      }
+
+      spreads.push(items.length);
+      items.push(item);
+    }
+
+    const problem = this.spreadProblem(items, spreads, context.place);
+    if (problem != undefined) {
+      this.report(context.module, ref.loc, problem, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const required = items.length;
+    const lent = spreads.length == 0 && this.isLentTupleForm(form);
+
+    return this.store.tupleOf({
+      items,
+      readonly: form.readonly,
+      required,
+      rest: spreads[spreads.length - 1] ?? -1,
+      lent,
+    });
+  }
+
+  private readonly isLentTupleForm(form: TupleTypeForm): boolean {
+    const tree = this.program.tree;
+
+    const elements = tree.tupleElementsOf(form.elementsList);
+    if (elements.length == 0) {
+      return false;
+    }
+
+    return elements.every((element) =>
+      this.isLentItem(tree.typeRefOf(element.typeId)),
+    );
+  }
+
+  private typeListCheck(
+    item: Type,
+    loc: int,
+    context: Read<TypeContext>,
+  ): void {
+    if (item.kind != TypeKind.TypeParameter) {
+      return;
+    }
+
+    const constraint = this.store.constraintOf(item);
+    const isList =
+      constraint?.kind == TypeKind.Array || constraint?.kind == TypeKind.Tuple;
+    if (isList) {
+      this.report(context.module, loc, Code.TupleTypeList, { word: item.name });
+    }
+  }
+
+  private readonly spreadProblem(
+    items: Read<Type[]>,
+    spreads: Read<int[]>,
+    place: TypePlace,
+  ): Code | undefined {
+    const last = items.length - 1;
+
+    for (const at of spreads) {
+      const item = items[at];
+      if (item == undefined || item.kind != TypeKind.Array) {
+        continue;
+      }
+      if (at < last) {
+        return Code.TupleSpreadNotLast;
+      }
+      if (place == TypePlace.Plain) {
+        return Code.TupleRest;
+      }
+    }
+
+    return undefined;
+  }
+
+  private object(
+    form: ObjectTypeForm,
+    context: Read<TypeContext>,
+    declared: boolean,
+  ): Type {
+    const tree = this.program.tree;
+
+    const fields: ObjectField[] = [];
+
+    for (const field of tree.objectFieldsOf(form.fieldsList)) {
+      if (field.call) {
+        continue;
+      }
+
+      const typeRef = tree.typeRefOf(field.typeId);
+      const type = this.value(typeRef, context);
+      const overloaded = this.isOverloaded(form, field.name);
+      const problem = this.memberProblem(fields, field, type, overloaded);
+
+      if (overloaded && !declared) {
+        this.report(context.module, field.loc, Code.SignaturesOnlyInInterface, {
+          word: field.name,
+        });
+
+        continue;
+      }
+      if (problem != undefined) {
+        const other = this.typeText(type);
+
+        this.report(context.module, field.loc, problem, {
+          word: field.name,
+          other,
+        });
+
+        continue;
+      }
+
+      fields.push({
+        name: field.name,
+        type,
+        optional: field.optional,
+        readonly: field.readonly,
+      });
+    }
+
+    return this.store.objectOf(fields);
+  }
+
+  private readonly isOverloaded(form: ObjectTypeForm, name: string): boolean {
+    const tree = this.program.tree;
+
+    let count = 0;
+
+    for (const field of tree.objectFieldsOf(form.fieldsList)) {
+      if (field.call || field.name != name) {
+        continue;
+      }
+      if (!field.method) {
+        return false;
+      }
+
+      count += 1;
+    }
+
+    return count > 1;
+  }
+
+  private readonly memberProblem(
+    kept: Read<ObjectField[]>,
+    field: ObjectTypeField,
+    type: Type,
+    overloaded: boolean,
+  ): Code | undefined {
+    const earlier = kept.filter((one) => one.name == field.name);
+
+    if (earlier.length > 0 && !overloaded) {
+      return Code.DuplicateField;
+    }
+    if (earlier.some((one) => one.type.id == type.id)) {
+      return Code.DuplicateSignature;
+    }
+
+    return undefined;
+  }
+
+  private functionType(
+    form: FunctionTypeForm,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    const last = tree.functionTypeParamsOf(form.paramsList).length - 1;
+    const sites: ParameterSite[] = [];
+
+    for (const param of tree.functionTypeParamsOf(form.paramsList)) {
+      const spread = form.rest && sites.length == last;
+      const kind = this.siteKind(param.optional, spread);
+
+      sites.push({
+        name: param.name,
+        loc: param.loc,
+        kind,
+        type: tree.typeRefOf(param.typeId),
+        isDeclared: false,
+      });
+    }
+
+    const result = tree.typeRefAt(form.resultId);
+
+    this.assertsTypeCheck(result, context);
+
+    const resultRef = tree.typeRefAt(form.resultId);
+
+    return this.signature(sites, resultRef, context);
+  }
+
+  private assertsTypeCheck(
+    result: TypeRef | undefined,
+    context: Read<TypeContext>,
+  ): void {
+    const form = result?.form;
+    if (result == undefined || form == undefined) {
+      return;
+    }
+    if (form.kind != TypeRefKind.Predicate || !form.asserts) {
+      return;
+    }
+
+    const shown = this.assertedText(result, context);
+
+    this.report(context.module, result.loc, Code.AssertsRefused, {
+      word: shown,
+      other: this.assertedAdvice(result, shown),
+    });
+  }
+
+  private assertedText(result: TypeRef, context: Read<TypeContext>): string {
+    const tree = this.program.tree;
+
+    const ref = tree.typeRefsOf(result.argsList)[0];
+    if (ref == undefined) {
+      return result.name;
+    }
+
+    const type = this.resolve(ref, context);
+    const shown = this.typeText(type);
+
+    return `${result.name} is ${shown}`;
+  }
+
+  private readonly assertedAdvice(result: TypeRef, shown: string): string {
+    const tree = this.program.tree;
+
+    const args = tree.typeRefsOf(result.argsList);
+    if (args.length == 0) {
+      return "boolean";
+    }
+
+    return shown;
+  }
+
+  private readonly siteKind(optional: boolean, spread: boolean): ParamKind {
+    if (spread) {
+      return ParamKind.Rest;
+    }
+    if (optional) {
+      return ParamKind.Optional;
+    }
+
+    return ParamKind.Required;
+  }
+
+  private literal(name: string, form: LiteralTypeForm): Type {
+    if (name == kStringTypeName) {
+      return this.store.literal(LiteralKind.String, form.text);
+    }
+    if (name == kBooleanTypeName) {
+      const truth = this.truthText(form.number);
+
+      return this.store.literal(LiteralKind.Boolean, truth);
+    }
+
+    const text = `${form.number}`;
+
+    if (form.integer) {
+      return this.store.literal(LiteralKind.Int, text);
+    }
+
+    return this.store.literal(LiteralKind.Double, text);
+  }
+
+  private readonly truthText(number: double): string {
+    if (number == 0.0) {
+      return "false";
+    }
+
+    return "true";
+  }
+}

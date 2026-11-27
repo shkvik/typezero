@@ -28,17 +28,19 @@ import {
 
 partial class ExpressionTypes {
   private patternSource(
-    door: VariableDoor,
+    key: string,
     variable: DeclaredVariable,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const decl = variable.decl;
-    const init = decl.init;
+    const init = tree.exprAt(decl.initId);
     const loop = variable.loop;
     if (loop != undefined) {
       const item = this.loopItem(loop, module);
 
-      door.type = item;
+      this.setDoorType(key, item);
 
       return this.loopShapeCheck(decl, item, module);
     }
@@ -46,14 +48,18 @@ partial class ExpressionTypes {
       return;
     }
 
-    const given = this.patternGiven(init, decl.typeAnn, module);
+    const given = this.patternGiven(
+      init,
+      tree.typeRefAt(decl.typeAnnId),
+      module,
+    );
     if (decl.form.kind != BindingKind.Array) {
-      door.type = given;
-
-      return;
+      return this.setDoorType(key, given);
     }
 
-    door.type = this.patternArray(init, given, module);
+    const array = this.patternArray(init, given, module);
+
+    this.setDoorType(key, array);
   }
 
   private patternGiven(
@@ -70,7 +76,7 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const type = this.resolver.value(written, context);
+    const type = this.types.value(written, context);
     if (type.kind != TypeKind.Error) {
       this.checked(init, type, module, kNoPlace);
     }
@@ -80,7 +86,7 @@ partial class ExpressionTypes {
 
   private patternArray(init: Expr, given: Type, module: int): Type {
     const base = this.types.apparent(given);
-    if (this.library.isJsonHolder(given)) {
+    if (this.types.isJsonHolder(given)) {
       return given;
     }
 
@@ -102,30 +108,30 @@ partial class ExpressionTypes {
       return this.notPatternArray(init, given, module);
     }
 
-    return this.store.arrayOf(item);
+    return this.types.store.arrayOf(item);
   }
 
   private readonly isMatchArray(type: Type): boolean {
     if (type.kind == TypeKind.Instance) {
-      const isLibrary = this.modules.isLibraryModule(type.module);
+      const isLibrary = this.types.isLibraryModule(type.module);
 
       return isLibrary && type.name == kMatchArrayClass;
     }
 
-    const isNamed = this.store.labelOf(type) == kMatchArrayClass;
+    const isNamed = this.types.store.labelOf(type) == kMatchArrayClass;
 
-    return isNamed && this.resolver.isLibraryShape(type);
+    return isNamed && this.types.isLibraryShape(type);
   }
 
-  private readonly notPatternArray(init: Expr, given: Type, module: int): Type {
-    const checked = this.indexes.notPatternArray(init, given);
+  private notPatternArray(init: Expr, given: Type, module: int): Type {
+    const checked = this.types.notPatternArray(init, given);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly loopShapeCheck(decl: VarDeclarator, item: Type, module: int): void {
+  private loopShapeCheck(decl: VarDeclarator, item: Type, module: int): void {
     if (decl.form.kind != BindingKind.Array) {
       return;
     }
@@ -136,28 +142,31 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Tuple ||
       base.kind == TypeKind.Error;
     if (!isList && !this.isMatchArray(base)) {
-      this.report(module, decl.loc, Code.DestructureElements, {
-        word: this.text.of(item),
+      this.errors.write(module, decl.loc, Code.DestructureElements, {
+        word: this.types.typeText(item),
       });
     }
   }
 
   private patternElement(expr: IndexExpr, module: int): Type {
-    const object = this.typed(expr.object, undefined, module);
+    const tree = this.types.program.tree;
+
+    const objectExpr = tree.exprOf(expr.objectId);
+    const object = this.typed(objectExpr, undefined, module);
     const base = this.types.apparent(object);
-    if (this.library.isJsonHolder(object)) {
-      return this.types.optional(this.store.plain(TypeKind.Json));
+    if (this.types.isJsonHolder(object)) {
+      return this.types.optional(this.types.store.plain(TypeKind.Json));
     }
 
     switch (base.kind) {
       case TypeKind.Array:
-        return base.item;
+        return this.types.store.itemOf(base);
       case TypeKind.Tuple:
         return this.tupleIndexed(expr, base, module);
       case TypeKind.Json:
         return base;
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
     }
   }
 }

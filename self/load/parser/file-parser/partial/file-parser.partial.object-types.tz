@@ -11,11 +11,7 @@ import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   MappedTypeForm,
   ModifierChange,
-  ObjectTypeField,
-  ObjectTypeForm,
   TypeRefKind,
-  TypeParamDecl,
-  TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   kRecordTypeName,
@@ -26,6 +22,12 @@ import {
   kSymbolHashName,
   kSymbolIteratorName,
 } from "../const/file-parser.const.object-types.tz";
+import {
+  ObjectTypeField,
+  ObjectTypeForm,
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 partial class FileParser {
   private readonly mappedTypeAhead(): boolean {
@@ -45,13 +47,11 @@ partial class FileParser {
     readonlyChange: ModifierChange,
   ): TypeRef {
     const ref = this.typeRef(loc);
-    const mapped: MappedTypeForm = {
+    ref.form = {
       kind: TypeRefKind.Mapped,
       optionalChange: ModifierChange.None,
       readonlyChange,
     };
-
-    ref.form = mapped;
     this.cursor.accept(TokenKind.LBracket);
     const variable = this.cursor.next();
 
@@ -68,7 +68,7 @@ partial class FileParser {
     }
     const optionalChange = this.acceptModifier(TokenKind.Question);
 
-    ref.form = { ...mapped, optionalChange };
+    ref.form = { kind: TypeRefKind.Mapped, optionalChange, readonlyChange };
     if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedBeforeMappedValues)) {
       this.cursor.skipToClosingBrace();
       return ref;
@@ -260,7 +260,6 @@ partial class FileParser {
 
         ref.form = this.objectForm(fields);
 
-
         return ref;
       }
 
@@ -271,9 +270,9 @@ partial class FileParser {
         return ref;
       }
 
-      fields.push(member);
-
       const separatorCode = this.separatorCode(member);
+
+      fields.push(member);
       if (!this.endObjectTypeMember(separatorCode)) {
         ref.form = this.objectForm(fields);
 
@@ -284,7 +283,6 @@ partial class FileParser {
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedObjectTypeClose);
 
     ref.form = this.objectForm(fields);
-
 
     return ref;
   }
@@ -485,7 +483,7 @@ partial class FileParser {
   }
 
   private indexSignature(
-    ref: TypeRef,
+    ref: Own<TypeRef>,
     loc: int,
     afterFields: boolean,
   ): TypeRef {

@@ -32,18 +32,27 @@ import {
 } from "../../../crypto-rules/types/crypto-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly cryptoAsyncCallback(
+  private cryptoAsyncCallback(
     expr: CallExpr,
     shown: string,
     module: int,
   ): boolean {
-    const last = expr.args[expr.args.length - 1]?.expr;
+    const tree = this.types.program.tree;
+
+    const last = tree.exprAt(
+      tree.argumentsOf(expr.argsList)[
+        tree.argumentsOf(expr.argsList).length - 1
+      ]?.exprId,
+    );
     const isCallback = last != undefined && last.kind == ExprKind.Function;
-    if (!this.crypto.isAsyncName(shown) || !isCallback || last == undefined) {
+    if (!this.types.isAsyncName(shown) || !isCallback || last == undefined) {
       return false;
     }
 
-    this.reportFound(module, this.crypto.asyncCallbackError(last.loc, shown));
+    this.errors.writeFound(
+      module,
+      this.types.asyncCallbackError(last.loc, shown),
+    );
 
     return true;
   }
@@ -55,7 +64,9 @@ partial class ExpressionTypes {
     hint: string,
     module: int,
   ): boolean {
-    const arg = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
     if (arg == undefined) {
       return false;
     }
@@ -65,37 +76,39 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const callbackError = this.crypto.syncCallbackError(arg.loc, name, hint);
+    const callbackError = this.types.syncCallbackError(arg.loc, name, hint);
 
-    this.reportFound(module, callbackError);
+    this.errors.writeFound(module, callbackError);
 
     return true;
   }
 
-  private readonly cryptoOptionsFine(
+  private cryptoOptionsFine(
     expr: CallExpr,
     index: int,
     shown: string,
     allowed: Read<string[]>,
     module: int,
   ): boolean {
-    const options = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const options = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
     if (options == undefined || options.kind == ExprKind.Undefined) {
       return true;
     }
     if (options.kind != ExprKind.ObjectLit) {
-      const literalError = this.crypto.optionsLiteralError(
+      const literalError = this.types.optionsLiteralError(
         options.loc,
         shown,
         allowed,
       );
 
-      this.reportFound(module, literalError);
+      this.errors.writeFound(module, literalError);
 
       return false;
     }
 
-    for (const property of options.props) {
+    for (const property of tree.propertiesOf(options.propsList)) {
       const kind = property.form.kind;
       const isNamed =
         kind != PropertyKind.Spread &&
@@ -103,25 +116,25 @@ partial class ExpressionTypes {
         kind != PropertyKind.Method &&
         property.name != "";
       if (!isNamed) {
-        const byNameError = this.crypto.optionsByNameError(
+        const byNameError = this.types.optionsByNameError(
           property.loc,
           shown,
           allowed,
         );
 
-        this.reportFound(module, byNameError);
+        this.errors.writeFound(module, byNameError);
 
         return false;
       }
       if (!allowed.includes(property.name)) {
-        const unknownError = this.crypto.optionUnknownError(
+        const unknownError = this.types.optionUnknownError(
           property.loc,
           shown,
           property.name,
           allowed,
         );
 
-        this.reportFound(module, unknownError);
+        this.errors.writeFound(module, unknownError);
 
         return false;
       }
@@ -131,11 +144,13 @@ partial class ExpressionTypes {
   }
 
   private scryptOptionsCheck(expr: CallExpr, shown: string, module: int): void {
+    const tree = this.types.program.tree;
+
     if (!this.cryptoOptionsFine(expr, 3, shown, kScryptOptions, module)) {
       return;
     }
 
-    const options = expr.args[3]?.expr;
+    const options = tree.exprAt(tree.argumentsOf(expr.argsList)[3]?.exprId);
     if (options == undefined) {
       return;
     }
@@ -152,13 +167,13 @@ partial class ExpressionTypes {
       const later = this.optionValue(options, second);
       const isBoth = this.optionValue(options, first) != undefined;
       if (isBoth && later != undefined) {
-        const togetherError = this.crypto.togetherError(
+        const togetherError = this.types.togetherError(
           later.loc,
           first,
           second,
         );
 
-        return this.reportFound(module, togetherError);
+        return this.errors.writeFound(module, togetherError);
       }
     }
 
@@ -176,7 +191,7 @@ partial class ExpressionTypes {
 
     const number = this.cryptoNumber(cost, module);
     if (number != undefined) {
-      this.reportFound(module, this.crypto.costError(cost.loc, number));
+      this.errors.writeFound(module, this.types.costError(cost.loc, number));
     }
   }
 
@@ -186,16 +201,18 @@ partial class ExpressionTypes {
     calleeLoc: int,
     module: int,
   ): void {
-    const count = expr.args.length;
-    const first = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const count = tree.argumentsOf(expr.argsList).length;
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (count > 2 || first == undefined) {
       return;
     }
 
     const type = this.constantText(first) ?? "";
-    const typeError = this.crypto.pairTypeError(first.loc, type);
+    const typeError = this.types.pairTypeError(first.loc, type);
     if (type != "" && typeError != undefined) {
-      return this.reportFound(module, typeError);
+      return this.errors.writeFound(module, typeError);
     }
     if (!this.cryptoOptionsFine(expr, 1, shown, kPairOptions, module)) {
       return;
@@ -204,9 +221,9 @@ partial class ExpressionTypes {
     for (const name of kPairUnsupported) {
       const value = this.cryptoOptionAt(expr, 1, name);
       if (value != undefined) {
-        const optionError = this.crypto.pairOptionError(value.loc, name);
+        const optionError = this.types.pairOptionError(value.loc, name);
 
-        return this.reportFound(module, optionError);
+        return this.errors.writeFound(module, optionError);
       }
     }
 
@@ -221,14 +238,14 @@ partial class ExpressionTypes {
   ): void {
     const modulus = this.cryptoOptionAt(expr, 1, kModulusOption);
     const curve = this.cryptoOptionAt(expr, 1, kCurveOption);
-    const needsError = this.crypto.pairNeedsError(
+    const needsError = this.types.pairNeedsError(
       calleeLoc,
       type,
       modulus != undefined,
       curve != undefined,
     );
     if (needsError != undefined) {
-      return this.reportFound(module, needsError);
+      return this.errors.writeFound(module, needsError);
     }
     if (modulus == undefined) {
       return;
@@ -236,9 +253,9 @@ partial class ExpressionTypes {
 
     const bits = this.cryptoNumber(modulus, module);
     if (bits != undefined) {
-      const smallError = this.crypto.smallModulusError(modulus.loc, type, bits);
+      const smallError = this.types.smallModulusError(modulus.loc, type, bits);
 
-      this.reportFound(module, smallError);
+      this.errors.writeFound(module, smallError);
     }
   }
 
@@ -248,19 +265,23 @@ partial class ExpressionTypes {
     home: int,
     module: int,
   ): Type | undefined {
-    const opened = this.program.modules[home];
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[home];
     const isCrypto =
       opened != undefined &&
-      this.crypto.isCryptoModule(opened.name) &&
-      this.crypto.isCryptoClass(name);
-    if (!isCrypto || this.modules.isLibraryModule(module)) {
+      this.types.isCryptoModule(opened.name) &&
+      this.types.isCryptoClass(name);
+    if (!isCrypto || this.types.isLibraryModule(module)) {
       return undefined;
     }
 
-    this.reportFound(module, this.crypto.newError(expr.loc, name));
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, this.types.newError(expr.loc, name));
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private cryptoMethodCall(
@@ -269,45 +290,59 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    const home = this.program.modules[instance.module]?.name ?? "";
-    const shape = this.crypto.classOf(instance, home);
-    const hasSpread = expr.args.some((arg) => arg.spread);
+    const tree = this.types.program.tree;
+
+    const home = this.types.program.modules[instance.module]?.name ?? "";
+    const className = this.types.cryptoClassName(instance, home);
+    if (className == undefined) {
+      return undefined;
+    }
+
+    const shape = this.tables.cryptoClass(className);
+    const hasSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
     if (shape == undefined || hasSpread) {
       return undefined;
     }
 
-    const methodError = this.crypto.methodError(member.loc, shape, member.name);
+    const methodError = this.types.methodError(member.loc, shape, member.name);
     if (methodError == undefined) {
       this.cryptoMethodArguments(expr, member, shape, module);
 
       return undefined;
     }
 
-    this.reportFound(module, methodError);
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, methodError);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly cryptoMemberRead(
+  private cryptoMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    const home = this.program.modules[instance.module]?.name ?? "";
-    const shape = this.crypto.classOf(instance, home);
+    const home = this.types.program.modules[instance.module]?.name ?? "";
+    const className = this.types.cryptoClassName(instance, home);
+    if (className == undefined) {
+      return undefined;
+    }
+
+    const shape = this.tables.cryptoClass(className);
     if (shape == undefined) {
       return undefined;
     }
 
-    const memberError = this.crypto.memberError(expr.loc, shape, expr.name);
+    const memberError = this.types.memberError(expr.loc, shape, expr.name);
     if (memberError == undefined) {
       return undefined;
     }
 
-    this.reportFound(module, memberError);
+    this.errors.writeFound(module, memberError);
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private cryptoMethodArguments(
@@ -316,16 +351,22 @@ partial class ExpressionTypes {
     shape: Read<CryptoClass>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const isHash = kHashClasses.includes(shape.name);
     const isCipher = kCipherClasses.includes(shape.name);
-    const count = expr.args.length;
+    const count = tree.argumentsOf(expr.argsList).length;
     if (member.name == kUpdateName && isHash && count <= 2) {
-      const item = { index: 0, what: "data", kinds: kTextOrViews };
+      const item: CryptoData = { index: 0, what: "data", kinds: kTextOrViews };
 
       return this.cryptoUpdateCheck(expr, item, module);
     }
     if (member.name == kUpdateName && isCipher && count <= 3) {
-      const item = { index: 0, what: "data", kinds: kTextOrBuffers };
+      const item: CryptoData = {
+        index: 0,
+        what: "data",
+        kinds: kTextOrBuffers,
+      };
 
       return this.cryptoUpdateCheck(expr, item, module);
     }
@@ -344,29 +385,33 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly cryptoEncodingCheck(
+  private cryptoEncodingCheck(
     expr: CallExpr,
     index: int,
     name: string,
     module: int,
   ): void {
-    const encoding = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const encoding = tree.exprAt(
+      tree.argumentsOf(expr.argsList)[index]?.exprId,
+    );
     if (encoding == undefined || encoding.kind == ExprKind.Undefined) {
       return;
     }
 
     const text = this.constantText(encoding);
     if (text == undefined) {
-      const literalError = this.crypto.encodingLiteralError(encoding.loc, name);
+      const literalError = this.types.encodingLiteralError(encoding.loc, name);
 
-      return this.reportFound(module, literalError);
+      return this.errors.writeFound(module, literalError);
     }
     if (text == "buffer") {
       return;
     }
 
-    const unknownError = this.byteSources.encodingError(encoding.loc, [text]);
+    const unknownError = this.types.encodingError(encoding.loc, [text]);
 
-    this.reportFound(module, unknownError);
+    this.errors.writeFound(module, unknownError);
   }
 }

@@ -1,0 +1,569 @@
+import { AstFlattener } from "../ast-flattener.tz";
+import {
+  ClassField,
+  ClassMember,
+  Decorator,
+  EnumMember,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+} from "../../../program/ast/types/ast.types.declarations.tz";
+import {
+  ArrayElement,
+  CallArgument,
+  Property,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Param,
+  UnsafeMark,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+  ModuleName,
+} from "../../../program/ast/types/ast.types.modules.tz";
+import {
+  VarDeclarator,
+} from "../../../program/ast/types/ast.types.patterns.tz";
+import { AstList } from "../../../program/ast/types/ast.types.span.tz";
+import { SwitchCase } from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionTypeParam,
+  ObjectTypeField,
+  TupleElement,
+  TypeParamDecl,
+} from "../../../program/ast/types/ast.types.types.tz";
+import {
+  ClassField as SyntaxClassField,
+  ClassMember as SyntaxClassMember,
+  Decorator as SyntaxDecorator,
+  EnumMember as SyntaxEnumMember,
+} from "../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  DeclaredClass as SyntaxDeclaredClass,
+  DeclaredMember as SyntaxDeclaredMember,
+} from "../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  ArrayElement as SyntaxArrayElement,
+  CallArgument as SyntaxCallArgument,
+  Expr as SyntaxExpr,
+  IndexExpr as SyntaxIndexExpr,
+  Property as SyntaxProperty,
+} from "../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  FunctionDecl as SyntaxFunctionDecl,
+  Param as SyntaxParam,
+  UnsafeMark as SyntaxUnsafeMark,
+} from "../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  ExportDecl as SyntaxExportDecl,
+  ImportDecl as SyntaxImportDecl,
+} from "../../../program/syntax/types/syntax.types.modules.tz";
+import {
+  VarDeclarator as SyntaxVarDeclarator,
+} from "../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  BlockStmt as SyntaxBlockStmt,
+  Stmt as SyntaxStmt,
+  SwitchCase as SyntaxSwitchCase,
+} from "../../../program/syntax/types/syntax.types.statements.tz";
+import {
+  FunctionTypeParam as SyntaxFunctionTypeParam,
+  ObjectTypeField as SyntaxObjectTypeField,
+  TupleElement as SyntaxTupleElement,
+  TypeParamDecl as SyntaxTypeParamDecl,
+  TypeRef as SyntaxTypeRef,
+} from "../../../program/syntax/types/syntax.types.types.tz";
+
+partial class AstFlattener {
+  private arrayElementList(
+    nodes: Read<readonly SyntaxArrayElement[]>,
+  ): AstList {
+    const flat: ArrayElement[] = [];
+
+    for (const node of nodes) {
+      const record = this.arrayElement(node);
+
+      flat.push(record);
+    }
+
+    const start = this.arrayElements.length;
+
+    for (const record of flat) {
+      this.arrayElements.push(record);
+    }
+
+    return { start, end: this.arrayElements.length };
+  }
+
+  private callArgumentList(
+    nodes: Read<readonly SyntaxCallArgument[]>,
+  ): AstList {
+    const flat: CallArgument[] = [];
+
+    for (const node of nodes) {
+      const record = this.callArgument(node);
+
+      flat.push(record);
+    }
+
+    const start = this.arrayElements.length;
+
+    for (const record of flat) {
+      this.arrayElements.push(record);
+    }
+
+    return { start, end: this.arrayElements.length };
+  }
+
+  private classFieldList(nodes: Read<readonly SyntaxClassField[]>): AstList {
+    const flat: ClassField[] = [];
+
+    for (const node of nodes) {
+      const record = this.classField(node);
+
+      flat.push(record);
+    }
+
+    const start = this.classFields.length;
+
+    for (const record of flat) {
+      this.classFields.push(record);
+    }
+
+    return { start, end: this.classFields.length };
+  }
+
+  private declaredClassList(
+    nodes: Read<readonly SyntaxDeclaredClass[]>,
+  ): AstList {
+    const flat: DeclaredClass[] = [];
+
+    for (const node of nodes) {
+      const record = this.declaredClass(node);
+
+      flat.push(record);
+    }
+
+    const start = this.declaredClasses.length;
+
+    for (const record of flat) {
+      this.declaredClasses.push(record);
+    }
+
+    return { start, end: this.declaredClasses.length };
+  }
+
+  private declaredMemberList(
+    nodes: Read<readonly SyntaxDeclaredMember[]>,
+  ): AstList {
+    const flat: DeclaredMember[] = [];
+
+    for (const node of nodes) {
+      const record = this.declaredMember(node);
+
+      flat.push(record);
+    }
+
+    const start = this.declaredMembers.length;
+
+    for (const record of flat) {
+      this.declaredMembers.push(record);
+    }
+
+    return { start, end: this.declaredMembers.length };
+  }
+
+  private decoratorList(nodes: Read<readonly SyntaxDecorator[]>): AstList {
+    const flat: Decorator[] = [];
+
+    for (const node of nodes) {
+      const record = this.decorator(node);
+
+      flat.push(record);
+    }
+
+    const start = this.decorators.length;
+
+    for (const record of flat) {
+      this.decorators.push(record);
+    }
+
+    return { start, end: this.decorators.length };
+  }
+
+  private enumMemberList(nodes: Read<readonly SyntaxEnumMember[]>): AstList {
+    const flat: EnumMember[] = [];
+
+    for (const node of nodes) {
+      const record = this.enumMember(node);
+
+      flat.push(record);
+    }
+
+    const start = this.enumMembers.length;
+
+    for (const record of flat) {
+      this.enumMembers.push(record);
+    }
+
+    return { start, end: this.enumMembers.length };
+  }
+
+  private exportDeclList(nodes: Read<readonly SyntaxExportDecl[]>): AstList {
+    const flat: ExportDecl[] = [];
+
+    for (const node of nodes) {
+      const record = this.exportDecl(node);
+
+      flat.push(record);
+    }
+
+    const start = this.exportDecls.length;
+
+    for (const record of flat) {
+      this.exportDecls.push(record);
+    }
+
+    return { start, end: this.exportDecls.length };
+  }
+
+  private exprList(nodes: Read<readonly SyntaxExpr[]>): AstList {
+    const ids: int[] = [];
+
+    for (const node of nodes) {
+      const id = this.expr(node);
+
+      ids.push(id);
+    }
+
+    return this.pushExprIds(ids);
+  }
+
+  private functionDeclList(
+    nodes: Read<readonly SyntaxFunctionDecl[]>,
+  ): AstList {
+    const ids: int[] = [];
+
+    for (const node of nodes) {
+      const id = this.functionDecl(node);
+
+      ids.push(id);
+    }
+
+    return this.pushStmtIds(ids);
+  }
+
+  private functionTypeParamList(
+    nodes: Read<readonly SyntaxFunctionTypeParam[]>,
+  ): AstList {
+    const flat: FunctionTypeParam[] = [];
+
+    for (const node of nodes) {
+      const record = this.functionTypeParam(node);
+
+      flat.push(record);
+    }
+
+    const start = this.functionTypeParams.length;
+
+    for (const record of flat) {
+      this.functionTypeParams.push(record);
+    }
+
+    return { start, end: this.functionTypeParams.length };
+  }
+
+  private importDeclList(nodes: Read<readonly SyntaxImportDecl[]>): AstList {
+    const flat: ImportDecl[] = [];
+
+    for (const node of nodes) {
+      const record = this.importDecl(node);
+
+      flat.push(record);
+    }
+
+    const start = this.importDecls.length;
+
+    for (const record of flat) {
+      this.importDecls.push(record);
+    }
+
+    return { start, end: this.importDecls.length };
+  }
+
+  private indexExprList(nodes: Read<readonly SyntaxIndexExpr[]>): AstList {
+    const ids: int[] = [];
+
+    for (const node of nodes) {
+      const id = this.indexExpr(node);
+
+      ids.push(id);
+    }
+
+    return this.pushExprIds(ids);
+  }
+
+  private moduleNameList(nodes: Read<readonly ModuleName[]>): AstList {
+    const start = this.moduleNames.length;
+
+    for (const node of nodes) {
+      this.moduleNames.push(node);
+    }
+
+    return { start, end: this.moduleNames.length };
+  }
+
+  private objectTypeFieldList(
+    nodes: Read<readonly SyntaxObjectTypeField[]>,
+  ): AstList {
+    const flat: ObjectTypeField[] = [];
+
+    for (const node of nodes) {
+      const record = this.objectTypeField(node);
+
+      flat.push(record);
+    }
+
+    const start = this.objectTypeFields.length;
+
+    for (const record of flat) {
+      this.objectTypeFields.push(record);
+    }
+
+    return { start, end: this.objectTypeFields.length };
+  }
+
+  private paramList(nodes: Read<readonly SyntaxParam[]>): AstList {
+    const flat: Param[] = [];
+
+    for (const node of nodes) {
+      const record = this.param(node);
+
+      flat.push(record);
+    }
+
+    const start = this.params.length;
+
+    for (const record of flat) {
+      this.params.push(record);
+    }
+
+    return { start, end: this.params.length };
+  }
+
+  private propertyList(nodes: Read<readonly SyntaxProperty[]>): AstList {
+    const flat: Property[] = [];
+
+    for (const node of nodes) {
+      const record = this.property(node);
+
+      flat.push(record);
+    }
+
+    const start = this.properties.length;
+
+    for (const record of flat) {
+      this.properties.push(record);
+    }
+
+    return { start, end: this.properties.length };
+  }
+
+  private stmtList(nodes: Read<readonly SyntaxStmt[]>): AstList {
+    const ids: int[] = [];
+
+    for (const node of nodes) {
+      const id = this.stmt(node);
+
+      ids.push(id);
+    }
+
+    return this.pushStmtIds(ids);
+  }
+
+  private switchCaseList(nodes: Read<readonly SyntaxSwitchCase[]>): AstList {
+    const flat: SwitchCase[] = [];
+
+    for (const node of nodes) {
+      const record = this.switchCase(node);
+
+      flat.push(record);
+    }
+
+    const start = this.switchCases.length;
+
+    for (const record of flat) {
+      this.switchCases.push(record);
+    }
+
+    return { start, end: this.switchCases.length };
+  }
+
+  private tupleElementList(
+    nodes: Read<readonly SyntaxTupleElement[]>,
+  ): AstList {
+    const flat: TupleElement[] = [];
+
+    for (const node of nodes) {
+      const record = this.tupleElement(node);
+
+      flat.push(record);
+    }
+
+    const start = this.tupleElements.length;
+
+    for (const record of flat) {
+      this.tupleElements.push(record);
+    }
+
+    return { start, end: this.tupleElements.length };
+  }
+
+  private typeParamDeclList(
+    nodes: Read<readonly SyntaxTypeParamDecl[]>,
+  ): AstList {
+    const flat: TypeParamDecl[] = [];
+
+    for (const node of nodes) {
+      const record = this.typeParamDecl(node);
+
+      flat.push(record);
+    }
+
+    const start = this.typeParamDecls.length;
+
+    for (const record of flat) {
+      this.typeParamDecls.push(record);
+    }
+
+    return { start, end: this.typeParamDecls.length };
+  }
+
+  private typeRefList(nodes: Read<readonly SyntaxTypeRef[]>): AstList {
+    const ids: int[] = [];
+
+    for (const node of nodes) {
+      const id = this.typeRef(node);
+
+      ids.push(id);
+    }
+
+    return this.pushTypeRefIds(ids);
+  }
+
+  private varDeclaratorList(
+    nodes: Read<readonly SyntaxVarDeclarator[]>,
+  ): AstList {
+    const flat: VarDeclarator[] = [];
+
+    for (const node of nodes) {
+      const record = this.varDeclarator(node);
+
+      flat.push(record);
+    }
+
+    const start = this.varDeclarators.length;
+
+    for (const record of flat) {
+      this.varDeclarators.push(record);
+    }
+
+    return { start, end: this.varDeclarators.length };
+  }
+
+  private textList(texts: Read<readonly string[]>): AstList {
+    const start = this.texts.length;
+
+    for (const text of texts) {
+      this.texts.push(text);
+    }
+
+    return { start, end: this.texts.length };
+  }
+
+  private pushExprIds(ids: Read<int[]>): AstList {
+    const start = this.exprIds.length;
+
+    for (const id of ids) {
+      this.exprIds.push(id);
+    }
+
+    return { start, end: this.exprIds.length };
+  }
+
+  private pushStmtIds(ids: Read<int[]>): AstList {
+    const start = this.stmtIds.length;
+
+    for (const id of ids) {
+      this.stmtIds.push(id);
+    }
+
+    return { start, end: this.stmtIds.length };
+  }
+
+  private pushTypeRefIds(ids: Read<int[]>): AstList {
+    const start = this.typeRefIds.length;
+
+    for (const id of ids) {
+      this.typeRefIds.push(id);
+    }
+
+    return { start, end: this.typeRefIds.length };
+  }
+
+  private blockStmtAt(
+    node: Read<SyntaxBlockStmt | undefined>,
+  ): int | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.blockStmt(node);
+  }
+
+  private classMemberAt(
+    node: Read<SyntaxClassMember | undefined>,
+  ): ClassMember | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.classMember(node);
+  }
+
+  private exprAt(node: Read<SyntaxExpr | undefined>): int | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.expr(node);
+  }
+
+  private stmtAt(node: Read<SyntaxStmt | undefined>): int | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.stmt(node);
+  }
+
+  private typeRefAt(node: Read<SyntaxTypeRef | undefined>): int | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.typeRef(node);
+  }
+
+  private unsafeMarkAt(
+    node: Read<SyntaxUnsafeMark | undefined>,
+  ): UnsafeMark | undefined {
+    if (node == undefined) {
+      return undefined;
+    }
+
+    return this.unsafeMark(node);
+  }
+}

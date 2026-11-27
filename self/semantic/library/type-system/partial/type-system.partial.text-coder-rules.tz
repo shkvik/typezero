@@ -1,0 +1,140 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { kDecoderLabels } from "../../../../program/library/decoder-labels/const/decoder-labels.const.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kDecodeName,
+  kDecoderClasses,
+  kFatalDecoderClass,
+  kFatalName,
+  kLabelSpaces,
+  kParseName,
+  kTextDecoderClass,
+} from "../../text-coder-rules/const/text-coder-rules.const.tz";
+
+partial class TypeSystem {
+  public isDecoderNew(type: Type): boolean {
+    return this.isTextCoderNamed(type, kTextDecoderClass);
+  }
+
+  public isFatalNew(type: Type): boolean {
+    return this.isTextCoderNamed(type, kFatalDecoderClass);
+  }
+
+  public isDecodeCall(type: Type, name: string): boolean {
+    const base = this.definedType(type);
+    const isDecoder =
+      base.kind == TypeKind.Instance && kDecoderClasses.includes(base.name);
+
+    return isDecoder && name == kDecodeName && this.isBytesType(base);
+  }
+
+  public readonly isParseName(name: string): boolean {
+    return name == kParseName;
+  }
+
+  public readonly isFatalName(name: string): boolean {
+    return name == kFatalName;
+  }
+
+  public readonly literalLabel(label: Expr): string | undefined {
+    const tree = this.program.tree;
+
+    if (label.kind == ExprKind.StringLit) {
+      return label.value;
+    }
+    if (
+      label.kind == ExprKind.Template &&
+      tree.exprsOf(label.exprsList).length == 0
+    ) {
+      return tree.textsOf(label.quasisList)[0];
+    }
+
+    return undefined;
+  }
+
+  public readonly labelError(
+    loc: int,
+    labels: Read<string[]>,
+  ): SourceError | undefined {
+    for (const label of labels) {
+      const plain = this.trimmed(label).toLowerCase();
+      if (!kDecoderLabels.includes(plain)) {
+        return {
+          code: Code.DecoderLabelUnknown,
+          loc,
+          details: { word: label },
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  public readonly unknownLabelError(loc: int): SourceError {
+    return { code: Code.DecoderLabelNotKnown, loc, details: kNoDetails };
+  }
+
+  public readonly isFatalFlag(value: Expr): boolean {
+    if (value.kind == ExprKind.Undefined) {
+      return false;
+    }
+
+    return value.kind != ExprKind.BoolLit || value.value;
+  }
+
+  public decodeInputError(loc: int, found: Type): SourceError | undefined {
+    const base = this.definedType(found);
+    const isFitting =
+      base.kind == TypeKind.Error ||
+      base.kind == TypeKind.Undefined ||
+      this.isByteView(base) ||
+      this.isArrayBuffer(base);
+    if (isFitting) {
+      return undefined;
+    }
+
+    const first = this.typeText(found);
+
+    return { code: Code.DecodeInput, loc, details: { first } };
+  }
+
+  public readonly fatalNewError(loc: int): SourceError {
+    return { code: Code.FatalDecoderNew, loc, details: kNoDetails };
+  }
+
+  public readonly resizableError(loc: int): SourceError {
+    return { code: Code.ResizableBuffer, loc, details: kNoDetails };
+  }
+
+  private isTextCoderNamed(type: Type, name: string): boolean {
+    const base = this.definedType(type);
+
+    return (
+      base.kind == TypeKind.Instance &&
+      base.name == name &&
+      this.isBytesType(base)
+    );
+  }
+
+  private readonly trimmed(label: string): string {
+    let start = 0;
+    let end = label.length;
+
+    while (start < end && kLabelSpaces.includes(label.charAt(start))) {
+      start += 1;
+    }
+
+    while (end > start && kLabelSpaces.includes(label.charAt(end - 1))) {
+      end -= 1;
+    }
+
+    return label.slice(start, end);
+  }
+}

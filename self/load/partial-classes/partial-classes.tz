@@ -1,19 +1,26 @@
 import { basename, dirname, relative, resolve } from "node:path";
+import { replace } from "tz:mem";
 import { Code } from "../../diagnostic/code.tz";
-import { Details } from "../../diagnostic/types/message.types.tz";
-import { ClassDecl } from "../../program/ast/types/ast.types.classes.tz";
 import {
-  ImportDecl,
-  ModulePath,
-} from "../../program/ast/types/ast.types.modules.tz";
+  Details,
+  SourceError,
+} from "../../diagnostic/types/message.types.tz";
+import { ModulePath } from "../../program/ast/types/ast.types.modules.tz";
 import { StmtKind } from "../../program/ast/types/ast.types.statements.tz";
 import {
   kPathSeparator,
   kWindowsSeparator,
 } from "../../program/module/const/module.const.tz";
 import { LinkKind } from "../../program/module/types/module.types.tz";
+import { ClassDecl } from "../../program/syntax/types/syntax.types.classes.tz";
+import { ImportDecl } from "../../program/syntax/types/syntax.types.modules.tz";
 import { OpenModule } from "../loader/types/loader.types.tz";
-import { ImportedClass, PartTarget } from "./types/partial-classes.types.tz";
+import {
+  ImportedClass,
+  PartJoin,
+  PartSearch,
+  PartTarget,
+} from "./types/partial-classes.types.tz";
 import {
   kHerePrefix,
   kParentStart,
@@ -21,208 +28,323 @@ import {
 } from "./const/partial-classes.const.tz";
 
 export class PartialClasses {
-  private readonly modules: OpenModule[];
-  private readonly byId: Map<int, OpenModule>;
-  private readonly homes: Map<string, OpenModule>;
+  private modules: OpenModule[];
+  private readonly order: int[];
+  private joins: PartJoin[];
+  private readonly joined: Map<string, string[]>;
 
-  public constructor(modules: Own<OpenModule[]>) {
+  public constructor(modules: Own<OpenModule[]>, order: Own<int[]>) {
     this.modules = modules;
-    this.byId = new Map<int, OpenModule>();
-    this.homes = new Map<string, OpenModule>();
+    this.order = order;
+    this.joins = [];
+    this.joined = new Map<string, string[]>();
   }
 
   public join(): void {
-    for (const module of this.modules) {
-      this.byId.set(module.id, module);
+    const order = this.order.slice();
+
+    for (const id of order) {
+      this.checkPartLists(id);
     }
 
-    for (const module of this.modules) {
-      this.checkPartLists(module);
-    }
+    const homes = new Map<string, int>();
 
-    for (const module of this.modules.slice()) {
-      this.joinModuleParts(module);
+    for (const id of order) {
+      this.joinModuleParts(id, homes);
     }
   }
 
-  private readonly checkPartLists(module: OpenModule): void {
-    for (const decl of module.parsed.file.imports) {
-      if (decl.isPartList) {
-        this.checkPartList(module, decl);
+  public takeModules(): OpenModule[] {
+    return replace(this.modules, []);
+  }
+
+  public takeJoins(): PartJoin[] {
+    return replace(this.joins, []);
+  }
+
+  private checkPartLists(id: int): void {
+    const lists = this.partListsOf(id);
+
+    for (const index of lists) {
+      this.checkPartList(id, index);
+    }
+  }
+
+  private readonly partListsOf(id: int): int[] {
+    const found: int[] = [];
+    const module = this.modules[id];
+    if (module == undefined) {
+      return found;
+    }
+
+    const imports = module.parsed.file.imports;
+
+    for (let index = 0; index < imports.length; index++) {
+      if (imports[index]?.isPartList == true) {
+        found.push(index);
       }
     }
+
+    return found;
   }
 
-  private readonly checkPartList(module: OpenModule, decl: ImportDecl): void {
-    const listed = this.linkedModule(module, decl.from);
-    if (listed == undefined) {
+  private readonly importAt(
+    id: int,
+    index: int,
+  ): Read<ImportDecl | undefined> {
+    return this.modules[id]?.parsed.file.imports[index];
+  }
+
+  private checkPartList(id: int, index: int): void {
+    const from = this.importAt(id, index)?.from;
+    const loc = this.importAt(id, index)?.loc ?? 0;
+    if (from == undefined) {
       return;
     }
 
-    const parts = this.partsIn(listed);
-    const hasPart = parts.some((part) => this.isPartOf(part, listed, module));
-    if (!hasPart) {
-      this.report(module, decl.loc, Code.PartListWithoutPart, {
-        path: decl.from.path,
-      });
+    const listed = this.linkedModule(id, from);
+    if (listed == undefined || this.hasPartOf(listed, id)) {
+      return;
     }
+
+    this.report(id, loc, Code.PartListWithoutPart, { path: from.path });
   }
 
-  private readonly partsIn(module: Read<OpenModule>): ClassDecl[] {
-    const parts: ClassDecl[] = [];
+  private readonly hasPartOf(listed: int, id: int): boolean {
+    const parts = this.partsIn(listed);
 
-    for (const item of module.parsed.file.items) {
-      if (item.kind == StmtKind.Class && item.isPartial) {
-        parts.push(item);
+    return parts.some((part) => this.isPartOf(listed, part, id));
+  }
+
+  private readonly partsIn(id: int): int[] {
+    const parts: int[] = [];
+    const module = this.modules[id];
+    if (module == undefined) {
+      return parts;
+    }
+
+    const items = module.parsed.file.items;
+
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      if (item?.kind == StmtKind.Class && item.isPartial) {
+        parts.push(index);
       }
     }
 
     return parts;
   }
 
-  private readonly isPartOf(
-    part: ClassDecl,
-    module: Read<OpenModule>,
-    classModule: Read<OpenModule>,
-  ): boolean {
-    const imported = this.importedAs(module, part.name ?? "");
+  private readonly classAt(
+    id: int,
+    item: int,
+  ): Read<ClassDecl | undefined> {
+    const stmt = this.modules[id]?.parsed.file.items[item];
+    if (stmt == undefined || stmt.kind != StmtKind.Class) {
+      return undefined;
+    }
+
+    return stmt;
+  }
+
+  private readonly classNameAt(id: int, item: int): string {
+    return this.classAt(id, item)?.name ?? "";
+  }
+
+  private readonly classLocAt(id: int, item: int): int {
+    return this.classAt(id, item)?.loc ?? 0;
+  }
+
+  private readonly isPartOf(id: int, item: int, classModule: int): boolean {
+    const word = this.classNameAt(id, item);
+    const imported = this.importedAs(id, word);
     if (imported == undefined) {
       return false;
     }
 
-    const from = this.linkedModule(module, imported.decl.from);
+    const from = this.linkedModule(id, imported.from);
 
     return from == classModule;
   }
 
-  private joinModuleParts(module: OpenModule): void {
-    for (const part of this.partsIn(module)) {
-      module.parts.push(part);
-      this.joinPart(module, part);
+  private joinModuleParts(id: int, homes: Map<string, int>): void {
+    const parts = this.partsIn(id);
+
+    for (const item of parts) {
+      this.modules[id]?.partItems.push(item);
+      this.joinPart(id, item, homes);
     }
   }
 
-  private joinPart(module: Own<OpenModule>, part: ClassDecl): void {
-    const word = part.name ?? "";
-    const target = this.partTarget(module, part, word);
+  private joinPart(id: int, item: int, homes: Map<string, int>): void {
+    const word = this.classNameAt(id, item);
+    const found = this.foundTarget(id, item, word);
+    const target = found.target;
+    const problem = found.problem;
+    if (problem != undefined) {
+      this.modules[id]?.problems.push(problem);
+    }
     if (target == undefined) {
       return;
     }
 
-    this.checkShape(module, part, word);
-    if (!this.hasSameTypeParams(part, target.decl)) {
-      const other = this.typeParamsText(target.decl);
+    const shape = this.shapeProblems(id, item, word);
 
-      this.report(module, part.loc, Code.PartTypeParams, { word, other });
+    for (const one of shape.drain()) {
+      this.modules[id]?.problems.push(one);
+    }
+
+    const part: PartTarget = { module: id, item };
+    if (!this.hasSameTypeParams(part, target)) {
+      const other = this.typeParamsText(target);
+      const loc = this.classLocAt(id, item);
+
+      this.report(id, loc, Code.PartTypeParams, { word, other });
 
       return;
     }
 
-    this.joinMethods(module, part, target, word);
+    this.joinMethods(part, target, word, homes);
   }
 
-  private readonly partTarget(
-    module: OpenModule,
-    part: ClassDecl,
-    word: string,
-  ): PartTarget | undefined {
-    const loc = part.loc;
-    const imported = this.importedAs(module, word);
+  private readonly foundTarget(id: int, item: int, word: string): PartSearch {
+    const loc = this.classLocAt(id, item);
+    const imported = this.importedAs(id, word);
     if (imported == undefined) {
       const other = word.toLowerCase();
+      const details = { word, other };
 
-      this.report(module, loc, Code.PartClassNotImported, { word, other });
-
-      return undefined;
+      return { problem: { code: Code.PartClassNotImported, loc, details } };
     }
 
-    const from = imported.decl.from;
+    const from = imported.from;
     const path = from.path;
-    const classModule = this.linkedModule(module, from);
+    const classModule = this.linkedModule(id, from);
     if (classModule == undefined) {
-      return undefined;
+      return {};
     }
-    if (classModule.parsed.source.isLibrary) {
-      this.report(module, loc, Code.PartOfLibraryClass, { word, path });
+    if (this.isLibraryModule(classModule)) {
+      const details = { word, path };
 
-      return undefined;
+      return { problem: { code: Code.PartOfLibraryClass, loc, details } };
     }
 
-    const decl = this.declaredClass(classModule, imported.name.name);
-    if (decl == undefined) {
-      this.report(module, loc, Code.PartClassNotDeclared, { word, path });
+    const declared = this.declaredClass(classModule, imported.name.name);
+    if (declared == undefined) {
+      const details = { word, path };
 
-      return undefined;
+      return { problem: { code: Code.PartClassNotDeclared, loc, details } };
     }
-    if (!this.listsPart(classModule, module)) {
-      this.report(module, loc, Code.PartNotListed, {
+    if (!this.listsPart(classModule, id)) {
+      const details = {
         word,
-        other: basename(classModule.file),
-        path: this.importPath(classModule, module),
-      });
+        other: basename(this.fileOf(classModule)),
+        path: this.importPath(classModule, id),
+      };
 
-      return undefined;
+      return { problem: { code: Code.PartNotListed, loc, details } };
     }
-    if (decl.baseExpr != undefined) {
-      this.report(module, loc, Code.PartOfClassExtendingValue, { word });
+    if (this.extendsValue(classModule, declared)) {
+      const details = { word };
 
-      return undefined;
+      return {
+        problem: { code: Code.PartOfClassExtendingValue, loc, details },
+      };
     }
 
-    return { decl, module: classModule };
+    return { target: { module: classModule, item: declared } };
+  }
+
+  private readonly extendsValue(id: int, item: int): boolean {
+    return this.classAt(id, item)?.baseExpr != undefined;
+  }
+
+  private readonly isLibraryModule(id: int): boolean {
+    return this.modules[id]?.parsed.source.isLibrary == true;
+  }
+
+  private readonly fileOf(id: int): string {
+    return this.modules[id]?.file ?? "";
   }
 
   private readonly importedAs(
-    module: Read<OpenModule>,
+    id: int,
     word: string,
   ): ImportedClass | undefined {
+    const module = this.modules[id];
+    if (module == undefined) {
+      return undefined;
+    }
+
     for (const decl of module.parsed.file.imports) {
       const name = decl.names.find((one) => one.as == word);
       if (name != undefined) {
-        return { decl, name };
+        return { from: decl.from, name };
       }
     }
 
     return undefined;
   }
 
-  private readonly declaredClass(
-    module: Read<OpenModule>,
-    name: string,
-  ): ClassDecl | undefined {
-    for (const item of module.parsed.file.items) {
-      if (item.kind != StmtKind.Class) {
+  private readonly declaredClass(id: int, name: string): int | undefined {
+    const module = this.modules[id];
+    if (module == undefined) {
+      return undefined;
+    }
+
+    const items = module.parsed.file.items;
+
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      if (item == undefined || item.kind != StmtKind.Class) {
         continue;
       }
       if (!item.isPartial && item.name == name) {
-        return item;
+        return index;
       }
     }
 
     return undefined;
   }
 
-  private readonly listsPart(classModule: Read<OpenModule>, module: Read<OpenModule>): boolean {
-    const imports = classModule.parsed.file.imports;
-    const lists = imports.filter((decl) => decl.isPartList);
+  private readonly listsPart(classModule: int, id: int): boolean {
+    const lists = this.partListsOf(classModule);
 
-    return lists.some(
-      (decl) => this.linkedModule(classModule, decl.from) == module,
-    );
+    return lists.some((index) => this.listsModule(classModule, index, id));
   }
 
-  private readonly checkShape(module: OpenModule, part: ClassDecl, word: string): void {
+  private readonly listsModule(module: int, index: int, id: int): boolean {
+    const from = this.importAt(module, index)?.from;
+    if (from == undefined) {
+      return false;
+    }
+
+    return this.linkedModule(module, from) == id;
+  }
+
+  private readonly shapeProblems(
+    id: int,
+    item: int,
+    word: string,
+  ): SourceError[] {
+    const found: SourceError[] = [];
+    const part = this.classAt(id, item);
+    if (part == undefined) {
+      return found;
+    }
+
     const field = part.fields[0];
     if (field != undefined) {
-      this.report(module, field.loc, Code.PartHasField, {
-        word,
-        other: field.name,
-      });
+      const details = { word, other: field.name };
+
+      found.push({ code: Code.PartHasField, loc: field.loc, details });
     }
 
     const made = part.constructors[0];
     if (made != undefined) {
-      this.report(module, made.loc, Code.PartHasConstructor, { word });
+      const details = { word };
+
+      found.push({ code: Code.PartHasConstructor, loc: made.loc, details });
     }
 
     const hasHeader =
@@ -230,18 +352,31 @@ export class PartialClasses {
       part.baseExpr != undefined ||
       part.interfaces.length > 0;
     if (hasHeader) {
-      this.report(module, part.loc, Code.PartHasHeader, { word });
+      const details = { word };
+
+      found.push({ code: Code.PartHasHeader, loc: part.loc, details });
     }
 
     const decorator = part.decorators[0];
     if (decorator != undefined) {
-      this.report(module, decorator.loc, Code.PartHasDecorators, { word });
+      const details = { word };
+      const loc = decorator.loc;
+
+      found.push({ code: Code.PartHasDecorators, loc, details });
     }
+
+    return found;
   }
 
-  private readonly hasSameTypeParams(part: ClassDecl, decl: ClassDecl): boolean {
-    const written = part.typeParams;
-    const declared = decl.typeParams;
+  private readonly hasSameTypeParams(
+    part: PartTarget,
+    target: PartTarget,
+  ): boolean {
+    const written = this.classAt(part.module, part.item)?.typeParams;
+    const declared = this.classAt(target.module, target.item)?.typeParams;
+    if (written == undefined || declared == undefined) {
+      return false;
+    }
     if (written.length != declared.length) {
       return false;
     }
@@ -260,8 +395,9 @@ export class PartialClasses {
     return true;
   }
 
-  private readonly typeParamsText(decl: ClassDecl): string {
-    if (decl.typeParams.length == 0) {
+  private readonly typeParamsText(target: PartTarget): string {
+    const decl = this.classAt(target.module, target.item);
+    if (decl == undefined || decl.typeParams.length == 0) {
       return "";
     }
 
@@ -270,45 +406,81 @@ export class PartialClasses {
     return `<${names.join(kTypeParamJoin)}>`;
   }
 
-  private joinMethods(
-    module: Own<OpenModule>,
-    part: ClassDecl,
-    target: Read<PartTarget>,
-    word: string,
-  ): void {
-    for (const method of part.methods) {
-      const name = method.name;
-      const key = `${target.module.id} ${word} ${name}`;
-      const declared = target.decl.methods.some((one) => one.name == name);
-      const home = this.homes.get(key) ?? target.module;
-      if (declared && home != module) {
-        this.report(module, method.loc, Code.PartMethodTwice, {
-          word: name,
-          other: word,
-          path: basename(home.file),
-        });
-      } else {
-        target.decl.methods = target.decl.methods.concat([method]);
-        this.homes.set(key, module);
-      }
+  private readonly methodNames(target: PartTarget): string[] {
+    const decl = this.classAt(target.module, target.item);
+    if (decl == undefined) {
+      return [];
     }
+
+    return decl.methods.map((method) => method.name);
   }
 
-  private readonly linkedModule(
-    module: Read<OpenModule>,
-    from: ModulePath,
-  ): OpenModule | undefined {
-    const link = module.links.find((one) => one.from.loc == from.loc);
+  private readonly methodPlaces(part: PartTarget): int[] {
+    const decl = this.classAt(part.module, part.item);
+    if (decl == undefined) {
+      return [];
+    }
+
+    return decl.methods.map((method) => method.loc);
+  }
+
+  private joinMethods(
+    part: PartTarget,
+    target: PartTarget,
+    word: string,
+    homes: Map<string, int>,
+  ): void {
+    const id = part.module;
+    const names = this.methodNames(part);
+    const places = this.methodPlaces(part);
+    const targetKey = `${target.module} ${target.item}`;
+    const declared = this.joinedNames(targetKey, target);
+
+    for (let index = 0; index < names.length; index++) {
+      const name = names[index];
+      const key = `${target.module} ${word} ${name}`;
+      const home = homes.get(key) ?? target.module;
+      if (declared.includes(name) && home != id) {
+        const path = basename(this.fileOf(home));
+        const loc = places[index] ?? 0;
+
+        this.report(id, loc, Code.PartMethodTwice, {
+          word: name,
+          other: word,
+          path,
+        });
+      } else {
+        declared.push(name);
+        this.joins.push({ target, part, method: index });
+        homes.set(key, id);
+      }
+    }
+
+    this.joined.set(targetKey, declared);
+  }
+
+  private readonly joinedNames(key: string, target: PartTarget): string[] {
+    const known = this.joined.get(key);
+    if (known != undefined) {
+      return known.slice();
+    }
+
+    return this.methodNames(target);
+  }
+
+  private readonly linkedModule(id: int, from: ModulePath): int | undefined {
+    const module = this.modules[id];
+    const link = module?.links.find((one) => one.from.loc == from.loc);
     if (link == undefined || link.kind != LinkKind.Module) {
       return undefined;
     }
 
-    return this.byId.get(link.target);
+    return link.target;
   }
 
-  private readonly importPath(from: Read<OpenModule>, to: Read<OpenModule>): string {
-    const base = dirname(resolve(from.file));
-    const target = resolve(to.file);
+  private readonly importPath(from: int, to: int): string {
+    const base = dirname(resolve(this.fileOf(from)));
+    const target = resolve(this.fileOf(to));
     const native = relative(base, target);
     const path = native.replaceAll(kWindowsSeparator, kPathSeparator);
     if (path.startsWith(kParentStart)) {
@@ -318,12 +490,7 @@ export class PartialClasses {
     return `${kHerePrefix}${path}`;
   }
 
-  private readonly report(
-    module: OpenModule,
-    loc: int,
-    code: Code,
-    details: Details,
-  ): void {
-    module.problems.push({ code, loc, details });
+  private report(id: int, loc: int, code: Code, details: Own<Details>): void {
+    this.modules[id]?.problems.push({ code, loc, details });
   }
 }

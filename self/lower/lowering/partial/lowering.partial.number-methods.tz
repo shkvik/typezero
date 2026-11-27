@@ -31,14 +31,17 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeOf(call);
-    const given = this.value(frame, member.object);
+    const object = tree.exprOf(member.objectId);
+    const given = this.value(frame, object);
     if (given == undefined) {
       return undefined;
     }
 
     const name = member.name;
-    if (name == "toString" && call.args.length == 0) {
+    if (name == "toString" && tree.argumentsOf(call.argsList).length == 0) {
       return this.numberText(frame, given);
     }
     if (name == "toString" || name == "toFixed") {
@@ -48,7 +51,7 @@ partial class Lowering {
       return this.decimalFrom(frame, given);
     }
     if (name == "toDouble") {
-      const double = this.store.plain(TypeKind.Double);
+      const double = this.values.types.store.plain(TypeKind.Double);
 
       return this.converted(frame, given, double, call.loc);
     }
@@ -71,7 +74,7 @@ partial class Lowering {
     name: string,
     given: IrValue,
   ): IrValue | undefined {
-    const double = this.store.plain(TypeKind.Double);
+    const double = this.values.types.store.plain(TypeKind.Double);
     const value = this.converted(frame, given, double, call.loc);
     const count = this.integerArgument(frame, call, 0);
     if (value == undefined || count == undefined) {
@@ -84,7 +87,7 @@ partial class Lowering {
     return this.textOut(frame, runtime, params, [value.value, count.value]);
   }
 
-  private readonly numberText(frame: Read<Frame>, given: IrValue): IrValue | undefined {
+  private numberText(frame: Read<Frame>, given: IrValue): IrValue | undefined {
     if (this.isDouble(given.tz)) {
       const params = [kDoubleType];
 
@@ -173,7 +176,7 @@ partial class Lowering {
     return IrOpcode.FPToSI;
   }
 
-  private readonly fitTest(
+  private fitTest(
     frame: Read<Frame>,
     long: LLVMValue,
     isUnsigned: boolean,

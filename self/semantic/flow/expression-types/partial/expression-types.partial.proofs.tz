@@ -23,7 +23,7 @@ partial class ExpressionTypes {
     module: int,
   ): boolean {
     const isExempt =
-      given.kind == TypeKind.Error || this.modules.isLibraryModule(module);
+      given.kind == TypeKind.Error || this.types.isLibraryModule(module);
     if (isExempt) {
       return false;
     }
@@ -32,12 +32,12 @@ partial class ExpressionTypes {
     }
 
     const constant = this.intConstant(expr, given, module);
-    if (constant != undefined && this.proofs.isInside(constant, range)) {
+    if (constant != undefined && this.types.isInside(constant, range)) {
       return true;
     }
 
-    const shown = this.sources.valueText(expr, module);
-    const betweenError = this.proofs.betweenError(
+    const shown = this.types.valueText(expr, module);
+    const betweenError = this.types.betweenError(
       expr.loc,
       range,
       constant,
@@ -45,16 +45,18 @@ partial class ExpressionTypes {
       shown,
     );
 
-    this.reportFound(module, betweenError);
+    this.errors.writeFound(module, betweenError);
 
     return false;
   }
 
   private canProveBetween(expr: Expr, range: ProofRange, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind == ExprKind.Conditional) {
       return (
-        this.canProveBetween(expr.thenExpr, range, module) &&
-        this.canProveBetween(expr.elseExpr, range, module)
+        this.canProveBetween(tree.exprOf(expr.thenExprId), range, module) &&
+        this.canProveBetween(tree.exprOf(expr.elseExprId), range, module)
       );
     }
 
@@ -62,12 +64,12 @@ partial class ExpressionTypes {
     const known = this.valueRange(expr, module);
     const high = range.high;
     const isLower =
-      this.isAtLeast(value, range.low) || this.proofs.isFrom(known, range.low);
+      this.isAtLeast(value, range.low) || this.types.isFrom(known, range.low);
     if (high == undefined || !isLower) {
       return isLower;
     }
 
-    return this.isAtMost(value, high) || this.proofs.isUpTo(known, high);
+    return this.isAtMost(value, high) || this.types.isUpTo(known, high);
   }
 
   private readonly isAtLeast(value: Linear | undefined, low: decimal): boolean {
@@ -98,7 +100,7 @@ partial class ExpressionTypes {
     limit: OffsetLimit,
     module: int,
   ): boolean {
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return false;
     }
     if (value != undefined) {
@@ -112,14 +114,14 @@ partial class ExpressionTypes {
     }
 
     const holder = this.peekType(object, module);
-    const hasBytes = this.bytes.isRaw(holder);
+    const hasBytes = this.types.isRaw(holder);
     const shown = this.shownOffset(value, module);
-    const objectText = this.sources.valueText(object, module);
-    const place = this.proofs.limitText(objectText, hasBytes, limit.less);
+    const objectText = this.types.valueText(object, module);
+    const place = this.types.limitText(objectText, hasBytes, limit.less);
     const loc = value?.loc ?? object.loc;
-    const upToError = this.proofs.upToError(loc, limit.what, shown, place);
+    const upToError = this.types.upToError(loc, limit.what, shown, place);
 
-    this.reportFound(module, upToError);
+    this.errors.writeFound(module, upToError);
 
     return false;
   }
@@ -132,7 +134,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.sources.valueText(value, module);
+    return this.types.valueText(value, module);
   }
 
   private canProveUpTo(
@@ -171,15 +173,23 @@ partial class ExpressionTypes {
     return this.isLinearUpTo(top, length, less);
   }
 
-  private readonly isLinearUpTo(value: Linear, length: Linear, less: decimal): boolean {
+  private readonly isLinearUpTo(
+    value: Linear,
+    length: Linear,
+    less: decimal,
+  ): boolean {
     const room = value.offset + less - length.offset;
 
     return this.canProve(value.term, length.term, room);
   }
 
   private measuredLength(object: Expr, module: int): Linear | undefined {
+    const tree = this.types.program.tree;
+
     if (object.kind == ExprKind.Member && object.name == kBufferName) {
-      return this.bufferLength(object.object, module);
+      const objectExpr = tree.exprOf(object.objectId);
+
+      return this.bufferLength(objectExpr, module);
     }
     if (object.kind != ExprKind.Name) {
       return this.madeLinear(object, module);
@@ -203,7 +213,7 @@ partial class ExpressionTypes {
 
   private bufferLength(view: Expr, module: int): Linear | undefined {
     const type = this.peekType(view, module);
-    const size = this.byteSources.elementSize(type);
+    const size = this.types.elementSize(type);
     const length = this.measuredLength(view, module);
     if (size == undefined || length == undefined) {
       return undefined;

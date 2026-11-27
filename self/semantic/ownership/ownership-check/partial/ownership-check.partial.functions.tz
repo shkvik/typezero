@@ -43,67 +43,79 @@ import {
 } from "../const/ownership-check.const.tz";
 
 partial class OwnershipCheck {
-  private checkModule(module: Module): void {
+  private checkModule(module: Read<Module>): void {
+    const tree = this.values.types.program.tree;
+
     this.module = module.id;
     this.home = module.id;
 
     const frame = this.emptyFrame(undefined, undefined, CallbackMode.During);
 
-    this.reportGlobalLets(module.file.items);
-    this.runFrame(frame, module.file.items);
+    const items = tree.stmtsOf(module.file.itemsList);
 
-    for (const item of module.file.items) {
-      this.checkDeclared(item, undefined);
+    this.reportGlobalLets(items);
+    const itemsItem = tree.stmtsOf(module.file.itemsList);
+
+    this.runFrame(frame, itemsItem);
+
+    for (const item of tree.stmtsOf(module.file.itemsList)) {
+      this.checkDeclared(item, false);
     }
-    for (const part of module.parts) {
-      this.checkClass(part, undefined);
+    for (const part of tree.classesOf(module.partsList)) {
+      this.checkClass(part, false);
     }
   }
 
-  private readonly reportGlobalLets(items: Read<Stmt[]>): void {
+  private reportGlobalLets(items: Read<Stmt[]>): void {
+    const tree = this.values.types.program.tree;
+
     for (const item of items) {
       if (item.kind != StmtKind.VarDecl || item.isConst) {
         continue;
       }
 
-      for (const declarator of item.decls) {
-        this.report(declarator.loc, Code.OwnGlobalLet, {
+      for (const declarator of tree.declaratorsOf(item.declsList)) {
+        this.errors.write(this.home, declarator.loc, Code.OwnGlobalLet, {
           word: declarator.name,
         });
       }
     }
   }
 
-  private checkDeclared(stmt: Stmt, outer: Read<FunctionFrame | undefined>): void {
+  private checkDeclared(stmt: Stmt, isNested: boolean): void {
     switch (stmt.kind) {
       case StmtKind.Function:
-        this.checkFunction(stmt, undefined, CallbackMode.During, outer);
+        this.checkFunction(stmt, undefined, CallbackMode.During, isNested);
         break;
       case StmtKind.Class:
-        this.checkClass(stmt, outer);
+        this.checkClass(stmt, isNested);
         break;
       default:
         break;
     }
   }
 
-  private checkClass(decl: ClassDecl, outer: Read<FunctionFrame | undefined>): void {
-    for (const field of decl.fields) {
-      const ref = field.type;
+  private checkClass(decl: ClassDecl, isNested: boolean): void {
+    const tree = this.values.types.program.tree;
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      const ref = tree.typeRefAt(field.typeId);
       if (ref != undefined && this.holdsBorrowRef(ref)) {
-        this.report(field.loc, Code.OwnBorrowField, { word: field.name });
+        this.errors.write(this.home, field.loc, Code.OwnBorrowField, {
+          word: field.name,
+        });
       }
     }
 
-    for (const method of decl.methods) {
-      const isPart = !decl.isPartial && this.partHomes.has(method);
+    for (const method of tree.functionsOf(decl.methodsList)) {
+      const isPart = !decl.isPartial && this.partHomes.has(method.id);
       if (!isPart) {
-        this.checkFunction(method, decl, CallbackMode.During, outer);
+        this.checkFunction(method, decl, CallbackMode.During, isNested);
       }
     }
 
-    for (const made of decl.constructors) {
-      this.checkFunction(made, decl, CallbackMode.During, outer);
+    for (const made of tree.functionsOf(decl.constructorsList)) {
+      this.checkFunction(made, decl, CallbackMode.During, isNested);
     }
   }
 
@@ -111,9 +123,11 @@ partial class OwnershipCheck {
     fn: FunctionDecl,
     owner: ClassDecl | undefined,
     callback: CallbackMode,
-    outer: Read<FunctionFrame | undefined>,
+    isNested: boolean,
   ): void {
-    const body = fn.body;
+    const tree = this.values.types.program.tree;
+
+    const body = tree.blockAt(fn.bodyId);
     if (body == undefined) {
       return;
     }
@@ -123,8 +137,12 @@ partial class OwnershipCheck {
 
     this.addThis(frame, fn, owner);
 
-    for (let index: int = 0; index < fn.params.length; index++) {
-      const param = fn.params[index];
+    for (
+      let index: int = 0;
+      index < tree.paramsOf(fn.paramsList).length;
+      index++
+    ) {
+      const param = tree.paramsOf(fn.paramsList)[index];
       if (param != undefined) {
         const type = this.paramTypeOf(shape, index);
 
@@ -132,30 +150,33 @@ partial class OwnershipCheck {
       }
     }
 
-    this.copyOuter(frame, outer);
+    if (isNested) {
+      this.copyOuter(frame);
+    }
 
     const saved = replace(this.state, { moved: [], isDead: false });
-    this.runFrame(frame, body.body);
+    const bodyItem = tree.stmtsOf(body.bodyList);
+
+    this.runFrame(frame, bodyItem);
     this.state = saved;
   }
 
   private runFrame(frame: Own<FunctionFrame>, items: Read<Stmt[]>): void {
+    this.collectUses(frame, items);
     this.frames.push(frame);
-
-    const pushed = this.frame();
-    if (pushed != undefined) {
-      this.collectUses(pushed, items);
-    }
-
     this.walkStatements(items);
-    this.noteHints();
-    this.frames.pop();
+
+    const done = this.frames.pop();
+    if (done != undefined) {
+      this.noteHints(done);
+    }
   }
 
-  private noteHints(): void {
-    const frame = this.frame();
-    const fn = frame?.fn;
-    if (frame == undefined || fn == undefined || fn.isArrow) {
+  private noteHints(frame: Read<FunctionFrame>): void {
+    const tree = this.values.types.program.tree;
+
+    const fn = frame.fn;
+    if (fn == undefined || fn.isArrow) {
       return;
     }
 
@@ -164,13 +185,14 @@ partial class OwnershipCheck {
       role != undefined &&
       role.method == MethodKind.Instance &&
       !role.isOverride &&
-      !role.isReadonly;
+      !role.isReadonly &&
+      frame.result != ResultMode.Mut;
     const self = frame.variables.get(kThisKey);
     if (isPlainMethod && self != undefined && !self.isChanged) {
       this.hint(fn.loc, "readonly-method", fn.name);
     }
 
-    for (const param of fn.params) {
+    for (const param of tree.paramsOf(fn.paramsList)) {
       const variable = frame.variables.get(param.loc);
       if (variable == undefined || variable.holding != Holding.Lent) {
         continue;
@@ -203,12 +225,13 @@ partial class OwnershipCheck {
     };
   }
 
-  private readonly copyOuter(frame: FunctionFrame, outer: Read<FunctionFrame | undefined>): void {
+  private readonly copyOuter(frame: FunctionFrame): void {
+    const outer = this.frame();
     if (outer == undefined) {
       return;
     }
 
-    for (const variable of new Map(outer.variables).values()) {
+    for (const variable of outer.variables.values()) {
       if (frame.variables.has(variable.key)) {
         continue;
       }
@@ -226,17 +249,22 @@ partial class OwnershipCheck {
         declared: -1,
         lastUse: -1,
         isChanged: false,
-        isCaptured: true,
       });
       frame.outer.add(variable.key);
     }
   }
 
-  private readonly capturedHolding(frame: Read<FunctionFrame>, variable: Read<Variable>): Holding {
+  private readonly capturedHolding(
+    frame: Read<FunctionFrame>,
+    variable: Read<Variable>,
+  ): Holding {
     if (variable.holding == Holding.Copy) {
       return Holding.Copy;
     }
-    if (variable.holding == Holding.Own && frame.callback == CallbackMode.Once) {
+    if (
+      variable.holding == Holding.Own &&
+      frame.callback == CallbackMode.Once
+    ) {
       return Holding.Own;
     }
 
@@ -274,24 +302,39 @@ partial class OwnershipCheck {
       declared: fn.loc,
       lastUse: -1,
       isChanged: false,
-      isCaptured: false,
     });
   }
 
-  private addParam(frame: FunctionFrame, param: Param, type: Type | undefined): void {
+  private addParam(
+    frame: FunctionFrame,
+    param: Param,
+    type: Type | undefined,
+  ): void {
+    const tree = this.values.types.program.tree;
+
     const mode = this.paramMode(param);
     const holding = this.paramHolding(mode, type);
 
     if (mode == ParamMode.Lent) {
       frame.lentParams.add(param.loc);
     }
-    if (mode == ParamMode.Lent && type != undefined && this.traits.isCopy(type, this.values)) {
-      this.report(param.loc, Code.OwnLentCopy, { word: param.name });
+    if (
+      mode == ParamMode.Lent &&
+      type != undefined &&
+      this.values.isCopy(type)
+    ) {
+      this.errors.write(this.home, param.loc, Code.OwnLentCopy, {
+        word: param.name,
+      });
     }
 
-    const isMarkedMut = param.type?.name == kMutName && param.type?.args.length == 1;
-    if (isMarkedMut && type != undefined && this.traits.isCopy(type, this.values)) {
-      this.report(param.loc, Code.OwnMutCopy, { word: param.name });
+    const isMarkedMut =
+      tree.typeRefAt(param.typeId)?.name == kMutName &&
+      tree.typeRefsOf(tree.typeRefAt(param.typeId)?.argsList).length == 1;
+    if (isMarkedMut && type != undefined && this.values.isCopy(type)) {
+      this.errors.write(this.home, param.loc, Code.OwnMutCopy, {
+        word: param.name,
+      });
     }
 
     frame.variables.set(param.loc, {
@@ -305,12 +348,11 @@ partial class OwnershipCheck {
       declared: param.loc,
       lastUse: -1,
       isChanged: false,
-      isCaptured: false,
     });
   }
 
   private paramHolding(mode: ParamMode, type: Type | undefined): Holding {
-    if (type != undefined && this.traits.isCopy(type, this.values)) {
+    if (type != undefined && this.values.isCopy(type)) {
       return Holding.Copy;
     }
     if (mode == ParamMode.Own || mode == ParamMode.Once) {
@@ -321,38 +363,55 @@ partial class OwnershipCheck {
   }
 
   private readonly holdsBorrowRef(ref: TypeRef): boolean {
+    const tree = this.values.types.program.tree;
+
     if (this.isBorrowRef(ref)) {
       return true;
     }
 
-    return ref.args.some((arg) => this.holdsBorrowRef(arg));
+    return tree
+      .typeRefsOf(ref.argsList)
+      .some((arg) => this.holdsBorrowRef(arg));
   }
 
   private readonly isBorrowRef(ref: TypeRef): boolean {
+    const tree = this.values.types.program.tree;
+
     if (ref.form.kind == TypeRefKind.Array) {
-      const item = ref.args[0];
+      const item = tree.typeRefsOf(ref.argsList)[0];
 
       return item != undefined && this.isBorrowRef(item);
     }
     if (ref.form.kind == TypeRefKind.Tuple) {
-      const parts = ref.form.elements;
+      const parts = tree.tupleElementsOf(ref.form.elementsList);
 
-      return parts.length > 0 && parts.every((part) => this.isBorrowRef(part.type));
+      return (
+        parts.length > 0 &&
+        parts.every((part) => this.isBorrowRef(tree.typeRefOf(part.typeId)))
+      );
     }
-    if (ref.args.length != 1) {
+    const args = tree.typeRefsOf(ref.argsList);
+    if (args.length != 1) {
       return false;
     }
 
-    return ref.name == kReadName || ref.name == kMutName || ref.name == kLentName;
+    return (
+      ref.name == kReadName || ref.name == kMutName || ref.name == kLentName
+    );
   }
 
   private readonly paramMode(param: Param): ParamMode {
-    const ref = param.type;
+    const tree = this.values.types.program.tree;
+
+    const ref = tree.typeRefAt(param.typeId);
     if (ref == undefined) {
       return ParamMode.Mut;
     }
-    if (param.form.kind == ParamKind.Rest && ref.form.kind == TypeRefKind.Array) {
-      const item = ref.args[0];
+    if (
+      param.form.kind == ParamKind.Rest &&
+      ref.form.kind == TypeRefKind.Array
+    ) {
+      const item = tree.typeRefsOf(ref.argsList)[0];
       if (item != undefined) {
         return this.modeOfRef(item);
       }
@@ -362,7 +421,10 @@ partial class OwnershipCheck {
   }
 
   private readonly modeOfRef(ref: TypeRef): ParamMode {
-    if (ref.args.length != 1) {
+    const tree = this.values.types.program.tree;
+
+    const args = tree.typeRefsOf(ref.argsList);
+    if (args.length != 1) {
       return ParamMode.Mut;
     }
 
@@ -381,7 +443,9 @@ partial class OwnershipCheck {
   }
 
   private readonly resultModeOf(fn: FunctionDecl | undefined): ResultMode {
-    const ref = fn?.returnType;
+    const tree = this.values.types.program.tree;
+
+    const ref = tree.typeRefAt(fn?.returnTypeId);
     if (ref == undefined) {
       return ResultMode.Own;
     }
@@ -390,12 +454,14 @@ partial class OwnershipCheck {
   }
 
   private readonly resultModeOfRef(ref: TypeRef): ResultMode {
-    const item = ref.args[0];
+    const tree = this.values.types.program.tree;
+
+    const item = tree.typeRefsOf(ref.argsList)[0];
     if (ref.form.kind == TypeRefKind.Array && item != undefined) {
       return this.resultModeOfRef(item);
     }
     if (ref.form.kind == TypeRefKind.Union) {
-      for (const part of ref.args) {
+      for (const part of tree.typeRefsOf(ref.argsList)) {
         const mode = this.resultModeOfRef(part);
         if (mode != ResultMode.Own) {
           return mode;
@@ -404,7 +470,8 @@ partial class OwnershipCheck {
 
       return ResultMode.Own;
     }
-    if (ref.args.length != 1) {
+    const args = tree.typeRefsOf(ref.argsList);
+    if (args.length != 1) {
       return ResultMode.Own;
     }
     if (ref.name == kReadName) {
@@ -423,7 +490,7 @@ partial class OwnershipCheck {
       return undefined;
     }
 
-    return type.shape;
+    return this.values.types.store.functionShapeOf(type);
   }
 
   private readonly functionTypeOf(fn: FunctionDecl): Type | undefined {
@@ -450,11 +517,27 @@ partial class OwnershipCheck {
     return param.type;
   }
 
-  private readonly frame(): FunctionFrame | undefined {
-    return this.frames[this.frames.length - 1];
-  }
+  private noteOwnCode(module: Read<Module>): void {
+    const tree = this.values.types.program.tree;
 
-  private readonly variableOf(key: int): Variable | undefined {
-    return this.frame()?.variables.get(key);
+    for (const item of tree.stmtsOf(module.file.itemsList)) {
+      if (item.kind == StmtKind.Function) {
+        this.ownCode.add(item.id);
+      }
+      if (item.kind != StmtKind.Class) {
+        continue;
+      }
+      for (const method of tree.functionsOf(item.methodsList)) {
+        this.ownCode.add(method.id);
+      }
+      for (const made of tree.functionsOf(item.constructorsList)) {
+        this.ownCode.add(made.id);
+      }
+    }
+    for (const part of tree.classesOf(module.partsList)) {
+      for (const method of tree.functionsOf(part.methodsList)) {
+        this.ownCode.add(method.id);
+      }
+    }
   }
 }

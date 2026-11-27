@@ -53,7 +53,6 @@ export enum GenericBuiltin {
   AsyncGenerator,
   Constructor,
   Mode,
-  Interned,
 }
 
 export enum TextChange {
@@ -164,9 +163,9 @@ export enum DoorState {
 }
 
 export type AliasDoor = {
-  state: Cell<DoorState>;
-  entered: Cell<boolean>;
-  result: Cell<Type>;
+  readonly state: DoorState;
+  readonly entered: boolean;
+  readonly result: Type;
   readonly reserved?: Type;
 };
 
@@ -225,5 +224,3 @@ export type SubstitutionWalk = {
   readonly visiting: Set<int>;
 };
 
-export type InternedAliasDoor = Interned<AliasDoor>;
-export type InternedRecords = Interned<ModuleRecord | AliasOrigin | TypeContext>;

@@ -10,16 +10,14 @@ import { Lowering } from "../lowering.tz";
 import {
   kArrayFree,
   kArrayLengthField,
-  kBooleanType,
   kArrayRelease,
   kArrayRetain,
+  kBooleanType,
   kDecimalFree,
   kDecimalRelease,
   kDecimalRetain,
   kDecimalType,
   kFlagType,
-  kImmortalCount,
-  kImmortalName,
   kInstanceRelease,
   kIntType,
   kObjectHeader,
@@ -30,19 +28,10 @@ import {
   kStringType,
   kVoidType,
 } from "../const/lowering.const.tz";
-import {
-  CountForm,
-  Frame,
-  IrValue,
-  Place,
-} from "../types/lowering.types.tz";
+import { CountForm, Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private isManaged(type: Type): boolean {
-    if (this.store.isInterned(type)) {
-      return false;
-    }
-
     const inner = this.optionalInner(type);
     if (inner != undefined) {
       return this.isManaged(inner);
@@ -63,24 +52,29 @@ partial class Lowering {
     }
 
     const isValueManaged =
-      !this.isEmptyHalf(type.value) && this.isManaged(type.value);
+      !this.isEmptyHalf(this.values.types.store.valueOf(type)) &&
+      this.isManaged(this.values.types.store.valueOf(type));
     const isErrorManaged =
-      !this.isEmptyHalf(type.error) && this.isManaged(type.error);
+      !this.isEmptyHalf(this.values.types.store.errorOf(type)) &&
+      this.isManaged(this.values.types.store.errorOf(type));
 
     return isValueManaged || isErrorManaged;
   }
 
   private owning(frame: Read<Frame>, value: IrValue): IrValue {
     if (value.isStatic == true) {
-      return { type: value.type, value: value.value, tz: value.tz, owned: true, isStatic: true };
+      return {
+        type: value.type,
+        value: value.value,
+        tz: value.tz,
+        owned: true,
+        isStatic: true,
+      };
     }
 
     const ownedFlag = value.ownedFlag;
     if (ownedFlag != undefined) {
       return this.flagOwning(frame, ownedFlag, value);
-    }
-    if (this.isArena(value.tz) && !this.isConstant(value)) {
-      this.immortalized(frame, value);
     }
 
     const isFree =
@@ -100,73 +94,20 @@ partial class Lowering {
     if (!this.isAuditing || this.isString(inner) || this.isDecimal(inner)) {
       return;
     }
-    if (this.traits.isCopy(inner, this.values)) {
+    if (this.values.isCopy(inner)) {
       return;
     }
 
-    const module = this.program.modules[frame.module];
+    const module = this.values.types.program.modules[frame.module];
     if (module == undefined) {
       return;
     }
 
     const lines = this.linesOf(frame.module, module.source.text);
-    const line = lines.placeOf(this.statementLoc).line;
+    const line = lines?.placeOf(this.statementLoc).line ?? 0;
     const kind = this.kindName(inner);
 
     this.audited.push(`${module.source.path}:${line}: ${kind}`);
-  }
-
-  private readonly isArena(type: Type): boolean {
-    const inner = this.optionalInner(type) ?? type;
-
-    return this.store.isInterned(inner) || this.store.isInterned(type);
-  }
-
-  private immortalized(frame: Read<Frame>, value: IrValue): void {
-    const inner = this.optionalInner(value.tz);
-    if (inner != undefined) {
-      const inside = this.insideValue(frame, value, inner);
-
-      return this.immortalized(frame, inside);
-    }
-    if (value.type != kPointerType) {
-      return;
-    }
-
-    const deep = this.deepImmortalCallee(value.tz);
-    if (deep != undefined) {
-      frame.made.call(deep, [value.value]);
-
-      return;
-    }
-
-    const helper = this.immortalHelper();
-
-    frame.made.call(helper, [value.value]);
-  }
-
-  private readonly immortalHelper(): IrCallee {
-    const known = this.ir.callee(kImmortalName);
-    if (known != undefined) {
-      return known;
-    }
-
-    const made = new IrFunction(this.ir, kImmortalName, kVoidType, [
-      kPointerType,
-    ]);
-    const object = made.param(0);
-    const kept = made.block("kept");
-    const done = made.block("done");
-    const none = this.ir.zero(kPointerType);
-    const isObject = made.integerCompare(IrIntPredicate.NotEqual, object, none);
-
-    made.conditionalBranch(isObject, kept, done);
-    made.open(kept);
-    made.store(this.ir.integer(kIntType, kImmortalCount), object);
-    made.open(done);
-    made.finishVoid();
-
-    return made.callee;
   }
 
   private dropping(frame: Read<Frame>, value: IrValue): void {
@@ -183,17 +124,28 @@ partial class Lowering {
       value.owned == true &&
       this.isManaged(value.tz) &&
       !this.isConstant(value);
+    if (isOwned && this.isCheckedDrop(value)) {
+      this.ownDropChecked(frame, value);
+    }
     if (isOwned) {
       this.countCall(frame, false, value);
     }
   }
 
-  private countCall(frame: Read<Frame>, isRetain: boolean, value: IrValue): void {
+  private countCall(
+    frame: Read<Frame>,
+    isRetain: boolean,
+    value: IrValue,
+  ): void {
     const inner = this.optionalInner(value.tz);
     if (inner != undefined) {
       const inside = this.insideValue(frame, value, inner);
 
       return this.countCall(frame, isRetain, inside);
+    }
+
+    if (this.isSingleOwner(value)) {
+      return this.ownCount(frame, isRetain, value);
     }
 
     const helper = this.countHelperOf(value.tz, isRetain);
@@ -219,7 +171,11 @@ partial class Lowering {
     if (this.isCounted(type) && !isRetain) {
       return this.instanceReleaseHelper();
     }
-    if (!isRetain && type.kind == TypeKind.Array && this.isManaged(type.item)) {
+    if (
+      !isRetain &&
+      type.kind == TypeKind.Array &&
+      this.isManaged(this.values.types.store.itemOf(type))
+    ) {
       return this.arrayReleaseHelper(type);
     }
 
@@ -278,7 +234,11 @@ partial class Lowering {
     this.flaggedDrop(frame, flag, value);
   }
 
-  private flagDropped(frame: Read<Frame>, ownedFlag: LLVMValue, value: IrValue): void {
+  private flagDropped(
+    frame: Read<Frame>,
+    ownedFlag: LLVMValue,
+    value: IrValue,
+  ): void {
     const release = frame.made.block("owned.drop");
     const after = frame.made.block("owned.after");
     const owned: IrValue = {
@@ -294,10 +254,18 @@ partial class Lowering {
     frame.made.open(after);
   }
 
-  private flagOwning(frame: Read<Frame>, ownedFlag: LLVMValue, value: IrValue): IrValue {
+  private flagOwning(
+    frame: Read<Frame>,
+    ownedFlag: LLVMValue,
+    value: IrValue,
+  ): IrValue {
     const retain = frame.made.block("borrowed.count");
     const after = frame.made.block("borrowed.after");
-    const borrowed: IrValue = { type: value.type, value: value.value, tz: value.tz };
+    const borrowed: IrValue = {
+      type: value.type,
+      value: value.value,
+      tz: value.tz,
+    };
 
     frame.made.conditionalBranch(ownedFlag, after, retain);
     frame.made.open(retain);
@@ -354,7 +322,7 @@ partial class Lowering {
     frame.made.store(this.ir.integer(kBooleanType, "1"), flag);
   }
 
-  private readonly countHelper(
+  private countHelper(
     name: string,
     isRetain: boolean,
     form: CountForm,
@@ -434,7 +402,7 @@ partial class Lowering {
     }
   }
 
-  private readonly isCountedTest(
+  private isCountedTest(
     made: IrFunction,
     argument: LLVMValue,
     form: CountForm,
@@ -451,7 +419,7 @@ partial class Lowering {
     return made.integerCompare(IrIntPredicate.NotEqual, argument, none);
   }
 
-  private readonly lastReference(
+  private lastReference(
     made: IrFunction,
     object: LLVMValue,
     count: LLVMValue,
@@ -486,6 +454,7 @@ partial class Lowering {
       module: 0,
       loops: [],
       scopes: [],
+      place: name,
     };
     const array = made.param(0);
     const counted = made.block("counted");
@@ -513,9 +482,19 @@ partial class Lowering {
     return made.callee;
   }
 
-  private cellsReleased(frame: Read<Frame>, array: LLVMValue, type: Type): void {
-    if (type.kind == TypeKind.Array) {
-      const loop = this.eachStart(frame, array, type.item);
+  private cellsReleased(
+    frame: Read<Frame>,
+    array: LLVMValue,
+    type: Type,
+  ): void {
+    const isLent = this.isLookingArray(type);
+    const isHeld = this.isManagedItems(type);
+    if (type.kind == TypeKind.Array && !isLent && isHeld) {
+      const loop = this.eachStart(
+        frame,
+        array,
+        this.values.types.store.itemOf(type),
+      );
       if (loop != undefined) {
         const item = loop.item;
 
@@ -536,7 +515,7 @@ partial class Lowering {
     frame.made.call(freeing, [array]);
   }
 
-  private readonly instanceReleaseHelper(): IrCallee {
+  private instanceReleaseHelper(): IrCallee {
     const known = this.ir.callee(kInstanceRelease);
     if (known != undefined) {
       return known;

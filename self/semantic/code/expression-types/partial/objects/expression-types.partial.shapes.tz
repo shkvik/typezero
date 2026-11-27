@@ -18,18 +18,18 @@ import {
 import { kResultMakers } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly literalShapeOf(expr: Expr): Type | undefined {
+  private literalShapeOf(expr: Expr): Type | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
-        return this.store.integer(64, false);
+        return this.types.store.integer(64, false);
       case ExprKind.FloatLit:
-        return this.store.plain(TypeKind.Double);
+        return this.types.store.plain(TypeKind.Double);
       case ExprKind.StringLit:
-        return this.store.plain(TypeKind.String);
+        return this.types.store.plain(TypeKind.String);
       case ExprKind.BoolLit:
-        return this.store.plain(TypeKind.Boolean);
+        return this.types.store.plain(TypeKind.Boolean);
       case ExprKind.Undefined:
-        return this.store.plain(TypeKind.Undefined);
+        return this.types.store.plain(TypeKind.Undefined);
       case ExprKind.Unary:
         return this.signedShape(expr);
       case ExprKind.ArrayLit:
@@ -41,8 +41,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly signedShape(expr: UnaryExpr): Type | undefined {
-    const operand = expr.operand;
+  private signedShape(expr: UnaryExpr): Type | undefined {
+    const tree = this.types.program.tree;
+
+    const operand = tree.exprOf(expr.operandId);
     const isNumber =
       operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
     if (expr.op != UnaryOp.Neg || !isNumber) {
@@ -52,20 +54,23 @@ partial class ExpressionTypes {
     return this.literalShapeOf(operand);
   }
 
-  private readonly arrayShape(expr: ArrayLitExpr): Type | undefined {
+  private arrayShape(expr: ArrayLitExpr): Type | undefined {
+    const tree = this.types.program.tree;
+
     let element: Type | undefined = undefined;
 
-    for (const item of expr.elements) {
+    for (const item of tree.elementsOf(expr.elementsList)) {
       if (item.spread || item.hole) {
         return undefined;
       }
 
-      const shape = this.literalShapeOf(item.expr);
+      const exprExpr = tree.exprOf(item.exprId);
+      const shape = this.literalShapeOf(exprExpr);
       if (shape == undefined) {
         return undefined;
       }
 
-      const joined = this.generics.joinedWith(element, shape);
+      const joined = this.types.joinedWith(element, shape);
       if (joined == undefined) {
         return undefined;
       }
@@ -77,18 +82,21 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.store.arrayOf(element);
+    return this.types.store.arrayOf(element);
   }
 
-  private readonly objectShape(expr: ObjectLitExpr): Type | undefined {
+  private objectShape(expr: ObjectLitExpr): Type | undefined {
+    const tree = this.types.program.tree;
+
     const fields: ObjectField[] = [];
 
-    for (const prop of expr.props) {
+    for (const prop of tree.propertiesOf(expr.propsList)) {
       if (prop.form.kind != PropertyKind.Value) {
         return undefined;
       }
 
-      const type = this.literalShapeOf(prop.value);
+      const value = tree.exprOf(prop.valueId);
+      const type = this.literalShapeOf(value);
       const name = prop.name;
       const isRepeated = fields.some((field) => field.name == name);
       if (type == undefined || type.kind == TypeKind.Undefined || isRepeated) {
@@ -98,11 +106,11 @@ partial class ExpressionTypes {
       fields.push({ name, type, optional: false, readonly: false });
     }
 
-    return this.store.objectOf(fields);
+    return this.types.store.objectOf(fields);
   }
 
   private readonly isContextual(expr: Expr, module: int): boolean {
-    if (this.shapes.isNeedingContext(expr)) {
+    if (this.types.isNeedingContext(expr)) {
       return true;
     }
 
@@ -116,11 +124,16 @@ partial class ExpressionTypes {
 
     const target = this.targetOfName(expr, module);
 
-    return target != undefined && this.modules.isLibraryModule(target.module);
+    return target != undefined && this.types.isLibraryModule(target.module);
   }
 
   private readonly isBareGeneric(expr: Expr, module: int): boolean {
-    if (expr.kind != ExprKind.Name || expr.typeArgs.length > 0) {
+    const tree = this.types.program.tree;
+
+    if (
+      expr.kind != ExprKind.Name ||
+      tree.typeRefsOf(expr.typeArgsList).length > 0
+    ) {
       return false;
     }
 
@@ -131,7 +144,7 @@ partial class ExpressionTypes {
 
     const fn = this.record(target.module)?.functions.get(target.loc);
 
-    return fn != undefined && fn.typeParams.length > 0;
+    return fn != undefined && tree.typeParamsOf(fn.typeParamsList).length > 0;
   }
 
   private readonly hasOperationParameter(shape: Read<FunctionShape>): boolean {
@@ -149,14 +162,14 @@ partial class ExpressionTypes {
 
     seen.add(type.id);
 
-    if (this.resolver.hasAliasOrigin(type)) {
+    if (this.types.hasAliasOrigin(type)) {
       return false;
     }
     if (type.kind == TypeKind.Operation || type.kind == TypeKind.Template) {
       return true;
     }
 
-    const parts = this.parts.typeParts(type);
+    const parts = this.types.typeParts(type);
 
     return parts.some((part) => this.isOperationInside(part, seen));
   }
@@ -169,16 +182,16 @@ partial class ExpressionTypes {
     const wanted = this.types.definedType(pattern);
     if (
       wanted.kind != TypeKind.Function ||
-      this.parts.mentionsParameter(wanted)
+      this.types.mentionsParameter(wanted)
     ) {
       return;
     }
 
-    const shape = wanted.shape;
-    const params = shape.params;
+    const shape = this.types.store.functionShapeOf(wanted);
+    const params = shape.params.slice();
     const rest = shape.rest;
-    const result = this.store.plain(TypeKind.Error);
-    const open = this.store.functionOf({ params, rest, result });
+    const result = this.types.store.plain(TypeKind.Error);
+    const open = this.types.store.functionOf({ params, rest, result });
 
     this.typed(expr, open, module);
   }

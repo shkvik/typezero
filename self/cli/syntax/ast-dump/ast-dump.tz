@@ -10,7 +10,7 @@ import {
   ModuleName,
   SourceFile,
 } from "../../../program/ast/types/ast.types.modules.tz";
-import { DeclarationFile } from "../../../program/ast/types/ast.types.declarations.tz";
+import { AstTree } from "../../../program/ast/ast-tree/ast-tree.tz";
 import { Quoting } from "./types/ast-dump.types.tz";
 import {
   kBackslash,
@@ -21,15 +21,20 @@ import {
   kQuote,
   kSpace,
 } from "./const/ast-dump.const.tz";
+import {
+  DeclarationFile,
+} from "../../../program/ast/types/ast.types.declarations.tz";
 
 export class Dumper {
   private readonly source: Buffer;
+  private readonly tree: AstTree;
   private readonly lines: string[];
   private readonly indents: string[];
   private depth: int;
 
-  public constructor(source: Own<Buffer>) {
-    this.source = source;
+  public constructor(source: Read<Buffer>, tree: Own<AstTree>) {
+    this.source = Buffer.from(source);
+    this.tree = tree;
     this.lines = [];
     this.indents = [""];
     this.depth = 0;
@@ -40,30 +45,41 @@ export class Dumper {
   }
 
   public dumpFile(file: Read<SourceFile>): void {
-    this.line(`items ${file.items.length}`);
+    const itemsItem = this.tree.stmtsOf(file.itemsList);
 
-    for (const item of file.items) {
+    this.line(`items ${itemsItem.length}`);
+
+    for (const item of this.tree.stmtsOf(file.itemsList)) {
       this.dumpStmt(item);
     }
 
-    this.dumpModules(file.imports, file.exports);
-    this.dumpTables(file);
+    this.dumpModules(
+      this.tree.importsOf(file.importsList),
+      this.tree.exportsOf(file.exportsList),
+    );
   }
 
   public dumpDeclarationFile(file: Read<DeclarationFile>): void {
-    this.line(`items ${file.items.length}`);
+    const itemsItem = this.tree.stmtsOf(file.itemsList);
 
-    for (const item of file.items) {
+    this.line(`items ${itemsItem.length}`);
+
+    for (const item of this.tree.stmtsOf(file.itemsList)) {
       this.dumpStmt(item);
     }
 
-    this.line(`classes ${file.classes.length}`);
+    this.line(
+      `classes ${this.tree.declaredClassesOf(file.classesList).length}`,
+    );
 
-    for (const declared of file.classes) {
+    for (const declared of this.tree.declaredClassesOf(file.classesList)) {
       this.dumpDeclaredClass(declared);
     }
 
-    this.dumpModules(file.imports, file.exports);
+    this.dumpModules(
+      this.tree.importsOf(file.importsList),
+      this.tree.exportsOf(file.exportsList),
+    );
   }
 
   private line(text: string): void {
@@ -107,7 +123,10 @@ export class Dumper {
     return quoting == Quoting.EscapeUnicode && code >= kHigh;
   }
 
-  private readonly quote(text: string, quoting: Quoting = Quoting.KeepUnicode): string {
+  private readonly quote(
+    text: string,
+    quoting: Quoting = Quoting.KeepUnicode,
+  ): string {
     const parts: string[] = [];
 
     for (let i = 0; i < text.length; i++) {
@@ -204,7 +223,10 @@ export class Dumper {
     this.depth -= 1;
   }
 
-  private dumpModules(imports: Read<ImportDecl[]>, exports: Read<ExportDecl[]>): void {
+  private dumpModules(
+    imports: Read<ImportDecl[]>,
+    exports: Read<ExportDecl[]>,
+  ): void {
     this.line(`imports ${imports.length}`);
 
     for (const decl of imports) {
@@ -218,9 +240,11 @@ export class Dumper {
 
       this.line(
         `Import ${decl.loc} ${path} ${from.loc} ${wholeName} ${wholeLoc} ` +
-          `${wholeIsDefault} ${isPartList} ${decl.names.length}`,
+          `${wholeIsDefault} ${isPartList} ${this.tree.namesOf(decl.namesList).length}`,
       );
-      this.dumpModuleNames(decl.names);
+      const names = this.tree.namesOf(decl.namesList);
+
+      this.dumpModuleNames(names);
     }
 
     this.line(`exports ${exports.length}`);
@@ -231,9 +255,11 @@ export class Dumper {
       const pathLoc = from?.loc ?? kNoLocation;
 
       this.line(
-        `Export ${decl.loc} ${decl.form} ${path} ${pathLoc} ${decl.names.length}`,
+        `Export ${decl.loc} ${decl.form} ${path} ${pathLoc} ${this.tree.namesOf(decl.namesList).length}`,
       );
-      this.dumpModuleNames(decl.names);
+      const namesItem = this.tree.namesOf(decl.namesList);
+
+      this.dumpModuleNames(namesItem);
     }
   }
 
@@ -250,10 +276,13 @@ export class Dumper {
     this.back();
   }
 
-  private dumpTables(file: Read<SourceFile>): void {
+  public dumpTables(
+    fieldNames: Read<Set<string>>,
+    constants: Read<Map<string, string[]>>,
+  ): void {
     const fields: string[] = [];
 
-    for (const field of file.fieldNames) {
+    for (const field of fieldNames) {
       fields.push(field);
     }
 
@@ -271,7 +300,7 @@ export class Dumper {
     this.line(`fields ${fields.length}${fieldList}`);
     const keys: string[] = [];
 
-    for (const key of file.stringConstants.keys()) {
+    for (const key of constants.keys()) {
       keys.push(key);
     }
 
@@ -279,7 +308,7 @@ export class Dumper {
     this.line(`constants ${keys.length}`);
 
     for (const key of keys) {
-      const values = file.stringConstants.get(key)?.slice() ?? [];
+      const values = constants.get(key)?.slice() ?? [];
       const quotedValues: string[] = [];
 
       for (const value of values) {

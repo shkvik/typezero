@@ -36,18 +36,24 @@ export class LoadCommand {
     this.report.moduleErrors(loaded.program);
   }
 
-  private readonly printProgram(program: Program): void {
+  private readonly printProgram(program: Read<Program>): void {
     const ambient = program.ambient;
     const modules = program.order.filter((one) => !ambient.includes(one));
 
     console.log(`modules ${modules.length}`);
 
-    for (const module of modules) {
-      this.printModule(program, module);
+    for (const id of modules) {
+      const module = program.modules[id];
+      if (module != undefined) {
+        this.printModule(program, module);
+      }
     }
   }
 
-  private readonly printModule(program: Program, module: Module): void {
+  private readonly printModule(
+    program: Read<Program>,
+    module: Read<Module>,
+  ): void {
     if (module.source.isLibrary) {
       console.log(`${module.name}${kLibraryMark}`);
 
@@ -61,12 +67,15 @@ export class LoadCommand {
       console.log(`  declaration ${declaration.source.path}`);
     }
 
-    for (const part of module.parts) {
-      const name = part.name ?? "";
-      const names = part.methods.map((method) => method.name);
-      const methods = names.join(" ");
+    const tree = program.tree;
 
-      console.log(`  part ${name}: ${methods}`);
+    for (const part of tree.classesOf(module.partsList)) {
+      const name = part.name ?? "";
+      const methods = tree.functionsOf(part.methodsList);
+      const names = methods.map((method) => method.name);
+      const methodText = names.join(" ");
+
+      console.log(`  part ${name}: ${methodText}`);
     }
 
     for (const link of module.links) {
@@ -77,7 +86,10 @@ export class LoadCommand {
     }
   }
 
-  private readonly targetText(program: Program, link: ModuleLink): string {
+  private readonly targetText(
+    program: Read<Program>,
+    link: ModuleLink,
+  ): string {
     switch (link.kind) {
       case LinkKind.Module:
         return this.moduleName(program, link.target);
@@ -90,7 +102,7 @@ export class LoadCommand {
     }
   }
 
-  private readonly moduleName(program: Program, id: int): string {
+  private readonly moduleName(program: Read<Program>, id: int): string {
     const module = program.modules[id];
     if (module == undefined) {
       return "";

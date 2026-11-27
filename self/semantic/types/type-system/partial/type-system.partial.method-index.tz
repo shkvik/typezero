@@ -1,0 +1,75 @@
+import { TypeSystem } from "../type-system.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+
+partial class TypeSystem {
+  public readonly classMethodsNamed(
+    decl: ClassDecl | undefined,
+    name: string,
+  ): FunctionDecl[] {
+    const found: FunctionDecl[] = [];
+    if (decl == undefined) {
+      return found;
+    }
+
+    const tree = this.program.tree;
+    const ids = this.methodIndex.get(`${decl.id} ${name}`);
+    if (ids == undefined) {
+      return found;
+    }
+
+    for (const id of ids) {
+      const method = tree.functionOf(id);
+
+      found.push(method);
+    }
+
+    return found;
+  }
+
+  public readonly classMethodNamed(
+    decl: ClassDecl | undefined,
+    name: string,
+  ): FunctionDecl | undefined {
+    if (decl == undefined) {
+      return undefined;
+    }
+
+    const tree = this.program.tree;
+    const id = this.methodIndex.get(`${decl.id} ${name}`)?.[0];
+    if (id == undefined) {
+      return undefined;
+    }
+
+    return tree.functionOf(id);
+  }
+
+  public readonly hasClassMethod(
+    decl: ClassDecl | undefined,
+    name: string,
+  ): boolean {
+    if (decl == undefined) {
+      return false;
+    }
+
+    return this.methodIndex.has(`${decl.id} ${name}`);
+  }
+
+  private indexMethods(): void {
+    const tree = this.program.tree;
+
+    for (const classId of tree.classIds()) {
+      const decl = tree.classOf(classId);
+
+      for (const id of tree.stmtIdsOf(decl.methodsList)) {
+        const method = tree.functionOf(id);
+        const key = `${classId} ${method.name}`;
+        if (!this.methodIndex.has(key)) {
+          this.methodIndex.set(key, []);
+        }
+
+        this.methodIndex.get(key)?.push(id);
+      }
+    }
+  }
+}

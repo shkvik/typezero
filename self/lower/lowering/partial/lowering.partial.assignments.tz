@@ -22,23 +22,33 @@ import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private assigned(frame: Frame, expr: AssignExpr): IrValue | undefined {
-    const target = expr.target;
+    const tree = this.values.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
     if (target.kind == ExprKind.Index) {
       return this.elementAssigned(frame, expr, target);
     }
     if (target.kind == ExprKind.Member) {
-      if (this.isProcessName(frame, target.object)) {
+      const targetObject = tree.exprOf(target.objectId);
+      if (this.isProcessName(frame, targetObject)) {
         return this.processAssigned(frame, expr, target);
       }
       if (target.name == kLengthName && expr.op == undefined) {
-        const object = this.typeOf(target.object);
+        const objectExpr = tree.exprOf(target.objectId);
+        const object = this.typeOf(objectExpr);
         if (object != undefined && object.kind == TypeKind.Array) {
-          return this.lengthAssigned(frame, expr, target.object, object);
+          return this.lengthAssigned(
+            frame,
+            expr,
+            tree.exprOf(target.objectId),
+            object,
+          );
         }
       }
     }
 
-    const place = this.targetPlace(frame, expr.target);
+    const targetExpr = tree.exprOf(expr.targetId);
+    const place = this.targetPlace(frame, targetExpr);
     if (place == undefined) {
       return undefined;
     }
@@ -48,7 +58,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const isLent = place.flag != undefined && value.owned != true && value.ownedFlag == undefined;
+    const isLent =
+      place.flag != undefined &&
+      value.owned != true &&
+      value.ownedFlag == undefined;
     if (isLent) {
       this.lentStored(frame, place, value);
     } else {
@@ -65,7 +78,12 @@ partial class Lowering {
     }
 
     const before = frame.made.load(place.type, place.pointer);
-    const old: IrValue = { type: place.type, value: before, tz: place.tz, owned: true };
+    const old: IrValue = {
+      type: place.type,
+      value: before,
+      tz: place.tz,
+      owned: true,
+    };
 
     this.flaggedDrop(frame, flag, old);
     frame.made.store(value.value, place.pointer);
@@ -78,11 +96,15 @@ partial class Lowering {
     owner: Expr,
     type: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     if (type.kind != TypeKind.Array) {
       return undefined;
     }
 
-    const isPlain = !this.isManaged(type.item) || this.isString(type.item);
+    const isPlain =
+      !this.isManaged(this.values.types.store.itemOf(type)) ||
+      this.isString(this.values.types.store.itemOf(type));
     if (!isPlain) {
       this.notLowered(frame.module, expr.loc, "a length set on this array");
 
@@ -90,13 +112,19 @@ partial class Lowering {
     }
 
     const array = this.value(frame, owner);
-    const int = this.store.integer(64, false);
-    const given = this.wantedValue(frame, expr.value, int);
+    const int = this.values.types.store.integer(64, false);
+    const valueExpr = tree.exprOf(expr.valueId);
+    const given = this.wantedValue(frame, valueExpr, int);
     if (array == undefined || given == undefined) {
       return undefined;
     }
 
-    const length = this.converted(frame, given, int, expr.value.loc);
+    const length = this.converted(
+      frame,
+      given,
+      int,
+      tree.exprOf(expr.valueId).loc,
+    );
     if (length == undefined) {
       return undefined;
     }
@@ -117,25 +145,40 @@ partial class Lowering {
     expr: AssignExpr,
     place: Place,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const op = expr.op;
     if (op == undefined) {
-      const given = this.value(frame, expr.value);
+      const valueExpr = tree.exprOf(expr.valueId);
+      const given = this.value(frame, valueExpr);
       if (given == undefined) {
         return undefined;
       }
 
-      return this.converted(frame, given, place.tz, expr.value.loc);
+      return this.converted(
+        frame,
+        given,
+        place.tz,
+        tree.exprOf(expr.valueId).loc,
+      );
     }
     if (op == BinaryOp.Add && this.isString(place.tz)) {
       const current = this.loaded(frame, place);
 
-      return this.concatenated(frame, [current], [expr.value]);
+      const exprValue = tree.exprOf(expr.valueId);
+
+      return this.concatenated(frame, [current], [exprValue]);
     }
 
     if (this.isDecimal(place.tz)) {
       const current = this.loaded(frame, place);
 
-      return this.decimalCompound(frame, op, current, expr.value);
+      return this.decimalCompound(
+        frame,
+        op,
+        current,
+        tree.exprOf(expr.valueId),
+      );
     }
 
     const isNumber = this.isInteger(place.tz) || this.isDouble(place.tz);
@@ -146,7 +189,7 @@ partial class Lowering {
     }
 
     const current = this.loaded(frame, place);
-    const right = this.operand(frame, expr.value, place.tz);
+    const right = this.operand(frame, tree.exprOf(expr.valueId), place.tz);
     if (right == undefined) {
       return undefined;
     }
@@ -155,6 +198,8 @@ partial class Lowering {
   }
 
   private targetPlace(frame: Frame, target: Expr): Place | undefined {
+    const tree = this.values.types.program.tree;
+
     if (target.kind == ExprKind.Name) {
       return this.namePlace(frame, target);
     }
@@ -164,7 +209,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const holder = this.value(frame, target.object);
+    const object = tree.exprOf(target.objectId);
+    const holder = this.value(frame, object);
     if (holder == undefined) {
       return undefined;
     }
@@ -189,7 +235,9 @@ partial class Lowering {
   }
 
   private updated(frame: Frame, expr: UpdateExpr): IrValue | undefined {
-    const target = expr.target;
+    const tree = this.values.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
     if (target.kind != ExprKind.Name && target.kind != ExprKind.Member) {
       this.notLowered(frame.module, expr.loc, "an update of this target");
 
@@ -220,7 +268,7 @@ partial class Lowering {
     return before;
   }
 
-  private readonly stepped(frame: Read<Frame>, value: IrValue, isUp: boolean): IrValue {
+  private stepped(frame: Read<Frame>, value: IrValue, isUp: boolean): IrValue {
     const isDouble = value.type == kDoubleType;
     const one = this.oneOf(value.type, isDouble);
     let opcode: IrOpcode = this.opcodeFor(
@@ -238,7 +286,7 @@ partial class Lowering {
     return { type: value.type, value: made, tz: value.tz };
   }
 
-  private readonly oneOf(type: string, isDouble: boolean): LLVMValue {
+  private oneOf(type: string, isDouble: boolean): LLVMValue {
     if (isDouble) {
       return this.ir.real(1);
     }

@@ -21,7 +21,9 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     const isResult =
       object.kind == ExprKind.Name &&
       object.name == kResultName &&
@@ -32,29 +34,33 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const error = this.store.plain(TypeKind.Error);
+    const error = this.types.store.plain(TypeKind.Error);
     const name = member.name;
     const isCombine = name == "combine" || name == "combineWithAllErrors";
     if (!isCombine) {
-      this.report(module, member.loc, Code.ResultStaticMissing, {
+      this.errors.write(module, member.loc, Code.ResultStaticMissing, {
         word: kResultName,
         other: name,
       });
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return error;
     }
-    if (expr.args.some((arg) => arg.spread)) {
-      this.looseArguments(expr.args, module);
+    if (tree.argumentsOf(expr.argsList).some((arg) => arg.spread)) {
+      const argsItem = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(argsItem, module);
 
       return error;
     }
 
-    const arg = expr.args[0]?.expr;
-    if (arg == undefined || expr.args.length != 1) {
-      this.report(module, member.loc, Code.ArgumentCount, {
-        word: this.calls.argumentCountText(1, 1, false),
-        other: `${expr.args.length}`,
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (arg == undefined || tree.argumentsOf(expr.argsList).length != 1) {
+      this.errors.write(module, member.loc, Code.ArgumentCount, {
+        word: this.types.argumentCountText(1, 1, false),
+        other: `${tree.argumentsOf(expr.argsList).length}`,
       });
 
       return error;
@@ -64,7 +70,7 @@ partial class ExpressionTypes {
       what: `${kResultName}.${name}`,
       isAll: name == "combineWithAllErrors",
     };
-    if (arg.kind == ExprKind.ArrayLit && this.shapes.isPlainList(arg)) {
+    if (arg.kind == ExprKind.ArrayLit && this.types.isPlainList(arg)) {
       return this.combinedList(arg, draft, module);
     }
 
@@ -76,6 +82,8 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const name = member.name;
     const isSearch =
       name == "includes" || name == "indexOf" || name == "lastIndexOf";
@@ -83,15 +91,23 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const object = this.peekType(member.object, module);
+    const objectExpr = tree.exprOf(member.objectId);
+    const object = this.peekType(objectExpr, module);
 
     const base = this.types.definedType(object);
-    if (base.kind != TypeKind.Array || !this.results.holdsResults(base.item)) {
+    if (
+      base.kind != TypeKind.Array ||
+      !this.types.holdsResults(this.types.store.itemOf(base))
+    ) {
       return false;
     }
 
-    this.report(module, member.loc, Code.ArraySearchResults, { word: name });
-    this.looseArguments(expr.args, module);
+    this.errors.write(module, member.loc, Code.ArraySearchResults, {
+      word: name,
+    });
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
@@ -101,10 +117,12 @@ partial class ExpressionTypes {
     draft: CombineDraft,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
     const results: ResultType[] = [];
-    const types = literal.elements.map((element) =>
-      this.typed(element.expr, undefined, module),
+    const types = tree.elementsOf(literal.elementsList).map((element) =>
+      this.typed(tree.exprOf(element.exprId), undefined, module),
     );
     if (types.some((type) => type.kind == TypeKind.Error)) {
       return error;
@@ -112,17 +130,22 @@ partial class ExpressionTypes {
 
     for (let index = 0; index < types.length; index++) {
       const type = types[index];
-      const element = literal.elements[index];
+      const element = tree.elementsOf(literal.elementsList)[index];
       if (type == undefined || element == undefined) {
         return error;
       }
 
       const defined = this.types.definedType(type);
       if (defined.kind != TypeKind.Result) {
-        this.report(module, element.expr.loc, Code.ResultCombineNotResult, {
-          word: draft.what,
-          first: this.text.of(type),
-        });
+        this.errors.write(
+          module,
+          tree.exprOf(element.exprId).loc,
+          Code.ResultCombineNotResult,
+          {
+            word: draft.what,
+            first: this.types.typeText(type),
+          },
+        );
 
         return error;
       }
@@ -138,7 +161,7 @@ partial class ExpressionTypes {
     return this.tupleCombined(literal, results, draft, module);
   }
 
-  private readonly combinedCommon(results: Read<ResultType[]>): ResultType | undefined {
+  private combinedCommon(results: Read<ResultType[]>): ResultType | undefined {
     let common = results[0];
 
     for (const result of results) {
@@ -152,17 +175,23 @@ partial class ExpressionTypes {
     return common;
   }
 
-  private readonly sameValues(
+  private sameValues(
     first: ResultType,
     second: ResultType,
   ): ResultType | undefined {
-    const value = this.results.joinedValue(first.value, second.value);
-    const error = this.resultHalfJoin(first.error, second.error);
+    const value = this.types.joinedValue(
+      this.types.store.valueOf(first),
+      this.types.store.valueOf(second),
+    );
+    const error = this.resultHalfJoin(
+      this.types.store.errorOf(first),
+      this.types.store.errorOf(second),
+    );
     if (value == undefined || error == undefined) {
       return undefined;
     }
 
-    const made = this.store.resultOf(value, error);
+    const made = this.types.store.resultOf(value, error);
     if (made.kind != TypeKind.Result) {
       return undefined;
     }
@@ -170,99 +199,109 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private readonly sameCombined(
+  private sameCombined(
     literal: ArrayLitExpr,
     common: ResultType,
     draft: CombineDraft,
     module: int,
   ): Type {
-    const checked = this.results.sameCombined(literal, common, draft);
+    const checked = this.types.sameCombined(literal, common, draft);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly tupleCombined(
+  private tupleCombined(
     literal: ArrayLitExpr,
     results: Read<ResultType[]>,
     draft: CombineDraft,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const values: Type[] = [];
-    let error: Type = this.store.plain(TypeKind.Never);
+    let error: Type = this.types.store.plain(TypeKind.Never);
 
     for (let index = 0; index < results.length; index++) {
       const result = results[index];
-      const element = literal.elements[index];
+      const element = tree.elementsOf(literal.elementsList)[index];
       if (result == undefined || element == undefined) {
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
-      if (!this.results.isHoldingValues(draft, result)) {
-        const noValuesError = this.results.noValuesError(
+      if (!this.types.isHoldingValues(draft, result)) {
+        const noValuesError = this.types.noValuesError(
           draft,
           result,
-          element.expr,
+          tree.exprOf(element.exprId),
         );
 
-        this.reportFound(module, noValuesError);
+        this.errors.writeFound(module, noValuesError);
 
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
 
-      values.push(result.value);
+      values.push(this.types.store.valueOf(result));
 
-      const joined = this.resultHalfJoin(error, result.error);
+      const joined = this.resultHalfJoin(
+        error,
+        this.types.store.errorOf(result),
+      );
       if (joined == undefined) {
-        this.report(module, element.expr.loc, Code.ResultCombineNoUnion, {
-          word: draft.what,
-          other: this.resultUnionWhy(error, result.error),
-        });
+        this.errors.write(
+          module,
+          tree.exprOf(element.exprId).loc,
+          Code.ResultCombineNoUnion,
+          {
+            word: draft.what,
+            other: this.resultUnionWhy(error, this.types.store.errorOf(result)),
+          },
+        );
 
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
 
       error = joined;
     }
 
-    const tuple = this.store.plainTuple(values);
+    const tuple = this.types.store.plainTuple(values);
 
-    return this.store.resultOf(
+    return this.types.store.resultOf(
       tuple,
-      this.results.combinedErrors(draft, error),
+      this.types.combinedErrors(draft, error),
     );
   }
 
   private combinedArray(arg: Expr, draft: CombineDraft, module: int): Type {
-    const error = this.store.plain(TypeKind.Error);
+    const error = this.types.store.plain(TypeKind.Error);
     const type = this.typed(arg, undefined, module);
     if (type.kind == TypeKind.Error) {
       return type;
     }
 
     const base = this.types.definedType(type);
-    const item = this.results.arrayResultItem(base);
+    const item = this.types.arrayResultItem(base);
     if (item == undefined) {
-      this.report(module, arg.loc, Code.ResultCombineNotArray, {
+      this.errors.write(module, arg.loc, Code.ResultCombineNotArray, {
         word: draft.what,
-        first: this.text.of(type),
+        first: this.types.typeText(type),
       });
 
       return error;
     }
-    if (!this.results.isHoldingValues(draft, item)) {
-      const noValuesError = this.results.noValuesError(draft, item, arg);
+    if (!this.types.isHoldingValues(draft, item)) {
+      const noValuesError = this.types.noValuesError(draft, item, arg);
 
-      this.reportFound(module, noValuesError);
+      this.errors.writeFound(module, noValuesError);
 
       return error;
     }
 
-    const values = this.store.arrayOf(item.value);
+    const values = this.types.store.arrayOf(this.types.store.valueOf(item));
 
-    return this.store.resultOf(
+    return this.types.store.resultOf(
       values,
-      this.results.combinedErrors(draft, item.error),
+      this.types.combinedErrors(draft, this.types.store.errorOf(item)),
     );
   }
 }

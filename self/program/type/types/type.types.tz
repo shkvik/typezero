@@ -70,6 +70,8 @@ export type PlainKind =
   | TypeKind.Json
   | TypeKind.AnyObject;
 
+export type TypeId = int;
+
 export type PlainType = {
   readonly id: int;
   readonly kind: PlainKind;
@@ -93,8 +95,9 @@ export type LiteralType = {
 export type ArrayType = {
   readonly id: int;
   readonly kind: TypeKind.Array;
-  readonly item: Type;
+  readonly itemId: TypeId;
   readonly readonly?: boolean;
+  readonly lent?: boolean;
 };
 
 export type TupleShape = {
@@ -102,15 +105,16 @@ export type TupleShape = {
   readonly readonly: boolean;
   readonly required: int;
   readonly rest: int;
+  readonly lent?: boolean;
 };
 
 export type TupleType = {
   readonly id: int;
   readonly kind: TypeKind.Tuple;
-  readonly items: readonly Type[];
   readonly readonly: boolean;
   readonly required: int;
   readonly rest: int;
+  readonly lent?: boolean;
 };
 
 export type ObjectField = {
@@ -119,13 +123,11 @@ export type ObjectField = {
   readonly optional: boolean;
   readonly readonly: boolean;
   readonly method?: boolean;
-  readonly cell?: boolean;
 };
 
 export type ObjectType = {
   readonly id: int;
   readonly kind: TypeKind.Object;
-  fields: Cell<readonly ObjectField[]>;
 };
 
 export type FunctionParameter = {
@@ -143,27 +145,25 @@ export type FunctionShape = {
 export type FunctionType = {
   readonly id: int;
   readonly kind: TypeKind.Function;
-  readonly shape: FunctionShape;
 };
 
 export type UnionType = {
   readonly id: int;
   readonly kind: TypeKind.Union;
-  parts: Cell<readonly Type[]>;
   readonly recursive: boolean;
 };
 
 export type ResultType = {
   readonly id: int;
   readonly kind: TypeKind.Result;
-  readonly value: Type;
-  readonly error: Type;
+  readonly valueId: TypeId;
+  readonly errorId: TypeId;
 };
 
 export type PromiseType = {
   readonly id: int;
   readonly kind: TypeKind.Promise;
-  readonly value: Type;
+  readonly valueId: TypeId;
 };
 
 export type IteratorShape = {
@@ -176,15 +176,15 @@ export type IteratorShape = {
 export type IteratorType = {
   readonly id: int;
   readonly kind: TypeKind.Iterator;
-  readonly shape: IteratorShape;
+  readonly isAsync: boolean;
 };
 
 export type DictType = {
   readonly id: int;
   readonly kind: TypeKind.Dict;
   readonly dict: DictKind;
-  readonly key: Type;
-  readonly value: Type;
+  readonly keyId: TypeId;
+  readonly valueId: TypeId;
 };
 
 export type InstanceType = {
@@ -193,7 +193,6 @@ export type InstanceType = {
   readonly module: int;
   readonly loc: int;
   readonly name: string;
-  readonly args: readonly Type[];
 };
 
 export type TypeParameterType = {
@@ -207,8 +206,6 @@ export type TypeParameterType = {
 export type TemplateType = {
   readonly id: int;
   readonly kind: TypeKind.Template;
-  readonly texts: readonly string[];
-  readonly parts: readonly Type[];
 };
 
 export type OperationShape = {
@@ -222,13 +219,12 @@ export type OperationShape = {
 export type OperationType = {
   readonly id: int;
   readonly kind: TypeKind.Operation;
-  readonly shape: OperationShape;
 };
 
 export type ClassType = {
   readonly id: int;
   readonly kind: TypeKind.Class;
-  readonly instance: Type;
+  readonly instanceId: TypeId;
   readonly exact: boolean;
 };
 
@@ -251,15 +247,6 @@ export type Type =
   | OperationType
   | ClassType;
 
-export type InternedType = Interned<Type>;
-
-export type InternedTypeList = Interned<readonly Type[]>;
-
-export type InternedFields = Interned<readonly ObjectField[]>;
-
-export type InternedWriters = Interned<readonly ParamWriter[]>;
-
-export type InternedParams = Interned<readonly FunctionParameter[]>;
 export type ParamWriter = {
   readonly name: string;
   readonly writer: string;

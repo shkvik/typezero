@@ -1,0 +1,380 @@
+import {
+  CallExpr,
+  Expr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kFindName,
+  kIntType,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  CallbackStep,
+  Frame,
+  IrValue,
+  Place,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private filterResult(call: CallExpr, object: Type): Type {
+    const answered = this.typeOf(call);
+    if (answered == undefined || object.kind != TypeKind.Array) {
+      return object;
+    }
+    if (!this.isLookingArray(answered)) {
+      return object;
+    }
+
+    return this.values.types.store.lentArrayOf(
+      this.values.types.store.itemOf(object),
+    );
+  }
+
+  private methodResult(
+    call: CallExpr,
+    name: string,
+    object: Type,
+  ): Type | undefined {
+    if (name == "filter") {
+      return this.filterResult(call, object);
+    }
+
+    const answered = this.typeOf(call);
+    if (answered != undefined && answered.kind != TypeKind.Error) {
+      return answered;
+    }
+
+    switch (name) {
+      case "some":
+      case "every":
+        return this.values.types.store.plain(TypeKind.Boolean);
+      case "findIndex":
+        return this.values.types.store.integer(64, false);
+      case "forEach":
+        return this.values.types.store.plain(TypeKind.Void);
+      case "filter":
+        return object;
+      case "find": {
+        const item = this.itemOf(object);
+        if (item == undefined) {
+          return undefined;
+        }
+
+        const empty = this.values.types.store.plain(TypeKind.Undefined);
+
+        return this.values.types.store.unionOf([item, empty]);
+      }
+      default:
+        return answered;
+    }
+  }
+
+  private callbackMethod(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const callback = tree.argumentsOf(call.argsList)[0];
+    const result = this.methodResult(call, member.name, object);
+    const resultIr = this.typeOrUndefined(result);
+    if (object.kind != TypeKind.Array || callback == undefined) {
+      this.notLowered(frame.module, call.loc, "these arguments");
+
+      return undefined;
+    }
+    if (result == undefined || resultIr == undefined) {
+      this.notLowered(frame.module, call.loc, "a result of this type");
+
+      return undefined;
+    }
+    const expr = tree.exprOf(callback.exprId);
+    if (!this.isInlineable(expr)) {
+      this.notLowered(frame.module, call.loc, "a callback that is not inline");
+
+      return undefined;
+    }
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const borrowed: IrValue = {
+      type: array.type,
+      value: array.value,
+      tz: array.tz,
+    };
+    const slotType = this.slotTypeOf(resultIr);
+    const slot = frame.made.slot(slotType, "method.result");
+    const place: Place = {
+      pointer: slot,
+      type: slotType,
+      tz: result,
+      owner: frame.id,
+    };
+
+    frame.made.entryStore(this.ir.zero(slotType), slot);
+
+    const isStarted = this.methodStart(frame, member.name, place, result);
+    if (!isStarted) {
+      return undefined;
+    }
+
+    const loop = this.eachStart(
+      frame,
+      array.value,
+      this.values.types.store.itemOf(object),
+    );
+    if (loop == undefined) {
+      return undefined;
+    }
+
+    const isLent = member.name == kFindName && array.owned != true;
+    const isStaticArray = array.owned != true && array.isStatic == true;
+    const item = this.staticOrSame(loop.item, isStaticArray);
+    const isStepped = this.callbackStep(
+      frame,
+      member.name,
+      tree.exprOf(callback.exprId),
+      place,
+      {
+        item,
+        index: loop.index,
+        array: borrowed,
+        done: loop.done,
+        isLent,
+      },
+    );
+    if (!isStepped) {
+      return undefined;
+    }
+
+    this.eachEnd(frame, loop);
+
+    const value = frame.made.load(slotType, slot);
+
+    frame.made.store(this.ir.zero(slotType), slot);
+    this.dropping(frame, array);
+
+    const answer: IrValue = {
+      type: resultIr,
+      value,
+      tz: result,
+      owned: !isLent,
+    };
+
+    return this.staticOrSame(answer, isLent && isStaticArray);
+  }
+
+  private readonly slotTypeOf(type: string): string {
+    if (type == kVoidType) {
+      return kBooleanType;
+    }
+
+    return type;
+  }
+
+  private methodStart(
+    frame: Read<Frame>,
+    name: string,
+    place: Place,
+    result: Type,
+  ): boolean {
+    switch (name) {
+      case "every":
+        frame.made.store(this.ir.integer(kBooleanType, "1"), place.pointer);
+
+        return true;
+      case "findIndex":
+        frame.made.store(this.ir.integer(kIntType, "-1"), place.pointer);
+
+        return true;
+      case "filter":
+      case "map":
+      case "flatMap": {
+        const item = this.itemOf(result);
+        const descriptor = this.descriptor(item ?? result);
+        if (item == undefined || descriptor == undefined) {
+          return false;
+        }
+
+        const array = this.emptyArray(frame, descriptor);
+
+        frame.made.store(array, place.pointer);
+
+        return true;
+      }
+      default:
+        return true;
+    }
+  }
+
+  private callbackStep(
+    frame: Frame,
+    name: string,
+    callback: Expr,
+    place: Place,
+    step: CallbackStep,
+  ): boolean {
+    const args = [step.item, step.index, step.array];
+    const wanted = this.flatWanted(name, place);
+    const returned = this.inlineCall(frame, callback, args, wanted);
+    if (returned == undefined) {
+      return false;
+    }
+
+    switch (name) {
+      case "forEach":
+        this.dropping(frame, returned);
+
+        return true;
+      case "map":
+        return this.mappedPush(frame, place, returned, callback);
+      case "flatMap":
+        return this.flatPushed(frame, place, returned, callback);
+      default:
+        return this.testedStep(frame, name, callback, place, step, returned);
+    }
+  }
+
+  private readonly flatWanted(name: string, place: Place): Type | undefined {
+    if (name != "flatMap") {
+      return undefined;
+    }
+
+    return place.tz;
+  }
+
+  private mappedPush(
+    frame: Frame,
+    place: Place,
+    returned: IrValue,
+    callback: Expr,
+  ): boolean {
+    const item = this.itemOf(place.tz);
+    if (item == undefined) {
+      return false;
+    }
+
+    const value = this.converted(frame, returned, item, callback.loc);
+    if (value == undefined) {
+      return false;
+    }
+
+    const array = frame.made.load(kPointerType, place.pointer);
+
+    this.pushed(frame, array, value, item);
+
+    return true;
+  }
+
+  private testedStep(
+    frame: Frame,
+    name: string,
+    callback: Expr,
+    place: Place,
+    step: CallbackStep,
+    returned: IrValue,
+  ): boolean {
+    const test = this.truthOf(frame, returned, callback);
+    if (test == undefined) {
+      return false;
+    }
+
+    const hit = frame.made.block("method.hit");
+    const miss = frame.made.block("method.miss");
+
+    if (name == "every") {
+      frame.made.conditionalBranch(test, miss, hit);
+    } else {
+      frame.made.conditionalBranch(test, hit, miss);
+    }
+
+    frame.made.open(hit);
+
+    const isStored = this.hitStored(frame, name, place, step);
+    if (!isStored) {
+      return false;
+    }
+
+    frame.made.open(miss);
+
+    return true;
+  }
+
+  private hitStored(
+    frame: Frame,
+    name: string,
+    place: Place,
+    step: CallbackStep,
+  ): boolean {
+    switch (name) {
+      case "some":
+        frame.made.store(this.ir.integer(kBooleanType, "1"), place.pointer);
+        frame.made.branch(step.done);
+
+        return true;
+      case "every":
+        frame.made.store(this.ir.integer(kBooleanType, "0"), place.pointer);
+        frame.made.branch(step.done);
+
+        return true;
+      case "findIndex":
+        frame.made.store(step.index.value, place.pointer);
+        frame.made.branch(step.done);
+
+        return true;
+      case "find": {
+        const kept = this.foundItem(frame, step);
+        const value = this.converted(frame, kept, place.tz, 0);
+        if (value == undefined) {
+          return false;
+        }
+
+        frame.made.store(value.value, place.pointer);
+        frame.made.branch(step.done);
+
+        return true;
+      }
+      case "filter": {
+        const array = frame.made.load(kPointerType, place.pointer);
+        const item = this.itemOf(place.tz);
+        if (item == undefined) {
+          return false;
+        }
+
+        this.pushed(frame, array, this.keptItem(step, place.tz), item);
+
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private keptItem(step: Read<CallbackStep>, result: Type): IrValue {
+    if (!this.isLookingArray(result)) {
+      return step.item;
+    }
+
+    const item = step.item;
+
+    return { type: item.type, value: item.value, tz: item.tz, owned: true };
+  }
+
+  private foundItem(frame: Read<Frame>, step: Read<CallbackStep>): IrValue {
+    if (step.isLent == true) {
+      return step.item;
+    }
+
+    return this.owning(frame, step.item);
+  }
+}

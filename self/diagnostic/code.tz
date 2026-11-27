@@ -1488,9 +1488,6 @@ export enum Code {
   OwnReadonlyArray = "TZ4023",
   OwnGiveGlobal = "TZ4024",
   OwnTakeElement = "TZ4025",
-  OwnInternedChanged = "TZ4026",
-  OwnCellBorrow = "TZ4027",
-  OwnInternedField = "TZ4028",
   OwnTakeEmpty = "TZ4029",
   OwnBorrowField = "TZ4030",
   OwnLentCopy = "TZ4031",
@@ -1507,5 +1504,5 @@ export enum Code {
   OwnUnsafeUnused = "TZ4042",
   OwnUnsafeRequires = "TZ4043",
   OwnCloneField = "TZ4044",
-  OwnCellReach = "TZ4045",
+  OwnCopyShared = "TZ4047",
 }

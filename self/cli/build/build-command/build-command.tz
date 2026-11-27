@@ -5,7 +5,6 @@ import { basename, dirname, extname, join } from "node:path";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
 import { Program } from "../../../program/module/types/module.types.tz";
 import { SourceLines } from "../../../program/source-lines/source-lines.tz";
-import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { IrModule } from "../../../lower/ir-module/ir-module.tz";
 import { Lowering } from "../../../lower/lowering/lowering.tz";
 import { Unlowered } from "../../../lower/lowering/types/lowering.types.tz";
@@ -17,6 +16,7 @@ import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 import {
   kAuditOption,
+  kCheckCountsOption,
   kEmitIrOption,
   kExecutableExtension,
   kIrExtension,
@@ -30,16 +30,17 @@ import {
   kTemporaryPrefix,
 } from "./const/build-command.const.tz";
 import { BuildOptions } from "./types/build-command.types.tz";
+import {
+  ModuleProblems,
+} from "../../../pipeline/front-end/types/front-end.types.tz";
 
 export class BuildCommand {
   private readonly args: string[];
   private readonly report: ProgramReport;
-  private readonly store: TypeStore;
 
   public constructor(args: Own<string[]>) {
     this.args = args;
     this.report = new ProgramReport();
-    this.store = new TypeStore();
   }
 
   public run(): void {
@@ -54,27 +55,25 @@ export class BuildCommand {
 
     const source = new ProgramSource();
     const loaded = source.loadWith(entry, [], true);
-    const program = loaded.program;
 
     this.report.loadProblems(loaded);
-    this.report.moduleErrors(program);
+    this.report.moduleErrors(loaded.program);
 
-    const front = new FrontEnd(this.store, program);
+    const front = new FrontEnd();
     if (this.report.hasFailed() && !front.isCheckable(loaded)) {
       return;
     }
 
-    const checked = front.run();
+    const checked = front.run(loaded.program);
+    const found = front.problems(checked);
 
-    for (const problems of front.problems(checked)) {
-      this.report.sourceErrors(problems.source, problems.errors);
-    }
+    this.moduleProblems(checked.values.types.program, found);
 
     if (this.report.hasFailed()) {
       return;
     }
 
-    const ownership = this.checkOwnership(program, checked.values);
+    const ownership = this.checkOwnership(checked.values);
 
     if (this.report.hasFailed()) {
       return;
@@ -82,17 +81,14 @@ export class BuildCommand {
 
     const moves = ownership.takeMoves();
     const borrows = ownership.takeBorrows();
-    const lowering = new Lowering(
-      this.store,
-      program,
-      checked.types,
-      ownership.values,
-      moves,
-      borrows,
-    );
+    const closures = ownership.takeLentClosures();
+    const lowering = new Lowering(ownership.values, moves, borrows, closures);
 
     if (options.isAuditing) {
       lowering.audit();
+    }
+    if (options.isCheckingCounts) {
+      lowering.checkCounts();
     }
 
     const lowered = lowering.run();
@@ -102,7 +98,7 @@ export class BuildCommand {
       this.auditPrinted(lowering.lateWork());
     }
     if (lowered.unlowered.length > 0) {
-      return this.unloweredReport(program, lowered.unlowered);
+      return this.unloweredReport(lowering.sourceProgram(), lowered.unlowered);
     }
 
     const ir = lowering.ir;
@@ -127,6 +123,7 @@ export class BuildCommand {
     const libraries: string[] = [];
     let isEmittingIr = false;
     let isAuditing = false;
+    let isCheckingCounts = false;
     let isWrong = false;
 
     for (let index = 3; index < this.args.length; index++) {
@@ -146,6 +143,8 @@ export class BuildCommand {
         isEmittingIr = true;
       } else if (arg == kAuditOption) {
         isAuditing = true;
+      } else if (arg == kCheckCountsOption) {
+        isCheckingCounts = true;
       } else if (entry == undefined) {
         entry = arg;
       } else {
@@ -153,7 +152,15 @@ export class BuildCommand {
       }
     }
 
-    return { entry, output, libraries, isEmittingIr, isAuditing, isWrong };
+    return {
+      entry,
+      output,
+      libraries,
+      isEmittingIr,
+      isAuditing,
+      isCheckingCounts,
+      isWrong,
+    };
   }
 
   private readonly auditPrinted(sites: Own<string[]>): void {
@@ -174,7 +181,10 @@ export class BuildCommand {
     }
   }
 
-  private readonly outputOf(options: Read<BuildOptions>, entry: string): string {
+  private readonly outputOf(
+    options: Read<BuildOptions>,
+    entry: string,
+  ): string {
     const given = options.output;
     if (given != undefined) {
       return given;
@@ -189,13 +199,24 @@ export class BuildCommand {
     return `${stem}${kExecutableExtension}`;
   }
 
-  private checkOwnership(
-    program: Program,
-    values: Own<ExpressionTypes>,
-  ): OwnershipCheck {
-    const ownership = new OwnershipCheck(this.store, values, program);
+  private moduleProblems(
+    program: Read<Program>,
+    found: Read<ModuleProblems[]>,
+  ): void {
+    for (const problems of found) {
+      const module = program.modules[problems.module];
+      if (module != undefined) {
+        this.report.sourceErrors(module.source, problems.errors);
+      }
+    }
+  }
+
+  private checkOwnership(values: Own<ExpressionTypes>): OwnershipCheck {
+    const ownership = new OwnershipCheck(values);
 
     ownership.run();
+
+    const program = ownership.values.types.program;
 
     for (const module of program.modules) {
       const errors = ownership.problems(module.id);
@@ -210,7 +231,10 @@ export class BuildCommand {
     return ownership;
   }
 
-  private unloweredReport(program: Program, unlowered: Read<Unlowered[]>): void {
+  private unloweredReport(
+    program: Read<Program>,
+    unlowered: Read<Unlowered[]>,
+  ): void {
     for (const one of unlowered) {
       const module = program.modules[one.module];
       if (module == undefined) {

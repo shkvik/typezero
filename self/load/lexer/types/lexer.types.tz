@@ -1,7 +1,15 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { Token } from "../../token/types/token.types.tz";
+import {
+  ParsedFile,
+} from "../../../program/syntax/types/syntax.types.files.tz";
 
 export type LexResult = {
-  readonly tokens: readonly Token[];
+  readonly tokens: Token[];
   readonly errors: SourceError[];
+};
+
+export type LexedFile = {
+  readonly parsed: ParsedFile;
+  readonly tokens: Token[];
 };

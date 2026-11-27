@@ -1,0 +1,168 @@
+import { TypeSystem } from "../type-system.tz";
+import { kLentModes } from "../../../../program/type/type-store/const/type-store.const.tz";
+import { kNoUses } from "../../../../program/scopes/const/scopes.const.tz";
+import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import {
+  EnumDecl,
+  TypeAliasDecl,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { TypeContext } from "../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  public readonly scopeErrors(module: int): SourceError[] {
+    const errors = this.scopes.get(module)?.errors;
+    if (errors == undefined) {
+      return [];
+    }
+
+    return errors.slice();
+  }
+
+  public readonly usesOf(module: int): Read<readonly NameUse[]> {
+    const uses = this.scopes.get(module)?.uses;
+    if (uses == undefined) {
+      return kNoUses;
+    }
+
+    return uses;
+  }
+
+  public readonly problems(module: int): SourceError[] {
+    return this.errors.of(module);
+  }
+
+  private readonly isLentItem(item: TypeRef | undefined): boolean {
+    const tree = this.program.tree;
+
+    if (item == undefined || !kLentModes.includes(item.name)) {
+      return false;
+    }
+
+    return tree.typeRefsOf(item.argsList).length == 1;
+  }
+
+  public resolve(ref: TypeRef, context: Read<TypeContext>): Type {
+    const tree = this.program.tree;
+
+    const form = ref.form;
+
+    switch (form.kind) {
+      case TypeRefKind.Name:
+      case TypeRefKind.Generic:
+        return this.named(ref, context);
+      case TypeRefKind.Array: {
+        const written = tree.typeRefsOf(ref.argsList);
+        const items = this.resolveAll(written, context);
+        const error = this.store.plain(TypeKind.Error);
+        const item = items[0] ?? error;
+        if (this.isLentItem(written[0])) {
+          return this.store.lentArrayOf(item);
+        }
+
+        return this.listOf(ref, item, form.readonly, context);
+      }
+      case TypeRefKind.Union:
+        return this.union(ref, context);
+      case TypeRefKind.Tuple:
+        return this.tuple(ref, form, context);
+      case TypeRefKind.Object:
+        return this.object(form, context, false);
+      case TypeRefKind.Function:
+        return this.functionType(form, context);
+      case TypeRefKind.Literal:
+        return this.literal(ref.name, form);
+      case TypeRefKind.Predicate:
+        return this.store.plain(TypeKind.Boolean);
+      case TypeRefKind.KeyOf:
+        return this.keyOf(ref, context);
+      case TypeRefKind.Indexed:
+        return this.indexed(ref, context);
+      case TypeRefKind.Mapped:
+        return this.mapped(ref, form, context);
+      case TypeRefKind.Conditional:
+        return this.conditional(ref, context);
+      case TypeRefKind.Template:
+        return this.template(ref, form, context);
+      case TypeRefKind.Intersection:
+        return this.intersection(ref, context);
+      case TypeRefKind.Infer:
+        return this.inferred(ref, context);
+      case TypeRefKind.TypeOf:
+        return this.typeOfClass(ref, context);
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  public declaredAlias(module: int, decl: TypeAliasDecl): Type {
+    const tree = this.program.tree;
+
+    const written: Type[] = [];
+
+    this.builtinAliasCheck(module, decl);
+    this.aliasGrowthCheck(module, decl);
+
+    for (const param of tree.typeParamsOf(decl.typeParamsList)) {
+      const name = param.name;
+      const type = this.opened(
+        module,
+        param.loc,
+        name,
+        tree.typeRefAt(param.constraintId),
+      );
+
+      written.push(type);
+    }
+
+    return this.alias(module, decl, written, false);
+  }
+
+  public declaredEnum(module: int, decl: EnumDecl): Type {
+    return this.enumWholeOf(module, decl);
+  }
+
+  private resolveAll(
+    refs: Read<TypeRef[]>,
+    context: Read<TypeContext>,
+  ): Type[] {
+    const types: Type[] = [];
+
+    for (const ref of refs) {
+      const type = this.resolve(ref, context);
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private named(ref: TypeRef, context: Read<TypeContext>): Type {
+    const record = this.record(context.module);
+    const use = record?.uses.get(ref.loc);
+    const symbol = use?.symbol;
+    if (symbol == undefined || this.isBuiltinShadow(symbol)) {
+      return this.global(ref, context);
+    }
+
+    return this.declared(ref, symbol, context);
+  }
+
+  private report(module: int, loc: int, code: Code, details: Details): void {
+    const record = this.record(module);
+    if (record == undefined) {
+      return;
+    }
+
+    this.errors.write(module, loc, code, details);
+  }
+}

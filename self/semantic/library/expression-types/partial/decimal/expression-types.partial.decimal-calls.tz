@@ -47,24 +47,26 @@ partial class ExpressionTypes {
   }
 
   private decimalOfCall(expr: CallExpr, callee: NameExpr, module: int): Type {
-    const error = this.store.plain(TypeKind.Error);
-    const arg = expr.args[0]?.expr;
-    if (arg == undefined || expr.args.length != 1) {
-      this.report(module, callee.loc, Code.ArgumentCount, {
-        word: this.calls.argumentCountText(1, 1, false),
-        other: `${expr.args.length}`,
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (arg == undefined || tree.argumentsOf(expr.argsList).length != 1) {
+      this.errors.write(module, callee.loc, Code.ArgumentCount, {
+        word: this.types.argumentCountText(1, 1, false),
+        other: `${tree.argumentsOf(expr.argsList).length}`,
       });
 
       return error;
     }
 
-    const hint = this.decimals.decimalOfHint(arg);
+    const hint = this.types.decimalOfHint(arg);
     const type = this.typed(arg, hint, module);
     const base = this.types.apparent(this.types.definedType(type));
     if (type.kind == TypeKind.Error) {
       return error;
     }
-    if (this.decimals.isTextType(type)) {
+    if (this.types.isDecimalTextType(type)) {
       return this.decimalOfText(arg, type, module);
     }
 
@@ -73,12 +75,12 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Double ||
       base.kind == TypeKind.Decimal;
     if (isNumber && !this.types.isOptional(type)) {
-      return this.decimals.decimalType();
+      return this.types.decimalType();
     }
 
-    this.report(module, arg.loc, Code.DecimalOfType, {
-      word: this.text.of(type),
-      place: this.decimals.maybePlace(this.types.isOptional(type)),
+    this.errors.write(module, arg.loc, Code.DecimalOfType, {
+      word: this.types.typeText(type),
+      place: this.types.maybePlace(this.types.isOptional(type)),
     });
 
     return error;
@@ -87,23 +89,25 @@ partial class ExpressionTypes {
   private decimalOfText(arg: Expr, type: Type, module: int): Type {
     const texts = this.knownTextsOf(arg, type, module);
     if (texts == undefined) {
-      const failure = this.resolver.libraryShape(kDecimalError, []);
+      const failure = this.types.libraryShape(kDecimalError, []);
       if (failure == undefined) {
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
 
-      return this.store.resultOf(this.decimals.decimalType(), failure);
+      return this.types.store.resultOf(this.types.decimalType(), failure);
     }
 
     const reader = new DecimalText();
     const wrong = texts.find((text) => !reader.isNumber(text));
     if (wrong != undefined) {
-      this.report(module, arg.loc, Code.DecimalNotNumber, { word: wrong });
+      this.errors.write(module, arg.loc, Code.DecimalNotNumber, {
+        word: wrong,
+      });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.decimals.decimalType();
+    return this.types.decimalType();
   }
 
   private knownTextsOf(
@@ -111,24 +115,41 @@ partial class ExpressionTypes {
     type: Type,
     module: int,
   ): string[] | undefined {
+    const tree = this.types.program.tree;
+
     if (arg.kind == ExprKind.StringLit) {
       return [arg.value];
     }
-    if (arg.kind == ExprKind.Template && arg.exprs.length == 0) {
-      return arg.quasis.slice(0, 1);
+    if (
+      arg.kind == ExprKind.Template &&
+      tree.exprsOf(arg.exprsList).length == 0
+    ) {
+      return tree.textsOf(arg.quasisList).slice(0, 1);
     }
     if (type.kind == TypeKind.Literal && type.literal == LiteralKind.String) {
       return [type.text];
     }
-    if (type.kind == TypeKind.Union && this.decimals.isTextType(type)) {
-      return type.parts.map((part) => this.decimals.literalPartText(part));
+    if (type.kind == TypeKind.Union && this.types.isDecimalTextType(type)) {
+      return this.types.store
+        .partsOf(type)
+        .map((part) => this.types.literalPartText(part));
     }
     if (arg.kind == ExprKind.Name) {
-      return this.doorOfName(arg, module)?.texts;
+      return this.doorTextsOfName(arg, module);
     }
     if (arg.kind == ExprKind.Conditional) {
-      const first = this.branchTexts(arg.cond, arg.thenExpr, true, module);
-      const second = this.branchTexts(arg.cond, arg.elseExpr, false, module);
+      const first = this.branchTexts(
+        tree.exprOf(arg.condId),
+        tree.exprOf(arg.thenExprId),
+        true,
+        module,
+      );
+      const second = this.branchTexts(
+        tree.exprOf(arg.condId),
+        tree.exprOf(arg.elseExprId),
+        false,
+        module,
+      );
       if (first == undefined || second == undefined) {
         return undefined;
       }
@@ -163,18 +184,23 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    if (!this.isDecimalName(member.object, module)) {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    if (!this.isDecimalName(object, module)) {
       return undefined;
     }
 
-    const error = this.store.plain(TypeKind.Error);
+    const error = this.types.store.plain(TypeKind.Error);
     const name = member.name;
     if (!kDecimalStatics.includes(name)) {
       const decimalStaticMissingError =
-        this.decimals.decimalStaticMissingError(member);
+        this.types.decimalStaticMissingError(member);
 
-      this.reportFound(module, decimalStaticMissingError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, decimalStaticMissingError);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return error;
     }
@@ -182,9 +208,14 @@ partial class ExpressionTypes {
     let isFitting = true;
     let hasValue = false;
 
-    for (const arg of expr.args) {
+    for (const arg of tree.argumentsOf(expr.argsList)) {
       if (!arg.spread) {
-        this.checked(arg.expr, this.decimals.decimalType(), module, kNoPlace);
+        this.checked(
+          tree.exprOf(arg.exprId),
+          this.types.decimalType(),
+          module,
+          kNoPlace,
+        );
 
         hasValue = true;
 
@@ -194,7 +225,8 @@ partial class ExpressionTypes {
       const isSpread = this.decimalSpreadCheck(arg, module);
 
       isFitting = isFitting && isSpread;
-      hasValue = hasValue || this.isFilledSource(arg.expr, module);
+      hasValue =
+        hasValue || this.isFilledSource(tree.exprOf(arg.exprId), module);
     }
 
     if (!isFitting) {
@@ -202,36 +234,46 @@ partial class ExpressionTypes {
     }
 
     const isSum = name == "sum";
-    if (expr.args.length == 0 && !isSum) {
-      this.report(module, member.loc, Code.DecimalNoValue, { word: name });
+    if (tree.argumentsOf(expr.argsList).length == 0 && !isSum) {
+      this.errors.write(module, member.loc, Code.DecimalNoValue, {
+        word: name,
+      });
 
       return error;
     }
     if (hasValue || isSum) {
-      return this.decimals.decimalType();
+      return this.types.decimalType();
     }
 
-    return this.types.optional(this.decimals.decimalType());
+    return this.types.optional(this.types.decimalType());
   }
 
   private decimalSpreadCheck(arg: CallArgument, module: int): boolean {
-    const list = this.store.arrayOf(this.decimals.decimalType());
-    const type = this.typed(arg.expr, list, module);
-    if (type == list || type.kind == TypeKind.Error) {
+    const tree = this.types.program.tree;
+
+    const list = this.types.store.arrayOf(this.types.decimalType());
+    const expr = tree.exprOf(arg.exprId);
+    const type = this.typed(expr, list, module);
+    if (type.id == list.id || type.kind == TypeKind.Error) {
       return true;
     }
 
-    this.report(module, arg.expr.loc, Code.DecimalSpreadNotDecimals, {
-      word: this.text.of(type),
-    });
+    this.errors.write(
+      module,
+      tree.exprOf(arg.exprId).loc,
+      Code.DecimalSpreadNotDecimals,
+      {
+        word: this.types.typeText(type),
+      },
+    );
 
     return false;
   }
 
-  private readonly decimalStaticRead(expr: MemberExpr, module: int): Type {
-    const checked = this.decimals.decimalStaticRead(expr);
+  private decimalStaticRead(expr: MemberExpr, module: int): Type {
+    const checked = this.types.decimalStaticRead(expr);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -241,29 +283,35 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
     const name = member.name;
     const method = kDecimalMethods.find((one) => one.name == name);
     if (method == undefined) {
-      this.report(module, member.loc, Code.DecimalMethodMissing, {
+      this.errors.write(module, member.loc, Code.DecimalMethodMissing, {
         word: name,
-        place: this.decimals.decimalMissingHint(name),
+        place: this.types.decimalMissingHint(name),
       });
-      this.looseArguments(expr.args, module);
+      const argsItem = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(argsItem, module);
 
       return error;
     }
 
-    const count = expr.args.length;
+    const count = tree.argumentsOf(expr.argsList).length;
     if (name == "decimalPlaces" && count > 0) {
-      this.report(module, member.loc, Code.DecimalPlacesOnly, kNoDetails);
-      this.looseArguments(expr.args, module);
+      this.errors.write(module, member.loc, Code.DecimalPlacesOnly, kNoDetails);
+      const exprArgs = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(exprArgs, module);
 
       return error;
     }
     if (count < method.least || count > method.most) {
-      this.report(module, member.loc, Code.ArgumentCount, {
-        word: this.calls.argumentCountText(method.least, method.most, false),
+      this.errors.write(module, member.loc, Code.ArgumentCount, {
+        word: this.types.argumentCountText(method.least, method.most, false),
         other: `${count}`,
       });
 
@@ -271,19 +319,19 @@ partial class ExpressionTypes {
     }
 
     for (let index = 0; index < count; index++) {
-      const arg = expr.args[index]?.expr;
+      const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
       const kind = method.args[index];
       if (arg != undefined && kind != undefined) {
         this.decimalArgument(arg, kind, name, module);
       }
     }
 
-    const divisor = expr.args[0]?.expr;
+    const divisor = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (name == "div" && divisor != undefined) {
       this.decimalZeroCheck(divisor, module);
     }
 
-    return this.decimals.decimalMethodResult(method);
+    return this.types.decimalMethodResult(method);
   }
 
   private decimalArgument(
@@ -294,7 +342,7 @@ partial class ExpressionTypes {
   ): void {
     switch (kind) {
       case DecimalArgument.Decimal:
-        this.checked(arg, this.decimals.decimalType(), module, kNoPlace);
+        this.checked(arg, this.types.decimalType(), module, kNoPlace);
 
         return;
       case DecimalArgument.Places:
@@ -319,7 +367,7 @@ partial class ExpressionTypes {
   }
 
   private decimalCount(arg: Expr, range: ProofRange, module: int): void {
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
     const type = this.typed(arg, int, module);
     const base = this.types.apparent(type);
     if (type.kind == TypeKind.Error) {
@@ -331,15 +379,15 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, arg.loc, Code.DecimalCountType, {
+    this.errors.write(module, arg.loc, Code.DecimalCountType, {
       word: range.what,
-      first: this.text.of(type),
-      place: this.decimals.maybePlace(this.types.isOptional(type)),
+      first: this.types.typeText(type),
+      place: this.types.maybePlace(this.types.isOptional(type)),
     });
   }
 
   private roundingModeCheck(arg: Expr, module: int): void {
-    const string = this.store.plain(TypeKind.String);
+    const string = this.types.store.plain(TypeKind.String);
     const type = this.checked(arg, string, module, kNoPlace);
     if (type.kind == TypeKind.Error) {
       return;
@@ -347,44 +395,46 @@ partial class ExpressionTypes {
 
     const modes = this.knownTextsOf(arg, type, module);
     if (modes == undefined) {
-      this.report(module, arg.loc, Code.RoundingModeRuntime, kNoDetails);
+      this.errors.write(module, arg.loc, Code.RoundingModeRuntime, kNoDetails);
 
       return;
     }
 
     const unknown = modes.find((mode) => !kRoundingModes.includes(mode));
     if (unknown != undefined) {
-      this.report(module, arg.loc, Code.RoundingModeUnknown, {
+      this.errors.write(module, arg.loc, Code.RoundingModeUnknown, {
         word: unknown,
       });
     }
   }
 
-  private readonly decimalRangeCheck(expr: Expr, module: int): void {
+  private decimalRangeCheck(expr: Expr, module: int): void {
     if (expr.kind != ExprKind.FloatLit) {
       return;
     }
 
     const span = expr.text;
-    const source = this.program.modules[module]?.source.text;
+    const source = this.types.program.modules[module]?.source.text;
     if (span == undefined || source == undefined) {
       return;
     }
 
     const text = source.toString("utf8", span.start, span.end);
-    const top = this.decimals.decimalTop(text);
+    const top = this.types.decimalTop(text);
     if (top != undefined && top > 10000000) {
-      this.report(module, expr.loc, Code.DecimalOutOfRange, kNoDetails);
+      this.errors.write(module, expr.loc, Code.DecimalOutOfRange, kNoDetails);
     }
   }
 
   private mathDecimalCheck(expr: CallExpr, module: int): boolean {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return false;
     }
 
-    const holder = callee.object;
+    const holder = tree.exprOf(callee.objectId);
     const isMath =
       holder.kind == ExprKind.Name &&
       holder.name == kMathName &&
@@ -393,14 +443,22 @@ partial class ExpressionTypes {
       return false;
     }
 
-    for (const arg of expr.args) {
-      const type = this.peekType(arg.expr, module);
+    for (const arg of tree.argumentsOf(expr.argsList)) {
+      const exprExpr = tree.exprOf(arg.exprId);
+      const type = this.peekType(exprExpr, module);
 
       if (!arg.spread && this.types.apparent(type).kind == TypeKind.Decimal) {
-        this.report(module, arg.expr.loc, Code.MathArgumentDecimal, {
-          word: this.text.of(type),
-        });
-        this.looseArguments(expr.args, module);
+        this.errors.write(
+          module,
+          tree.exprOf(arg.exprId).loc,
+          Code.MathArgumentDecimal,
+          {
+            word: this.types.typeText(type),
+          },
+        );
+        const args = tree.argumentsOf(expr.argsList);
+
+        this.looseArguments(args, module);
 
         return true;
       }
@@ -414,17 +472,26 @@ partial class ExpressionTypes {
     tested: Type,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
     if (isDividing && this.types.apparent(tested).kind == TypeKind.Decimal) {
-      this.decimalZeroCheck(expr.value, module);
+      const value = tree.exprOf(expr.valueId);
+
+      this.decimalZeroCheck(value, module);
     }
   }
 
   private decimalZeroCheck(divisor: Expr, module: int): void {
     const value = this.plainConstant(divisor, module);
     const isZero = value != undefined && value == 0;
-    if (isZero || this.shapes.isZeroLiteral(divisor)) {
-      this.report(module, divisor.loc, Code.DecimalDivisionByZero, kNoDetails);
+    if (isZero || this.types.isZeroLiteral(divisor)) {
+      this.errors.write(
+        module,
+        divisor.loc,
+        Code.DecimalDivisionByZero,
+        kNoDetails,
+      );
     }
   }
 }

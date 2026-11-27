@@ -1,0 +1,356 @@
+import { FileParser } from "../file-parser.tz";
+import { KnownName } from "../../../token/types/token.types.tz";
+import {
+  BinaryOp,
+  ExprKind,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BindingForm,
+  BindingKind,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  Pattern,
+  PatternElement,
+} from "../types/file-parser.types.patterns.tz";
+import { kSliceMethodName } from "../const/file-parser.const.patterns.tz";
+import {
+  Expr,
+  IndexExpr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+
+partial class FileParser {
+  private assignPattern(
+    loc: int,
+    pattern: Read<Pattern>,
+    value: Own<Expr>,
+  ): Stmt {
+    const decls: VarDeclarator[] = [];
+    const direct = this.isDirect(pattern, value);
+    const values: string[] = [];
+
+    if (direct && value.kind == ExprKind.ArrayLit) {
+      for (const item of value.elements) {
+        const copy = this.copyExpr(item.expr);
+        const hidden = this.hiddenDeclarator(copy.loc, copy, undefined, {
+          kind: BindingKind.Plain,
+        });
+        const name = hidden.name;
+
+        decls.push(hidden);
+        values.push(name);
+      }
+    } else {
+      const form = this.formOf(pattern);
+      const hidden = this.hiddenDeclarator(pattern.loc, value, undefined, form);
+
+      decls.push(hidden);
+    }
+
+    const base = decls[0]?.name ?? "";
+    const keyReads: IndexExpr[] = [];
+    const body: Stmt[] = [
+      { kind: StmtKind.VarDecl, loc, isConst: true, isUsing: false, decls },
+    ];
+
+    for (let i = 0; i < pattern.elements.length; i++) {
+      const element = pattern.elements[i];
+      if (element == undefined || element.hole) {
+        continue;
+      }
+
+      const name = values[i];
+      const part = this.assignedPart(element, name, base, pattern, i, keyReads);
+      const nested = element.nested;
+      if (nested != undefined) {
+        const assignment = this.assignPattern(element.loc, nested, part);
+
+        body.push(assignment);
+
+        continue;
+      }
+
+      const target = this.targetOf(element, part);
+      const assign: Expr = {
+        kind: ExprKind.Assign,
+        loc: element.loc,
+        target,
+        value: part,
+      };
+
+      const statement: Stmt = {
+        kind: StmtKind.Expr,
+        loc: element.loc,
+        expr: assign,
+      };
+
+      body.push(statement);
+    }
+
+    return { kind: StmtKind.Block, loc, body };
+  }
+
+  private readonly directElement(
+    element: Read<PatternElement>,
+    name: string,
+  ): Expr {
+    const read: Expr = {
+      kind: ExprKind.Name,
+      loc: element.loc,
+      name,
+      known: KnownName.None,
+      typeArgs: [],
+    };
+    const fallback = element.defaultValue;
+    if (fallback == undefined) {
+      return read;
+    }
+
+    return {
+      kind: ExprKind.Binary,
+      loc: element.loc,
+      op: BinaryOp.Nullish,
+      lhs: read,
+      rhs: this.copyExpr(fallback),
+    };
+  }
+
+  private readonly elementOf(
+    base: string,
+    pattern: Read<Pattern>,
+    i: int,
+    keyReads: IndexExpr[],
+  ): Expr {
+    const element = pattern.elements[i];
+    const loc = element?.loc ?? pattern.loc;
+    const source: Expr = {
+      kind: ExprKind.Name,
+      loc,
+      name: base,
+      known: KnownName.None,
+      typeArgs: [],
+    };
+
+    if (element == undefined) {
+      return source;
+    }
+    if (pattern.object) {
+      return this.objectElementOf(pattern, element, source, keyReads);
+    }
+
+    return this.arrayElementOf(element, source, i);
+  }
+
+  private readonly arrayElementOf(
+    element: Read<PatternElement>,
+    source: Own<Expr>,
+    i: int,
+  ): Expr {
+    const position: Expr = {
+      kind: ExprKind.IntLit,
+      loc: element.loc,
+      value: i.toUint64(),
+    };
+
+    if (element.rest) {
+      return this.sliceFrom(element.loc, source, position);
+    }
+
+    const read: Expr = {
+      kind: ExprKind.Index,
+      loc: element.loc,
+      object: source,
+      index: position,
+      optional: false,
+    };
+
+    return this.withDefault(element, read);
+  }
+
+  private readonly sliceFrom(
+    loc: int,
+    source: Own<Expr>,
+    position: Own<Expr>,
+  ): Expr {
+    const slice: Expr = {
+      kind: ExprKind.Member,
+      loc,
+      object: source,
+      name: kSliceMethodName,
+      known: KnownName.None,
+      optional: false,
+      typeArgs: [],
+    };
+
+    return {
+      kind: ExprKind.Call,
+      loc,
+      callee: slice,
+      args: [{ expr: position, spread: false }],
+      optional: false,
+      tagged: false,
+    };
+  }
+
+  private readonly objectElementOf(
+    pattern: Read<Pattern>,
+    element: Read<PatternElement>,
+    source: Own<Expr>,
+    keyReads: IndexExpr[],
+  ): Expr {
+    if (element.rest) {
+      return this.restOf(pattern, element, source, keyReads);
+    }
+
+    const keyExpr = element.keyExpr;
+    if (keyExpr != undefined) {
+      const keyed: IndexExpr = {
+        kind: ExprKind.Index,
+        loc: element.loc,
+        object: source,
+        index: this.copyExpr(keyExpr),
+        optional: false,
+      };
+
+      keyReads.push(this.copyIndexExpr(keyed));
+
+      return this.withDefault(element, keyed);
+    }
+
+    const read: Expr = {
+      kind: ExprKind.Member,
+      loc: element.loc,
+      object: source,
+      name: element.key,
+      known: KnownName.None,
+      optional: false,
+      typeArgs: [],
+    };
+
+    return this.withDefault(element, read);
+  }
+
+  private readonly withDefault(
+    element: Read<PatternElement>,
+    read: Own<Expr>,
+  ): Expr {
+    const fallback = element.defaultValue;
+    if (fallback == undefined) {
+      return read;
+    }
+
+    return {
+      kind: ExprKind.Binary,
+      loc: element.loc,
+      op: BinaryOp.Nullish,
+      lhs: read,
+      rhs: this.copyExpr(fallback),
+    };
+  }
+
+  private readonly restOf(
+    pattern: Read<Pattern>,
+    element: Read<PatternElement>,
+    source: Own<Expr>,
+    keyReads: Read<IndexExpr[]>,
+  ): Expr {
+    const omit: string[] = [];
+
+    for (const other of pattern.elements) {
+      if (!other.rest && other.keyExpr == undefined) {
+        omit.push(other.key);
+      }
+    }
+
+    return {
+      kind: ExprKind.ObjectLit,
+      loc: element.loc,
+      props: [
+        {
+          name: "",
+          loc: element.loc,
+          value: source,
+          form: {
+            kind: PropertyKind.Spread,
+            omit,
+            omitKeys: keyReads.map((one) => this.copyIndexExpr(one)),
+          },
+        },
+      ],
+    };
+  }
+
+  private readonly emptyElement(loc: int): PatternElement {
+    return { loc, hole: false, rest: false, name: "", key: "" };
+  }
+
+  private readonly formOf(pattern: Read<Pattern>): BindingForm {
+    if (pattern.object) {
+      return { kind: BindingKind.Object };
+    }
+
+    const last = pattern.elements[pattern.elements.length - 1];
+    const rest = last != undefined && last.rest;
+
+    return { kind: BindingKind.Array, length: pattern.elements.length, rest };
+  }
+
+  private readonly isDirect(pattern: Read<Pattern>, value: Expr): boolean {
+    if (pattern.object || value.kind != ExprKind.ArrayLit) {
+      return false;
+    }
+    if (value.elements.length < pattern.elements.length) {
+      return false;
+    }
+
+    for (const item of value.elements) {
+      if (item.spread || item.hole) {
+        return false;
+      }
+    }
+
+    for (const item of pattern.elements) {
+      if (item.rest) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly assignedPart(
+    element: Read<PatternElement>,
+    name: string | undefined,
+    base: string,
+    pattern: Read<Pattern>,
+    i: int,
+    keyReads: IndexExpr[],
+  ): Expr {
+    if (name != undefined) {
+      return this.directElement(element, name);
+    }
+
+    return this.elementOf(base, pattern, i, keyReads);
+  }
+
+  private readonly targetOf(
+    element: Read<PatternElement>,
+    part: Read<Expr>,
+  ): Expr {
+    const written = element.target;
+    if (written != undefined) {
+      return this.copyExpr(written);
+    }
+
+    return this.copyExpr(part);
+  }
+}

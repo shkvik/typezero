@@ -3,6 +3,7 @@ import { Code } from "../../../../diagnostic/code.tz";
 import {
   CallExpr,
   ExprKind,
+  MemberExpr,
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
@@ -33,28 +34,54 @@ import {
 } from "../types/ownership-check.types.tz";
 import {
   kCloneKey,
+  kConcatName,
   kSharingNames,
   kStructuredCloneName,
   kUnsafeRequiresName,
 } from "../const/ownership-check.const.tz";
 
 partial class OwnershipCheck {
-  private readonly checkRequires(info: Read<Callee>, loc: int, word: string): void {
+  private takeJoinedReceiver(
+    receiver: Read<Operand>,
+    callee: MemberExpr,
+  ): void {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    const type = this.values.answers.typeOf(object);
+    if (callee.name != kConcatName || type == undefined) {
+      return;
+    }
+    if (type.kind != TypeKind.Array) {
+      return;
+    }
+    if (this.values.isCopy(this.values.types.store.itemOf(type))) {
+      return;
+    }
+
+    this.take(receiver, object);
+  }
+
+  private checkRequires(info: Read<Callee>, loc: int, word: string): void {
     const decl = info.decl;
     if (decl == undefined || !this.isRequiring(decl) || this.isInsideUnsafe()) {
       return;
     }
 
-    this.report(loc, Code.OwnUnsafeRequires, { word });
+    this.errors.write(this.home, loc, Code.OwnUnsafeRequires, { word });
   }
 
   private readonly isRequiring(fn: FunctionDecl): boolean {
-    const options = fn.unsafe?.options;
+    const tree = this.values.types.program.tree;
+
+    const options = tree.exprAt(fn.unsafe?.optionsId);
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
       return false;
     }
 
-    return options.props.some((property) => property.name == kUnsafeRequiresName);
+    return tree
+      .propertiesOf(options.propsList)
+      .some((property) => property.name == kUnsafeRequiresName);
   }
 
   private readonly isInsideUnsafe(): boolean {
@@ -76,7 +103,8 @@ partial class OwnershipCheck {
 
   private readonly heldLoans(operand: Read<Operand>): Loan[] {
     const place = operand.place;
-    if (operand.kind != OperandKind.Place || place == undefined || place.path.length > 0) {
+    const isWhole = place != undefined && place.depth == 0;
+    if (operand.kind != OperandKind.Place || place == undefined || !isWhole) {
       return this.loansOf(operand);
     }
 
@@ -100,11 +128,14 @@ partial class OwnershipCheck {
     uses: Read<ArgumentUse[]>,
     loc: int,
   ): Operand {
-    const isBorrow = info.result == ResultMode.Read || info.result == ResultMode.Mut;
-    const lent = uses.filter((use) => use.mode == ParamMode.Lent);
-    let isLasting = lent.every((use) => this.isLastingSource(use.operand));
+    const isBorrow =
+      info.result == ResultMode.Read || info.result == ResultMode.Mut;
+    const hasLent = uses.some((use) => use.mode == ParamMode.Lent);
+    let isLasting = uses.every(
+      (use) => use.mode != ParamMode.Lent || this.isLastingSource(use.operand),
+    );
 
-    if (lent.length == 0 && receiver != undefined) {
+    if (!hasLent && receiver != undefined) {
       isLasting = this.isLastingSource(receiver);
     }
     if (isBorrow && isLasting) {
@@ -115,7 +146,9 @@ partial class OwnershipCheck {
   }
 
   private readonly isLastingSource(operand: Read<Operand>): boolean {
-    return operand.kind != OperandKind.Fresh && operand.kind != OperandKind.Nothing;
+    return (
+      operand.kind != OperandKind.Fresh && operand.kind != OperandKind.Nothing
+    );
   }
 
   private collectionCallee(type: Type): Callee {
@@ -130,8 +163,10 @@ partial class OwnershipCheck {
       return ParamMode.Read;
     }
 
-    const isKeyCopy = this.traits.isCopy(type.key, this.values);
-    const isValueCopy = type.dict == DictKind.Set || this.traits.isCopy(type.value, this.values);
+    const isKeyCopy = this.values.isCopy(this.values.types.store.keyOf(type));
+    const isValueCopy =
+      type.dict == DictKind.Set ||
+      this.values.isCopy(this.values.types.store.valueOf(type));
     if (isKeyCopy && isValueCopy) {
       return ParamMode.Read;
     }
@@ -140,9 +175,15 @@ partial class OwnershipCheck {
   }
 
   private checkClone(callee: NameExpr, expr: CallExpr): void {
-    const argument = expr.args[0]?.expr;
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isLocal = this.keyOfName(callee) != undefined;
-    if (callee.name != kStructuredCloneName || argument == undefined || isLocal) {
+    if (
+      callee.name != kStructuredCloneName ||
+      argument == undefined ||
+      isLocal
+    ) {
       return;
     }
 
@@ -164,11 +205,14 @@ partial class OwnershipCheck {
       word = found.word;
     }
 
-    this.report(argument.loc, Code.OwnCloneField, { word, other: found.other });
+    this.errors.write(this.home, argument.loc, Code.OwnCloneField, {
+      word,
+      other: found.other,
+    });
   }
 
   private uncloneable(type: Type, seen: Set<int>): CloneProblem | undefined {
-    if (seen.has(type.id) || this.traits.isCopy(type, this.values)) {
+    if (seen.has(type.id) || this.values.isCopy(type)) {
       return undefined;
     }
 
@@ -180,18 +224,30 @@ partial class OwnershipCheck {
       case TypeKind.Iterator:
         return { word: "", other: "an iterator" };
       case TypeKind.Array:
-        return this.uncloneable(type.item, seen);
+        return this.uncloneable(this.values.types.store.itemOf(type), seen);
       case TypeKind.Tuple:
-        return this.firstUncloneable(type.items, seen);
+        return this.firstUncloneable(
+          this.values.types.store.itemsOf(type),
+          seen,
+        );
       case TypeKind.Union:
-        return this.firstUncloneable(type.parts, seen);
+        return this.firstUncloneable(
+          this.values.types.store.partsOf(type),
+          seen,
+        );
       case TypeKind.Dict: {
-        const parts = [type.key, type.value];
+        const parts = [
+          this.values.types.store.keyOf(type),
+          this.values.types.store.valueOf(type),
+        ];
 
         return this.firstUncloneable(parts, seen);
       }
       case TypeKind.Object:
-        return this.fieldUncloneable(type.fields, seen);
+        return this.fieldUncloneable(
+          this.values.types.store.fieldsOf(type),
+          seen,
+        );
       case TypeKind.Instance:
         return this.instanceUncloneable(type, seen);
       default:
@@ -199,7 +255,10 @@ partial class OwnershipCheck {
     }
   }
 
-  private firstUncloneable(types: Read<Type[]>, seen: Set<int>): CloneProblem | undefined {
+  private firstUncloneable(
+    types: Read<Type[]>,
+    seen: Set<int>,
+  ): CloneProblem | undefined {
     for (const one of types) {
       const found = this.uncloneable(one, seen);
       if (found != undefined) {
@@ -210,7 +269,10 @@ partial class OwnershipCheck {
     return undefined;
   }
 
-  private fieldUncloneable(fields: Read<ObjectField[]>, seen: Set<int>): CloneProblem | undefined {
+  private fieldUncloneable(
+    fields: Read<ObjectField[]>,
+    seen: Set<int>,
+  ): CloneProblem | undefined {
     for (const field of fields) {
       const found = this.namedUncloneable(field.name, field.type, seen);
       if (found != undefined) {
@@ -221,7 +283,10 @@ partial class OwnershipCheck {
     return undefined;
   }
 
-  private memberUncloneable(fields: Read<InstanceField[]>, seen: Set<int>): CloneProblem | undefined {
+  private memberUncloneable(
+    fields: Read<InstanceField[]>,
+    seen: Set<int>,
+  ): CloneProblem | undefined {
     for (const field of fields) {
       const found = this.namedUncloneable(field.name, field.type, seen);
       if (found != undefined) {
@@ -232,7 +297,11 @@ partial class OwnershipCheck {
     return undefined;
   }
 
-  private namedUncloneable(name: string, type: Type, seen: Set<int>): CloneProblem | undefined {
+  private namedUncloneable(
+    name: string,
+    type: Type,
+    seen: Set<int>,
+  ): CloneProblem | undefined {
     const found = this.uncloneable(type, seen);
     if (found == undefined) {
       return undefined;
@@ -247,7 +316,10 @@ partial class OwnershipCheck {
     return { word, other: found.other };
   }
 
-  private instanceUncloneable(type: Type, seen: Set<int>): CloneProblem | undefined {
+  private instanceUncloneable(
+    type: Type,
+    seen: Set<int>,
+  ): CloneProblem | undefined {
     if (type.kind != TypeKind.Instance || kSharingNames.includes(type.name)) {
       return undefined;
     }
@@ -256,8 +328,11 @@ partial class OwnershipCheck {
     if (decl == undefined || this.hasMethod(decl, kCloneKey)) {
       return undefined;
     }
-    if (this.traits.hasDispose(decl)) {
-      return { word: "", other: `a ${type.name}, which frees a resource in [Symbol.dispose]` };
+    if (this.values.hasDispose(decl)) {
+      return {
+        word: "",
+        other: `a ${type.name}, which frees a resource in [Symbol.dispose]`,
+      };
     }
 
     const fields = this.values.instanceFields(type);
@@ -269,25 +344,31 @@ partial class OwnershipCheck {
   }
 
   private interfaceCallee(type: Type, name: string): Callee | undefined {
-    const label = this.store.labelOf(type);
+    const tree = this.values.types.program.tree;
+
+    const label = this.values.types.store.labelOf(type);
     if (label == undefined) {
       return undefined;
     }
 
     const decl = this.aliasNamed(label);
-    const form = decl?.type.form;
+    const form = tree.typeRefAt(decl?.typeId)?.form;
     if (form == undefined || form.kind != TypeRefKind.Object) {
       return undefined;
     }
 
-    const field = form.fields.find((one) => one.name == name);
-    const method = field?.type.form;
+    const field = tree
+      .objectFieldsOf(form.fieldsList)
+      .find((one) => one.name == name);
+    const method = tree.typeRefAt(field?.typeId)?.form;
     if (method == undefined || method.kind != TypeRefKind.Function) {
       return undefined;
     }
 
-    const params = method.params.map((param) => this.interfaceParam(param));
-    const result = method.result;
+    const params = tree
+      .functionTypeParamsOf(method.paramsList)
+      .map((param) => this.interfaceParam(param));
+    const result = tree.typeRefAt(method.resultId);
     let mode: ResultMode = ResultMode.Own;
 
     if (result != undefined) {
@@ -298,9 +379,12 @@ partial class OwnershipCheck {
   }
 
   private readonly interfaceParam(param: Read<FunctionTypeParam>): CalleeParam {
-    const ref = param.type;
-    const inner = ref.args[0];
-    const isWrapped = ref.args.length == 1 && inner != undefined;
+    const tree = this.values.types.program.tree;
+
+    const ref = tree.typeRefOf(param.typeId);
+    const inner = tree.typeRefsOf(ref.argsList)[0];
+    const isWrapped =
+      tree.typeRefsOf(ref.argsList).length == 1 && inner != undefined;
     let isCallback = ref.form.kind == TypeRefKind.Function;
 
     if (isWrapped && inner != undefined) {
@@ -311,10 +395,12 @@ partial class OwnershipCheck {
   }
 
   private readonly aliasNamed(name: string): TypeAliasDecl | undefined {
-    const home = this.program.modules[this.module];
-    const found = home?.file.items.find(
-      (item) => item.kind == StmtKind.TypeAlias && item.name == name,
-    );
+    const tree = this.values.types.program.tree;
+
+    const home = this.values.types.program.modules[this.module];
+    const found = tree
+      .stmtsOf(home?.file.itemsList)
+      .find((item) => item.kind == StmtKind.TypeAlias && item.name == name);
     if (found != undefined && found.kind == StmtKind.TypeAlias) {
       return found;
     }

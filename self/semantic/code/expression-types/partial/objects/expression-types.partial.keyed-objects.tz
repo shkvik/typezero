@@ -20,15 +20,17 @@ partial class ExpressionTypes {
     target: Type | undefined,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const seen = new Map<string, Type>();
 
-    for (const property of expr.props) {
+    for (const property of tree.propertiesOf(expr.propsList)) {
       const form = property.form;
       if (form.kind != PropertyKind.Computed) {
         continue;
       }
 
-      const key = form.key;
+      const key = tree.exprOf(form.keyId);
       if (this.constantKey(key, module) != undefined) {
         continue;
       }
@@ -40,7 +42,7 @@ partial class ExpressionTypes {
       if (keyType.kind != TypeKind.Union) {
         continue;
       }
-      if (!this.objects.isLiteralKeys(keyType)) {
+      if (!this.types.isLiteralKeys(keyType)) {
         continue;
       }
 
@@ -59,11 +61,15 @@ partial class ExpressionTypes {
   }
 
   private readonly isEnumMemberKey(key: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (key.kind != ExprKind.Member) {
       return false;
     }
 
-    return this.enumHomeOf(key.object, module) != undefined;
+    const object = tree.exprOf(key.objectId);
+
+    return this.enumHomeOf(object, module) != undefined;
   }
 
   private keyedPropertyFails(
@@ -91,26 +97,30 @@ partial class ExpressionTypes {
     target: ObjectType,
     module: int,
   ): boolean {
-    const word = this.text.of(keyType);
+    const tree = this.types.program.tree;
+
+    const word = this.types.typeText(keyType);
     const field = this.keyedFieldType(target, keyType);
     if (field == undefined) {
-      this.report(module, key.loc, Code.KeyedFieldsDiffer, {
+      this.errors.write(module, key.loc, Code.KeyedFieldsDiffer, {
         word,
-        other: this.text.of(target),
+        other: this.types.typeText(target),
       });
 
       return true;
     }
     if (!this.types.isOptional(field)) {
-      this.report(module, key.loc, Code.KeyedNotOptional, {
+      this.errors.write(module, key.loc, Code.KeyedNotOptional, {
         word,
-        other: this.text.of(field),
+        other: this.types.typeText(field),
       });
 
       return true;
     }
 
-    this.checked(property.value, field, module, kNoPlace);
+    const value = tree.exprOf(property.valueId);
+
+    this.checked(value, field, module, kNoPlace);
 
     return false;
   }
@@ -122,22 +132,27 @@ partial class ExpressionTypes {
     seen: Map<string, Type>,
     module: int,
   ): boolean {
-    const value = this.typed(property.value, undefined, module);
+    const tree = this.types.program.tree;
+
+    const valueExpr = tree.exprOf(property.valueId);
+    const value = this.typed(valueExpr, undefined, module);
     if (value.kind == TypeKind.Error) {
       return true;
     }
 
     const optional = this.types.optional(value);
 
-    for (const part of this.generics.partsOfType(keyType)) {
+    for (const part of this.types.partsOfType(keyType)) {
       if (part.kind != TypeKind.Literal) {
         continue;
       }
 
       const name = part.text;
       const same = seen.get(name);
-      if (same != undefined && same != optional) {
-        this.report(module, key.loc, Code.KeyedValuesDiffer, { word: name });
+      if (same != undefined && same.id != optional.id) {
+        this.errors.write(module, key.loc, Code.KeyedValuesDiffer, {
+          word: name,
+        });
 
         return true;
       }

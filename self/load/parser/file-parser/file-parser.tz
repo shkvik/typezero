@@ -1,11 +1,20 @@
 import { replace } from "tz:mem";
 import "./partial/file-parser.partial.types.tz";
+import "./partial/file-parser.partial.literal-types.tz";
+import "./partial/file-parser.partial.copies-expressions.tz";
+import "./partial/file-parser.partial.copies-statements.tz";
+import "./partial/file-parser.partial.copies-declarations.tz";
+import "./partial/file-parser.partial.copies-types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import "./partial/file-parser.partial.expressions.tz";
 import "./partial/file-parser.partial.patterns.tz";
+import "./partial/file-parser.partial.pattern-assignments.tz";
 import "./partial/file-parser.partial.statements.tz";
+import "./partial/file-parser.partial.switches.tz";
 import "./partial/file-parser.partial.functions.tz";
 import "./partial/file-parser.partial.classes.tz";
+import "./partial/file-parser.partial.parameter-fields.tz";
+import "./partial/file-parser.partial.class-members.tz";
 import "./partial/file-parser.partial.modules.tz";
 import "./partial/file-parser.partial.operators.tz";
 import "./partial/file-parser.partial.calls.tz";
@@ -20,13 +29,6 @@ import "./partial/file-parser.partial.modifiers.tz";
 import "./partial/file-parser.partial.exports.tz";
 import "./partial/file-parser.partial.declaration-file.tz";
 import { Token, TokenKind } from "../../token/types/token.types.tz";
-import { Stmt } from "../../../program/ast/types/ast.types.statements.tz";
-import {
-  ExportDecl,
-  ImportDecl,
-  SourceFile,
-} from "../../../program/ast/types/ast.types.modules.tz";
-import { DeclarationFile } from "../../../program/ast/types/ast.types.declarations.tz";
 import { Cursor } from "../cursor/cursor.tz";
 import { kNoStatement } from "./const/file-parser.const.statements.tz";
 import { LiteralReader } from "../literal/literal.tz";
@@ -41,8 +43,18 @@ import {
   DeclarationResult,
   ParseResult,
 } from "./types/file-parser.types.result.tz";
-
-import { UnsafeMark } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  DeclarationFile,
+} from "../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  UnsafeMark,
+} from "../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+  SourceFile,
+} from "../../../program/syntax/types/syntax.types.modules.tz";
+import { Stmt } from "../../../program/syntax/types/syntax.types.statements.tz";
 
 export class FileParser {
   private readonly cursor: Cursor;
@@ -58,7 +70,15 @@ export class FileParser {
   private statementStart: int;
   private unsafeMark?: UnsafeMark;
 
-  public constructor(source: Own<Buffer>, tokens: readonly Token[], library: boolean) {
+  public takeTokens(): Token[] {
+    return this.cursor.takeTokens();
+  }
+
+  public constructor(
+    source: Read<Buffer>,
+    tokens: Own<Token[]>,
+    library: boolean,
+  ) {
     this.cursor = new Cursor(tokens);
     this.literals = new LiteralReader(source);
     this.library = library;
@@ -78,11 +98,7 @@ export class FileParser {
   }
 
   private takenUnsafe(): UnsafeMark | undefined {
-    const mark = this.unsafeMark;
-
-    this.unsafeMark = undefined;
-
-    return mark;
+    return replace(this.unsafeMark, undefined);
   }
 
   public run(): ParseResult {
@@ -105,7 +121,10 @@ export class FileParser {
       imports: replace(this.imports, []),
       exports: replace(this.exports, []),
       fieldNames: replace(this.fieldNames, new Set<string>()),
-      stringConstants: replace(this.stringConstants, new Map<string, string[]>()),
+      stringConstants: replace(
+        this.stringConstants,
+        new Map<string, string[]>(),
+      ),
     };
 
     return { file, errors: this.cursor.takeErrors() };

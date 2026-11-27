@@ -18,7 +18,7 @@ import { IrValue, TextConstant } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private stringValue(text: string): IrValue {
-    const tz = this.store.plain(TypeKind.String);
+    const tz = this.values.types.store.plain(TypeKind.String);
     const known = this.strings.get(text);
     if (known != undefined) {
       return { type: kStringType, value: known, tz };
@@ -31,7 +31,7 @@ partial class Lowering {
     return { type: kStringType, value: constant, tz };
   }
 
-  private readonly stringConstant(text: string): LLVMValue {
+  private stringConstant(text: string): LLVMValue {
     const units = this.codeUnits(text);
     const isTwoBytes = units.some((unit) => unit > kLatinLimit);
     const isAscii = units.every((unit) => unit <= kAsciiLimit);
@@ -56,7 +56,7 @@ partial class Lowering {
     return this.ir.constStruct([buffer, meta]);
   }
 
-  private readonly bufferConstant(units: Read<int[]>, isTwoBytes: boolean): LLVMValue {
+  private bufferConstant(units: Read<int[]>, isTwoBytes: boolean): LLVMValue {
     const name = this.ir.uniqueName(".str.");
     const length = units.length;
     let element: string = "i8";
@@ -83,7 +83,7 @@ partial class Lowering {
     return this.ir.global(name, layout, value, true);
   }
 
-  private readonly unitsData(units: Read<int[]>, isTwoBytes: boolean): LLVMValue {
+  private unitsData(units: Read<int[]>, isTwoBytes: boolean): LLVMValue {
     if (!isTwoBytes) {
       return this.byteArray(units);
     }
@@ -93,7 +93,7 @@ partial class Lowering {
     return this.ir.constArray("i16", items);
   }
 
-  private readonly byteText(message: string): TextConstant {
+  private byteText(message: string): TextConstant {
     const bytes = Buffer.from(message, "utf8");
     const name = this.ir.uniqueName(".text.");
     const data = this.ir.bytes(bytes, false);
@@ -133,7 +133,7 @@ partial class Lowering {
     return 0;
   }
 
-  private readonly metaValue(length: int, flags: int): LLVMValue {
+  private metaValue(length: int, flags: int): LLVMValue {
     const top = flags.toString(16);
     const rest = length.toString(16).padStart(15, "0");
 

@@ -1,0 +1,290 @@
+import { TypeSystem } from "../../type-system.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  SymbolKind,
+} from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionShape,
+  OperationKind,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { InferHole } from "../../../type-relation/types/type-relation.types.tz";
+import {
+  Distribution,
+  TypeContext,
+  TypePlace,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private conditional(ref: TypeRef, context: Read<TypeContext>): Type {
+    const tree = this.program.tree;
+
+    const args = tree.typeRefsOf(ref.argsList);
+    const spread = this.distribution(args[0], context);
+    if (spread == undefined) {
+      return this.decided(ref, context);
+    }
+
+    const results: Type[] = [];
+
+    for (const part of spread.parts) {
+      const inner = this.bound(context, spread.loc, part);
+      const result = this.decided(ref, inner);
+
+      results.push(result);
+    }
+
+    return this.store.unionOf(results);
+  }
+
+  private distribution(
+    check: TypeRef | undefined,
+    context: Read<TypeContext>,
+  ): Distribution | undefined {
+    if (check == undefined || check.form.kind != TypeRefKind.Name) {
+      return undefined;
+    }
+
+    const record = this.record(context.module);
+    const symbol = record?.uses.get(check.loc)?.symbol;
+    if (symbol == undefined || symbol.kind != SymbolKind.TypeParameter) {
+      return undefined;
+    }
+
+    const bound = context.bindings.get(symbol.loc);
+    if (bound == undefined) {
+      return undefined;
+    }
+    if (bound.kind == TypeKind.Never) {
+      return { loc: symbol.loc, parts: [] };
+    }
+    if (bound.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    return { loc: symbol.loc, parts: this.store.partsOf(bound) };
+  }
+
+  private decided(ref: TypeRef, context: Read<TypeContext>): Type {
+    const tree = this.program.tree;
+
+    const checkRef = tree.typeRefsOf(ref.argsList)[0];
+    const wantedRef = tree.typeRefsOf(ref.argsList)[1];
+    const yes = tree.typeRefsOf(ref.argsList)[2];
+    const no = tree.typeRefsOf(ref.argsList)[3];
+
+    if (checkRef == undefined || wantedRef == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const holes = new Map<int, InferHole>();
+
+    this.findHoles(wantedRef, context, holes);
+
+    const pattern = this.placed(context, TypePlace.Pattern);
+    const check = this.resolve(checkRef, context);
+    const wanted = this.resolve(wantedRef, pattern);
+    const seen = new Set<int>(holes.keys());
+    if (this.depends(check, seen) || this.depends(wanted, seen)) {
+      const branches = this.resolveAll(
+        tree.typeRefsOf(ref.argsList).slice(2),
+        context,
+      );
+      const operands = [check, wanted].concat(branches);
+
+      return this.operation(OperationKind.Conditional, operands, "");
+    }
+    if (check.kind == TypeKind.Error || wanted.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const captured = this.matches(
+      check,
+      wanted,
+      new Map<int, InferHole>(holes),
+    );
+    if (captured == undefined) {
+      return this.result(no, context);
+    }
+
+    const bindings = new Map<int, Type>(context.bindings);
+    const unknown = this.store.plain(TypeKind.Unknown);
+
+    for (const hole of holes.values()) {
+      const taken = captured.get(hole.loc) ?? unknown;
+
+      bindings.set(hole.loc, taken);
+    }
+
+    return this.result(yes, {
+      module: context.module,
+      bindings,
+      place: context.place,
+    });
+  }
+
+  private findHoles(
+    ref: TypeRef,
+    context: Read<TypeContext>,
+    holes: Map<int, InferHole>,
+  ): void {
+    const tree = this.program.tree;
+
+    const form = ref.form;
+
+    switch (form.kind) {
+      case TypeRefKind.Infer: {
+        const module = context.module;
+        const hole = this.store.typeParameter(module, ref.loc, ref.name);
+
+        this.holes.add(hole.id);
+        const constraint = this.holeConstraint(
+          tree.typeRefsOf(ref.argsList)[0],
+          context,
+        );
+
+        holes.set(hole.id, { loc: ref.loc, constraint });
+
+        return;
+      }
+      case TypeRefKind.Conditional:
+        return;
+      case TypeRefKind.Function: {
+        const result = tree.typeRefAt(form.resultId);
+
+        for (const param of tree.functionTypeParamsOf(form.paramsList)) {
+          const typeRef = tree.typeRefOf(param.typeId);
+
+          this.findHoles(typeRef, context, holes);
+        }
+
+        if (result != undefined) {
+          this.findHoles(result, context, holes);
+        }
+
+        return;
+      }
+      case TypeRefKind.Object:
+        for (const field of tree.objectFieldsOf(form.fieldsList)) {
+          const fieldType = tree.typeRefOf(field.typeId);
+
+          this.findHoles(fieldType, context, holes);
+        }
+
+        return;
+      case TypeRefKind.Tuple:
+        for (const element of tree.tupleElementsOf(form.elementsList)) {
+          const elementType = tree.typeRefOf(element.typeId);
+
+          this.findHoles(elementType, context, holes);
+        }
+
+        return;
+      default:
+        for (const arg of tree.typeRefsOf(ref.argsList)) {
+          this.findHoles(arg, context, holes);
+        }
+
+        return;
+    }
+  }
+
+  private holeConstraint(
+    written: TypeRef | undefined,
+    context: Read<TypeContext>,
+  ): Type | undefined {
+    if (written == undefined) {
+      return undefined;
+    }
+
+    return this.resolve(written, context);
+  }
+
+  private result(ref: TypeRef | undefined, context: Read<TypeContext>): Type {
+    if (ref == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    return this.resolve(ref, context);
+  }
+
+  private readonly depends(type: Type, seen: Set<int>): boolean {
+    if (seen.has(type.id)) {
+      return false;
+    }
+
+    seen.add(type.id);
+
+    switch (type.kind) {
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+        return true;
+      case TypeKind.Array:
+        return this.depends(this.store.itemOf(type), seen);
+      case TypeKind.Tuple:
+        return this.anyDepends(this.store.itemsOf(type), seen);
+      case TypeKind.Union:
+        return this.anyDepends(this.store.partsOf(type), seen);
+      case TypeKind.Object: {
+        const types = this.store.fieldsOf(type).map((field) => field.type);
+
+        return this.anyDepends(types, seen);
+      }
+      case TypeKind.Function:
+        return this.shapeDepends(this.store.functionShapeOf(type), seen);
+      case TypeKind.Promise:
+        return this.depends(this.store.valueOf(type), seen);
+      case TypeKind.Result:
+        return this.anyDepends(
+          [this.store.valueOf(type), this.store.errorOf(type)],
+          seen,
+        );
+      case TypeKind.Dict:
+        return this.anyDepends(
+          [this.store.keyOf(type), this.store.valueOf(type)],
+          seen,
+        );
+      case TypeKind.Iterator: {
+        const shape = this.store.iteratorShapeOf(type);
+        const types = [shape.yielded, shape.returned, shape.sent];
+
+        return this.anyDepends(types, seen);
+      }
+      case TypeKind.Instance:
+        return this.anyDepends(this.store.argsOf(type), seen);
+      case TypeKind.Template:
+        return this.anyDepends(this.store.partsOf(type), seen);
+      default:
+        return false;
+    }
+  }
+
+  private readonly shapeDepends(
+    shape: Read<FunctionShape>,
+    seen: Set<int>,
+  ): boolean {
+    const types = shape.params.map((param) => param.type);
+    const self = shape.self;
+    if (self != undefined) {
+      types.push(self);
+    }
+
+    types.push(shape.result);
+
+    return this.anyDepends(types, seen);
+  }
+
+  private readonly anyDepends(types: Read<Type[]>, seen: Set<int>): boolean {
+    for (const type of types) {
+      if (this.depends(type, seen)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+}

@@ -1,0 +1,180 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  AssignExpr,
+  BinaryOp,
+  ExprKind,
+  IndexExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { TruthUse } from "../../truth-rules/types/truth-rules.types.tz";
+
+partial class TypeSystem {
+  public readonly logicalAssignWord(isAnd: boolean): string {
+    if (isAnd) {
+      return "&&=";
+    }
+
+    return "||=";
+  }
+
+  public readonly assignUse(op: BinaryOp | undefined): TruthUse {
+    if (op == BinaryOp.LogOr) {
+      return TruthUse.OrAssign;
+    }
+
+    return TruthUse.AndAssign;
+  }
+
+  public readonly assignedWanted(
+    op: BinaryOp | undefined,
+    declared: Type | undefined,
+  ): Type | undefined {
+    const isPlain =
+      op == undefined || op == BinaryOp.LogOr || op == BinaryOp.Nullish;
+    if (!isPlain || declared == undefined) {
+      return undefined;
+    }
+    if (declared.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return declared;
+  }
+
+  public assignedFact(
+    op: BinaryOp | undefined,
+    declared: Type,
+    current: Type | undefined,
+    given: Type,
+  ): Type | undefined {
+    const isDefaulting = op == BinaryOp.LogOr || op == BinaryOp.Nullish;
+
+    if (declared.kind != TypeKind.Union) {
+      return undefined;
+    }
+    if (isDefaulting && current != undefined) {
+      return this.defaultedFact(declared, current, given);
+    }
+    if (op != undefined || given.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (!this.converts(given, declared)) {
+      return undefined;
+    }
+
+    return given;
+  }
+
+  public readonly withFact(
+    facts: Read<Map<string, Type>>,
+    key: string,
+    type: Type,
+  ): Map<string, Type> {
+    const copy = new Map<string, Type>(facts);
+
+    copy.set(key, type);
+
+    return copy;
+  }
+
+  public branchesJoined(
+    before: Read<Map<string, Type>>,
+    thenStart: Read<Map<string, Type>>,
+    thenEnd: Read<Map<string, Type>>,
+    elseStart: Read<Map<string, Type>>,
+    elseEnd: Read<Map<string, Type>>,
+  ): Map<string, Type> {
+    const joined = new Map<string, Type>(before);
+    const keys = new Set<string>(thenEnd.keys());
+
+    for (const key of elseEnd.keys()) {
+      keys.add(key);
+    }
+
+    for (const key of before.keys()) {
+      keys.add(key);
+    }
+
+    for (const key of keys) {
+      const isThenChanged = thenEnd.get(key)?.id != thenStart.get(key)?.id;
+      const isElseChanged = elseEnd.get(key)?.id != elseStart.get(key)?.id;
+      if (!isThenChanged && !isElseChanged) {
+        continue;
+      }
+
+      const thenType = thenEnd.get(key);
+      const elseType = elseEnd.get(key);
+
+      joined.delete(key);
+
+      if (thenType != undefined && elseType != undefined) {
+        const union = this.store.unionOf([thenType, elseType]);
+
+        joined.set(key, union);
+      }
+    }
+
+    return joined;
+  }
+
+  public readonly tupleWriteCheck(
+    target: IndexExpr,
+    tuple: Type,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const index = tree.exprOf(target.indexId);
+    if (tuple.kind != TypeKind.Tuple || !tuple.readonly) {
+      return undefined;
+    }
+    if (index.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ObjectReadOnlyField,
+      loc: target.loc,
+      details: {
+        word: `${index.value}`,
+        first: this.typeText(tuple),
+      },
+    };
+  }
+
+  public readonly logicalTargetCheck(expr: AssignExpr): Checked<boolean> {
+    const tree = this.program.tree;
+
+    const op = expr.op;
+    const isLogical = op == BinaryOp.LogAnd || op == BinaryOp.LogOr;
+    if (!isLogical || this.isSimpleTarget(tree.exprOf(expr.targetId))) {
+      return { value: false };
+    }
+
+    const word = this.logicalAssignWord(op == BinaryOp.LogAnd);
+
+    return {
+      value: true,
+      error: {
+        code: Code.LogicalAssignSimple,
+        loc: tree.exprOf(expr.targetId).loc,
+        details: { word },
+      },
+    };
+  }
+
+  private defaultedFact(declared: Type, current: Type, given: Type): Type {
+    const defined = this.definedType(current);
+    const isKnown =
+      given.kind != TypeKind.Error && this.converts(given, declared);
+    if (!isKnown) {
+      return defined;
+    }
+
+    return this.store.unionOf([defined, given]);
+  }
+}

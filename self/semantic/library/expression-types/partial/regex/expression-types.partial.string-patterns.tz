@@ -29,33 +29,39 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const method = member.name;
     const receiver = this.types.definedType(object);
-    const isBareSplit = method == kSplitName && expr.args.length == 0;
-    const hasSpread = expr.args.some((arg) => arg.spread);
+    const isBareSplit =
+      method == kSplitName && tree.argumentsOf(expr.argsList).length == 0;
+    const hasSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
     const isPattern =
-      this.regexes.isText(receiver) && this.regexes.isPatternMethod(method);
+      this.types.isRegexText(receiver) && this.types.isPatternMethod(method);
     if (!isPattern || isBareSplit || hasSpread) {
       return undefined;
     }
 
-    const count = expr.args.length;
-    const least = this.regexes.leastArguments(method);
-    const most = this.regexes.mostArguments(method);
-    const pattern = expr.args[0];
+    const count = tree.argumentsOf(expr.argsList).length;
+    const least = this.types.regexLeastArguments(method);
+    const most = this.types.mostArguments(method);
+    const pattern = tree.argumentsOf(expr.argsList)[0];
     if (count < least || count > most || pattern == undefined) {
-      const word = this.calls.argumentCountText(least, most, false);
+      const word = this.types.argumentCountText(least, most, false);
 
-      this.report(module, member.loc, Code.ArgumentCount, {
+      this.errors.write(module, member.loc, Code.ArgumentCount, {
         word,
         other: `${count}`,
       });
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const given = this.typed(pattern.expr, undefined, module);
+    const exprExpr = tree.exprOf(pattern.exprId);
+    const given = this.typed(exprExpr, undefined, module);
 
     return this.patternGivenCall(expr, member, given, module);
   }
@@ -66,32 +72,39 @@ partial class ExpressionTypes {
     given: Type,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     if (given.kind == TypeKind.Error) {
       return this.patternRestLoosely(expr, module);
     }
-    if (this.regexes.isRegExp(given)) {
+    if (this.types.isRegexRegExp(given)) {
       return this.regexPatternCall(expr, member, module);
     }
-    if (this.regexes.isText(given)) {
+    if (this.types.isRegexText(given)) {
       return this.textPatternCall(expr, member, module);
     }
 
-    const pattern = expr.args[0]?.expr ?? member;
-    const notPattern = this.regexes.notPatternError(
+    const pattern =
+      tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId) ?? member;
+    const notPattern = this.types.notPatternError(
       pattern.loc,
       member.name,
       given,
     );
 
-    this.reportFound(module, notPattern);
+    this.errors.writeFound(module, notPattern);
 
     return this.patternRestLoosely(expr, module);
   }
 
   private patternRestLoosely(expr: CallExpr, module: int): Type {
-    this.looseArguments(expr.args.slice(1), module);
+    const tree = this.types.program.tree;
 
-    return this.store.plain(TypeKind.Error);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args.slice(1), module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private regexPatternCall(
@@ -99,8 +112,11 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const method = member.name;
-    const pattern = expr.args[0]?.expr ?? member;
+    const pattern =
+      tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId) ?? member;
     const shape = this.knownRegex(pattern, module);
     if (method == kMatchName) {
       return this.regexMatchCall(member, shape, module);
@@ -108,15 +124,15 @@ partial class ExpressionTypes {
 
     const isNeedingGlobal =
       method == kMatchAllName || method == kReplaceAllName;
-    const isMissing = shape != undefined && !this.regexes.isGlobal(shape);
+    const isMissing = shape != undefined && !this.types.isGlobal(shape);
     if (isNeedingGlobal && isMissing && shape != undefined) {
-      const needsGlobal = this.regexes.needsGlobalError(
+      const needsGlobal = this.types.needsGlobalError(
         pattern.loc,
         method,
         shape,
       );
 
-      this.reportFound(module, needsGlobal);
+      this.errors.writeFound(module, needsGlobal);
 
       return this.patternRestLoosely(expr, module);
     }
@@ -125,39 +141,46 @@ partial class ExpressionTypes {
       case kMatchAllName:
         return this.allMatches();
       case kSearchName:
-        return this.store.integer(64, false);
+        return this.types.store.integer(64, false);
       case kSplitName:
         this.splitLimitCheck(expr, module);
 
-        return this.regexes.splitType(shape);
+        return this.types.splitType(shape);
       default:
         return this.regexReplaceCall(expr, member, shape, module);
     }
   }
 
-  private readonly regexMatchCall(
+  private regexMatchCall(
     member: MemberExpr,
     shape: Read<RegexShape | undefined>,
     module: int,
   ): Type {
     if (shape == undefined) {
-      this.reportFound(module, this.regexes.matchFlagError(member.loc));
+      this.errors.writeFound(module, this.types.matchFlagError(member.loc));
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.regexes.isGlobal(shape)) {
-      const text = this.store.plain(TypeKind.String);
+    if (this.types.isGlobal(shape)) {
+      const text = this.types.store.plain(TypeKind.String);
 
-      return this.types.optional(this.store.arrayOf(text));
+      return this.types.optional(this.types.store.arrayOf(text));
     }
 
     return this.foundMatch();
   }
 
   private splitLimitCheck(expr: CallExpr, module: int): void {
-    const limit = expr.args[1];
+    const tree = this.types.program.tree;
+
+    const limit = tree.argumentsOf(expr.argsList)[1];
     if (limit != undefined) {
-      this.checked(limit.expr, this.store.integer(64, false), module, "");
+      this.checked(
+        tree.exprOf(limit.exprId),
+        this.types.store.integer(64, false),
+        module,
+        "",
+      );
     }
   }
 
@@ -167,13 +190,15 @@ partial class ExpressionTypes {
     shape: Read<RegexShape | undefined>,
     module: int,
   ): Type {
-    const replacement = expr.args[1];
-    const text = this.store.plain(TypeKind.String);
+    const tree = this.types.program.tree;
+
+    const replacement = tree.argumentsOf(expr.argsList)[1];
+    const text = this.types.store.plain(TypeKind.String);
     if (replacement == undefined) {
       return text;
     }
 
-    const value = replacement.expr;
+    const value = tree.exprOf(replacement.exprId);
     if (this.isFunctionReplacement(value, module)) {
       return this.functionReplaceCall(value, member, shape, module);
     }
@@ -181,13 +206,13 @@ partial class ExpressionTypes {
     this.checked(value, text, module, "");
 
     if (shape != undefined && value.kind == ExprKind.StringLit) {
-      const groupError = this.regexes.groupReferenceError(
+      const groupError = this.types.groupReferenceError(
         value.loc,
         shape,
         value.value,
       );
 
-      this.reportFound(module, groupError);
+      this.errors.writeFound(module, groupError);
     }
 
     return text;
@@ -223,49 +248,56 @@ partial class ExpressionTypes {
     shape: Read<RegexShape | undefined>,
     module: int,
   ): Type {
-    const params = this.regexes.replacerParams(shape);
-    const text = this.store.plain(TypeKind.String);
+    const tree = this.types.program.tree;
+
+    const params = this.types.replacerParams(shape);
+    const text = this.types.store.plain(TypeKind.String);
     const written = this.closureParams(value);
     if (written.length > params.length) {
       const extraError = this.extraParamsError(member, shape, written, params);
 
-      this.reportFound(module, extraError);
+      this.errors.writeFound(module, extraError);
     }
 
     while (params.length < written.length) {
       params.push(text);
     }
 
-    const replacer = this.regexes.replacerType(params);
+    const replacer = this.types.replacerType(params);
     const peeked = this.peekType(value, module);
-    const isAsyncClosure = value.kind == ExprKind.Function && value.fn.isAsync;
+    const isAsyncClosure =
+      value.kind == ExprKind.Function && tree.functionOf(value.fnId).isAsync;
     const isAsync =
       isAsyncClosure ||
       (peeked.kind == TypeKind.Function &&
-        peeked.shape.result.kind == TypeKind.Promise);
+        this.types.store.returnTypeOf(peeked).kind == TypeKind.Promise);
     if (isAsync) {
-      this.report(module, value.loc, Code.CallbackAsyncReplace, {
+      this.errors.write(module, value.loc, Code.CallbackAsyncReplace, {
         word: member.name,
         first: "string",
       });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const given = this.checked(value, replacer, module, "");
     if (this.types.definedType(given).kind != TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return text;
   }
 
   private readonly closureParams(value: Expr): Param[] {
+    const tree = this.types.program.tree;
+
     if (value.kind != ExprKind.Function) {
       return [];
     }
 
-    return value.fn.params;
+    const fn = tree.functionOf(value.fnId);
+
+    return tree.paramsOf(fn.paramsList);
   }
 
   private readonly extraParamsError(
@@ -280,7 +312,7 @@ partial class ExpressionTypes {
         return undefined;
       }
 
-      return this.regexes.onlyMatchError(second.loc);
+      return this.types.onlyMatchError(second.loc);
     }
 
     const count = params.length;
@@ -289,7 +321,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.regexes.passesError(extra.loc, member.name, count, shape);
+    return this.types.passesError(extra.loc, member.name, count, shape);
   }
 
   private textPatternCall(
@@ -297,38 +329,42 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const method = member.name;
-    const pattern = expr.args[0]?.expr ?? member;
+    const pattern =
+      tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId) ?? member;
     if (method == kSplitName) {
       this.splitLimitCheck(expr, module);
 
-      return this.regexes.textsType();
+      return this.types.textsType();
     }
     if (method != kReplaceAllName) {
-      const textError = this.regexes.textPatternError(
+      const textError = this.types.textPatternError(
         member.loc,
         method,
         pattern,
       );
 
-      this.reportFound(module, textError);
+      this.errors.writeFound(module, textError);
 
       return this.patternRestLoosely(expr, module);
     }
 
-    const replacement = expr.args[1]?.expr ?? member;
+    const replacement =
+      tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId) ?? member;
     if (replacement.kind == ExprKind.Function) {
-      const functionError = this.regexes.functionTextError(
+      const functionError = this.types.functionTextError(
         replacement.loc,
         pattern,
       );
 
-      this.reportFound(module, functionError);
+      this.errors.writeFound(module, functionError);
 
       return this.patternRestLoosely(expr, module);
     }
 
-    const text = this.store.plain(TypeKind.String);
+    const text = this.types.store.plain(TypeKind.String);
 
     this.checked(replacement, text, module, "");
 

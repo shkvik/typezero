@@ -1,10 +1,14 @@
-import { SourceFile } from "../../../../program/ast/types/ast.types.modules.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
   DeclarationFile,
   DeclaredClass,
-} from "../../../../program/ast/types/ast.types.declarations.tz";
-import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
-import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+} from "../../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  SourceFile,
+} from "../../../../program/syntax/types/syntax.types.modules.tz";
+import {
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
 
 export type ParseResult = {
   readonly file: SourceFile;

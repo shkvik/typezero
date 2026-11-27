@@ -22,12 +22,19 @@ partial class ExpressionTypes {
     target: Type | undefined,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
-    const isSpread = expr.props.some(
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    const isSpread = tree.propertiesOf(expr.propsList).some(
       (property) => property.form.kind == PropertyKind.Spread,
     );
     if (isSpread) {
-      this.report(module, expr.loc, Code.LiteralMethodsSpread, kNoDetails);
+      this.errors.write(
+        module,
+        expr.loc,
+        Code.LiteralMethodsSpread,
+        kNoDetails,
+      );
 
       return error;
     }
@@ -36,22 +43,22 @@ partial class ExpressionTypes {
       return error;
     }
 
-    const goal = this.objects.methodGoal(target);
-    const reserved = this.store.reserveObject();
+    const goal = this.types.methodGoal(target);
+    const reserved = this.types.store.reserveObject();
     const fields = this.literalValueFields(expr, goal, module);
     if (fields == undefined) {
       return error;
     }
 
-    this.store.fillObject(reserved, fields);
-    this.store.label(
+    this.types.store.fillObject(reserved, fields);
+    this.types.store.label(
       reserved,
-      this.objectMembers.methodObjectName(expr, fields),
+      this.types.methodObjectName(expr, fields),
     );
 
     const methods = this.literalMethods(expr, reserved, goal, module);
 
-    this.store.fillObject(reserved, methods);
+    this.types.store.fillObject(reserved, methods);
 
     if (goal == undefined) {
       return reserved;
@@ -60,28 +67,36 @@ partial class ExpressionTypes {
       return error;
     }
 
-    this.store.inherit(reserved, [goal]);
-    this.store.markBase(goal);
+    this.types.store.inherit(reserved, [goal]);
+    this.types.store.markBase(goal);
 
     return reserved;
   }
 
-  private readonly genericLiteralCheck(expr: ObjectLitExpr, module: int): boolean {
+  private genericLiteralCheck(expr: ObjectLitExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     const fn = this.openFunctions[this.openFunctions.length - 1];
-    const body = fn?.body;
-    if (fn == undefined || body == undefined || fn.typeParams.length == 0) {
+    const body = tree.blockAt(fn?.bodyId);
+    if (
+      fn == undefined ||
+      body == undefined ||
+      tree.typeParamsOf(fn.typeParamsList).length == 0
+    ) {
       return false;
     }
 
-    const isReturned = body.body.some(
+    const isReturned = tree.stmtsOf(body.bodyList).some(
       (statement) =>
-        statement.kind == StmtKind.Return && statement.value == expr,
+        statement.kind == StmtKind.Return && statement.valueId == expr.id,
     );
     if (!isReturned) {
       return false;
     }
 
-    this.report(module, expr.loc, Code.GenericLiteralClass, { word: fn.name });
+    this.errors.write(module, expr.loc, Code.GenericLiteralClass, {
+      word: fn.name,
+    });
 
     return true;
   }
@@ -91,10 +106,12 @@ partial class ExpressionTypes {
     goal: ObjectType | undefined,
     module: int,
   ): ObjectField[] | undefined {
+    const tree = this.types.program.tree;
+
     const fields: ObjectField[] = [];
     let isTyped = true;
 
-    for (const property of expr.props) {
+    for (const property of tree.propertiesOf(expr.propsList)) {
       if (property.form.kind == PropertyKind.Method) {
         continue;
       }
@@ -102,8 +119,9 @@ partial class ExpressionTypes {
         return undefined;
       }
 
-      const wanted = this.objects.goalField(goal, property.name);
-      const type = this.typed(property.value, wanted, module);
+      const wanted = this.types.goalField(goal, property.name);
+      const value = tree.exprOf(property.valueId);
+      const type = this.typed(value, wanted, module);
 
       isTyped = isTyped && type.kind != TypeKind.Error;
       fields.push({
@@ -127,20 +145,24 @@ partial class ExpressionTypes {
     goal: ObjectType | undefined,
     module: int,
   ): ObjectField[] {
+    const tree = this.types.program.tree;
+
     const methods: ObjectField[] = [];
 
-    for (const property of expr.props) {
-      const value = property.value;
+    for (const property of tree.propertiesOf(expr.propsList)) {
+      const value = tree.exprOf(property.valueId);
       const isMethod = property.form.kind == PropertyKind.Method;
       if (isMethod && value.kind == ExprKind.Function) {
-        this.literalOwners.set(value.fn, reserved);
+        const fn = tree.functionOf(value.fnId);
+
+        this.literalOwners.set(fn.id, reserved);
       }
     }
 
     this.selves.push(reserved);
     this.thisPlaces.push(ThisPlace.Method);
 
-    for (const property of expr.props) {
+    for (const property of tree.propertiesOf(expr.propsList)) {
       const type = this.literalMethodType(property, goal, module);
       if (type != undefined) {
         methods.push({
@@ -164,7 +186,9 @@ partial class ExpressionTypes {
     goal: ObjectType | undefined,
     module: int,
   ): Type | undefined {
-    const value = property.value;
+    const tree = this.types.program.tree;
+
+    const value = tree.exprOf(property.valueId);
     if (property.form.kind != PropertyKind.Method) {
       return undefined;
     }
@@ -172,7 +196,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const member = this.objectMembers.plainMember(goal, property.name);
+    const member = this.types.plainMember(goal, property.name);
     const isTyped =
       member != undefined &&
       member.readonly &&
@@ -181,18 +205,20 @@ partial class ExpressionTypes {
       return this.typed(value, member.type, module);
     }
 
-    return this.functionType(value.fn, module);
+    const fn = tree.functionOf(value.fnId);
+
+    return this.functionType(fn, module);
   }
 
-  private readonly methodTargetCheck(
+  private methodTargetCheck(
     expr: ObjectLitExpr,
     goal: ObjectType,
     methods: Read<ObjectField[]>,
     module: int,
   ): boolean {
-    const checked = this.objectMembers.methodTargetCheck(expr, goal, methods);
+    const checked = this.types.methodTargetCheck(expr, goal, methods);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

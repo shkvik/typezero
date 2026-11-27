@@ -3,15 +3,19 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  ArrayElement,
-  Expr,
   ExprKind,
-  Property,
   PropertyKind,
-  TemplateExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { DecodedText } from "../../literal/types/literal.types.tz";
-import { FunctionPlace } from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionPlace,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  ArrayElement,
+  Expr,
+  Property,
+  TemplateExpr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
 
 partial class FileParser {
   private template(raw: boolean): TemplateExpr {
@@ -314,7 +318,11 @@ partial class FileParser {
     };
   }
 
-  private readonly shorthandProperty(loc: int, name: string, word: Token): Property {
+  private readonly shorthandProperty(
+    loc: int,
+    name: string,
+    word: Token,
+  ): Property {
     if (word.kind == TokenKind.Undefined) {
       const value: Expr = { kind: ExprKind.Undefined, loc };
 

@@ -12,54 +12,36 @@ import {
   NewKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
-  FunctionDecl,
-  ParamKind,
-} from "../../../../program/ast/types/ast.types.functions.tz";
-import {
-  DeclaredMember,
-  DeclaredMemberKind,
-} from "../../../../program/ast/types/ast.types.declarations.tz";
-import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
-import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
-import {
   DictKind,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import {
   ArgumentUse,
-  BuiltinMethod,
   Callee,
   CalleeParam,
   CallbackMode,
-  Loan,
   LoanKind,
   Operand,
   OperandKind,
   ParamMode,
   Place,
-  ResultMode,
-  Variable,
 } from "../types/ownership-check.types.tz";
 import {
-  kArrayMethods,
-  kChangingArrayMethods,
-  kMapMethods,
   kMemModuleName,
-  kMutName,
   kReplaceName,
   kSwapName,
   kSymbolEqualsKey,
   kSymbolHashKey,
   kWeakRefName,
   kTakeName,
-  kViewName,
 } from "../const/ownership-check.const.tz";
-import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 
 partial class OwnershipCheck {
   private evaluateCall(expr: CallExpr): Operand {
-    const callee = expr.callee;
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind == ExprKind.Member) {
       return this.methodCall(expr, callee);
     }
@@ -76,24 +58,27 @@ partial class OwnershipCheck {
       this.evaluate(callee);
     }
 
-    this.checkCellReach(expr, info, undefined, expr.args);
-
-    const uses = this.argumentsOf(expr.args, info);
+    const args = tree.argumentsOf(expr.argsList);
+    const uses = this.argumentsOf(args, info, true);
 
     this.applyArguments(uses);
     this.checkTwice(undefined, undefined, LoanKind.Shared, uses);
     this.checkVariance(expr, uses);
+    this.checkCopyShares(expr, uses);
 
     return this.resultOf(info, expr, undefined, uses);
   }
 
-  private readonly borrowKeeper(receiver: Read<Operand>, callee: MemberExpr): Variable | undefined {
+  private readonly borrowKeeper(
+    receiver: Read<Operand>,
+    callee: MemberExpr,
+  ): int | undefined {
     const place = receiver.place;
     const isAdding = callee.name == "push" || callee.name == "unshift";
     if (!isAdding || receiver.kind != OperandKind.Place || place == undefined) {
       return undefined;
     }
-    if (place.path.length > 0) {
+    if (place.depth > 0) {
       return undefined;
     }
 
@@ -102,40 +87,56 @@ partial class OwnershipCheck {
       return undefined;
     }
 
-    return variable;
+    return place.root;
   }
 
-  private readonly keepBorrows(keeper: Variable, uses: Read<ArgumentUse[]>): void {
+  private keepBorrows(keeper: int, uses: Read<ArgumentUse[]>): void {
     for (const use of uses) {
       const loans = this.heldLoans(use.operand);
 
-      keeper.loans = keeper.loans.concat(loans);
+      this.addLoans(keeper, loans);
     }
   }
 
-  private readonly checkMemPlaces(callee: NameExpr, expr: CallExpr): void {
+  private checkMemPlaces(callee: NameExpr, expr: CallExpr): void {
+    const tree = this.values.types.program.tree;
+
     const count = callee.name == kSwapName ? 2 : 1;
     const isMem =
-      callee.name == kTakeName || callee.name == kReplaceName || callee.name == kSwapName;
+      callee.name == kTakeName ||
+      callee.name == kReplaceName ||
+      callee.name == kSwapName;
     if (!isMem || !this.isMemFunction(callee)) {
       return;
     }
 
-    for (const argument of expr.args.slice(0, count)) {
-      if (!this.isPlaceExpr(argument.expr)) {
-        this.report(argument.expr.loc, Code.OwnMemPlace, { word: callee.name });
+    for (const argument of tree.argumentsOf(expr.argsList).slice(0, count)) {
+      const exprExpr = tree.exprOf(argument.exprId);
+      if (!this.isPlaceExpr(exprExpr)) {
+        this.errors.write(
+          this.home,
+          tree.exprOf(argument.exprId).loc,
+          Code.OwnMemPlace,
+          {
+            word: callee.name,
+          },
+        );
       }
     }
   }
 
   private readonly isPlaceExpr(expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.Name:
       case ExprKind.Member:
       case ExprKind.Index:
         return true;
       case ExprKind.Cast:
-        return this.isPlaceExpr(expr.operand);
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.isPlaceExpr(operand);
       default:
         return false;
     }
@@ -143,20 +144,28 @@ partial class OwnershipCheck {
 
   private readonly isMemFunction(callee: NameExpr): boolean {
     const target = this.values.valueTargetOf(callee, this.module);
-    const home = target == undefined ? undefined : this.program.modules[target.module];
 
-    return home != undefined && home.name == kMemModuleName;
+    return this.moduleNameAt(target?.module) == kMemModuleName;
   }
 
-  private readonly checkTake(callee: NameExpr, expr: CallExpr): void {
-    const place = expr.args[0]?.expr;
+  private readonly moduleNameAt(module: int | undefined): string {
+    if (module == undefined) {
+      return "";
+    }
+
+    return this.values.types.program.modules[module]?.name ?? "";
+  }
+
+  private checkTake(callee: NameExpr, expr: CallExpr): void {
+    const tree = this.values.types.program.tree;
+
+    const place = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (callee.name != kTakeName || place == undefined) {
       return;
     }
 
     const target = this.values.valueTargetOf(callee, this.module);
-    const home = target == undefined ? undefined : this.program.modules[target.module];
-    if (home == undefined || home.name != kMemModuleName) {
+    if (this.moduleNameAt(target?.module) != kMemModuleName) {
       return;
     }
 
@@ -167,7 +176,7 @@ partial class OwnershipCheck {
 
     const word = this.exprText(place);
 
-    this.report(place.loc, Code.OwnTakeEmpty, { word });
+    this.errors.write(this.home, place.loc, Code.OwnTakeEmpty, { word });
   }
 
   private readonly hasEmptyValue(type: Type): boolean {
@@ -181,7 +190,9 @@ partial class OwnershipCheck {
       case TypeKind.Undefined:
         return true;
       case TypeKind.Union:
-        return type.parts.some((part) => part.kind == TypeKind.Undefined);
+        return this.values.types.store
+          .partsOf(type)
+          .some((part) => part.kind == TypeKind.Undefined);
       case TypeKind.Dict:
         return type.dict != DictKind.Record;
       default:
@@ -190,19 +201,22 @@ partial class OwnershipCheck {
   }
 
   private methodCall(expr: CallExpr, callee: MemberExpr): Operand {
-    const receiver = this.evaluate(callee.object);
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    const receiver = this.evaluate(object);
     const info = this.memberCallee(callee, expr);
 
+    this.checkSearchEquality(expr, callee);
+
     this.checkRequires(info, callee.loc, callee.name);
-    this.checkCellReach(expr, info, callee.object, expr.args);
 
-    const isGuarded = this.cellGuardFor(callee.object, expr.loc);
-    const uses = this.argumentsOf(expr.args, info);
-
-    this.cellGuardDone(isGuarded);
     const keeper = this.borrowKeeper(receiver, callee);
+    const args = tree.argumentsOf(expr.argsList);
+    const uses = this.argumentsOf(args, info, keeper == undefined);
 
     this.checkVariance(expr, uses);
+    this.checkCopyShares(expr, uses);
 
     if (keeper == undefined) {
       this.applyArguments(uses);
@@ -210,22 +224,31 @@ partial class OwnershipCheck {
       this.keepBorrows(keeper, uses);
     }
     this.applyReceiver(receiver, info.receiver, callee);
-    this.checkTwice(receiver, callee.object, info.receiver, uses);
+    this.checkTwice(
+      receiver,
+      tree.exprOf(callee.objectId),
+      info.receiver,
+      uses,
+    );
+    this.takeJoinedReceiver(receiver, callee);
 
     return this.resultOf(info, expr, receiver, uses);
   }
 
   private evaluateNew(expr: NewExpr): Operand {
+    const tree = this.values.types.program.tree;
+
     const form = expr.form;
     if (form.kind == NewKind.Callee) {
-      this.evaluate(form.callee);
+      const callee = tree.exprOf(form.calleeId);
+
+      this.evaluate(callee);
     }
 
     const info = this.constructorCallee(expr);
 
-    this.checkCellReach(expr, info, undefined, expr.args);
-
-    const uses = this.argumentsOf(expr.args, info);
+    const args = tree.argumentsOf(expr.argsList);
+    const uses = this.argumentsOf(args, info, true);
 
     this.applyArguments(uses);
     this.checkTwice(undefined, undefined, LoanKind.Shared, uses);
@@ -236,47 +259,112 @@ partial class OwnershipCheck {
 
   private checkMadeKeys(expr: NewExpr): void {
     const made = this.values.answers.typeOf(expr);
-    if (made != undefined && made.kind == TypeKind.Dict && made.dict != DictKind.Record) {
-      const name = this.copiedName(made.key);
-      const decl = this.values.classDeclOf(made.key);
+    if (
+      made != undefined &&
+      made.kind == TypeKind.Dict &&
+      made.dict != DictKind.Record
+    ) {
+      const name = this.copiedName(this.values.types.store.keyOf(made));
+      const decl = this.values.classDeclOf(this.values.types.store.keyOf(made));
       const isKeyed =
         decl != undefined &&
         this.hasMethod(decl, kSymbolEqualsKey) &&
         this.hasMethod(decl, kSymbolHashKey);
       if (name != undefined && !isKeyed) {
-        this.report(expr.loc, Code.OwnKeyHash, { word: name });
+        this.errors.write(this.home, expr.loc, Code.OwnKeyHash, { word: name });
       }
     }
-    if (made == undefined || made.kind != TypeKind.Instance || made.name != kWeakRefName) {
+    if (
+      made == undefined ||
+      made.kind != TypeKind.Instance ||
+      made.name != kWeakRefName
+    ) {
       return;
     }
 
-    const target = made.args[0];
+    const target = this.values.types.store.argsOf(made)[0];
     const name = target == undefined ? undefined : this.copiedName(target);
     if (name != undefined) {
-      this.report(expr.loc, Code.OwnWeakCopy, { word: name });
+      this.errors.write(this.home, expr.loc, Code.OwnWeakCopy, { word: name });
     }
   }
 
   public copiedName(type: Type): string | undefined {
-    if (this.store.isInterned(type) || !this.traits.isCopy(type, this.values)) {
+    if (!this.values.isCopy(type)) {
       return undefined;
     }
-    if (type.kind == TypeKind.Object) {
+    if (type.kind == TypeKind.Object || this.isRecordUnion(type)) {
       return "this object";
     }
-    if (type.kind != TypeKind.Instance || this.values.classDeclOf(type) == undefined) {
+    if (
+      type.kind != TypeKind.Instance ||
+      this.values.classDeclOf(type) == undefined
+    ) {
       return undefined;
     }
 
     return type.name;
   }
 
-  public readonly hasMethod(decl: ClassDecl, name: string): boolean {
-    return decl.methods.some((method) => method.name == name);
+  private readonly isRecordUnion(type: Type): boolean {
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    const parts = this.values.types.store.partsOf(type);
+    const records = parts.filter((part) => part.kind == TypeKind.Object);
+    const others = parts.filter(
+      (part) => part.kind != TypeKind.Object && part.kind != TypeKind.Undefined,
+    );
+
+    return records.length > 0 && others.length == 0;
   }
 
-  private argumentsOf(args: Read<CallArgument[]>, info: Read<Callee>): ArgumentUse[] {
+  private checkSearchEquality(call: CallExpr, callee: MemberExpr): void {
+    const isSearch =
+      callee.name == "includes" ||
+      callee.name == "indexOf" ||
+      callee.name == "lastIndexOf";
+    if (!isSearch) {
+      return;
+    }
+
+    const tree = this.values.types.program.tree;
+    const object = tree.exprOf(callee.objectId);
+    const array = this.values.answers.typeOf(object);
+    if (array == undefined || array.kind != TypeKind.Array) {
+      return;
+    }
+
+    const item = this.values.types.store.itemOf(array);
+    const name = this.copiedName(item);
+    if (name == undefined) {
+      return;
+    }
+
+    const decl = this.values.classDeclOf(item);
+    if (decl != undefined && this.hasMethod(decl, kSymbolEqualsKey)) {
+      return;
+    }
+
+    this.errors.write(this.home, call.loc, Code.OwnEqualsMissing, {
+      word: name,
+    });
+  }
+
+  public readonly hasMethod(decl: ClassDecl, name: string): boolean {
+    const tree = this.values.types.program.tree;
+
+    return this.values.types.hasClassMethod(decl, name);
+  }
+
+  private argumentsOf(
+    args: Read<CallArgument[]>,
+    info: Read<Callee>,
+    isMoving: boolean,
+  ): ArgumentUse[] {
+    const tree = this.values.types.program.tree;
+
     const uses: ArgumentUse[] = [];
 
     for (let index: int = 0; index < args.length; index++) {
@@ -287,97 +375,32 @@ partial class OwnershipCheck {
 
       const param = this.paramAt(info, index);
       const callback = this.callbackModeOf(param.mode);
-      const operand = this.evaluateFor(arg.expr, callback);
-      if (arg.spread && this.isSpreadOfCopies(arg.expr)) {
-        const copy = this.copyOperand(arg.expr.loc);
+      const exprExpr = tree.exprOf(arg.exprId);
+      const operand = this.evaluateFor(exprExpr, callback);
+      if (arg.spread && this.isSpreadOfCopies(tree.exprOf(arg.exprId))) {
+        const argExpr = tree.exprOf(arg.exprId);
+        const copy = this.copyOperand(argExpr.loc);
 
-        uses.push({ operand: copy, mode: ParamMode.Read, expr: arg.expr });
+        uses.push({
+          operand: copy,
+          mode: ParamMode.Read,
+          expr: tree.exprOf(arg.exprId),
+        });
 
         continue;
       }
 
-      uses.push({ operand, mode: param.mode, expr: arg.expr });
+      const expr = tree.exprOf(arg.exprId);
+      const isTaken =
+        param.mode == ParamMode.Own || param.mode == ParamMode.Once;
+      if (isMoving && isTaken) {
+        this.take(operand, expr);
+      }
+
+      uses.push({ operand, mode: param.mode, expr });
     }
 
     return uses;
-  }
-
-  private readonly calleeTypeOf(call: CallExpr): Type | undefined {
-    const callee = call.callee;
-    if (callee.kind != ExprKind.Name) {
-      return this.values.answers.typeOf(callee);
-    }
-
-    const target = this.values.valueTargetOf(callee, this.module);
-    if (target == undefined || target.kind != SymbolKind.Function) {
-      return this.values.answers.typeOf(callee);
-    }
-
-    return this.values.functionOf(target.module, target.loc);
-  }
-
-  private readonly checkVariance(call: CallExpr, uses: Read<ArgumentUse[]>): void {
-    const callee = this.calleeTypeOf(call);
-    if (callee == undefined || callee.kind != TypeKind.Function) {
-      return;
-    }
-
-    for (let index: int = 0; index < uses.length; index++) {
-      const use = uses[index];
-      const param = callee.shape.params[index];
-      if (use == undefined || param == undefined || use.mode != ParamMode.Mut) {
-        continue;
-      }
-
-      const given = this.ownTypeOf(use.expr);
-      if (given != undefined && this.isWiderPlace(given, param.type)) {
-        const word = this.exprText(use.expr);
-
-        this.report(use.expr.loc, Code.OwnMutVariance, { word });
-      }
-    }
-  }
-
-  private readonly ownTypeOf(expr: Expr): Type | undefined {
-    if (expr.kind != ExprKind.Name) {
-      return this.values.answers.typeOf(expr);
-    }
-
-    const target = this.values.valueTargetOf(expr, this.module);
-    if (target == undefined || target.kind != SymbolKind.Variable) {
-      return this.values.answers.typeOf(expr);
-    }
-
-    return this.values.variableOf(target.module, target.loc) ?? this.values.answers.typeOf(expr);
-  }
-
-  private readonly isWiderPlace(given: Type, wanted: Type): boolean {
-    if (given == wanted) {
-      return false;
-    }
-    if (given.kind == TypeKind.Array && wanted.kind == TypeKind.Array) {
-      return (
-        wanted.readonly != true &&
-        given.item != wanted.item &&
-        wanted.item.kind != TypeKind.TypeParameter
-      );
-    }
-    if (given.kind != TypeKind.Object || wanted.kind != TypeKind.Object) {
-      return false;
-    }
-
-    const givenFields = given.fields.slice();
-
-    return wanted.fields.some((field) => {
-      const own = givenFields.find((one) => one.name == field.name);
-
-      return (
-        !field.readonly &&
-        own != undefined &&
-        own.type != field.type &&
-        field.type.kind != TypeKind.TypeParameter
-      );
-    });
   }
 
   private readonly paramAt(info: Read<Callee>, index: int): CalleeParam {
@@ -408,10 +431,6 @@ partial class OwnershipCheck {
   private applyArguments(uses: Read<ArgumentUse[]>): void {
     for (const use of uses) {
       switch (use.mode) {
-        case ParamMode.Own:
-        case ParamMode.Once:
-          this.take(use.operand, use.expr);
-          break;
         case ParamMode.Mut:
           this.access(use.operand, LoanKind.Exclusive, use.expr);
           break;
@@ -426,441 +445,24 @@ partial class OwnershipCheck {
     kind: LoanKind,
     callee: MemberExpr,
   ): void {
+    const tree = this.values.types.program.tree;
+
     if (kind != LoanKind.Exclusive) {
       return;
     }
 
-    const type = this.values.answers.typeOf(callee.object);
-    const isShared =
-      (type != undefined && this.store.isInterned(type)) ||
-      this.isSharedPart(callee.object);
-    if (isShared) {
-      const word = this.exprText(callee.object);
+    const calleeObject = tree.exprOf(callee.objectId);
+    if (this.isReadonlyArrayExpr(calleeObject)) {
+      const object = tree.exprOf(callee.objectId);
+      const word = this.exprText(object);
 
-      this.report(callee.loc, Code.OwnInternedChanged, {
-        word,
-        other: callee.name,
-      });
-
-      return;
-    }
-    if (this.isReadonlyArrayExpr(callee.object)) {
-      const word = this.exprText(callee.object);
-
-      this.report(callee.loc, Code.OwnReadonlyArray, { word });
+      this.errors.write(this.home, callee.loc, Code.OwnReadonlyArray, { word });
 
       return;
     }
 
-    this.access(receiver, kind, callee.object);
-  }
+    const objectExpr = tree.exprOf(callee.objectId);
 
-  private readonly checkTwice(
-    receiver: Read<Operand | undefined>,
-    receiverExpr: Expr | undefined,
-    kind: LoanKind,
-    uses: Read<ArgumentUse[]>,
-  ): void {
-    const places: Place[] = [];
-    const exclusive: boolean[] = [];
-    const exprs: Expr[] = [];
-
-    if (receiver != undefined && receiverExpr != undefined) {
-      const isExclusive = kind == LoanKind.Exclusive;
-
-      this.notePlaces(receiver, isExclusive, receiverExpr, places, exclusive, exprs);
-    }
-
-    for (const use of uses) {
-      const isExclusive =
-        use.mode != ParamMode.Read && use.mode != ParamMode.Lent;
-
-      this.notePlaces(use.operand, isExclusive, use.expr, places, exclusive, exprs);
-    }
-
-    this.reportTwice(places, exclusive, exprs);
-  }
-
-  private readonly notePlaces(
-    operand: Read<Operand>,
-    isExclusive: boolean,
-    expr: Expr,
-    places: Place[],
-    exclusive: boolean[],
-    exprs: Expr[],
-  ): void {
-    for (const loan of this.loansOf(operand)) {
-      places.push(loan.place);
-      exclusive.push(isExclusive);
-      exprs.push(expr);
-    }
-  }
-
-  private readonly reportTwice(places: Read<Place[]>, exclusive: Read<boolean[]>, exprs: Read<Expr[]>): void {
-    for (let second: int = 1; second < places.length; second++) {
-      for (let first: int = 0; first < second; first++) {
-        const isConflict = this.isTwiceConflict(places, exclusive, first, second);
-        const expr = exprs[second];
-        const earlier = exprs[first];
-        if (!isConflict || expr == undefined || earlier == expr) {
-          continue;
-        }
-
-        const word = this.exprText(expr);
-
-        this.report(expr.loc, Code.OwnArgumentTwice, { word });
-
-        return;
-      }
-    }
-  }
-
-  private readonly isTwiceConflict(
-    places: Read<Place[]>,
-    exclusive: Read<boolean[]>,
-    first: int,
-    second: int,
-  ): boolean {
-    const one = places[first];
-    const two = places[second];
-    const isOneExclusive = exclusive[first] == true;
-    const isTwoExclusive = exclusive[second] == true;
-    if (one == undefined || two == undefined) {
-      return false;
-    }
-    if (!isOneExclusive && !isTwoExclusive) {
-      return false;
-    }
-
-    return this.overlaps(one, two);
-  }
-
-  private resultOf(
-    info: Callee,
-    expr: Expr,
-    receiver: Read<Operand | undefined>,
-    uses: Read<ArgumentUse[]>,
-  ): Operand {
-    const type = this.values.answers.typeOf(expr);
-    if (info.result == ResultMode.Copy || this.isCopyExpr(expr)) {
-      return this.copyOperand(expr.loc);
-    }
-    const isView = this.isViewCall(expr);
-    const isLent = info.decl != undefined && info.result != ResultMode.Element;
-    const isCopied = this.isArrayOfCopies(type) && !isView && !isLent;
-    if (info.result == ResultMode.Own || isCopied) {
-      return this.freshOperand(expr.loc);
-    }
-
-    const kind = this.resultLoanKind(info.result);
-    const loans = this.resultLoans(info, receiver, uses);
-    if (loans.length == 0) {
-      return this.emptyResult(info, receiver, uses, expr.loc);
-    }
-
-    const kinded = loans.map((loan) => this.loanOn(loan.place, kind, loan.frozen));
-    const isCell = receiver != undefined && receiver.isCell == true;
-    const isInferred = info.result == ResultMode.Element;
-    if (isCell || isInferred) {
-      return { kind: OperandKind.Borrowed, loans: kinded, loc: expr.loc, isCell, isInferred };
-    }
-
-    return this.borrowedOperand(kinded, expr.loc);
-  }
-
-  private readonly isViewCall(expr: Expr): boolean {
-    return (
-      expr.kind == ExprKind.Call &&
-      expr.callee.kind == ExprKind.Member &&
-      expr.callee.name == kViewName
-    );
-  }
-
-  private isArrayOfCopies(type: Type | undefined): boolean {
-    if (type == undefined || type.kind != TypeKind.Array) {
-      return false;
-    }
-
-    return this.traits.isCopy(type.item, this.values);
-  }
-
-  private readonly resultLoanKind(result: ResultMode): LoanKind {
-    if (result == ResultMode.Mut) {
-      return LoanKind.Exclusive;
-    }
-
-    return LoanKind.Shared;
-  }
-
-  private readonly resultLoans(
-    info: Read<Callee>,
-    receiver: Read<Operand | undefined>,
-    uses: Read<ArgumentUse[]>,
-  ): Loan[] {
-    const lent = uses.filter((use) => use.mode == ParamMode.Lent);
-    if (lent.length > 0) {
-      const loans: Loan[] = [];
-
-      for (const use of lent) {
-        loans.push(...this.loansOf(use.operand));
-      }
-
-      return loans;
-    }
-    if (receiver != undefined) {
-      return this.loansOf(receiver);
-    }
-
-    return [];
-  }
-
-  private memberCallee(callee: MemberExpr, call: Expr): Callee {
-    const type = this.values.answers.typeOf(callee.object);
-    if (type == undefined) {
-      return this.libraryCallee(call);
-    }
-
-    switch (type.kind) {
-      case TypeKind.Array:
-        return this.builtinCallee(kArrayMethods, callee.name, call);
-      case TypeKind.Dict:
-        return this.builtinCallee(kMapMethods, callee.name, call);
-      case TypeKind.Instance:
-        return this.instanceCallee(type, callee.name, call);
-      case TypeKind.Object:
-        return this.interfaceCallee(type, callee.name) ?? this.libraryCallee(call);
-      default:
-        return this.libraryCallee(call);
-    }
-  }
-
-  private instanceCallee(type: Type, name: string, call: Expr): Callee {
-    const method = this.methodNamed(type, name, 0);
-    if (method != undefined) {
-      return this.declCallee(method, false);
-    }
-
-    const member = this.declaredMethod(type, name);
-    if (member == undefined || member.form.kind != DeclaredMemberKind.Method) {
-      return this.libraryCallee(call);
-    }
-
-    const params: CalleeParam[] = [];
-
-    for (const param of member.form.params) {
-      const written = this.paramMode(param);
-      const isMarked = param.type?.name == kMutName;
-      const mode = this.calleeMode(written, !isMarked);
-      const isRest = param.form.kind == ParamKind.Rest;
-      const isCallback = param.type?.form.kind == TypeRefKind.Function;
-
-      params.push({ mode, isRest, isCallback });
-    }
-
-    const ref = member.type;
-    let result: ResultMode = ResultMode.Own;
-
-    if (ref != undefined) {
-      result = this.resultModeOfRef(ref);
-    }
-    if (result == ResultMode.Own && this.isCopyExpr(call)) {
-      result = ResultMode.Copy;
-    }
-
-    return { params, receiver: LoanKind.Shared, result };
-  }
-
-  private readonly declaredMethod(type: Type, name: string): DeclaredMember | undefined {
-    if (type.kind != TypeKind.Instance) {
-      return undefined;
-    }
-
-    const loc = type.loc;
-    const home = this.program.modules[type.module];
-    const declared = home?.declared.find((one) => one.loc == loc);
-
-    return declared?.members.find((one) => one.name == name && !one.isStatic);
-  }
-
-  private readonly methodNamed(type: Type, name: string, depth: int): FunctionDecl | undefined {
-    if (depth > 20) {
-      return undefined;
-    }
-
-    const decl = this.values.classDeclOf(type);
-    if (decl == undefined) {
-      return undefined;
-    }
-
-    const own = decl.methods.find((method) => method.name == name);
-    if (own != undefined) {
-      return own;
-    }
-
-    for (const parent of this.store.parentsOf(type)) {
-      const found = this.methodNamed(parent, name, depth + 1);
-      if (found != undefined) {
-        return found;
-      }
-    }
-
-    return undefined;
-  }
-
-  private nameCallee(callee: NameExpr, call: Expr): Callee {
-    const target = this.values.valueTargetOf(callee, this.module);
-    if (target == undefined || target.kind != SymbolKind.Function) {
-      return this.valueCallee();
-    }
-
-    const key = this.keyOf(target.module, target.loc);
-    const decl = this.functions.get(key);
-    if (decl != undefined) {
-      return this.declCallee(decl, false);
-    }
-
-    const declared = this.libraryFunction(target.module, target.loc);
-    if (declared == undefined) {
-      return this.libraryCallee(call);
-    }
-
-    return this.declCallee(declared, true);
-  }
-
-  private readonly libraryFunction(module: int, loc: int): FunctionDecl | undefined {
-    const opened = this.program.modules[module];
-    if (opened == undefined) {
-      return undefined;
-    }
-
-    for (const item of opened.file.items) {
-      if (item.kind == StmtKind.Function && item.loc == loc) {
-        return item;
-      }
-    }
-
-    return undefined;
-  }
-
-  private constructorCallee(expr: NewExpr): Callee {
-    const type = this.values.answers.typeOf(expr);
-    if (type == undefined) {
-      return this.libraryCallee(expr);
-    }
-    if (type.kind == TypeKind.Dict && type.dict != DictKind.Record) {
-      return this.collectionCallee(type);
-    }
-
-    const decl = this.values.classDeclOf(type);
-    const made = decl?.constructors[0];
-    if (made == undefined) {
-      return this.libraryCallee(expr);
-    }
-
-    return this.declCallee(made, false);
-  }
-
-  private readonly declCallee(fn: FunctionDecl, isLibrary: boolean): Callee {
-    const params: CalleeParam[] = [];
-
-    for (const param of fn.params) {
-      const written = this.paramMode(param);
-      const isMarked = param.type?.name == kMutName;
-      const mode = this.calleeMode(written, isLibrary && !isMarked);
-      const isRest = param.form.kind == ParamKind.Rest;
-      const isCallback = param.type?.form.kind == TypeRefKind.Function;
-
-      params.push({ mode, isRest, isCallback });
-    }
-
-    const receiver = this.receiverOf(fn);
-    const result = this.resultModeOf(fn);
-
-    return { params, receiver, result, decl: fn };
-  }
-
-  private readonly calleeMode(mode: ParamMode, isLibrary: boolean): ParamMode {
-    if (isLibrary && mode == ParamMode.Mut) {
-      return ParamMode.Read;
-    }
-
-    return mode;
-  }
-
-  private readonly receiverOf(fn: FunctionDecl): LoanKind {
-    if (fn.role?.isReadonly == true) {
-      return LoanKind.Shared;
-    }
-
-    return LoanKind.Exclusive;
-  }
-
-  private builtinCallee(table: Read<BuiltinMethod[]>, name: string, call: Expr): Callee {
-    const row = table.find((one) => one.name == name);
-    if (row == undefined) {
-      return this.libraryCallee(call);
-    }
-
-    const params: CalleeParam[] = row.params.map((mode) => ({
-      mode,
-      isRest: false,
-      isCallback: false,
-    }));
-
-    if (row.isRestOwn) {
-      params.push({ mode: ParamMode.Own, isRest: true, isCallback: false });
-    }
-
-    return { params, receiver: row.receiver, result: row.result };
-  }
-
-  private libraryCallee(call: Expr): Callee {
-    const isCopy = this.isCopyExpr(call);
-    let result: ResultMode = ResultMode.Own;
-
-    if (isCopy) {
-      result = ResultMode.Copy;
-    }
-
-    return { params: [], receiver: LoanKind.Shared, result };
-  }
-
-  private readonly valueCallee(): Callee {
-    const params: CalleeParam[] = [
-      { mode: ParamMode.Mut, isRest: true, isCallback: false },
-    ];
-
-    return { params, receiver: LoanKind.Shared, result: ResultMode.Own };
-  }
-
-  private readonly isChangingMethod(object: Expr, method: string): boolean {
-    const type = this.values.answers.typeOf(object);
-    if (type == undefined) {
-      return false;
-    }
-
-    switch (type.kind) {
-      case TypeKind.Array:
-        return kChangingArrayMethods.includes(method);
-      case TypeKind.Dict:
-        return this.isChangingDictMethod(method);
-      case TypeKind.Instance: {
-        const found = this.methodNamed(type, method, 0);
-
-        return found != undefined && found.role?.isReadonly != true;
-      }
-      default:
-        return false;
-    }
-  }
-
-  private readonly isChangingDictMethod(method: string): boolean {
-    const row = kMapMethods.find((one) => one.name == method);
-
-    return row != undefined && row.receiver == LoanKind.Exclusive;
-  }
-
-  private readonly isOperandPlace(operand: Read<Operand>): boolean {
-    return operand.kind == OperandKind.Place;
+    this.access(receiver, kind, objectExpr);
   }
 }

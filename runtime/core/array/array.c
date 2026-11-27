@@ -22,7 +22,14 @@
 
 int64_t tz_arr_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_arrays)); }
 
-void tz_arr_forget(void) { --tz_live_arrays; }
+static int64_t tz_immortal_arrays_count = 0;
+
+int64_t tz_arr_immortal_arrays(void) { return tz_immortal_arrays_count; }
+
+void tz_arr_forget(void) {
+  --tz_live_arrays;
+  ++tz_immortal_arrays_count;
+}
 
 const TzType tz_string_type = {TZ_T_STRING, sizeof(TzStr), NULL};
 const TzType tz_undefined_type = {TZ_T_UNDEFINED, 0, NULL};
@@ -522,6 +529,20 @@ TzArray *tz_arr_slice(TzArray *a, int64_t start, int64_t end, int32_t has_end) {
 
 TzArray *tz_arr_copy(TzArray *a) { return tz_arr_slice(a, 0, 0, 0); }
 
+/* A slice that only looks at the items (Read<T>[]): no counts; the result never drops them. */
+TzArray *tz_arr_slice_lent(TzArray *a, int64_t start, int64_t end, int32_t has_end) {
+  int64_t length = a->length;
+  int64_t from = relative(start, length);
+  int64_t to = has_end ? relative(end, length) : length;
+  int64_t count = to > from ? to - from : 0;
+  TzArray *result = tz_arr_new(a->type, count, count);
+  if (count) {
+    memcpy(result->data, element(a, (uint32_t)from), (size_t)count * a->type->size);
+  }
+
+  return result;
+}
+
 static TzArray *slice_as(TzArray *a, int64_t start, int64_t end, int32_t has_end, int member) {
   int64_t length = a->length;
   int64_t from = relative(start, length);
@@ -597,6 +618,34 @@ void tz_arr_append(TzArray *dst, TzArray *src) {
   uint32_t from = dst->length;
   dst->length = (uint32_t)total;
   retain_range(dst, from, dst->length);
+}
+
+/* Moves the items of src to the end of dst: no count changes, src is left empty. */
+void tz_arr_append_taken(TzArray *dst, TzArray *src) {
+  uint32_t n = src->length;
+  if (n == 0) {
+    return;
+  }
+  uint64_t total = (uint64_t)dst->length + n;
+  if (total > dst->capacity) {
+    tz_arr_grow(dst, (int64_t)total);
+  }
+  size_t size = dst->type->size;
+  char *moved = element(dst, dst->length);
+  memcpy(moved, src->data, (size_t)n * size);
+  if (tz_rc_is_member(src->rc)) {
+    for (uint32_t i = 0; i < n; ++i) {
+      tz_group_take_value(src, src->type, moved + (size_t)i * size);
+    }
+  }
+  uint32_t from = dst->length;
+  dst->length = (uint32_t)total;
+  src->length = 0;
+  if (tz_rc_is_member(dst->rc)) {
+    for (uint32_t i = from; i < dst->length; ++i) {
+      tz_group_store_value(dst, dst->type, element(dst, i));
+    }
+  }
 }
 
 static int values_equal(const TzType *type, const void *a, const void *b, int same_value_zero) {

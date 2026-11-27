@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { basename, isAbsolute, join } from "node:path";
 import { ManifestReader } from "../manifest-reader/manifest-reader.tz";
 import {
@@ -31,38 +32,38 @@ export class PackageGraph {
   }
 
   public build(entryDirectory: string): void {
-    const reader = this.reader;
-    const path = reader.findAbove(entryDirectory);
+    const path = this.reader.findAbove(entryDirectory);
     if (path == undefined) {
       return;
     }
 
-    const root = reader.read(path);
+    const root = this.reader.read(path);
     if (root == undefined) {
       return;
     }
 
     const locals = this.localManifests(root);
-    if (reader.errors.length > 0) {
+    if (this.reader.errors.length > 0) {
       return;
     }
 
     const ids = Array.from(locals.keys()).sort();
     const index = new Map<string, int>();
-    const manifests = [root];
+
+    for (let at = 0; at < ids.length; at++) {
+      index.set(ids[at] ?? "", at + 1);
+    }
+
+    const first = this.packageOf(root, 0, index);
+
+    this.packages.push(first);
 
     for (const id of ids) {
       const local = locals.get(id);
       if (local != undefined) {
-        index.set(id, manifests.length);
-        manifests.push(local);
-      }
-    }
+        const made = this.packageOf(local, index.get(id) ?? 0, index);
 
-    for (let at = 0; at < manifests.length; at++) {
-      const manifest = manifests[at];
-      if (manifest != undefined) {
-        this.packages.push(this.packageOf(manifest, at, index));
+        this.packages.push(made);
       }
     }
   }
@@ -75,8 +76,12 @@ export class PackageGraph {
     return this.packages.length > 0;
   }
 
-  public readonly packageAt(index: int): PackageInfo | undefined {
+  public readonly packageAt(index: int): Read<PackageInfo> | undefined {
     return this.packages[index];
+  }
+
+  public takePackages(): PackageInfo[] {
+    return replace(this.packages, []);
   }
 
   private packageOf(
@@ -84,7 +89,8 @@ export class PackageGraph {
     at: int,
     index: Read<Map<string, int>>,
   ): PackageInfo {
-    const aliases = new Map<string, int>();
+    const aliasNames: string[] = [];
+    const aliasTargets: int[] = [];
     const remote: string[] = [];
 
     for (const dependency of manifest.dependencies) {
@@ -98,7 +104,8 @@ export class PackageGraph {
 
       const target = index.get(this.localId(source.directory));
       if (target != undefined) {
-        aliases.set(dependency.alias, target);
+        aliasNames.push(dependency.alias);
+        aliasTargets.push(target);
       }
     }
 
@@ -107,8 +114,9 @@ export class PackageGraph {
       directory: manifest.directory,
       manifestPath: manifest.path,
       main: manifest.main,
-      exports: manifest.exports,
-      aliases,
+      exports: manifest.exports.slice(),
+      aliasNames,
+      aliasTargets,
       remote,
     };
   }
@@ -138,29 +146,30 @@ export class PackageGraph {
     return unique;
   }
 
-  private localManifests(root: Own<Manifest>): Map<string, Manifest> {
+  private localManifests(root: Read<Manifest>): Map<string, Manifest> {
     const found = new Map<string, Manifest>();
-    const queue = [root];
-    let next = 0;
+    const queue: string[] = [];
+    const first = this.localDirectories(root);
 
-    while (next < queue.length) {
-      const manifest = queue[next];
+    this.addLocals(first, found, queue);
 
-      next += 1;
-
-      if (manifest != undefined) {
-        this.addLocals(manifest, found, queue);
+    for (let next = 0; next < queue.length; next++) {
+      const manifest = found.get(queue[next] ?? "");
+      if (manifest == undefined) {
+        continue;
       }
+
+      const directories = this.localDirectories(manifest);
+
+      this.addLocals(directories, found, queue);
     }
 
     return found;
   }
 
-  private addLocals(
-    manifest: Read<Manifest>,
-    found: Map<string, Manifest>,
-    queue: Manifest[],
-  ): void {
+  private localDirectories(manifest: Read<Manifest>): string[] {
+    const directories: string[] = [];
+
     for (const dependency of manifest.dependencies) {
       const source = this.sourceOf(dependency.spec, manifest.directory);
       if (source.kind == DependencySourceKind.Problem) {
@@ -168,19 +177,29 @@ export class PackageGraph {
 
         continue;
       }
-      if (source.kind != DependencySourceKind.Local) {
-        continue;
+      if (source.kind == DependencySourceKind.Local) {
+        directories.push(source.directory);
       }
+    }
 
-      const id = this.localId(source.directory);
+    return directories;
+  }
+
+  private addLocals(
+    directories: Read<string[]>,
+    found: Map<string, Manifest>,
+    queue: string[],
+  ): void {
+    for (const directory of directories) {
+      const id = this.localId(directory);
       if (found.has(id)) {
         continue;
       }
 
-      const local = this.reader.readPackageDirectory(source.directory);
+      const local = this.reader.readPackageDirectory(directory);
       if (local != undefined) {
         found.set(id, local);
-        queue.push(local);
+        queue.push(id);
       }
     }
   }

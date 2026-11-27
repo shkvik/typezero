@@ -27,16 +27,18 @@ import {
 
 partial class Lowering {
   private readonly classParent(type: Type): Type | undefined {
+    const tree = this.values.types.program.tree;
+
     if (type.kind != TypeKind.Instance) {
       return undefined;
     }
 
     const decl = this.values.classDeclOf(type);
-    if (decl == undefined || decl.base == undefined) {
+    if (decl == undefined || tree.typeRefAt(decl.baseId) == undefined) {
       return undefined;
     }
 
-    return this.store
+    return this.values.types.store
       .parentsOf(type)
       .find((parent) => parent.kind == TypeKind.Instance);
   }
@@ -45,13 +47,17 @@ partial class Lowering {
     type: Type,
     name: string,
   ): OwnedMethod | undefined {
+    const tree = this.values.types.program.tree;
+
     let current: Type | undefined = type;
 
     while (current != undefined) {
       const decl = this.values.classDeclOf(current);
-      const fn = decl?.methods.find(
-        (one) => one.name == name && one.body != undefined,
-      );
+      const fn = tree
+        .functionsOf(decl?.methodsList)
+        .find(
+          (one) => one.name == name && tree.blockAt(one.bodyId) != undefined,
+        );
       if (decl != undefined && fn != undefined) {
         return { owner: current, decl, fn };
       }
@@ -63,23 +69,26 @@ partial class Lowering {
   }
 
   private readonly isInHierarchy(type: Type): boolean {
+    const tree = this.values.types.program.tree;
+
     const decl = this.values.classDeclOf(type);
     if (decl == undefined) {
       return false;
     }
 
-    return decl.base != undefined || this.hasChildren(decl);
+    return tree.typeRefAt(decl.baseId) != undefined || this.hasChildren(decl);
   }
 
   private readonly hasChildren(decl: ClassDecl): boolean {
+    const tree = this.values.types.program.tree;
+
     const name = decl.name ?? "";
 
-    for (const module of this.program.modules) {
-      for (const item of module.file.items) {
+    for (const module of this.values.types.program.modules) {
+      for (const item of tree.stmtsOf(module.file.itemsList)) {
         const isChild =
           item.kind == StmtKind.Class &&
-          item.base != undefined &&
-          item.base.name == name;
+          tree.typeRefAt(item.baseId)?.name == name;
         if (isChild) {
           return true;
         }
@@ -90,6 +99,8 @@ partial class Lowering {
   }
 
   private readonly slotNames(type: Type): string[] {
+    const tree = this.values.types.program.tree;
+
     const chain: Type[] = [];
     let current: Type | undefined = type;
 
@@ -103,10 +114,10 @@ partial class Lowering {
     for (const link of chain) {
       const decl = this.values.classDeclOf(link);
 
-      for (const fn of decl?.methods ?? []) {
+      for (const fn of tree.functionsOf(decl?.methodsList) ?? []) {
         const isSlot =
-          fn.body != undefined &&
-          fn.typeParams.length == 0 &&
+          tree.blockAt(fn.bodyId) != undefined &&
+          tree.typeParamsOf(fn.typeParamsList).length == 0 &&
           fn.role?.method != MethodKind.Static &&
           fn.name != kDisposeName &&
           !names.includes(fn.name);
@@ -142,7 +153,9 @@ partial class Lowering {
     return table;
   }
 
-  private targetOfOwned(found: OwnedMethod | undefined): MethodTarget | undefined {
+  private targetOfOwned(
+    found: OwnedMethod | undefined,
+  ): MethodTarget | undefined {
     if (found == undefined) {
       return undefined;
     }
@@ -156,7 +169,7 @@ partial class Lowering {
     name: string,
     self: IrValue,
     args: Own<LLVMValue[]>,
-    target: MethodTarget,
+    target: Read<MethodTarget>,
   ): LLVMValue | undefined {
     const index = this.slotNames(object).indexOf(name);
     const result = this.resultType(target.shape);
@@ -193,10 +206,15 @@ partial class Lowering {
   }
 
   private disposeOf(type: Type): MethodTarget | undefined {
+    const tree = this.values.types.program.tree;
+
     const decl = this.values.classDeclOf(type);
-    const fn = decl?.methods.find(
-      (one) => one.name == kDisposeName && one.body != undefined,
-    );
+    const fn = tree
+      .functionsOf(decl?.methodsList)
+      .find(
+        (one) =>
+          one.name == kDisposeName && tree.blockAt(one.bodyId) != undefined,
+      );
     if (decl == undefined || fn == undefined) {
       return undefined;
     }
@@ -205,6 +223,8 @@ partial class Lowering {
   }
 
   private superCall(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const self = frame.self;
     if (self == undefined) {
       this.notLowered(frame.module, call.loc, "this super call");
@@ -236,7 +256,7 @@ partial class Lowering {
     const kept: IrValue[] = [];
     const args = this.callArguments(
       frame,
-      call.args,
+      tree.argumentsOf(call.argsList),
       target.shape,
       call.loc,
       ctor,
@@ -261,6 +281,8 @@ partial class Lowering {
     call: CallExpr,
     member: MemberExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const self = frame.self;
     if (self == undefined) {
       this.notLowered(frame.module, call.loc, "this super call");
@@ -286,7 +308,7 @@ partial class Lowering {
     const kept: IrValue[] = [];
     const args = this.callArguments(
       frame,
-      call.args,
+      tree.argumentsOf(call.argsList),
       shape,
       call.loc,
       found.fn,
@@ -309,18 +331,22 @@ partial class Lowering {
   }
 
   private readonly isSuperName(expr: CallExpr): boolean {
-    const callee = expr.callee;
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
 
     return callee.kind == ExprKind.Name && callee.name == kSuperWord;
   }
 
   private readonly isSuperMember(expr: CallExpr): MemberExpr | undefined {
-    const callee = expr.callee;
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return undefined;
     }
 
-    const object = callee.object;
+    const object = tree.exprOf(callee.objectId);
     if (object.kind != ExprKind.Name || object.name != kSuperWord) {
       return undefined;
     }
@@ -329,11 +355,13 @@ partial class Lowering {
   }
 
   private readonly ownConstructor(type: Type): OwnedMethod | undefined {
+    const tree = this.values.types.program.tree;
+
     let current: Type | undefined = type;
 
     while (current != undefined) {
       const decl = this.values.classDeclOf(current);
-      const ctor = decl?.constructors[0];
+      const ctor = tree.functionsOf(decl?.constructorsList)[0];
       if (decl != undefined && ctor != undefined) {
         return { owner: current, decl, fn: ctor };
       }

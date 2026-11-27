@@ -1,0 +1,167 @@
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kDescriptorLayout,
+  kFlagType,
+  kHandleKind,
+  kHandleLayout,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import { DescriptorShape } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private descriptor(type: Type): LLVMValue | undefined {
+    if (type.kind == TypeKind.Result) {
+      return this.resultDescriptor(type);
+    }
+
+    const plain = this.widened(type);
+    const known = this.descriptors.get(plain.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    if (this.isHandleType(plain)) {
+      return this.handleDescriptor(plain);
+    }
+
+    const shape = this.descriptorShape(plain);
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    const name = this.ir.uniqueName("tz.type.");
+    const inner = shape.inner ?? this.ir.zero(kPointerType);
+    const value = this.ir.constStruct([
+      this.ir.integer(kFlagType, `${shape.kind}`),
+      this.ir.integer(kFlagType, `${shape.size}`),
+      inner,
+    ]);
+    const global = this.ir.global(name, kDescriptorLayout, value, true);
+
+    this.descriptors.set(plain.id, global);
+
+    return global;
+  }
+
+  private handleDescriptor(type: Type): LLVMValue {
+    let label = "";
+
+    if (type.kind == TypeKind.Instance) {
+      label = type.name;
+    }
+
+    const name = this.ir.uniqueName("tz.type.");
+    const base = this.ir.constStruct([
+      this.ir.integer(kFlagType, `${kHandleKind}`),
+      this.ir.integer(kFlagType, "8"),
+      this.ir.zero(kPointerType),
+    ]);
+    const length = Buffer.from(label, "utf8").length;
+    const value = this.ir.constStruct([
+      base,
+      this.cText(label),
+      this.ir.integer(kFlagType, `${length}`),
+    ]);
+    const global = this.ir.global(name, kHandleLayout, value, true);
+
+    this.descriptors.set(type.id, global);
+
+    return global;
+  }
+
+  private descriptorShape(type: Type): DescriptorShape | undefined {
+    switch (type.kind) {
+      case TypeKind.Int:
+        return {
+          kind: this.integerKind(type.bits, type.unsigned),
+          size: type.bits >> 3,
+        };
+      case TypeKind.Double:
+        return { kind: 3, size: 8 };
+      case TypeKind.Boolean:
+        return { kind: 4, size: 1 };
+      case TypeKind.String:
+        return { kind: 5, size: 16 };
+      case TypeKind.Decimal:
+        return { kind: 11, size: 16 };
+      case TypeKind.Array: {
+        const inner = this.descriptor(this.values.types.store.itemOf(type));
+        if (inner == undefined) {
+          return undefined;
+        }
+
+        return { kind: 6, size: 8, inner };
+      }
+      case TypeKind.Undefined:
+        return { kind: 8, size: 1 };
+      case TypeKind.Instance:
+      case TypeKind.Object:
+      case TypeKind.Tuple:
+      case TypeKind.Dict:
+        return { kind: 10, size: 8 };
+      case TypeKind.Union:
+        return this.unionShape(type);
+      default:
+        return undefined;
+    }
+  }
+
+  private unionShape(type: Type): DescriptorShape | undefined {
+    if (this.isObjectLike(type)) {
+      return { kind: 10, size: 8 };
+    }
+
+    return this.optionalShape(type);
+  }
+
+  private optionalShape(type: Type): DescriptorShape | undefined {
+    const inner = this.optionalInner(type);
+    if (inner == undefined) {
+      return undefined;
+    }
+
+    const described = this.descriptor(inner);
+    if (described == undefined) {
+      return undefined;
+    }
+
+    const size = this.optionalSize(this.widened(inner));
+
+    return { kind: 7, size, inner: described };
+  }
+
+  private optionalSize(inner: Type): int {
+    if (this.isReferenceLike(inner)) {
+      return 8;
+    }
+
+    switch (inner.kind) {
+      case TypeKind.Int:
+        return inner.bits >> 2;
+      case TypeKind.Boolean:
+        return 2;
+      case TypeKind.String:
+      case TypeKind.Decimal:
+        return 24;
+      case TypeKind.Instance:
+        return 8;
+      default:
+        return 16;
+    }
+  }
+
+  private readonly integerKind(bits: int, isUnsigned: boolean): int {
+    switch (bits) {
+      case 8:
+        return this.choose(isUnsigned, 20, 18);
+      case 16:
+        return this.choose(isUnsigned, 21, 19);
+      case 32:
+        return this.choose(isUnsigned, 22, 1);
+      default:
+        return this.choose(isUnsigned, 23, 2);
+    }
+  }
+}

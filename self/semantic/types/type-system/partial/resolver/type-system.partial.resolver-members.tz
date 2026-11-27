@@ -1,0 +1,175 @@
+import { TypeSystem } from "../../type-system.tz";
+import {
+  Access,
+  ClassDecl,
+  FieldKind,
+  FieldPresence,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMemberKind,
+} from "../../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  StmtKind,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  InstanceType,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  ModuleRecord,
+  TypeContext,
+  TypePlace,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private memberFields(instance: InstanceType): ObjectField[] {
+    const record = this.record(instance.module);
+    if (record == undefined) {
+      return [];
+    }
+
+    const decl = this.ownClassAt(record, instance.loc);
+    const declared = this.declaredClassAt(record, instance.loc);
+    if (decl != undefined) {
+      return this.classFields(instance, decl);
+    }
+    if (declared != undefined) {
+      return this.declaredFields(instance, declared);
+    }
+
+    return [];
+  }
+
+  private readonly ownClassAt(
+    record: Read<ModuleRecord>,
+    loc: int,
+  ): ClassDecl | undefined {
+    for (const decl of record.declarations.values()) {
+      if (decl.kind == StmtKind.Class && decl.loc == loc) {
+        return decl;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readonly declaredClassAt(
+    record: Read<ModuleRecord>,
+    loc: int,
+  ): DeclaredClass | undefined {
+    for (const declared of record.classes.values()) {
+      if (declared.loc == loc) {
+        return declared;
+      }
+    }
+
+    return undefined;
+  }
+
+  private classFields(instance: InstanceType, decl: ClassDecl): ObjectField[] {
+    const tree = this.program.tree;
+
+    const context = this.inside(
+      instance,
+      tree.typeParamsOf(decl.typeParamsList),
+    );
+    const fields: ObjectField[] = [];
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
+      if (field.access != Access.Public || field.form == FieldKind.Static) {
+        continue;
+      }
+
+      const typeRef = tree.typeRefAt(field.typeId);
+      const type = this.memberType(typeRef, context);
+      const optional = field.presence == FieldPresence.Optional;
+
+      fields.push({
+        name: field.name,
+        type,
+        optional,
+        readonly: field.readonly,
+      });
+    }
+
+    return fields;
+  }
+
+  private declaredFields(
+    instance: InstanceType,
+    declared: DeclaredClass,
+  ): ObjectField[] {
+    const tree = this.program.tree;
+
+    const context = this.inside(
+      instance,
+      tree.typeParamsOf(declared.typeParamsList),
+    );
+    const fields: ObjectField[] = [];
+
+    for (const member of tree.declaredMembersOf(declared.membersList)) {
+      const form = member.form;
+      const hidden = member.access != Access.Public || member.isStatic;
+      if (form.kind != DeclaredMemberKind.Field || hidden) {
+        continue;
+      }
+
+      const typeRef = tree.typeRefAt(member.typeId);
+      const type = this.memberType(typeRef, context);
+
+      fields.push({
+        name: member.name,
+        type,
+        optional: form.optional,
+        readonly: form.readonly,
+      });
+    }
+
+    return fields;
+  }
+
+  public readonly classContext(
+    instance: InstanceType,
+    params: Read<TypeParamDecl[]>,
+    home: int,
+  ): TypeContext {
+    const inside = this.inside(instance, params);
+
+    return { module: home, bindings: inside.bindings, place: inside.place };
+  }
+
+  private readonly inside(
+    instance: InstanceType,
+    params: Read<TypeParamDecl[]>,
+  ): TypeContext {
+    const bindings = new Map<int, Type>();
+
+    for (let index = 0; index < params.length; index++) {
+      const param = params[index];
+      const arg = this.store.argsOf(instance)[index];
+      if (arg != undefined) {
+        bindings.set(param.loc, arg);
+      }
+    }
+
+    return { module: instance.module, bindings, place: TypePlace.Plain };
+  }
+
+  private memberType(
+    written: TypeRef | undefined,
+    context: Read<TypeContext>,
+  ): Type {
+    if (written == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.resolve(written, context);
+  }
+}

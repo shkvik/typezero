@@ -1,0 +1,3 @@
+import { NameUse } from "../types/scopes.types.tz";
+
+export const kNoUses: readonly NameUse[] = [];

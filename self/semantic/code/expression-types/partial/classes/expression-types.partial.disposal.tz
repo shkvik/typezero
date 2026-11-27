@@ -17,9 +17,9 @@ import {
 import { kSuperName } from "../../../dispose-rules/const/dispose-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly disposeCheck(decl: ClassDecl, module: int): void {
-    const dispose = this.disposes.ownDispose(decl);
-    if (dispose == undefined || this.modules.isLibraryModule(module)) {
+  private disposeCheck(decl: ClassDecl, module: int): void {
+    const dispose = this.types.ownDispose(decl);
+    if (dispose == undefined || this.types.isLibraryModule(module)) {
       return;
     }
 
@@ -30,13 +30,13 @@ partial class ExpressionTypes {
       result.kind != TypeKind.Void &&
       result.kind != TypeKind.Error;
     const inherited = this.inheritedDispose(decl, module);
-    const disposeErrors = this.disposes.disposeErrors(
+    const disposeErrors = this.types.disposeErrors(
       dispose,
       isGivingValue,
       inherited,
     );
 
-    this.reportAll(module, disposeErrors);
+    this.errors.writeAll(module, disposeErrors);
   }
 
   private readonly resultOfFunction(type: Type | undefined): Type | undefined {
@@ -44,15 +44,18 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return type.shape.result;
+    return this.types.store.returnTypeOf(type);
   }
 
-  private readonly inheritedDispose(decl: ClassDecl, module: int): string | undefined {
-    if (decl.typeParams.length > 0) {
+  private inheritedDispose(decl: ClassDecl, module: int): string | undefined {
+    const tree = this.types.program.tree;
+
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
+    if (typeParams.length > 0) {
       return undefined;
     }
 
-    const instance = this.resolver.classInstance(module, decl, []);
+    const instance = this.types.classInstance(module, decl, []);
     let base = this.types.baseClassOf(instance);
 
     while (base != undefined && base.kind == TypeKind.Instance) {
@@ -60,7 +63,7 @@ partial class ExpressionTypes {
       if (owner == undefined) {
         return undefined;
       }
-      if (this.disposes.ownDispose(owner) != undefined) {
+      if (this.types.ownDispose(owner) != undefined) {
         return owner.name;
       }
 
@@ -75,29 +78,31 @@ partial class ExpressionTypes {
     following: Read<Stmt[]>,
     module: int,
   ): void {
-    const first = statement.decls[0];
-    if (first == undefined || this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    const first = tree.declaratorsOf(statement.declsList)[0];
+    if (first == undefined || this.types.isLibraryModule(module)) {
       return;
     }
 
     const type = this.door(module, first.loc)?.type;
     const isKnown = type != undefined && type.kind != TypeKind.Error;
     if (isKnown && type != undefined && !this.isDisposable(type)) {
-      this.report(module, statement.loc, Code.UsingNotDisposable, {
-        word: this.text.of(type),
+      this.errors.write(module, statement.loc, Code.UsingNotDisposable, {
+        word: this.types.typeText(type),
       });
     }
 
-    const outlivesErrors = this.disposes.outlivesErrors(statement, following);
+    const outlivesErrors = this.types.outlivesErrors(statement, following);
 
-    this.reportAll(module, outlivesErrors);
+    this.errors.writeAll(module, outlivesErrors);
   }
 
-  private readonly isDisposable(type: Type): boolean {
+  private isDisposable(type: Type): boolean {
     let current: Type | undefined = this.types.definedType(type);
 
     while (current != undefined && current.kind == TypeKind.Instance) {
-      if (this.modules.isLibraryModule(current.module)) {
+      if (this.types.isLibraryModule(current.module)) {
         return false;
       }
 
@@ -105,7 +110,7 @@ partial class ExpressionTypes {
       if (owner == undefined) {
         return false;
       }
-      if (this.disposes.ownDispose(owner) != undefined) {
+      if (this.types.ownDispose(owner) != undefined) {
         return true;
       }
 
@@ -115,22 +120,24 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly disposeCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (callee.kind != ExprKind.Index || this.modules.isLibraryModule(module)) {
+  private disposeCallCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Index || this.types.isLibraryModule(module)) {
       return;
     }
-    if (!this.disposes.isDisposeCall(expr)) {
+    if (!this.types.isDisposeCall(expr)) {
       return;
     }
 
     const fn = this.openFunctions[this.openFunctions.length - 1];
-    const object = callee.object;
+    const object = tree.exprOf(callee.objectId);
     const isSuper = object.kind == ExprKind.Name && object.name == kSuperName;
-    if (isSuper && this.disposes.isDisposeMethod(fn)) {
+    if (isSuper && this.types.isDisposeMethod(fn)) {
       return;
     }
 
-    this.report(module, callee.loc, Code.DisposeManual, kNoDetails);
+    this.errors.write(module, callee.loc, Code.DisposeManual, kNoDetails);
   }
 }

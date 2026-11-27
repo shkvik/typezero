@@ -16,7 +16,7 @@ import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz"
 import { kGlobalNames } from "../../../program/library/global-names/const/global-names.const.tz";
 import { kLibrary } from "../../../program/library/library-modules/const/library-modules.const.tz";
 import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
-import { Module } from "../../../program/module/types/module.types.tz";
+import { Module, Program } from "../../../program/module/types/module.types.tz";
 import {
   CapturePlace,
   ModuleScopes,
@@ -31,9 +31,9 @@ import { kHiddenPrefix, kNamePoint } from "./const/scope-traversal.const.tz";
 import { ClassFrame, JumpTarget } from "./types/scope-traversal.types.tz";
 
 export class ScopeTraversal {
-  private readonly module: Module;
+  private readonly module: int;
   private readonly names: ModuleNames;
-  private readonly globals: GlobalScope;
+  private globals: GlobalScope;
   private readonly partMethods: FunctionDecl[];
   private readonly scopes: ScopeStack;
   private uses: NameUse[];
@@ -45,6 +45,16 @@ export class ScopeTraversal {
   private defaultOf: string;
   private genericFunctions: int;
   private readonly memberUses: Map<string, string[]>;
+
+  public takeGlobals(): GlobalScope {
+    const empty: GlobalScope = {
+      values: new Set<string>(),
+      types: new Set<string>(),
+      namespaces: new Map<string, Set<string>>(),
+    };
+
+    return replace(this.globals, empty);
+  }
 
   public constructor(
     names: Own<ModuleNames>,
@@ -67,31 +77,44 @@ export class ScopeTraversal {
     this.memberUses = new Map<string, string[]>();
   }
 
-  public run(): ModuleScopes {
-    const items = this.module.file.items;
+  public run(program: Read<Program>): ModuleScopes {
+    const tree = program.tree;
+
+    const items = tree.stmtsOf(program.modules[this.module]?.file.itemsList);
 
     this.scopes.open();
-    this.declareImports();
-    this.declareStatements(items);
-    this.declareClasses(this.module.declared);
-    this.traverseStatements(items);
+    this.declareImports(program);
+    this.declareStatements(program, items);
+    this.declareClasses(
+      program,
+      tree.declaredClassesOf(program.modules[this.module]?.declaredList),
+    );
+    this.traverseStatements(program, items);
 
-    for (const one of this.module.declared) {
-      this.traverseDeclaredClass(one);
+    for (const one of tree.declaredClassesOf(
+      program.modules[this.module]?.declaredList,
+    )) {
+      this.traverseDeclaredClass(program, one);
     }
 
-    for (const part of this.module.parts) {
-      this.traverseClass(part, false);
+    for (const part of tree.classesOf(
+      program.modules[this.module]?.partsList,
+    )) {
+      this.traverseClass(program, part, false);
     }
 
     this.scopes.close();
-    this.wholeImportsCheck();
+    this.wholeImportsCheck(program);
     this.errors.sort((first, second) => first.loc - second.loc);
+
+    const count = this.names.errors.length;
+    const nameErrors = this.names.errors.splice(0, count);
+    const errors = nameErrors.concat(replace(this.errors, []));
 
     return {
       module: this.module,
       uses: replace(this.uses, []),
-      errors: replace(this.errors, []),
+      errors,
     };
   }
 
@@ -106,15 +129,18 @@ export class ScopeTraversal {
 
     const entry = this.scopes.findValue(name);
     if (entry != undefined) {
-      if (!this.scopes.isReadable(entry)) {
-        this.reportEarlyUse(entry.symbol, loc);
+      const symbol = entry.symbol;
+      const depth = entry.depth;
+      const isReadable = this.scopes.isReadable(entry);
+
+      if (!isReadable) {
+        this.reportEarlyUse(symbol, loc);
       }
-      if (this.otherCaseVariables.has(entry.symbol.loc)) {
+      if (this.otherCaseVariables.has(symbol.loc)) {
         this.report(loc, Code.OtherCaseVariable, { word: name });
       }
 
-      const symbol = entry.symbol;
-      const capture = this.captureOf(symbol, entry.depth, loc);
+      const capture = this.captureOf(symbol, depth, loc);
 
       this.noteUse({ loc, name, isType: false, symbol, capture });
 
@@ -190,7 +216,9 @@ export class ScopeTraversal {
 
     const entry = this.scopes.findType(first);
     if (entry != undefined) {
-      this.noteUse({ loc, name, isType: true, symbol: entry.symbol });
+      const symbol = entry.symbol;
+
+      this.noteUse({ loc, name, isType: true, symbol });
 
       return;
     }
@@ -250,8 +278,13 @@ export class ScopeTraversal {
     this.errors.push({ code, loc, details });
   }
 
-  private readonly lineOf(loc: int): string {
-    const lines = new SourceLines(this.module.source.text);
+  private readonly lineOf(program: Read<Program>, loc: int): string {
+    const module = program.modules[this.module];
+    if (module == undefined) {
+      return "?";
+    }
+
+    const lines = new SourceLines(module.source.text);
     const place = lines.placeOf(loc);
 
     return `${place.line}`;

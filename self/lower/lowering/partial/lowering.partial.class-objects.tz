@@ -1,0 +1,309 @@
+import {
+  Expr,
+  MemberExpr,
+  NewExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceField,
+} from "../../../program/expression-answers/types/expression-answers.types.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kIntType,
+  kObjectAllocate,
+  kObjectHeader,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  ClassLayout,
+  Frame,
+  IrValue,
+  LayoutShape,
+  Place,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private newValue(frame: Frame, expr: NewExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const type = this.typeOf(expr);
+    if (type != undefined && type.kind == TypeKind.Dict) {
+      return this.newDictFrom(frame, expr, type);
+    }
+    const array =
+      this.madeArrayType(type) ?? this.writtenArrayType(frame, expr);
+    if (array != undefined) {
+      return this.arrayOfLength(frame, expr, array);
+    }
+    if (type == undefined || type.kind != TypeKind.Instance) {
+      const kind = this.kindName(type);
+
+      this.notLowered(frame.module, expr.loc, `a new ${kind}`);
+
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const layout = this.layoutOf(type);
+    if (decl == undefined || layout == undefined) {
+      this.notLowered(frame.module, expr.loc, "this new");
+
+      return undefined;
+    }
+
+    const object = this.allocated(frame, layout);
+
+    this.fieldsInitialized(frame, type, object);
+
+    const value: IrValue = {
+      type: kPointerType,
+      value: object,
+      tz: type,
+      owned: true,
+    };
+    const owned = this.ownConstructor(type);
+    if (owned == undefined) {
+      return value;
+    }
+
+    const ctor = owned.fn;
+    const target = this.methodTarget(owned.owner, owned.decl, ctor);
+    const params = this.shapeTypesOf(target?.shape);
+    if (target == undefined || params == undefined) {
+      this.notLowered(frame.module, expr.loc, "this new");
+
+      return undefined;
+    }
+
+    const kept: IrValue[] = [];
+    const args = this.callArguments(
+      frame,
+      tree.argumentsOf(expr.argsList),
+      target.shape,
+      expr.loc,
+      ctor,
+      kept,
+    );
+    if (args == undefined) {
+      return undefined;
+    }
+
+    const all = [kPointerType].concat(params);
+    const callee = this.ir.declare(target.name, kVoidType, all);
+
+    frame.made.call(callee, [object].concat(args));
+    this.droppedAll(frame, kept);
+
+    return value;
+  }
+
+  private orderedDescriptor(
+    layout: Read<ClassLayout>,
+    names: Read<string[]>,
+  ): LLVMValue {
+    const fields = this.shapeFieldsOf(layout);
+    const isSame = names.every((name, index) => fields[index]?.name == name);
+    if (isSame) {
+      return layout.descriptor;
+    }
+
+    const key = `${layout.classId} ${names.join(" ")}`;
+    const known = this.orderedDescriptors.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const ordered: InstanceField[] = [];
+
+    for (const name of names) {
+      const field = fields.find((one) => one.name == name);
+      if (field != undefined) {
+        ordered.push(field);
+      }
+    }
+
+    const rest = fields.filter((field) => !names.includes(field.name));
+    const layoutShape = this.layoutShapes.get(layout.classId);
+    const shape: LayoutShape = {
+      name: layoutShape?.name ?? "",
+      fields: ordered.concat(rest),
+      flags: layoutShape?.flags ?? 0,
+    };
+    const placed = this.fieldsOf(layout);
+    const slots = this.layoutSlots.get(layout.classId)?.slice() ?? [];
+    const descriptor = this.layoutDescriptor(
+      shape,
+      layout.drop,
+      placed,
+      layout.classId,
+      slots,
+    );
+
+    this.orderedDescriptors.set(key, descriptor);
+
+    return descriptor;
+  }
+
+  private allocated(frame: Read<Frame>, layout: Read<ClassLayout>): LLVMValue {
+    const tz = this.values.types.store.integer(64, false);
+    const size = this.ir.integer(kIntType, `${layout.size}`);
+    const sizeValue: IrValue = { type: kIntType, value: size, tz };
+    const object = this.runtimeValue(frame, kObjectAllocate, kPointerType, [
+      sizeValue,
+    ]);
+    const count = frame.made.field(kObjectHeader, object, 0);
+    const kind = frame.made.field(kObjectHeader, object, 1);
+
+    frame.made.store(this.ir.integer(kIntType, "1"), count);
+    frame.made.store(layout.descriptor, kind);
+    this.zeroFields(frame, object, layout);
+
+    return object;
+  }
+
+  private zeroFields(
+    frame: Read<Frame>,
+    object: LLVMValue,
+    layout: Read<ClassLayout>,
+  ): void {
+    for (const field of this.fieldsOf(layout)) {
+      const address = frame.made.field(layout.struct, object, field.index);
+
+      frame.made.store(this.ir.zero(field.ir), address);
+    }
+  }
+
+  private fieldPlace(
+    frame: Frame,
+    object: Place,
+    name: string,
+    loc: int,
+  ): Place | undefined {
+    const pointer = frame.made.load(kPointerType, object.pointer);
+
+    return this.fieldAt(frame, pointer, object.tz, name, loc);
+  }
+
+  private fieldAt(
+    frame: Frame,
+    object: LLVMValue,
+    type: Type,
+    name: string,
+    loc: int,
+  ): Place | undefined {
+    if (type.kind == TypeKind.Union) {
+      const parts = this.values.types.store
+        .partsOf(type)
+        .filter((part) => part.kind != TypeKind.Undefined);
+      const single = parts[0];
+      if (parts.length == 1 && single != undefined) {
+        return this.fieldAt(frame, object, single, name, loc);
+      }
+
+      return this.unionFieldAt(frame, object, parts, name, loc);
+    }
+
+    const layout = this.layoutOf(type);
+    const field = this.layoutField(layout, name);
+    if (layout == undefined || field == undefined) {
+      const problem = this.layoutProblem(type);
+
+      this.notLowered(frame.module, loc, `a field of ${problem}`);
+
+      return undefined;
+    }
+
+    const pointer = frame.made.field(layout.struct, object, field.index);
+
+    return { pointer, type: field.ir, tz: field.type, owner: -1 };
+  }
+
+  private fieldValue(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(expr.objectId);
+    const object = this.value(frame, objectExpr);
+    if (object == undefined) {
+      return undefined;
+    }
+    if (this.isMixedField(object.tz, expr.name)) {
+      return this.mixedFieldValue(frame, object, expr);
+    }
+
+    const place = this.fieldAt(
+      frame,
+      object.value,
+      object.tz,
+      expr.name,
+      expr.loc,
+    );
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const loaded = this.seenAs(frame, this.loaded(frame, place), expr);
+    const isLooked = object.owned != true || !this.isManaged(object.tz);
+    if (isLooked && this.isStaticField(object, expr)) {
+      return this.staticValue(loaded);
+    }
+    if (
+      object.owned != true &&
+      this.isMovedField(frame, expr, place, loaded.tz)
+    ) {
+      frame.made.store(this.ir.zero(place.type), place.pointer);
+
+      return {
+        type: loaded.type,
+        value: loaded.value,
+        tz: loaded.tz,
+        owned: true,
+      };
+    }
+    if (object.owned != true || !this.isManaged(object.tz)) {
+      return loaded;
+    }
+
+    const kept = this.owning(frame, loaded);
+
+    this.dropping(frame, object);
+
+    return kept;
+  }
+
+  private isMovedField(
+    frame: Read<Frame>,
+    expr: Expr,
+    place: Read<Place>,
+    type: Type,
+  ): boolean {
+    const isManaged = this.isManaged(place.tz) || this.isManaged(type);
+
+    return (
+      this.moves.has(expr.id) &&
+      frame.inline == undefined &&
+      place.type == kPointerType &&
+      isManaged
+    );
+  }
+
+  private seenAs(frame: Frame, loaded: IrValue, expr: Expr): IrValue {
+    const seen = this.typeOf(expr);
+    if (seen == undefined || seen.kind == TypeKind.Error) {
+      return loaded;
+    }
+    if (this.irType(seen) == undefined) {
+      return loaded;
+    }
+
+    const isNarrowed =
+      this.optionalInner(loaded.tz) != undefined &&
+      this.optionalInner(seen) == undefined;
+    if (!isNarrowed) {
+      return loaded;
+    }
+
+    return this.converted(frame, loaded, seen, expr.loc) ?? loaded;
+  }
+}

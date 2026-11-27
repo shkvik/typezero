@@ -23,6 +23,7 @@ import {
   kDoubleShape,
   kFilterName,
   kGeneratorShape,
+  kLentArrayMethods,
   kMathConstants,
   kMathName,
   kNumberLaterMethods,
@@ -41,113 +42,125 @@ import { kMapClass } from "../../../code/class-rules/const/class-rules.const.tz"
 import { kPromiseClass } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly libraryReceiver(type: Type): Type | undefined {
+  private libraryReceiver(type: Type): Type | undefined {
     switch (type.kind) {
       case TypeKind.String:
       case TypeKind.Template:
-        return this.resolver.libraryShape(kStringShape, []);
+        return this.types.libraryShape(kStringShape, []);
       case TypeKind.Literal:
         return this.literalReceiver(type.literal);
       case TypeKind.Int:
         return this.integerReceiver(type);
       case TypeKind.Double:
-        return this.resolver.libraryShape(kDoubleShape, []);
+        return this.types.libraryShape(kDoubleShape, []);
       case TypeKind.Boolean:
-        return this.resolver.libraryShape(kBooleanShape, []);
+        return this.types.libraryShape(kBooleanShape, []);
       case TypeKind.Decimal:
-        return this.resolver.libraryShape(kDecimalShape, []);
+        return this.types.libraryShape(kDecimalShape, []);
       case TypeKind.Array:
-        return this.resolver.libraryShape(kArrayShape, [type.item]);
+        return this.types.libraryShape(kArrayShape, [
+          this.types.store.itemOf(type),
+        ]);
       case TypeKind.Result: {
-        const args = [type.value, type.error];
+        const args = [
+          this.types.store.valueOf(type),
+          this.types.store.errorOf(type),
+        ];
 
-        return this.resolver.libraryShape(kResultShape, args);
+        return this.types.libraryShape(kResultShape, args);
       }
       case TypeKind.Iterator:
         return this.iteratorReceiver(type);
       case TypeKind.Dict:
         return this.dictReceiver(type);
       case TypeKind.Promise:
-        return this.resolver.libraryInstance(kPromiseClass, [type.value]);
+        return this.types.libraryInstance(kPromiseClass, [
+          this.types.store.valueOf(type),
+        ]);
       case TypeKind.Instance:
-        return this.library.instanceReceiver(type);
+        return this.types.instanceReceiver(type);
       default:
         return undefined;
     }
   }
 
-  private readonly literalReceiver(literal: LiteralKind): Type | undefined {
+  private literalReceiver(literal: LiteralKind): Type | undefined {
     switch (literal) {
       case LiteralKind.String:
-        return this.resolver.libraryShape(kStringShape, []);
+        return this.types.libraryShape(kStringShape, []);
       case LiteralKind.Int: {
-        const int = this.store.integer(64, false);
+        const int = this.types.store.integer(64, false);
 
         return this.libraryReceiver(int);
       }
       case LiteralKind.Double:
-        return this.resolver.libraryShape(kDoubleShape, []);
+        return this.types.libraryShape(kDoubleShape, []);
       default:
-        return this.resolver.libraryShape(kBooleanShape, []);
+        return this.types.libraryShape(kBooleanShape, []);
     }
   }
 
-  private readonly integerReceiver(type: Type): Type | undefined {
+  private integerReceiver(type: Type): Type | undefined {
     if (type.kind != TypeKind.Int || type.wraps) {
       return undefined;
     }
 
-    const name = this.text.of(type);
+    const name = this.types.typeText(type);
 
-    return this.resolver.libraryShape(name, []);
+    return this.types.libraryShape(name, []);
   }
 
-  private readonly iteratorReceiver(type: Type): Type | undefined {
+  private iteratorReceiver(type: Type): Type | undefined {
     if (type.kind != TypeKind.Iterator) {
       return undefined;
     }
 
-    const shape = type.shape;
+    const shape = this.types.store.iteratorShapeOf(type);
     const args = [shape.yielded, shape.returned, shape.sent];
 
     if (shape.async) {
-      return this.resolver.libraryShape(kAsyncGeneratorShape, args);
+      return this.types.libraryShape(kAsyncGeneratorShape, args);
     }
 
-    return this.resolver.libraryShape(kGeneratorShape, args);
+    return this.types.libraryShape(kGeneratorShape, args);
   }
 
-  private readonly dictReceiver(type: Type): Type | undefined {
+  private dictReceiver(type: Type): Type | undefined {
     if (type.kind != TypeKind.Dict) {
       return undefined;
     }
 
     switch (type.dict) {
       case DictKind.Map: {
-        const args = [type.key, type.value];
+        const args = [
+          this.types.store.keyOf(type),
+          this.types.store.valueOf(type),
+        ];
 
-        return this.resolver.libraryInstance(kMapClass, args);
+        return this.types.libraryInstance(kMapClass, args);
       }
       case DictKind.Set:
-        return this.resolver.libraryInstance(kSetClass, [type.key]);
+        return this.types.libraryInstance(kSetClass, [
+          this.types.store.keyOf(type),
+        ]);
       default:
         return undefined;
     }
   }
 
-  private readonly libraryMemberTyped(
+  private libraryMemberTyped(
     expr: MemberExpr,
     object: Type,
     module: int,
   ): Type {
     const receiver = this.libraryReceiver(object);
     if (receiver == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const member = this.libraryMemberType(receiver, expr.name, false);
     if (member == undefined || member.kind == TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return member;
@@ -186,7 +199,7 @@ partial class ExpressionTypes {
       member.name == kFilterName && object.kind == TypeKind.Array;
     const isProved =
       (kSpecialMethods.includes(member.name) && !isFilter) ||
-      this.library.isRegexSplit(expr, member);
+      this.types.isRegexSplit(expr, member);
     const generic = this.receiverMember(receiver, member.name, true);
     const isGeneric =
       generic != undefined &&
@@ -194,7 +207,7 @@ partial class ExpressionTypes {
       this.mentionsLibraryParameter(generic);
     const isSpecial = isProved || object.kind == TypeKind.Result;
     if (isGeneric && isSpecial) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (isGeneric && generic != undefined) {
       return this.libraryMethodCall(expr, member, generic, wanted, module);
@@ -214,33 +227,52 @@ partial class ExpressionTypes {
       return proved;
     }
     if (this.doubleConversionCheck(member, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (method == undefined || isProved) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const kind = this.library.receiverKind(object);
+    const kind = this.types.receiverKind(object);
 
     const marked = this.positionShape(object, member.name) ?? method;
 
-    this.positionMask = this.library.maskOf(object, marked);
+    this.positionMask = this.types.maskOf(object, marked);
     this.positionMethod = member.name;
 
     const called = this.fieldValueCall(expr, member, method, kind, module);
     if (isFilter) {
-      return this.filteredArray(expr, called);
+      const kept = this.filteredArray(expr, called);
+
+      return this.lentResult(member, object, kept);
     }
 
-    return called;
+    return this.lentResult(member, object, called);
+  }
+
+  private lentResult(member: MemberExpr, object: Type, result: Type): Type {
+    const isLooked = kLentArrayMethods.includes(member.name);
+    if (!isLooked || object.kind != TypeKind.Array) {
+      return result;
+    }
+    if (result.kind != TypeKind.Array) {
+      return result;
+    }
+
+    const item = this.types.store.itemOf(result);
+    if (this.isCopy(item)) {
+      return result;
+    }
+
+    return this.types.store.lentArrayOf(item);
   }
 
   private readonly mentionsLibraryParameter(method: Type): boolean {
-    if (!this.parts.mentionsParameter(method)) {
+    if (!this.types.mentionsParameter(method)) {
       return false;
     }
 
-    const params = this.parts.genericParameters(method);
+    const params = this.types.genericParameters(method);
     if (params == undefined) {
       return true;
     }
@@ -253,57 +285,71 @@ partial class ExpressionTypes {
       return true;
     }
 
-    return this.modules.isLibraryModule(param.module);
+    const isCode = this.types.isCheckedLibrary(param.module);
+
+    return this.types.isLibraryModule(param.module) && !isCode;
   }
 
-  private readonly filteredArray(expr: CallExpr, kept: Type): Type {
-    if (kept.kind != TypeKind.Array || !this.types.isOptional(kept.item)) {
+  private filteredArray(expr: CallExpr, kept: Type): Type {
+    const tree = this.types.program.tree;
+
+    if (
+      kept.kind != TypeKind.Array ||
+      !this.types.isOptional(this.types.store.itemOf(kept))
+    ) {
       return kept;
     }
 
-    const callback = expr.args[0]?.expr;
+    const callback = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (callback == undefined || !this.keepsDefined(callback)) {
       return kept;
     }
 
-    const defined = this.types.definedType(kept.item);
+    const defined = this.types.definedType(this.types.store.itemOf(kept));
 
-    return this.store.arrayOf(defined);
+    return this.types.store.arrayOf(defined);
   }
 
   private readonly keepsDefined(callback: Expr): boolean {
+    const tree = this.types.program.tree;
+
     if (callback.kind != ExprKind.Function) {
       return false;
     }
 
-    const fn = callback.fn;
-    const param = fn.params[0];
-    const only = fn.body?.body[0];
+    const fn = tree.functionOf(callback.fnId);
+    const param = tree.paramsOf(fn.paramsList)[0];
+    const only = tree.stmtsOf(tree.blockAt(fn.bodyId)?.bodyList)[0];
     if (param == undefined || only == undefined || !fn.concise) {
       return false;
     }
-    if (only.kind != StmtKind.Return || only.value == undefined) {
+    if (only.kind != StmtKind.Return) {
       return false;
     }
 
-    const test = only.value;
-    if (test.kind != ExprKind.Binary || test.op != BinaryOp.Ne) {
+    const test = tree.exprAt(only.valueId);
+    if (test == undefined || test.kind != ExprKind.Binary) {
+      return false;
+    }
+    if (test.op != BinaryOp.Ne) {
       return false;
     }
 
+    const left = tree.exprOf(test.lhsId);
+    const right = tree.exprOf(test.rhsId);
     const isLeft =
-      test.lhs.kind == ExprKind.Name &&
-      test.lhs.name == param.name &&
-      test.rhs.kind == ExprKind.Undefined;
+      left.kind == ExprKind.Name &&
+      left.name == param.name &&
+      right.kind == ExprKind.Undefined;
     const isRight =
-      test.rhs.kind == ExprKind.Name &&
-      test.rhs.name == param.name &&
-      test.lhs.kind == ExprKind.Undefined;
+      right.kind == ExprKind.Name &&
+      right.name == param.name &&
+      left.kind == ExprKind.Undefined;
 
     return isLeft || isRight;
   }
 
-  private readonly receiverVariants(receiver: Type, name: string): LibraryVariants {
+  private receiverVariants(receiver: Type, name: string): LibraryVariants {
     if (receiver.kind != TypeKind.Instance) {
       return { types: [], open: [] };
     }
@@ -318,9 +364,11 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const params = this.parts.genericParameters(type);
+    const tree = this.types.program.tree;
+
+    const params = this.types.genericParameters(type);
     if (type.kind != TypeKind.Function || params == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (params.length == 0) {
       const kind = this.namespaceKind(member, module);
@@ -329,8 +377,8 @@ partial class ExpressionTypes {
 
       return this.fieldValueCall(expr, member, type, kind, module);
     }
-    if (expr.optional || type.shape.self != undefined) {
-      return this.store.plain(TypeKind.Error);
+    if (expr.optional || this.types.store.selfTypeOf(type) != undefined) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const generic: GenericTarget = {
@@ -338,9 +386,9 @@ partial class ExpressionTypes {
       params,
       decls: [],
       home: module,
-      shape: type.shape,
+      shape: this.types.store.functionShapeOf(type),
       loc: member.loc,
-      typeArgs: member.typeArgs,
+      typeArgs: tree.typeRefsOf(member.typeArgsList),
       isLenient: true,
     };
 
@@ -353,24 +401,27 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const name = member.name;
     const base = this.types.apparent(object);
     if (base.kind == TypeKind.Array && kTakenMethods.includes(name)) {
-      return this.takenItem(member, base.item, module);
+      return this.takenItem(member, this.types.store.itemOf(base), module);
     }
 
     const isText =
       base.kind == TypeKind.String || base.kind == TypeKind.Template;
-    const index = expr.args[0]?.expr;
+    const index = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (!isText || index == undefined || !kCodeMethods.includes(name)) {
       return undefined;
     }
 
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
 
     this.typed(index, int, module);
 
-    if (this.isProvenIndex(member.object, index, module)) {
+    const objectExpr = tree.exprOf(member.objectId);
+    if (this.isProvenIndex(objectExpr, index, module)) {
       return int;
     }
 
@@ -378,9 +429,14 @@ partial class ExpressionTypes {
   }
 
   private takenItem(member: MemberExpr, item: Type, module: int): Type {
-    const isFilled = this.isProvenFilled(member.object, module);
+    const tree = this.types.program.tree;
 
-    this.takenFrom(member.object, module);
+    const object = tree.exprOf(member.objectId);
+    const isFilled = this.isProvenFilled(object, module);
+
+    const objectExpr = tree.exprOf(member.objectId);
+
+    this.takenFrom(objectExpr, module);
 
     if (isFilled) {
       return item;
@@ -396,39 +452,47 @@ partial class ExpressionTypes {
     receiver: Type,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const name = member.name;
     if (
       receiver.kind != TypeKind.Object ||
-      !this.library.isPlainReceiver(object)
+      !this.types.isPlainReceiver(object)
     ) {
       return;
     }
     if (kNumberLaterMethods.includes(name)) {
       return;
     }
-    if (receiver.fields.some((field) => field.name == name)) {
+    if (
+      this.types.store.fieldsOf(receiver).some((field) => field.name == name)
+    ) {
       return;
     }
 
-    this.looseArguments(expr.args, module);
-    this.report(module, member.loc, Code.PropertyMissing, {
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
+    this.errors.write(module, member.loc, Code.PropertyMissing, {
       word: name,
-      first: this.text.of(object),
+      first: this.types.typeText(object),
     });
   }
 
-  private readonly namespaceReadCheck(expr: MemberExpr, module: int): void {
-    const object = expr.object;
+  private namespaceReadCheck(expr: MemberExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
     if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
       return;
     }
 
-    const code = this.library.namespaceCode(object.name);
+    const code = this.types.namespaceCode(object.name);
     if (code != Code.NamespaceMemberMissing) {
       return;
     }
 
-    this.report(module, expr.loc, code, {
+    this.errors.write(module, expr.loc, code, {
       word: expr.name,
       first: object.name,
     });
@@ -439,18 +503,22 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): void {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
       return;
     }
 
-    const code = this.library.namespaceCode(object.name);
+    const code = this.types.namespaceCode(object.name);
     if (code == undefined) {
       return;
     }
 
-    this.looseArguments(expr.args, module);
-    this.report(module, member.loc, code, {
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
+    this.errors.write(module, member.loc, code, {
       word: member.name,
       first: object.name,
     });
@@ -461,7 +529,9 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     const isMath =
       object.kind == ExprKind.Name &&
       object.name == kMathName &&
@@ -472,31 +542,33 @@ partial class ExpressionTypes {
 
     const word = member.name;
     if (kMathConstants.includes(word)) {
-      this.looseArguments(expr.args, module);
-      this.report(module, member.loc, Code.MathConstantCalled, { word });
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
+      this.errors.write(module, member.loc, Code.MathConstantCalled, { word });
 
       return true;
     }
 
     const isRanged = word == "max" || word == "min";
-    if (!isRanged || expr.args.length > 0) {
+    if (!isRanged || tree.argumentsOf(expr.argsList).length > 0) {
       return false;
     }
 
-    const first = this.library.mathEndSign(word);
+    const first = this.types.mathEndSign(word);
 
-    this.report(module, member.loc, Code.MathNoValues, { word, first });
+    this.errors.write(module, member.loc, Code.MathNoValues, { word, first });
 
     return true;
   }
 
-  private readonly positionShape(object: Type, name: string): Type | undefined {
+  private positionShape(object: Type, name: string): Type | undefined {
     if (object.kind != TypeKind.Array) {
       return undefined;
     }
 
-    const open = this.store.plain(TypeKind.Unknown);
-    const receiver = this.resolver.libraryShape(kArrayShape, [open]);
+    const open = this.types.store.plain(TypeKind.Unknown);
+    const receiver = this.types.libraryShape(kArrayShape, [open]);
     if (receiver == undefined) {
       return undefined;
     }
@@ -505,7 +577,9 @@ partial class ExpressionTypes {
   }
 
   private readonly namespaceKind(member: MemberExpr, module: int): CallKind {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     const isMath =
       object.kind == ExprKind.Name &&
       object.name == kMathName &&

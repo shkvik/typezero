@@ -24,15 +24,17 @@ import {
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly readlineCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+  private readlineCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Name || this.types.isLibraryModule(module)) {
       return;
     }
 
-    const count = expr.args.length;
-    const hasSpread = expr.args.some((one) => one.spread);
-    const first = expr.args[0]?.expr;
+    const count = tree.argumentsOf(expr.argsList).length;
+    const hasSpread = tree.argumentsOf(expr.argsList).some((one) => one.spread);
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (hasSpread || count > 2 || first == undefined) {
       return;
     }
@@ -43,7 +45,11 @@ partial class ExpressionTypes {
       return this.readlineOptionsCheck(expr, first, module);
     }
 
-    this.readlineStreamsCheck(first, expr.args[1]?.expr, module);
+    this.readlineStreamsCheck(
+      first,
+      tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId),
+      module,
+    );
   }
 
   private readonly isReadlineCreate(callee: Expr, module: int): boolean {
@@ -60,7 +66,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const opened = this.program.modules[target.module];
+    const opened = this.types.program.modules[target.module];
     const name = this.importedName(callee, module);
 
     return (
@@ -70,7 +76,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly readlineOptionsCheck(
+  private readlineOptionsCheck(
     expr: CallExpr,
     options: Expr,
     module: int,
@@ -89,7 +95,7 @@ partial class ExpressionTypes {
     for (const name of kReadlineUnsupported) {
       const value = this.optionValue(options, name);
       if (value != undefined) {
-        return this.report(module, value.loc, Code.ReadlineOption, {
+        return this.errors.write(module, value.loc, Code.ReadlineOption, {
           word: name,
         });
       }
@@ -97,7 +103,12 @@ partial class ExpressionTypes {
 
     const input = this.optionValue(options, "input");
     if (input == undefined) {
-      return this.report(module, options.loc, Code.ReadlineNoInput, kNoDetails);
+      return this.errors.write(
+        module,
+        options.loc,
+        Code.ReadlineNoInput,
+        kNoDetails,
+      );
     }
 
     const output = this.optionValue(options, "output");
@@ -105,13 +116,18 @@ partial class ExpressionTypes {
     this.readlineStreamsCheck(input, output, module);
   }
 
-  private readonly readlineStreamsCheck(
+  private readlineStreamsCheck(
     input: Expr,
     output: Expr | undefined,
     module: int,
   ): void {
     if (!this.isProcessStream(input, "stdin", module)) {
-      return this.report(module, input.loc, Code.ReadlineNotStdin, kNoDetails);
+      return this.errors.write(
+        module,
+        input.loc,
+        Code.ReadlineNotStdin,
+        kNoDetails,
+      );
     }
     if (output == undefined || output.kind == ExprKind.Undefined) {
       return;
@@ -121,33 +137,39 @@ partial class ExpressionTypes {
       this.isProcessStream(output, "stdout", module) ||
       this.isProcessStream(output, "stderr", module);
     if (!isWritten) {
-      this.report(module, output.loc, Code.ReadlineOutput, kNoDetails);
+      this.errors.write(module, output.loc, Code.ReadlineOutput, kNoDetails);
     }
   }
 
-  private readonly isProcessStream(value: Expr, name: string, module: int): boolean {
+  private readonly isProcessStream(
+    value: Expr,
+    name: string,
+    module: int,
+  ): boolean {
+    const tree = this.types.program.tree;
+
     return (
       value.kind == ExprKind.Member &&
       value.name == name &&
-      this.isProcessName(value.object, module)
+      this.isProcessName(tree.exprOf(value.objectId), module)
     );
   }
 
-  private readonly isReadlineInterface(object: Type, module: int): boolean {
+  private isReadlineInterface(object: Type, module: int): boolean {
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Instance || base.name != kInterfaceName) {
       return false;
     }
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return false;
     }
 
-    const opened = this.program.modules[base.module];
+    const opened = this.types.program.modules[base.module];
 
     return opened != undefined && kReadlineModules.includes(opened.name);
   }
 
-  private readonly readlineMemberRead(
+  private readlineMemberRead(
     expr: MemberExpr,
     object: Type,
     module: int,
@@ -156,9 +178,9 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, expr.loc, Code.ReadlineNoMember, {
+    this.errors.write(module, expr.loc, Code.ReadlineNoMember, {
       word: expr.name,
-      first: this.text.of(object),
+      first: this.types.typeText(object),
     });
 
     return true;
@@ -170,6 +192,8 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const word = member.name;
     if (!this.isReadlineInterface(object, module)) {
       return undefined;
@@ -179,15 +203,20 @@ partial class ExpressionTypes {
     }
 
     if (kReadlineEvents.includes(word)) {
-      this.report(module, member.loc, Code.ReadlineEvents, { word });
+      this.errors.write(module, member.loc, Code.ReadlineEvents, { word });
     } else {
-      const first = this.text.of(object);
+      const first = this.types.typeText(object);
 
-      this.report(module, member.loc, Code.ReadlineNoMember, { word, first });
+      this.errors.write(module, member.loc, Code.ReadlineNoMember, {
+        word,
+        first,
+      });
     }
 
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 }

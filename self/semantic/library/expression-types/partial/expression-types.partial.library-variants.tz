@@ -30,18 +30,22 @@ import {
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
-  private readonly declaredVariants(
+  private declaredVariants(
     instance: InstanceType,
     name: string,
     isStatic: boolean,
   ): LibraryVariants {
-    const opened = this.program.modules[instance.module];
-    const declared = opened?.declared.find((one) => one.loc == instance.loc);
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[instance.module];
+    const declared = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == instance.loc);
     if (declared == undefined) {
       return { types: [], open: [] };
     }
 
-    const members = declared.members.filter(
+    const members = tree.declaredMembersOf(declared.membersList).filter(
       (one) => one.name == name && one.isStatic == isStatic,
     );
     if (members.length == 0 && !isStatic) {
@@ -51,19 +55,21 @@ partial class ExpressionTypes {
       return { types: [], open: [] };
     }
 
-    const context = this.resolver.classContext(
+    const context = this.types.classContext(
       instance,
-      declared.typeParams,
+      tree.typeParamsOf(declared.typeParamsList),
       instance.module,
     );
 
     return this.variantsOf(members, context);
   }
 
-  private readonly variantsOf(
+  private variantsOf(
     members: Read<DeclaredMember[]>,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): LibraryVariants {
+    const tree = this.types.program.tree;
+
     const types: FunctionType[] = [];
     const open: OpenVariant[] = [];
 
@@ -77,36 +83,40 @@ partial class ExpressionTypes {
       if (type == undefined && form.kind != DeclaredMemberKind.Field) {
         const result = this.openResult(member, context);
 
-        open.push({ params: form.params, result });
+        const paramsItem = tree.paramsOf(form.paramsList);
+
+        open.push({ params: paramsItem, result });
       }
     }
 
     return { types, open };
   }
 
-  private readonly openResult(
+  private openResult(
     member: DeclaredMember,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): Type | undefined {
-    const written = member.type;
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(member.typeId);
     if (written == undefined) {
       return undefined;
     }
 
     this.errors.beginTrial();
 
-    const result = this.resolver.resolve(written, context);
+    const result = this.types.resolve(written, context);
 
     this.errors.endTrial();
 
-    if (result.kind == TypeKind.Error || this.parts.mentionsParameter(result)) {
+    if (result.kind == TypeKind.Error || this.types.mentionsParameter(result)) {
       return undefined;
     }
 
     return result;
   }
 
-  private readonly parentVariantTypes(
+  private parentVariantTypes(
     instance: InstanceType,
     name: string,
   ): LibraryVariants {
@@ -118,19 +128,24 @@ partial class ExpressionTypes {
     return this.declaredVariants(parent, name, false);
   }
 
-  private readonly variantType(
+  private variantType(
     member: DeclaredMember,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): FunctionType | undefined {
+    const tree = this.types.program.tree;
+
     const form = member.form;
-    if (form.kind == DeclaredMemberKind.Field || form.typeParams.length > 0) {
+    if (
+      form.kind == DeclaredMemberKind.Field ||
+      tree.typeParamsOf(form.typeParamsList).length > 0
+    ) {
       return undefined;
     }
 
     const sites: ParameterSite[] = [];
 
-    for (const param of form.params) {
-      const type = param.type;
+    for (const param of tree.paramsOf(form.paramsList)) {
+      const type = tree.typeRefAt(param.typeId);
       if (type == undefined) {
         return undefined;
       }
@@ -144,7 +159,11 @@ partial class ExpressionTypes {
       });
     }
 
-    const signature = this.resolver.signature(sites, member.type, context);
+    const signature = this.types.signature(
+      sites,
+      tree.typeRefAt(member.typeId),
+      context,
+    );
     if (signature.kind != TypeKind.Function) {
       return undefined;
     }
@@ -158,9 +177,18 @@ partial class ExpressionTypes {
     variants: Read<LibraryVariants>,
     module: int,
   ): Type {
-    const chosen = this.quietVariant(expr.args, member.name, variants, module);
+    const tree = this.types.program.tree;
+
+    const chosen = this.quietVariant(
+      tree.argumentsOf(expr.argsList),
+      member.name,
+      variants,
+      module,
+    );
     if (chosen == undefined) {
-      this.looseValues(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseValues(args, module);
 
       return this.sharedResult(variants);
     }
@@ -171,9 +199,14 @@ partial class ExpressionTypes {
   }
 
   private looseValues(args: Read<CallArgument[]>, module: int): void {
+    const tree = this.types.program.tree;
+
     for (const arg of args) {
-      if (arg.expr.kind != ExprKind.Function) {
-        this.typed(arg.expr, undefined, module);
+      const exprExpr = tree.exprOf(arg.exprId);
+      if (exprExpr.kind != ExprKind.Function) {
+        const expr = tree.exprOf(arg.exprId);
+
+        this.typed(expr, undefined, module);
       }
     }
   }
@@ -184,19 +217,19 @@ partial class ExpressionTypes {
     variants: Read<LibraryVariants>,
     module: int,
   ): FunctionType | undefined {
+    const tree = this.types.program.tree;
+
     const count = args.length;
-    const ranked = this.calls.typeVariants(name, variants.types);
-    const counted = ranked.filter((one) =>
-      this.overloads.isCountFitting(one.type, count),
-    );
-    const others = variants.open.filter((one) =>
-      this.overloads.isCountTaking(one.params, count),
+    const ranked = this.types.typeVariants(name, variants.types);
+    const counted = this.countFitting(ranked, count);
+    const hasOthers = variants.open.some((one) =>
+      this.types.isCountTaking(one.params, count),
     );
     const isPlain = args.every(
-      (arg) => !arg.spread && arg.expr.kind != ExprKind.Function,
+      (arg) => !arg.spread && tree.exprOf(arg.exprId).kind != ExprKind.Function,
     );
     const only = counted[0];
-    const isOnly = counted.length == 1 && others.length == 0;
+    const isOnly = counted.length == 1 && !hasOthers;
     if (isOnly && only != undefined && !isPlain) {
       return only.type;
     }
@@ -205,28 +238,33 @@ partial class ExpressionTypes {
     }
 
     const given = this.quietArguments(args, module);
-    const applicable: RankedVariant[] = [];
+    const fitting: int[] = [];
 
-    for (const variant of counted) {
+    for (let index = 0; index < counted.length; index++) {
+      const variant = counted[index];
+      if (variant == undefined) {
+        continue;
+      }
+
       const reason = this.variantRanks(args, given, variant, module);
       if (reason == "") {
-        applicable.push(variant);
+        fitting.push(index);
       }
     }
 
-    const best = applicable.find((one) =>
-      this.overloads.isBestVariant(one, applicable),
-    );
-    const chosen = best ?? applicable[0];
+    const best = this.bestVariantAt(counted, fitting) ?? fitting[0];
+    if (best == undefined) {
+      return undefined;
+    }
 
-    return chosen?.type;
+    return counted[best]?.type;
   }
 
   private readonly sharedResult(variants: Read<LibraryVariants>): Type {
     const results: (Type | undefined)[] = [];
 
     for (const type of variants.types) {
-      results.push(type.shape.result);
+      results.push(this.types.store.returnTypeOf(type));
     }
 
     for (const other of variants.open) {
@@ -235,9 +273,9 @@ partial class ExpressionTypes {
 
     const first = results[0];
     const isShared =
-      first != undefined && results.every((result) => result == first);
+      first != undefined && results.every((result) => result?.id == first.id);
     if (!isShared || first == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return first;
@@ -250,16 +288,18 @@ partial class ExpressionTypes {
     home: int,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const variants = this.functionVariants(fn, home);
-    const count = expr.args.length;
-    const isPlain = expr.args.every(
-      (arg) => !arg.spread && arg.expr.kind != ExprKind.Function,
+    const count = tree.argumentsOf(expr.argsList).length;
+    const isPlain = tree.argumentsOf(expr.argsList).every(
+      (arg) => !arg.spread && tree.exprOf(arg.exprId).kind != ExprKind.Function,
     );
     const isOpenFitting = variants.open.some((one) =>
-      this.overloads.isCountTaking(one.params, count),
+      this.types.isCountTaking(one.params, count),
     );
     if (isOpenFitting || !isPlain) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const chosen = this.cleanVariant(expr, callee, variants.types, module);
@@ -278,7 +318,7 @@ partial class ExpressionTypes {
     );
 
     if (result.kind == TypeKind.Promise) {
-      this.lenientCalls.delete(expr);
+      this.lenientCalls.delete(expr.id);
     }
 
     return result;
@@ -290,10 +330,12 @@ partial class ExpressionTypes {
     types: Read<FunctionType[]>,
     module: int,
   ): FunctionType | undefined {
-    const count = expr.args.length;
+    const tree = this.types.program.tree;
+
+    const count = tree.argumentsOf(expr.argsList).length;
 
     for (const type of types) {
-      if (!this.overloads.isCountFitting(type, count)) {
+      if (!this.types.isCountFitting(type, count)) {
         continue;
       }
 
@@ -310,7 +352,10 @@ partial class ExpressionTypes {
   }
 
   private functionVariants(fn: FunctionDecl, home: int): LibraryVariants {
-    const items = this.program.modules[home]?.file.items ?? [];
+    const tree = this.types.program.tree;
+
+    const items =
+      tree.stmtsOf(this.types.program.modules[home]?.file.itemsList) ?? [];
     const types: FunctionType[] = [];
     const open: OpenVariant[] = [];
 
@@ -318,8 +363,11 @@ partial class ExpressionTypes {
       if (item.kind != StmtKind.Function || item.name != fn.name) {
         continue;
       }
-      if (item.typeParams.length > 0) {
-        open.push({ params: item.params });
+      const typeParams = tree.typeParamsOf(item.typeParamsList);
+      if (typeParams.length > 0) {
+        const paramsItem = tree.paramsOf(item.paramsList);
+
+        open.push({ params: paramsItem });
         continue;
       }
 

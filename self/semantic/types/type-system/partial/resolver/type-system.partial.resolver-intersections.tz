@@ -1,0 +1,179 @@
+import { TypeSystem } from "../../type-system.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  ObjectField,
+  OperationKind,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private intersection(
+    ref: TypeRef,
+    context: Read<TypeContext>,
+  ): Type {
+    const tree = this.program.tree;
+
+    const args = tree.typeRefsOf(ref.argsList);
+    const parts = this.resolveAll(args, context);
+    let joined = parts[0] ?? this.store.plain(TypeKind.Error);
+
+    for (let index = 1; index < parts.length; index++) {
+      const part = parts[index];
+
+      joined = this.joined(joined, part, ref.loc, context);
+    }
+
+    return joined;
+  }
+
+  private joined(
+    first: Type,
+    second: Type,
+    loc: int,
+    context: Read<TypeContext>,
+  ): Type {
+    if (first.id == second.id) {
+      return first;
+    }
+    if (first.kind == TypeKind.Error || second.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isOpen(first) || this.isOpen(second)) {
+      return this.operation(OperationKind.Intersection, [first, second], "");
+    }
+    if (second.kind == TypeKind.String) {
+      return this.onlyTexts(first);
+    }
+    if (
+      second.kind == TypeKind.Object &&
+      this.store.fieldsOf(second).length == 0
+    ) {
+      return this.withoutUndefined(first);
+    }
+
+    const other = this.notObject(first) ?? this.notObject(second);
+    if (other != undefined) {
+      const word = this.typeText(other);
+
+      this.report(context.module, loc, Code.IntersectionNeedsObjects, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.eachWithEach(first, second, loc, context);
+  }
+
+  private readonly notObject(type: Type): Type | undefined {
+    const parts = this.resolverPartsOf(type);
+    if (parts.some((part) => part.kind == TypeKind.Undefined)) {
+      return type;
+    }
+
+    return parts.find((part) => part.kind != TypeKind.Object);
+  }
+
+  private eachWithEach(
+    first: Type,
+    second: Type,
+    loc: int,
+    context: Read<TypeContext>,
+  ): Type {
+    const merged: Type[] = [];
+
+    for (const left of this.resolverPartsOf(first)) {
+      for (const right of this.resolverPartsOf(second)) {
+        const fields = this.mergedFields(left, right, loc, context);
+        if (fields == undefined) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        const object = this.store.objectOf(fields);
+
+        merged.push(object);
+      }
+    }
+
+    return this.store.unionOf(merged);
+  }
+
+  private mergedFields(
+    left: Type,
+    right: Type,
+    loc: int,
+    context: Read<TypeContext>,
+  ): ObjectField[] | undefined {
+    if (left.kind != TypeKind.Object || right.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const fields: ObjectField[] = [];
+
+    for (const own of this.store.fieldsOf(left)) {
+      const other = this.store
+        .fieldsOf(right)
+        .find((one) => one.name == own.name);
+      const both = this.sameField(own, other, loc, context);
+      if (both == undefined) {
+        return undefined;
+      }
+
+      fields.push(both);
+    }
+
+    for (const added of this.store.fieldsOf(right)) {
+      if (!this.store.fieldsOf(left).some((one) => one.name == added.name)) {
+        fields.push(added);
+      }
+    }
+
+    return fields;
+  }
+
+  private sameField(
+    first: ObjectField,
+    second: ObjectField | undefined,
+    loc: int,
+    context: Read<TypeContext>,
+  ): ObjectField | undefined {
+    if (second == undefined) {
+      return first;
+    }
+
+    const type = this.commonType(first.type, second.type);
+    if (type == undefined) {
+      const one = this.typeText(first.type);
+      const other = this.typeText(second.type);
+
+      this.report(context.module, loc, Code.IntersectionFieldTypes, {
+        word: second.name,
+        first: one,
+        second: other,
+      });
+
+      return undefined;
+    }
+
+    return {
+      name: second.name,
+      type,
+      optional: first.optional && second.optional,
+      readonly: first.readonly || second.readonly,
+    };
+  }
+
+  private readonly commonType(first: Type, second: Type): Type | undefined {
+    if (first.id == second.id || this.baseOf(first)?.id == second.id) {
+      return first;
+    }
+    if (this.baseOf(second)?.id == first.id) {
+      return second;
+    }
+
+    return undefined;
+  }
+}

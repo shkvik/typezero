@@ -1,0 +1,451 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kArrayName,
+  kArraySlice,
+  kArraySliceLent,
+  kFlagType,
+  kFromName,
+  kIntType,
+  kMapCopy,
+  kMapCopyName,
+  kMapEntries,
+  kMapEntriesName,
+  kMapKeys,
+  kMapKeysName,
+  kMapValues,
+  kMapValuesName,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private dictItems(
+    frame: Frame,
+    expr: Expr,
+    isKeys: boolean,
+  ): IrValue | undefined {
+    const object = this.typeOf(expr);
+    if (object != undefined && this.isTzMap(object)) {
+      const name = this.pick(isKeys, kMapKeysName, kMapValuesName);
+
+      return this.mapListed(frame, name, expr, object);
+    }
+
+    const map = this.value(frame, expr);
+    if (object == undefined || object.kind != TypeKind.Dict) {
+      this.notLowered(frame.module, expr.loc, "this dictionary");
+
+      return undefined;
+    }
+    if (map == undefined) {
+      return undefined;
+    }
+
+    const item = this.dictItemType(object, isKeys);
+    const element = this.descriptor(item);
+    if (element == undefined) {
+      this.notLowered(frame.module, expr.loc, "a dictionary of these types");
+
+      return undefined;
+    }
+
+    const name = this.pick(isKeys, kMapKeys, kMapValues);
+    const listing = this.ir.declare(name, kPointerType, [
+      kPointerType,
+      kPointerType,
+    ]);
+    const array = frame.made.call(listing, [map.value, element]);
+    const tz = this.values.types.store.arrayOf(item);
+
+    this.dropping(frame, map);
+
+    return { type: kPointerType, value: array, tz, owned: true };
+  }
+
+  private readonly dictItemType(object: Type, isKeys: boolean): Type {
+    if (object.kind != TypeKind.Dict || isKeys) {
+      return this.dictKeyType(object);
+    }
+
+    return this.values.types.store.valueOf(object);
+  }
+
+  private readonly dictKeyType(object: Type): Type {
+    if (object.kind != TypeKind.Dict) {
+      return object;
+    }
+
+    return this.values.types.store.keyOf(object);
+  }
+
+  private newDictFrom(
+    frame: Frame,
+    expr: NewExpr,
+    type: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const source = tree.argumentsOf(expr.argsList)[0];
+    if (source == undefined) {
+      return this.newDict(frame, type, expr.loc);
+    }
+
+    const exprExpr = tree.exprOf(source.exprId);
+    const from = this.typeOf(exprExpr);
+    if (from != undefined && from.kind == TypeKind.Dict) {
+      const sourceExpr = tree.exprOf(source.exprId);
+
+      return this.dictCopy(frame, sourceExpr, type);
+    }
+
+    const items = this.sourceItems(frame, tree.exprOf(source.exprId));
+    if (items == undefined || items.tz.kind != TypeKind.Array) {
+      this.notLowered(frame.module, expr.loc, "a dictionary from this source");
+
+      return undefined;
+    }
+
+    const made = this.newDict(frame, type, expr.loc);
+    if (made == undefined) {
+      return undefined;
+    }
+    if (this.isTzMap(type)) {
+      this.mapFilled(frame, made, items, type);
+      if (this.isCopyEntries(type)) {
+        this.dropping(frame, items);
+      }
+
+      return made;
+    }
+
+    this.itemsAdded(frame, made, items, type);
+    this.dropping(frame, items);
+
+    return made;
+  }
+
+  private sourceItems(frame: Frame, expr: Expr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const listed = this.listedDict(expr);
+    if (listed != undefined) {
+      return this.dictItems(
+        frame,
+        tree.exprOf(listed.objectId),
+        listed.name == "keys",
+      );
+    }
+
+    return this.value(frame, expr);
+  }
+
+  private listedDict(expr: Expr): MemberExpr | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (
+      expr.kind != ExprKind.Call ||
+      tree.argumentsOf(expr.argsList).length != 0
+    ) {
+      return undefined;
+    }
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const objectExpr = tree.exprOf(callee.objectId);
+    const object = this.typeOf(objectExpr);
+    const isListing = callee.name == "keys" || callee.name == "values";
+    if (object == undefined || object.kind != TypeKind.Dict || !isListing) {
+      return undefined;
+    }
+
+    return callee;
+  }
+
+  private dictCopy(
+    frame: Frame,
+    source: Expr,
+    type: Type,
+  ): IrValue | undefined {
+    if (this.isTzMap(type) && !this.isCopyEntries(type)) {
+      return this.mapMoved(frame, source, type);
+    }
+    if (this.isTzMap(type)) {
+      return this.mapListed(frame, kMapCopyName, source, type);
+    }
+
+    const layout = this.dictLayout(type);
+    const from = this.value(frame, source);
+    if (layout == undefined || from == undefined) {
+      this.notLowered(frame.module, source.loc, "a dictionary of these types");
+
+      return undefined;
+    }
+
+    const copying = this.ir.declare(kMapCopy, kPointerType, [
+      kPointerType,
+      kPointerType,
+    ]);
+    const map = frame.made.call(copying, [from.value, layout.descriptor]);
+
+    this.dropping(frame, from);
+
+    return { type: kPointerType, value: map, tz: type, owned: true };
+  }
+
+  private itemsAdded(
+    frame: Frame,
+    map: IrValue,
+    items: IrValue,
+    type: Type,
+  ): void {
+    const array = items.value;
+    const tz = items.tz;
+    if (tz.kind != TypeKind.Array) {
+      return;
+    }
+
+    const item = this.irType(this.values.types.store.itemOf(tz));
+    if (item == undefined) {
+      return;
+    }
+
+    const cond = frame.made.block("fill.cond");
+    const body = frame.made.block("fill.body");
+    const end = frame.made.block("fill.end");
+    const counter = frame.made.slot(kIntType, "fill.index");
+
+    frame.made.store(this.ir.zero(kIntType), counter);
+    frame.made.open(cond);
+
+    const index = frame.made.load(kIntType, counter);
+    const length = this.arrayLength(frame, array);
+    const isInside = frame.made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      index,
+      length,
+    );
+
+    frame.made.conditionalBranch(isInside, body, end);
+    frame.made.open(body);
+
+    const data = this.arrayData(frame, array);
+    const address = frame.made.element(item, data, index);
+    const loaded: IrValue = {
+      type: item,
+      value: frame.made.load(item, address),
+      tz: this.values.types.store.itemOf(tz),
+    };
+    const one = this.ir.integer(kIntType, "1");
+
+    this.entryAdded(frame, map.value, loaded, type);
+    frame.made.store(frame.made.binary(IrOpcode.Add, index, one), counter);
+    frame.made.branch(cond);
+    frame.made.open(end);
+  }
+
+  private entryAdded(
+    frame: Frame,
+    map: LLVMValue,
+    item: IrValue,
+    type: Type,
+  ): void {
+    const dictLayout = this.dictLayout(type);
+    if (type.kind != TypeKind.Dict || dictLayout == undefined) {
+      return;
+    }
+    if (type.dict == DictKind.Set) {
+      const key = this.converted(
+        frame,
+        item,
+        this.values.types.store.keyOf(type),
+        0,
+      );
+      if (key != undefined) {
+        this.dictAdd(frame, map, key);
+      }
+
+      return;
+    }
+
+    const pair = this.layoutOf(item.tz);
+    const first = this.layoutField(pair, "0");
+    const second = this.layoutField(pair, "1");
+    if (pair == undefined || first == undefined || second == undefined) {
+      return;
+    }
+
+    const keyAddress = frame.made.field(pair.struct, item.value, first.index);
+    const valueAddress = frame.made.field(
+      pair.struct,
+      item.value,
+      second.index,
+    );
+    const keyRead: IrValue = {
+      type: first.ir,
+      value: frame.made.load(first.ir, keyAddress),
+      tz: first.type,
+    };
+    const valueRead: IrValue = {
+      type: second.ir,
+      value: frame.made.load(second.ir, valueAddress),
+      tz: second.type,
+    };
+    const key = this.converted(
+      frame,
+      keyRead,
+      this.values.types.store.keyOf(type),
+      0,
+    );
+    const value = this.converted(
+      frame,
+      valueRead,
+      this.values.types.store.valueOf(type),
+      0,
+    );
+    if (key == undefined || value == undefined) {
+      return;
+    }
+
+    const entry = this.dictAdd(frame, map, key);
+    const owned = this.owning(frame, value);
+
+    this.entryStored(frame, entry, dictLayout.valueOffset, owned);
+  }
+
+  private readonly isArrayFrom(member: MemberExpr): boolean {
+    const tree = this.values.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+
+    return (
+      object.kind == ExprKind.Name &&
+      object.name == kArrayName &&
+      member.name == kFromName
+    );
+  }
+
+  private arrayFrom(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const source = tree.argumentsOf(call.argsList)[0];
+    if (source == undefined || tree.argumentsOf(call.argsList).length != 1) {
+      this.notLowered(frame.module, call.loc, "this call of Array.from");
+
+      return undefined;
+    }
+
+    const expr = tree.exprOf(source.exprId);
+    const type = this.typeIn(frame, expr);
+    const exprExpr = tree.exprOf(source.exprId);
+    const listed = this.listedDict(exprExpr);
+    if (listed != undefined) {
+      return this.dictItems(
+        frame,
+        tree.exprOf(listed.objectId),
+        listed.name == "keys",
+      );
+    }
+    if (type != undefined && type.kind == TypeKind.Dict) {
+      const sourceExpr = tree.exprOf(source.exprId);
+
+      return this.dictItems(frame, sourceExpr, true);
+    }
+    if (type == undefined || type.kind != TypeKind.Array) {
+      this.notLowered(frame.module, call.loc, "this call of Array.from");
+
+      return undefined;
+    }
+
+    const given = this.value(frame, tree.exprOf(source.exprId));
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const result = this.typeOf(call) ?? type;
+    const isLent = this.isLookingArray(result);
+    const name = this.pick(isLent, kArraySliceLent, kArraySlice);
+    const copying = this.ir.declare(name, kPointerType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+    ]);
+    const zero = this.ir.zero(kIntType);
+    const none = this.ir.zero(kFlagType);
+    const copy = frame.made.call(copying, [given.value, zero, zero, none]);
+    const tz = this.fromType(result, type);
+
+    this.dropping(frame, given);
+
+    return { type: kPointerType, value: copy, tz, owned: true };
+  }
+
+  private fromType(result: Type, source: Type): Type {
+    if (this.isLookingArray(result)) {
+      return result;
+    }
+
+    return source;
+  }
+
+  private dictEntries(
+    frame: Frame,
+    expr: Expr,
+    type: Type,
+  ): IrValue | undefined {
+    if (type.kind != TypeKind.Dict) {
+      return undefined;
+    }
+    if (this.isTzMap(type)) {
+      return this.mapListed(frame, kMapEntriesName, expr, type);
+    }
+
+    const tuple = this.values.types.store.plainTuple([
+      this.values.types.store.keyOf(type),
+      this.values.types.store.valueOf(type),
+    ]);
+    const layout = this.layoutOf(tuple);
+    const element = this.descriptor(tuple);
+    const map = this.value(frame, expr);
+    if (layout == undefined || element == undefined || map == undefined) {
+      this.notLowered(frame.module, expr.loc, "the entries of this map");
+
+      return undefined;
+    }
+
+    const listing = this.ir.declare(kMapEntries, kPointerType, [
+      kPointerType,
+      kPointerType,
+      kPointerType,
+      kIntType,
+    ]);
+    const size = this.ir.integer(kIntType, `${layout.size}`);
+    const args = [map.value, element, layout.descriptor, size];
+    const array = frame.made.call(listing, args);
+    const tz = this.values.types.store.arrayOf(tuple);
+
+    this.dropping(frame, map);
+
+    return { type: kPointerType, value: array, tz, owned: true };
+  }
+}

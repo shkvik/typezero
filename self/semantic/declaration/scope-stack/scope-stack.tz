@@ -29,13 +29,13 @@ export class ScopeStack {
     this.depth -= 1;
   }
 
-  public declaredValue(name: string): ScopeEntry | undefined {
+  public declaredValue(name: string): Read<ScopeEntry> | undefined {
     this.ensureScope();
 
     return this.scopes[this.scopes.length - 1]?.values.get(name);
   }
 
-  public declaredType(name: string): ScopeEntry | undefined {
+  public declaredType(name: string): Read<ScopeEntry> | undefined {
     this.ensureScope();
 
     return this.scopes[this.scopes.length - 1]?.types.get(name);
@@ -55,7 +55,7 @@ export class ScopeStack {
     this.scopes[this.scopes.length - 1]?.types.set(symbol.name, entry);
   }
 
-  public readonly findValue(name: string): ScopeEntry | undefined {
+  public readonly findValue(name: string): Read<ScopeEntry> | undefined {
     for (let index = this.scopes.length - 1; index >= 0; index--) {
       const entry = this.scopes[index]?.values.get(name);
       if (entry != undefined) {
@@ -66,7 +66,7 @@ export class ScopeStack {
     return undefined;
   }
 
-  public readonly findType(name: string): ScopeEntry | undefined {
+  public readonly findType(name: string): Read<ScopeEntry> | undefined {
     for (let index = this.scopes.length - 1; index >= 0; index--) {
       const entry = this.scopes[index]?.types.get(name);
       if (entry != undefined) {
@@ -77,10 +77,14 @@ export class ScopeStack {
     return undefined;
   }
 
-  public readonly markLive(name: string): void {
-    const entry = this.findValue(name);
-    if (entry != undefined) {
-      entry.live = true;
+  public markLive(name: string): void {
+    for (let index = this.scopes.length - 1; index >= 0; index--) {
+      const entry = this.scopes[index]?.values.get(name);
+      if (entry != undefined) {
+        entry.live = true;
+
+        return;
+      }
     }
   }
 

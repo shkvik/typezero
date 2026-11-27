@@ -1,0 +1,237 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  ProofRange,
+} from "../../../flow/proof-rules/types/proof-rules.types.tz";
+import {
+  kArgumentRanges,
+} from "../../library-rules/const/library-rules.const.ranges.tz";
+import {
+  RangeReceiver,
+} from "../../library-rules/types/library-rules.types.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  kPromiseClass,
+  kPromiseStatics,
+  kSplitName,
+} from "../../library-rules/const/library-rules.const.tz";
+import {
+  CallKind,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  kPromisePlaceholder,
+} from "../../../code/statement-rules/const/statement-rules.const.tz";
+
+partial class TypeSystem {
+  public isJsonHolder(type: Type): boolean {
+    return this.definedType(type).kind == TypeKind.Json;
+  }
+
+  public readonly instanceReceiver(type: InstanceType): Type | undefined {
+    if (!this.isLibraryModule(type.module)) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  public readonly isPlainReceiver(object: Type): boolean {
+    const base = this.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly namespaceCode(name: string): Code | undefined {
+    switch (name) {
+      case "Math":
+      case "Number":
+        return Code.NamespaceMemberMissing;
+      case "JSON":
+        return Code.JsonMemberMissing;
+      case "Object":
+        return Code.ObjectStaticRefused;
+      case "Promise":
+        return Code.PromiseStaticRefused;
+      case "console":
+        return Code.ConsoleMemberRefused;
+      default:
+        return undefined;
+    }
+  }
+
+  public readonly mathEndSign(word: string): string {
+    if (word == "max") {
+      return "-";
+    }
+
+    return "";
+  }
+
+  public maskOf(object: Type, method: Type): boolean[] {
+    if (object.kind == TypeKind.Dict) {
+      return [];
+    }
+
+    return this.libraryPositionsOf(method);
+  }
+
+  public readonly receiverKind(object: Type): CallKind {
+    const base = this.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Dict:
+        return CallKind.Positional;
+      default:
+        return CallKind.Library;
+    }
+  }
+
+  public readonly isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
+    const tree = this.program.tree;
+
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+
+    return (
+      member.name == kSplitName &&
+      first != undefined &&
+      first.kind == ExprKind.RegexLit
+    );
+  }
+
+  public readonly isMathNumber(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  public readonly mathOneHint(arg: Expr, type: Type, common: Type): string {
+    const code = this.numberCode(type, common);
+    const word = this.operandName(arg);
+    const other = this.conversionName(common);
+    if (code == Code.ConvertExplicitly) {
+      return `; convert it explicitly: '${word}.${other}()'`;
+    }
+    if (code == Code.RoundThenConvert) {
+      return `; round it first, then convert: 'Math.trunc(${word}).${other}()' (or Math.round, Math.floor, Math.ceil)`;
+    }
+
+    return "";
+  }
+
+  public readonly promiseHolderText(holder: Expr): string {
+    if (holder.kind == ExprKind.Name) {
+      return holder.name;
+    }
+
+    return kPromisePlaceholder;
+  }
+
+  public readonly executorCheck(expr: NewExpr, name: string): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+
+    const executor = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (name != kPromiseClass || executor == undefined) {
+      return errors;
+    }
+    if (executor.kind != ExprKind.Function) {
+      return errors;
+    }
+
+    const fn = tree.functionOf(executor.fnId);
+    const second = tree.paramsOf(fn.paramsList)[1];
+    if (second != undefined) {
+      errors.push({
+        code: Code.PromiseRejectParam,
+        loc: second.loc,
+        details: kNoDetails,
+      });
+    }
+
+    return errors;
+  }
+
+  public readonly promiseMissingCheck(member: MemberExpr): Checked<boolean> {
+    if (kPromiseStatics.includes(member.name)) {
+      return { value: false };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.PromiseStaticRefused,
+        loc: member.loc,
+        details: {
+          word: member.name,
+        },
+      },
+    };
+  }
+
+  public argumentRange(object: Type, name: string): ProofRange | undefined {
+    const receiver = this.rangeReceiver(object);
+    const row = kArgumentRanges.find(
+      (one) => one.receiver == receiver && one.name == name,
+    );
+
+    return row?.range;
+  }
+
+  private libraryPositionsOf(method: Type): boolean[] {
+    if (method.kind != TypeKind.Function) {
+      return [];
+    }
+
+    return this.store.paramsOf(method).map((param) => {
+      const base = this.definedType(param.type);
+
+      return base.kind == TypeKind.Int && !base.wraps;
+    });
+  }
+
+  private rangeReceiver(object: Type): RangeReceiver {
+    const base = this.definedType(object);
+    if (this.isNumber(base)) {
+      return RangeReceiver.Number;
+    }
+
+    switch (base.kind) {
+      case TypeKind.String:
+        return RangeReceiver.Text;
+      case TypeKind.Iterator:
+        return RangeReceiver.Iterator;
+      default:
+        return RangeReceiver.Other;
+    }
+  }
+}

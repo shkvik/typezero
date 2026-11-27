@@ -18,11 +18,16 @@ import {
 
 partial class ExpressionTypes {
   private pathKey(expr: Expr, module: int): string | undefined {
+    const tree = this.types.program.tree;
+
     if (expr.kind == ExprKind.OptionalChain) {
-      return this.pathKey(expr.chain, module);
+      const chain = tree.exprOf(expr.chainId);
+
+      return this.pathKey(chain, module);
     }
     if (expr.kind == ExprKind.Member) {
-      const object = this.pathKey(expr.object, module);
+      const objectExpr = tree.exprOf(expr.objectId);
+      const object = this.pathKey(objectExpr, module);
       if (object == undefined) {
         return undefined;
       }
@@ -85,20 +90,24 @@ partial class ExpressionTypes {
   }
 
   private assignedTyped(expr: AssignExpr, module: int): Type {
-    const target = expr.target;
+    const tree = this.types.program.tree;
 
-    this.writtenTargets.add(target);
+    const target = tree.exprOf(expr.targetId);
+
+    this.writtenTargets.add(target.id);
 
     if (this.logicalTargetCheck(expr, module)) {
-      this.typed(expr.value, undefined, module);
+      const value = tree.exprOf(expr.valueId);
 
-      return this.store.plain(TypeKind.Error);
+      this.typed(value, undefined, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.processAssignCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.statsDateCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const isCompound = expr.op != undefined && expr.op != BinaryOp.Nullish;
@@ -108,18 +117,22 @@ partial class ExpressionTypes {
       this.unionTargetCheck(target, module) ||
       (isCompound && this.recordTargetCheck(target, module));
     if (isRefused) {
-      this.typed(expr.value, undefined, module);
+      const valueExpr = tree.exprOf(expr.valueId);
 
-      return this.store.plain(TypeKind.Error);
+      this.typed(valueExpr, undefined, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
     if (expr.op != undefined && this.fieldReadEarly(target, module)) {
-      this.typed(expr.value, undefined, module);
+      const exprValue = tree.exprOf(expr.valueId);
+
+      this.typed(exprValue, undefined, module);
       this.fieldSetMark(target, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const source = expr.value;
+    const source = tree.exprOf(expr.valueId);
     const isMade =
       source.kind == ExprKind.Name && source.name.startsWith(kHiddenMark);
     if (target.kind == ExprKind.Index && !isMade) {
@@ -134,7 +147,7 @@ partial class ExpressionTypes {
       this.forgetPatterned(target, module);
       this.fieldSetMark(target, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     if (expr.op == BinaryOp.Nullish) {
@@ -146,15 +159,15 @@ partial class ExpressionTypes {
     this.decimalAssignCheck(expr, tested, module);
 
     if (isOwnTarget && this.compoundUndefinedCheck(expr, tested, module)) {
-      this.typed(expr.value, undefined, module);
+      this.typed(tree.exprOf(expr.valueId), undefined, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (expr.op == BinaryOp.LogOr || expr.op == BinaryOp.LogAnd) {
       const tested = current ?? declared;
-      const use = this.flows.assignUse(expr.op);
+      const use = this.types.assignUse(expr.op);
 
-      this.checkTruthy(target, tested, use, expr.value, module);
+      this.checkTruthy(target, tested, use, tree.exprOf(expr.valueId), module);
     }
 
     const given = this.assignedValue(expr, declared, tested, module);
@@ -166,13 +179,13 @@ partial class ExpressionTypes {
       return given;
     }
 
-    const fact = this.flows.assignedFact(expr.op, declared, current, given);
+    const fact = this.types.assignedFact(expr.op, declared, current, given);
 
     this.forgetPath(key);
     this.forgetFieldsNamed(target);
 
     if (fact != undefined) {
-      this.facts = this.flows.withFact(this.facts, key, fact);
+      this.facts = this.types.withFact(this.facts, key, fact);
     }
 
     this.assignedBounds(expr, module);
@@ -186,21 +199,26 @@ partial class ExpressionTypes {
     tested: Type,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const op = expr.op;
-    if (op != undefined && this.assignments.isArithmetic(op)) {
-      const type = this.assignments.compoundTarget(declared, tested);
+    if (op != undefined && this.types.isArithmetic(op)) {
+      const type = this.types.compoundTarget(declared, tested);
 
       return this.compoundValue(expr, op, type, module);
     }
 
-    const target = expr.target;
-    const wanted = this.flows.assignedWanted(op, declared);
-    const given = this.typed(expr.value, wanted, module);
+    const target = tree.exprOf(expr.targetId);
+    const wanted = this.types.assignedWanted(op, declared);
+    const value = tree.exprOf(expr.valueId);
+    const given = this.typed(value, wanted, module);
     const isChecked =
       !this.isLibraryTarget(target, module) &&
       !this.isPlacedLiteral(target, given, module);
     if (wanted != undefined && isChecked) {
-      this.coerce(expr.value, given, wanted, module, kNoPlace);
+      const valueExpr = tree.exprOf(expr.valueId);
+
+      this.coerce(valueExpr, given, wanted, module, kNoPlace);
     }
 
     this.lengthAssignCheck(expr, given, module);
@@ -220,7 +238,7 @@ partial class ExpressionTypes {
     return this.knownFact(key) ?? declared;
   }
 
-  private readonly fixedUpdateCheck(target: Expr, module: int): boolean {
+  private fixedUpdateCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Name) {
       return false;
     }
@@ -235,19 +253,19 @@ partial class ExpressionTypes {
 
   private updatedTyped(target: Expr, module: int): Type {
     if (this.dictTargetCheck(target, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (target.kind == ExprKind.Index) {
       this.arrayWriteCheck(target, true, module);
     }
     if (this.recordTargetCheck(target, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.updateTargetCheck(target, module);
 
     if (this.fixedUpdateCheck(target, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const type = this.typed(target, undefined, module);

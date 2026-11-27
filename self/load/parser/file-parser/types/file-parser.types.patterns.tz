@@ -1,4 +1,6 @@
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
 
 export type PatternElement = {
   readonly loc: int;

@@ -1,0 +1,356 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kChangeEventField,
+  kChangeListenerField,
+  kEachEvent,
+  kListenerMethods,
+  kNoEvents,
+  kServiceEvents,
+} from "../../event-rules/const/event-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly isListenerMethod(name: string): boolean {
+    return kListenerMethods.includes(name);
+  }
+
+  public readonly isServiceEvent(name: string): boolean {
+    return kServiceEvents.includes(name);
+  }
+
+  public serviceArgs(): Type {
+    const text = this.store.plain(TypeKind.String);
+    const unknown = this.store.plain(TypeKind.Unknown);
+    const change = this.store.objectOf([
+      { name: kChangeEventField, type: text, optional: false, readonly: false },
+      {
+        name: kChangeListenerField,
+        type: unknown,
+        optional: false,
+        readonly: false,
+      },
+    ]);
+
+    return this.store.tupleOf({
+      items: [change],
+      readonly: false,
+      required: 1,
+      rest: -1,
+    });
+  }
+
+  public mapError(loc: int, events: Type): SourceError | undefined {
+    if (events.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (events.kind == TypeKind.Dict) {
+      return this.recordMapError(loc, this.store.valueOf(events));
+    }
+    if (events.kind != TypeKind.Object) {
+      const why = `'${this.typeText(events)}' is not one`;
+
+      return { code: Code.EventMapInvalid, loc, details: { word: why } };
+    }
+
+    for (const field of this.store.fieldsOf(events)) {
+      const error = this.fieldError(loc, field);
+      if (error != undefined) {
+        return error;
+      }
+    }
+
+    return undefined;
+  }
+
+  public eventArgs(events: Type, name: string): Type | undefined {
+    if (this.isServiceEvent(name)) {
+      return this.serviceArgs();
+    }
+    if (events.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    return this.store.fieldsOf(events).find((field) => field.name == name)
+      ?.type;
+  }
+
+  public readonly noEventError(
+    loc: int,
+    events: Type,
+    name: string,
+  ): SourceError {
+    const names = this.eventNames(events);
+    const first = this.eventListText(names);
+    const other = this.nearestHint(names, name);
+
+    return {
+      code: Code.EventNotInMap,
+      loc,
+      details: { word: name, first, other },
+    };
+  }
+
+  public listenerType(args: Type, result: Type, self: Type | undefined): Type {
+    if (args.kind != TypeKind.Tuple) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const required = args.required;
+    const rest = args.rest >= 0;
+    const params = this.store.itemsOf(args).map((type, index) => ({
+      type,
+      optional: index >= required,
+    }));
+
+    return this.store.functionOf({ params, rest, self, result });
+  }
+
+  public readonly arityError(
+    loc: int,
+    event: string,
+    args: Type,
+    wanted: string,
+    count: int,
+  ): SourceError {
+    return {
+      code: Code.EmitArity,
+      loc,
+      details: {
+        word: event,
+        first: this.typeText(args),
+        second: wanted,
+        other: `${count}`,
+      },
+    };
+  }
+
+  public readonly notFunctionError(loc: int, given: Type): SourceError {
+    const first = this.typeText(given);
+
+    return { code: Code.ListenerNotFunction, loc, details: { first } };
+  }
+
+  public readonly getsError(
+    loc: int,
+    event: string,
+    args: Type,
+    given: Type,
+  ): SourceError {
+    return {
+      code: Code.ListenerGets,
+      loc,
+      details: {
+        word: event,
+        first: this.typeText(args),
+        second: this.typeText(given),
+      },
+    };
+  }
+
+  public readonly asyncResultError(loc: int, result: Type): SourceError {
+    const first = this.typeText(result);
+
+    return { code: Code.ListenerAsyncResult, loc, details: { first } };
+  }
+
+  public readonly thisTypeError(
+    loc: int,
+    self: Type,
+    emitter: Type,
+  ): SourceError {
+    return {
+      code: Code.ListenerThisType,
+      loc,
+      details: { first: this.typeText(self), second: this.typeText(emitter) },
+    };
+  }
+
+  public readonly asyncThisError(loc: int): SourceError {
+    return { code: Code.ListenerAsyncThis, loc, details: kNoDetails };
+  }
+
+  public readonly notEmittedError(
+    loc: int,
+    names: Read<string[]>,
+    name: string,
+  ): SourceError {
+    if (names.length == 0) {
+      return { code: Code.EventNeverEmitted, loc, details: { word: name } };
+    }
+
+    const first = this.eventListText(names);
+    const other = this.nearestHint(names, name);
+
+    return {
+      code: Code.EventNotEmitted,
+      loc,
+      details: { word: name, first, other },
+    };
+  }
+
+  private readonly recordMapError(
+    loc: int,
+    args: Type,
+  ): SourceError | undefined {
+    if (args.kind != TypeKind.Tuple) {
+      const shown = this.typeText(args);
+      const why = `the arguments of each event are '${shown}' here, which is not a tuple`;
+
+      return { code: Code.EventMapInvalid, loc, details: { word: why } };
+    }
+    if (this.store.itemsOf(args).length > 1 || args.rest >= 0) {
+      const first = this.typeText(args);
+
+      return {
+        code: Code.EventSeveral,
+        loc,
+        details: { word: kEachEvent, first },
+      };
+    }
+
+    return undefined;
+  }
+
+  private fieldError(loc: int, field: ObjectField): SourceError | undefined {
+    const type = field.type;
+    const word = field.name;
+    if (field.optional) {
+      const why = `event '${word}' is optional, but an event is in the map or not`;
+
+      return { code: Code.EventMapInvalid, loc, details: { word: why } };
+    }
+    if (type.kind != TypeKind.Tuple) {
+      const shown = this.typeText(type);
+      const why = `event '${word}' has '${shown}', which is not a tuple`;
+
+      return { code: Code.EventMapInvalid, loc, details: { word: why } };
+    }
+
+    const isService = this.isServiceEvent(word);
+    if (isService && type.id != this.serviceArgs().id) {
+      const first = this.typeText(type);
+
+      return { code: Code.EventServiceInMap, loc, details: { word, first } };
+    }
+    if (!isService && (this.store.itemsOf(type).length > 1 || type.rest >= 0)) {
+      const first = this.typeText(type);
+      const event = `event '${word}'`;
+
+      return { code: Code.EventSeveral, loc, details: { word: event, first } };
+    }
+
+    return undefined;
+  }
+
+  private readonly eventNames(events: Type): string[] {
+    if (events.kind != TypeKind.Object) {
+      return [];
+    }
+
+    return this.store.fieldsOf(events).map((field) => field.name);
+  }
+
+  private readonly eventListText(names: Read<string[]>): string {
+    if (names.length == 0) {
+      return kNoEvents;
+    }
+
+    const quoted = names.map((name) => `'${name}'`);
+    const last = quoted[quoted.length - 1] ?? "";
+    if (quoted.length == 1) {
+      return last;
+    }
+
+    const head = quoted.slice(0, quoted.length - 1).join(", ");
+
+    return `${head} and ${last}`;
+  }
+
+  private readonly nearestHint(names: Read<string[]>, name: string): string {
+    let best = "";
+    let bestDistance = -1;
+
+    for (const one of names) {
+      const distance = this.editDistance(one, name);
+      if (bestDistance < 0 || distance < bestDistance) {
+        best = one;
+        bestDistance = distance;
+      }
+    }
+
+    const limit = this.distanceLimit(name);
+    if (best == "" || bestDistance > limit) {
+      return "";
+    }
+
+    return `; did you mean '${best}'?`;
+  }
+
+  private readonly distanceLimit(name: string): int {
+    let third = 0;
+
+    while ((third + 1) * 3 <= name.length) {
+      third += 1;
+    }
+
+    if (third > 2) {
+      return third;
+    }
+
+    return 2;
+  }
+
+  private readonly editDistance(first: string, second: string): int {
+    let previous: int[] = [];
+
+    for (let column = 0; column <= second.length; column++) {
+      previous.push(column);
+    }
+
+    for (let row = 1; row <= first.length; row++) {
+      const current: int[] = [row];
+      const char = first.slice(row - 1, row);
+
+      for (let column = 1; column <= second.length; column++) {
+        const other = second.slice(column - 1, column);
+        const cost = this.changeCost(char, other);
+        const replaced = (previous[column - 1] ?? 0) + cost;
+        const removed = (previous[column] ?? 0) + 1;
+        const added = (current[column - 1] ?? 0) + 1;
+
+        current.push(this.smallest(replaced, removed, added));
+      }
+
+      previous = current;
+    }
+
+    return previous[second.length] ?? 0;
+  }
+
+  private readonly changeCost(first: string, second: string): int {
+    if (first == second) {
+      return 0;
+    }
+
+    return 1;
+  }
+
+  private readonly smallest(first: int, second: int, third: int): int {
+    let least = first;
+    if (second < least) {
+      least = second;
+    }
+    if (third < least) {
+      least = third;
+    }
+
+    return least;
+  }
+}

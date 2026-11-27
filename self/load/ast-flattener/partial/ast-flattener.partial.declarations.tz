@@ -1,0 +1,364 @@
+import { AstFlattener } from "../ast-flattener.tz";
+import {
+  ClassDecl,
+  ClassField,
+  ClassMember,
+  Decorator,
+  EnumDecl,
+  EnumMember,
+  HandleDecl,
+  TypeAliasDecl,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  DeclarationFile,
+  DeclaredClass,
+  DeclaredMember,
+  DeclaredMemberForm,
+  DeclaredMemberKind,
+  DeclaredSignature,
+} from "../../../program/ast/types/ast.types.declarations.tz";
+import {
+  DefaultedParam,
+  FunctionDecl,
+  Param,
+  ParamForm,
+  ParamKind,
+  UnsafeMark,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+} from "../../../program/ast/types/ast.types.modules.tz";
+import {
+  ClassDecl as SyntaxClassDecl,
+  ClassField as SyntaxClassField,
+  ClassMember as SyntaxClassMember,
+  Decorator as SyntaxDecorator,
+  EnumDecl as SyntaxEnumDecl,
+  EnumMember as SyntaxEnumMember,
+  HandleDecl as SyntaxHandleDecl,
+  TypeAliasDecl as SyntaxTypeAliasDecl,
+} from "../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  DeclarationFile as SyntaxDeclarationFile,
+  DeclaredClass as SyntaxDeclaredClass,
+  DeclaredMember as SyntaxDeclaredMember,
+  DeclaredMemberForm as SyntaxDeclaredMemberForm,
+  DeclaredSignature as SyntaxDeclaredSignature,
+} from "../../../program/syntax/types/syntax.types.declarations.tz";
+import {
+  DefaultedParam as SyntaxDefaultedParam,
+  FunctionDecl as SyntaxFunctionDecl,
+  Param as SyntaxParam,
+  ParamForm as SyntaxParamForm,
+  UnsafeMark as SyntaxUnsafeMark,
+} from "../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  ExportDecl as SyntaxExportDecl,
+  ImportDecl as SyntaxImportDecl,
+} from "../../../program/syntax/types/syntax.types.modules.tz";
+
+partial class AstFlattener {
+  private decorator(node: Read<SyntaxDecorator>): Decorator {
+    const exprId = this.expr(node.expr);
+
+    return { loc: node.loc, exprId };
+  }
+
+  private typeAliasDecl(node: Read<SyntaxTypeAliasDecl>): int {
+    const typeParamsList = this.typeParamDeclList(node.typeParams);
+    const typeId = this.typeRef(node.type);
+    const basesList = this.typeRefList(node.bases);
+    const id = this.stmts.length;
+    const record: TypeAliasDecl = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      name: node.name,
+      typeParamsList,
+      typeId,
+      basesList,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private handleDecl(node: Read<SyntaxHandleDecl>): int {
+    const typeParamsList = this.typeParamDeclList(node.typeParams);
+    const id = this.stmts.length;
+    const record: HandleDecl = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      name: node.name,
+      typeParamsList,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private enumMember(node: Read<SyntaxEnumMember>): EnumMember {
+    const initId = this.exprAt(node.init);
+
+    return { name: node.name, loc: node.loc, initId };
+  }
+
+  private enumDecl(node: Read<SyntaxEnumDecl>): int {
+    const membersList = this.enumMemberList(node.members);
+    const id = this.stmts.length;
+    const record: EnumDecl = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      name: node.name,
+      membersList,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private classMember(node: Read<SyntaxClassMember>): ClassMember {
+    const decoratorsList = this.decoratorList(node.decorators);
+
+    return {
+      access: node.access,
+      isOverride: node.isOverride,
+      isReadonly: node.isReadonly,
+      decoratorsList,
+      method: node.method,
+    };
+  }
+
+  private classField(node: Read<SyntaxClassField>): ClassField {
+    const typeId = this.typeRefAt(node.type);
+    const initId = this.exprAt(node.init);
+    const decoratorsList = this.decoratorList(node.decorators);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      typeId,
+      initId,
+      form: node.form,
+      presence: node.presence,
+      readonly: node.readonly,
+      isOverride: node.isOverride,
+      access: node.access,
+      decoratorsList,
+      accessor: node.accessor,
+    };
+  }
+
+  private classDecl(node: Read<SyntaxClassDecl>): int {
+    const baseId = this.typeRefAt(node.base);
+    const baseExprId = this.exprAt(node.baseExpr);
+    const baseArgsList = this.typeRefList(node.baseArgs);
+    const interfacesList = this.typeRefList(node.interfaces);
+    const fieldsList = this.classFieldList(node.fields);
+    const methodsList = this.functionDeclList(node.methods);
+    const constructorsList = this.functionDeclList(node.constructors);
+    const decoratorsList = this.decoratorList(node.decorators);
+    const typeParamsList = this.typeParamDeclList(node.typeParams);
+    const id = this.stmts.length;
+    const record: ClassDecl = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      name: node.name,
+      isAbstract: node.isAbstract,
+      isPartial: node.isPartial,
+      baseId,
+      baseExprId,
+      baseArgsList,
+      interfacesList,
+      fieldsList,
+      methodsList,
+      constructorsList,
+      expression: node.expression,
+      decoratorsList,
+      typeParamsList,
+      source: node.source,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private declaredSignature(
+    node: Read<SyntaxDeclaredSignature>,
+  ): DeclaredSignature {
+    const typeParamsList = this.typeParamDeclList(node.typeParams);
+    const paramsList = this.paramList(node.params);
+
+    return {
+      kind: node.kind,
+      typeParamsList,
+      paramsList,
+    };
+  }
+
+  private declaredMemberForm(
+    node: Read<SyntaxDeclaredMemberForm>,
+  ): DeclaredMemberForm {
+    switch (node.kind) {
+      case DeclaredMemberKind.Field:
+        return node;
+      case DeclaredMemberKind.Method:
+      case DeclaredMemberKind.Constructor:
+        return this.declaredSignature(node);
+    }
+
+    return { kind: DeclaredMemberKind.Field, readonly: false, optional: false };
+  }
+
+  private declaredMember(node: Read<SyntaxDeclaredMember>): DeclaredMember {
+    const formFlat = this.declaredMemberForm(node.form);
+    const typeId = this.typeRefAt(node.type);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      access: node.access,
+      accessWritten: node.accessWritten,
+      isStatic: node.isStatic,
+      form: formFlat,
+      typeId,
+    };
+  }
+
+  private declaredClass(node: Read<SyntaxDeclaredClass>): DeclaredClass {
+    const typeParamsList = this.typeParamDeclList(node.typeParams);
+    const baseId = this.typeRefAt(node.base);
+    const implementedList = this.typeRefList(node.implemented);
+    const membersList = this.declaredMemberList(node.members);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      isAbstract: node.isAbstract,
+      typeParamsList,
+      baseId,
+      implementedList,
+      membersList,
+    };
+  }
+
+  private declarationFile(node: Read<SyntaxDeclarationFile>): DeclarationFile {
+    const itemsList = this.stmtList(node.items);
+    const classesList = this.declaredClassList(node.classes);
+    const importsList = this.importDeclList(node.imports);
+    const exportsList = this.exportDeclList(node.exports);
+
+    return {
+      itemsList,
+      classesList,
+      importsList,
+      exportsList,
+    };
+  }
+
+  private defaultedParam(node: Read<SyntaxDefaultedParam>): DefaultedParam {
+    const defaultValueId = this.expr(node.defaultValue);
+
+    return { kind: node.kind, defaultValueId };
+  }
+
+  private paramForm(node: Read<SyntaxParamForm>): ParamForm {
+    switch (node.kind) {
+      case ParamKind.Required:
+      case ParamKind.Optional:
+      case ParamKind.Rest:
+        return node;
+      case ParamKind.Defaulted:
+        return this.defaultedParam(node);
+    }
+
+    return { kind: ParamKind.Required };
+  }
+
+  private param(node: Read<SyntaxParam>): Param {
+    const typeId = this.typeRefAt(node.type);
+    const formFlat = this.paramForm(node.form);
+    const decoratorsList = this.decoratorList(node.decorators);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      typeId,
+      form: formFlat,
+      property: node.property,
+      pattern: node.pattern,
+      decoratorsList,
+    };
+  }
+
+  private unsafeMark(node: Read<SyntaxUnsafeMark>): UnsafeMark {
+    const optionsId = this.exprAt(node.options);
+
+    return { loc: node.loc, optionsId };
+  }
+
+  private functionDecl(node: Read<SyntaxFunctionDecl>): int {
+    const typeParamsList = this.typeParamDeclList(node.typeParams);
+    const paramsList = this.paramList(node.params);
+    const returnTypeId = this.typeRefAt(node.returnType);
+    const bodyId = this.blockStmtAt(node.body);
+    const roleFlat = this.classMemberAt(node.role);
+    const unsafeFlat = this.unsafeMarkAt(node.unsafe);
+    const id = this.stmts.length;
+    const record: FunctionDecl = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      name: node.name,
+      typeParamsList,
+      paramsList,
+      returnTypeId,
+      bodyId,
+      source: node.source,
+      isArrow: node.isArrow,
+      concise: node.concise,
+      ownName: node.ownName,
+      place: node.place,
+      bodySource: node.bodySource,
+      isGenerator: node.isGenerator,
+      isAsync: node.isAsync,
+      role: roleFlat,
+      unsafe: unsafeFlat,
+    };
+
+    this.stmts.push(record);
+
+    return id;
+  }
+
+  private importDecl(node: Read<SyntaxImportDecl>): ImportDecl {
+    const namesList = this.moduleNameList(node.names);
+
+    return {
+      loc: node.loc,
+      namesList,
+      from: node.from,
+      whole: node.whole,
+      isPartList: node.isPartList,
+    };
+  }
+
+  private exportDecl(node: Read<SyntaxExportDecl>): ExportDecl {
+    const namesList = this.moduleNameList(node.names);
+
+    return {
+      loc: node.loc,
+      form: node.form,
+      namesList,
+      from: node.from,
+    };
+  }
+}

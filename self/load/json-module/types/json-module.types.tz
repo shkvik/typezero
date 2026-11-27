@@ -19,6 +19,11 @@ export type JsonFields = {
   readonly items: JsonNode[];
 };
 
+export type JsonFieldView = {
+  readonly keys: string[];
+  readonly places: int[];
+};
+
 export enum JsonShapeKind {
   Unknown,
   Json,
@@ -32,9 +37,7 @@ export enum JsonShapeKind {
 
 export type JsonShape = {
   readonly kind: JsonShapeKind;
-  readonly items: readonly JsonShape[];
-  readonly keys: readonly string[];
-  readonly optional: readonly boolean[];
+  readonly items: JsonShape[];
+  readonly keys: string[];
+  readonly optional: boolean[];
 };
-
-export type InternedJson = Interned<JsonNode | JsonShape>;

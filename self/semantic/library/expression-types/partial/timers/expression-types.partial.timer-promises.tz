@@ -14,12 +14,14 @@ import {
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly timerPromisesCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+  private timerPromisesCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Name || this.types.isLibraryModule(module)) {
       return;
     }
-    if (expr.args.some((one) => one.spread)) {
+    if (tree.argumentsOf(expr.argsList).some((one) => one.spread)) {
       return;
     }
     if (!this.isTimersPromisesName(callee, module)) {
@@ -39,7 +41,8 @@ partial class ExpressionTypes {
       options,
       isUtf8Only: false,
     };
-    if (expr.args.length <= index + 1) {
+    const args = tree.argumentsOf(expr.argsList);
+    if (args.length <= index + 1) {
       this.fsOptionsCheck(expr, index, row, module);
     }
   }
@@ -62,7 +65,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const opened = this.program.modules[target.module];
+    const opened = this.types.program.modules[target.module];
 
     return opened != undefined && opened.name == kTimersPromisesModule;
   }

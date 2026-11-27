@@ -16,23 +16,33 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     if (expr.op == BinaryOp.Pow) {
       return this.decimalPower(expr, pair, module);
     }
 
-    const isLeftFitting = this.isDecimalSide(expr.lhs, pair.left, module);
-    const isRightFitting = this.isDecimalSide(expr.rhs, pair.right, module);
+    const isLeftFitting = this.isDecimalSide(
+      tree.exprOf(expr.lhsId),
+      pair.left,
+      module,
+    );
+    const isRightFitting = this.isDecimalSide(
+      tree.exprOf(expr.rhsId),
+      pair.right,
+      module,
+    );
     if (!isLeftFitting || !isRightFitting) {
-      const decimalMixError = this.decimals.decimalMixError(expr, pair, module);
+      const decimalMixError = this.types.decimalMixError(expr, pair, module);
 
-      this.reportFound(module, decimalMixError);
+      this.errors.writeFound(module, decimalMixError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.decimalDivisor(expr, pair.right, module);
 
-    return this.store.plain(TypeKind.Decimal);
+    return this.types.store.plain(TypeKind.Decimal);
   }
 
   private isDecimalSide(side: Expr, type: Type, module: int): boolean {
@@ -43,20 +53,24 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Int && this.isWholeTree(side, module);
   }
 
-  private readonly decimalPower(expr: BinaryExpr, pair: OperandPair, module: int): Type {
-    const checked = this.decimals.decimalPower(expr, pair);
+  private decimalPower(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+    const checked = this.types.decimalPower(expr, pair);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
   private decimalDivisor(expr: BinaryExpr, right: Type, module: int): void {
+    const tree = this.types.program.tree;
+
     const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
     if (!isDividing) {
       return;
     }
 
-    this.decimalZeroCheck(expr.rhs, module);
+    const rhs = tree.exprOf(expr.rhsId);
+
+    this.decimalZeroCheck(rhs, module);
   }
 }

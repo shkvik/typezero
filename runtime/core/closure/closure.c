@@ -5,7 +5,14 @@
 
 int64_t tz_obj_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_objects)); }
 
-void tz_obj_forget(void) { --tz_live_objects; }
+static int64_t tz_immortal_objects_count = 0;
+
+int64_t tz_obj_immortal_objects(void) { return tz_immortal_objects_count; }
+
+void tz_obj_forget(void) {
+  --tz_live_objects;
+  ++tz_immortal_objects_count;
+}
 
 TZ_HOT void *tz_obj_alloc(int64_t size) {
   ++tz_live_objects;

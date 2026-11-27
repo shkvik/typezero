@@ -123,6 +123,7 @@ export declare function LLVMPositionBuilderAtEnd(
 export declare function LLVMGetBasicBlockTerminator(
   block: LLVMBlock,
 ): LLVMValue | undefined;
+export declare function LLVMGetInsertBlock(builder: LLVMBuilder): LLVMBlock;
 
 export declare function LLVMBuildRetVoid(builder: LLVMBuilder): LLVMValue;
 export declare function LLVMBuildRet(

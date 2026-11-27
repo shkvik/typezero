@@ -32,22 +32,27 @@ import {
   kUndefinedText,
   kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private readonly printStream(frame: Read<Frame>, call: CallExpr): boolean | undefined {
-    const callee = call.callee;
+  private readonly printStream(
+    frame: Read<Frame>,
+    call: CallExpr,
+  ): boolean | undefined {
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
     if (callee.kind != ExprKind.Member) {
       return undefined;
     }
 
-    const object = callee.object;
+    const object = tree.exprOf(callee.objectId);
     if (object.kind != ExprKind.Name || object.name != kConsoleName) {
       return undefined;
     }
 
     const target = this.values.valueTargetOf(object, frame.module);
-    const opened = this.program.modules[target?.module ?? -1];
+    const opened = this.values.types.program.modules[target?.module ?? -1];
     if (opened == undefined || !opened.source.isLibrary) {
       return undefined;
     }
@@ -66,16 +71,23 @@ partial class Lowering {
     call: CallExpr,
     isError: boolean,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const values: IrValue[] = [];
 
-    for (const arg of call.args) {
+    for (const arg of tree.argumentsOf(call.argsList)) {
       if (arg.spread) {
-        this.notLowered(frame.module, arg.expr.loc, "a spread argument");
+        this.notLowered(
+          frame.module,
+          tree.exprOf(arg.exprId).loc,
+          "a spread argument",
+        );
 
         return undefined;
       }
 
-      const value = this.printedValue(frame, arg.expr);
+      const expr = tree.exprOf(arg.exprId);
+      const value = this.printedValue(frame, expr);
       if (value == undefined) {
         return undefined;
       }
@@ -109,7 +121,7 @@ partial class Lowering {
       this.runtimeCall(frame.made, kErrorEnd, []);
     }
 
-    const tz = this.store.plain(TypeKind.Void);
+    const tz = this.values.types.store.plain(TypeKind.Void);
 
     return { type: kVoidType, value: this.ir.zero(kCharType), tz };
   }
@@ -123,7 +135,7 @@ partial class Lowering {
   }
 
   private printOne(frame: Read<Frame>, value: IrValue): void {
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
     if (this.isTzMap(value.tz)) {
       return this.mapPrinted(frame, value);
     }
@@ -167,9 +179,12 @@ partial class Lowering {
     }
 
     const isSet = this.isTzSet(type);
-    const target = { module: kMapModule, name: kMapPrintName };
-    const items = [type.key, this.mapValueType(type)];
-    const boolean = this.store.plain(TypeKind.Boolean);
+    const target: RuntimeTarget = { module: kMapModule, name: kMapPrintName };
+    const items = [
+      this.values.types.store.keyOf(type),
+      this.mapValueType(type),
+    ];
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
     const flag = this.ir.integer(kBooleanType, `${this.choose(isSet, 1, 0)}`);
     const kind: IrValue = { type: kBooleanType, value: flag, tz: boolean };
 
@@ -181,12 +196,15 @@ partial class Lowering {
     call: CallExpr,
     callee: NameExpr,
   ): IrValue | undefined {
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined) {
       return undefined;
     }
 
-    const value = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const value = this.value(frame, expr);
     if (value == undefined) {
       return undefined;
     }
@@ -214,7 +232,7 @@ partial class Lowering {
     }
 
     const spill = frame.made.slot(value.type, "print.value");
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
     const args: IrValue[] = [
       { type: kPointerType, value: descriptor, tz },
       { type: kPointerType, value: spill, tz },
@@ -224,8 +242,8 @@ partial class Lowering {
     this.runtimeCall(frame.made, kPrintValue, args);
   }
 
-  private readonly printCode(frame: Read<Frame>, code: int): void {
-    const tz = this.store.integer(32, false);
+  private printCode(frame: Read<Frame>, code: int): void {
+    const tz = this.values.types.store.integer(32, false);
     const made = this.ir.integer(kCharType, `${code}`);
     const value: IrValue = { type: kCharType, value: made, tz };
 

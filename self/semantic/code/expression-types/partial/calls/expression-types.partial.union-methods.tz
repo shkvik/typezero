@@ -20,6 +20,8 @@ partial class ExpressionTypes {
     common: Type | undefined,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const parts = this.shapeParts(object);
     if (common != undefined || parts == undefined) {
       return undefined;
@@ -27,9 +29,11 @@ partial class ExpressionTypes {
 
     const shared = this.sharedMethod(member, object, parts, module);
     if (shared == undefined) {
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.calledWith(expr, shared, member.loc, CallKind.Own, module);
@@ -38,30 +42,30 @@ partial class ExpressionTypes {
   private readonly shapeParts(object: UnionType): ObjectType[] | undefined {
     const parts: ObjectType[] = [];
 
-    for (const part of object.parts) {
-      if (part.kind != TypeKind.Object || this.resolver.isLibraryShape(part)) {
+    for (const part of this.types.store.partsOf(object)) {
+      if (part.kind != TypeKind.Object || this.types.isLibraryShape(part)) {
         return undefined;
       }
 
       parts.push(part);
     }
 
-    if (this.mismatches.sharedTag(object) != undefined) {
+    if (this.types.sharedTag(object) != undefined) {
       return undefined;
     }
 
     return parts;
   }
 
-  private readonly sharedMethod(
+  private sharedMethod(
     member: MemberExpr,
     object: UnionType,
     parts: Read<ObjectType[]>,
     module: int,
   ): FunctionType | undefined {
-    const checked = this.calls.sharedMethod(member, object, parts);
+    const checked = this.types.sharedMethod(member, object, parts);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

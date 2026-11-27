@@ -30,28 +30,33 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly genericClassValueCheck(
+  private genericClassValueCheck(
     expr: NameExpr,
     target: ValueTarget,
     wanted: Type | undefined,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const decl = this.record(target.module)?.classes.get(target.loc);
     if (wanted == undefined || decl == undefined) {
       return false;
     }
 
     const goal = this.types.definedType(wanted);
-    if (decl.typeParams.length == 0 || goal.kind != TypeKind.Class) {
+    if (
+      tree.typeParamsOf(decl.typeParamsList).length == 0 ||
+      goal.kind != TypeKind.Class
+    ) {
       return false;
     }
 
     const word = decl.name ?? expr.name;
     const other = this.genericClassExample(word, target.module);
 
-    this.report(module, expr.loc, Code.GenericClassConstructor, {
+    this.errors.write(module, expr.loc, Code.GenericClassConstructor, {
       word,
-      first: this.text.of(wanted),
+      first: this.types.typeText(wanted),
       other,
     });
 
@@ -59,34 +64,39 @@ partial class ExpressionTypes {
   }
 
   private readonly genericClassExample(word: string, home: int): string {
-    if (this.modules.isLibraryModule(home)) {
+    if (this.types.isLibraryModule(home)) {
       return `${kBusExample}${word}${kExampleEnd}`;
     }
 
     return `${kIntExample}${word} extends ${word}<int>${kExampleEnd}`;
   }
 
-  private readonly classValue(target: ValueTarget): Type {
-    const error = this.store.plain(TypeKind.Error);
-    if (this.modules.isLibraryModule(target.module)) {
+  private classValue(target: ValueTarget): Type {
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    if (this.types.isLibraryModule(target.module)) {
       return error;
     }
 
     const decl = this.record(target.module)?.classes.get(target.loc);
-    if (decl == undefined || decl.typeParams.length > 0) {
+    if (
+      decl == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return error;
     }
 
-    const instance = this.resolver.classInstance(target.module, decl, []);
+    const instance = this.types.classInstance(target.module, decl, []);
     if (instance.kind != TypeKind.Instance) {
       return error;
     }
 
-    return this.store.classOf(instance, true);
+    return this.types.store.classOf(instance, true);
   }
 
   private valueNew(expr: NewExpr, callee: Type, loc: int, module: int): Type {
-    const error = this.store.plain(TypeKind.Error);
+    const error = this.types.store.plain(TypeKind.Error);
 
     switch (callee.kind) {
       case TypeKind.Error:
@@ -95,8 +105,8 @@ partial class ExpressionTypes {
       case TypeKind.Class:
         return this.classValueNew(expr, callee, module);
       default:
-        this.report(module, loc, Code.ValueNewNotClass, {
-          word: this.text.of(callee),
+        this.errors.write(module, loc, Code.ValueNewNotClass, {
+          word: this.types.typeText(callee),
         });
 
         return error;
@@ -104,10 +114,14 @@ partial class ExpressionTypes {
   }
 
   private classValueNew(expr: NewExpr, callee: ClassType, module: int): Type {
-    const instance = callee.instance;
-    const isSpread = expr.args.some((arg) => arg.spread);
+    const tree = this.types.program.tree;
+
+    const instance = this.types.store.classInstanceOf(callee);
+    const isSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
     if (!isSpread) {
-      this.requireConstruct(instance, expr.args.length);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.requireConstruct(instance, args.length);
     }
     if (!callee.exact && !isSpread) {
       this.reflectedNewNote(expr, instance, module);
@@ -118,7 +132,7 @@ partial class ExpressionTypes {
 
     const decl = this.classOf(instance);
     if (decl == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.constructed(expr, instance, decl, module);
@@ -131,7 +145,7 @@ partial class ExpressionTypes {
   ): Type | undefined {
     const isValue =
       target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter;
-    if (!isValue || this.modules.isLibraryModule(target.module)) {
+    if (!isValue || this.types.isLibraryModule(target.module)) {
       return undefined;
     }
 
@@ -151,17 +165,17 @@ partial class ExpressionTypes {
 
     const door = this.door(target.module, target.loc);
 
-    return door?.type ?? this.store.plain(TypeKind.Error);
+    return door?.type ?? this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly classValueMember(
+  private classValueMember(
     expr: MemberExpr,
     object: ClassType,
     module: int,
   ): Type {
-    const checked = this.classValues.classValueMember(expr, object);
+    const checked = this.types.classValueMember(expr, object);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -172,15 +186,19 @@ partial class ExpressionTypes {
     object: ClassType,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     if (!object.exact) {
-      this.report(module, member.loc, Code.ClassValueStatics, {
-        word: this.text.of(object),
+      this.errors.write(module, member.loc, Code.ClassValueStatics, {
+        word: this.types.typeText(object),
       });
     }
 
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private valueOwner(target: ValueTarget): StaticOwner | undefined {
@@ -195,7 +213,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const instance = type.instance;
+    const instance = this.types.store.classInstanceOf(type);
     if (instance.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -208,7 +226,12 @@ partial class ExpressionTypes {
     return { decl, module: instance.module };
   }
 
-  private readonly classNameCode(expr: Expr, code: Code, base: Type, module: int): Code {
+  private readonly classNameCode(
+    expr: Expr,
+    code: Code,
+    base: Type,
+    module: int,
+  ): Code {
     if (base.kind != TypeKind.Class || expr.kind != ExprKind.Name) {
       return code;
     }
@@ -249,36 +272,47 @@ partial class ExpressionTypes {
   }
 
   private classExprTyped(expr: ClassExpr, module: int): Type {
-    const error = this.store.plain(TypeKind.Error);
-    const decl = expr.decl;
-    const base = decl.baseExpr;
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    const decl = tree.classOf(expr.declId);
+    const base = tree.exprAt(decl.baseExprId);
     const parent = this.baseValue(base, module);
-    if (decl.typeParams.length > 0 || parent == undefined) {
+    if (
+      tree.typeParamsOf(decl.typeParamsList).length > 0 ||
+      parent == undefined
+    ) {
       return error;
     }
 
-    const instance = this.resolver.classInstance(module, decl, []);
+    const instance = this.types.classInstance(module, decl, []);
     if (instance.kind != TypeKind.Instance) {
       return error;
     }
     if (parent.kind == TypeKind.Instance) {
-      const known = this.store.parentsOf(instance);
+      const known = this.types.store.parentsOf(instance);
       const parents: Type[] = [parent];
 
-      this.store.inherit(instance, parents.concat(known));
-      this.store.markBase(parent);
+      this.types.store.inherit(instance, parents.concat(known));
+      this.types.store.markBase(parent);
     }
 
     const name = this.classExprName(expr, module);
     if (name != undefined) {
-      this.store.label(instance, name);
+      this.types.store.label(instance, name);
     }
 
-    return this.store.classOf(instance, true);
+    return this.types.store.classOf(instance, true);
   }
 
-  private readonly classExprName(expr: ClassExpr, module: int): string | undefined {
-    if (expr.decl.name != undefined) {
+  private readonly classExprName(
+    expr: ClassExpr,
+    module: int,
+  ): string | undefined {
+    const tree = this.types.program.tree;
+
+    const declClass = tree.classOf(expr.declId);
+    if (declClass.name != undefined) {
       return undefined;
     }
 
@@ -288,7 +322,7 @@ partial class ExpressionTypes {
     }
 
     for (const variable of variables.values()) {
-      if (variable.decl.init == expr) {
+      if (variable.decl.initId == expr.id) {
         return variable.decl.name;
       }
     }
@@ -298,7 +332,7 @@ partial class ExpressionTypes {
 
   private baseValue(base: Expr | undefined, module: int): Type | undefined {
     if (base == undefined) {
-      return this.store.plain(TypeKind.Void);
+      return this.types.store.plain(TypeKind.Void);
     }
 
     const type = this.typed(base, undefined, module);
@@ -308,39 +342,48 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const word = this.text.of(type);
+    const word = this.types.typeText(type);
     if (type.kind != TypeKind.Class) {
-      this.report(module, base.loc, Code.ExtendsNotClassValue, { word });
+      this.errors.write(module, base.loc, Code.ExtendsNotClassValue, { word });
 
       return undefined;
     }
     if (!type.exact) {
-      this.report(module, base.loc, Code.ExtendsRuntimeClass, { word });
+      this.errors.write(module, base.loc, Code.ExtendsRuntimeClass, { word });
 
       return undefined;
     }
 
-    return type.instance;
+    return this.types.store.classInstanceOf(type);
   }
 
-  private readonly constructorArgsCheck(fn: FunctionDecl, module: int): void {
+  private constructorArgsCheck(fn: FunctionDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     const owner = this.ownerClasses[this.ownerClasses.length - 1]?.decl;
     const isDerived =
       owner != undefined &&
-      (owner.base != undefined || owner.baseExpr != undefined);
-    const isConstructor = owner?.constructors.includes(fn) == true;
+      (tree.typeRefAt(owner.baseId) != undefined ||
+        tree.exprAt(owner.baseExprId) != undefined);
+    const isConstructor =
+      tree.holdsStmt(owner?.constructorsList, fn.id) == true;
     if (isDerived && isConstructor) {
       return;
     }
 
-    for (const param of fn.params) {
-      const ref = param.type;
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      const ref = tree.typeRefAt(param.typeId);
       const isArgs =
         ref != undefined &&
         ref.form.kind == TypeRefKind.Name &&
         ref.name == kConstructorArgsName;
       if (isArgs && ref != undefined) {
-        this.report(module, ref.loc, Code.ConstructorArgsSubclass, kNoDetails);
+        this.errors.write(
+          module,
+          ref.loc,
+          Code.ConstructorArgsSubclass,
+          kNoDetails,
+        );
       }
     }
   }

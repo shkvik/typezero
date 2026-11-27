@@ -16,7 +16,12 @@ import {
 } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly isAlwaysReturning(statement: Stmt | undefined, module: int): boolean {
+  private readonly isAlwaysReturning(
+    statement: Stmt | undefined,
+    module: int,
+  ): boolean {
+    const tree = this.types.program.tree;
+
     if (statement == undefined) {
       return false;
     }
@@ -25,30 +30,32 @@ partial class ExpressionTypes {
       case StmtKind.Return:
         return true;
       case StmtKind.Expr:
-        return this.isExit(statement.expr, module);
+        const expr = tree.exprOf(statement.exprId);
+
+        return this.isExit(expr, module);
       case StmtKind.Block:
-        return statement.body.some((one) =>
-          this.isAlwaysReturning(one, module),
-        );
+        return tree
+          .stmtsOf(statement.bodyList)
+          .some((one) => this.isAlwaysReturning(one, module));
       case StmtKind.If:
         return this.isIfReturning(statement, module);
       case StmtKind.While:
       case StmtKind.DoWhile:
         return (
-          this.shapes.isTrueLiteral(statement.cond) &&
-          !this.shapes.hasBreak(statement.body)
+          this.types.isTrueLiteral(tree.exprOf(statement.condId)) &&
+          !this.types.hasBreak(tree.stmtOf(statement.bodyId))
         );
       case StmtKind.For:
         return (
-          this.shapes.isForever(statement.cond) &&
-          !this.shapes.hasBreak(statement.body)
+          this.types.isForever(tree.exprAt(statement.condId)) &&
+          !this.types.hasBreak(tree.stmtAt(statement.bodyId))
         );
       case StmtKind.Switch:
         return this.isSwitchReturning(statement, module);
       case StmtKind.Labeled:
         return (
-          this.isAlwaysReturning(statement.body, module) &&
-          !this.shapes.hasBreak(statement.body)
+          this.isAlwaysReturning(tree.stmtOf(statement.bodyId), module) &&
+          !this.types.hasBreak(tree.stmtOf(statement.bodyId))
         );
       default:
         return false;
@@ -56,11 +63,13 @@ partial class ExpressionTypes {
   }
 
   private readonly isExit(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Call) {
       return false;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind == ExprKind.Name) {
       return callee.name == kPanicName && this.isLibraryName(callee, module);
     }
@@ -68,7 +77,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const owner = callee.object;
+    const owner = tree.exprOf(callee.objectId);
     if (owner.kind != ExprKind.Name || owner.name != kProcessName) {
       return false;
     }
@@ -77,13 +86,19 @@ partial class ExpressionTypes {
   }
 
   private readonly isIfReturning(statement: IfStmt, module: int): boolean {
-    const literal = this.shapes.literalCondition(statement.cond);
-    const elseStmt = statement.elseStmt;
+    const tree = this.types.program.tree;
+
+    const cond = tree.exprOf(statement.condId);
+    const literal = this.types.literalCondition(cond);
+    const elseStmt = tree.stmtAt(statement.elseStmtId);
     if (literal == true && elseStmt == undefined) {
-      return this.isAlwaysReturning(statement.thenStmt, module);
+      const thenStmt = tree.stmtOf(statement.thenStmtId);
+
+      return this.isAlwaysReturning(thenStmt, module);
     }
 
-    const isEmptyThen = statement.thenStmt.kind == StmtKind.Empty;
+    const isEmptyThen =
+      tree.stmtOf(statement.thenStmtId).kind == StmtKind.Empty;
     if (literal == false && isEmptyThen) {
       return this.isAlwaysReturning(elseStmt, module);
     }
@@ -92,27 +107,36 @@ partial class ExpressionTypes {
     }
 
     return (
-      this.isAlwaysReturning(statement.thenStmt, module) &&
+      this.isAlwaysReturning(tree.stmtOf(statement.thenStmtId), module) &&
       this.isAlwaysReturning(elseStmt, module)
     );
   }
 
-  private readonly isSwitchReturning(statement: SwitchStmt, module: int): boolean {
-    const cases = statement.cases;
+  private readonly isSwitchReturning(
+    statement: SwitchStmt,
+    module: int,
+  ): boolean {
+    const tree = this.types.program.tree;
+
+    const cases = tree.casesOf(statement.casesList);
     const last = cases[cases.length - 1];
-    const hasDefault = cases.some((option) => option.test == undefined);
+    const hasDefault = cases.some(
+      (option) => tree.exprAt(option.testId) == undefined,
+    );
     const isCovered = this.coveredSwitches.has(`${module} ${statement.loc}`);
     if ((!hasDefault && !isCovered) || last == undefined) {
       return false;
     }
 
     const isLeaving = cases.some((option) =>
-      option.body.some((one) => this.shapes.hasBreak(one)),
+      tree.stmtsOf(option.bodyList).some((one) => this.types.hasBreak(one)),
     );
     if (isLeaving) {
       return false;
     }
 
-    return last.body.some((one) => this.isAlwaysReturning(one, module));
+    return tree
+      .stmtsOf(last.bodyList)
+      .some((one) => this.isAlwaysReturning(one, module));
   }
 }

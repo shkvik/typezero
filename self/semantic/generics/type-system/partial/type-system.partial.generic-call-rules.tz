@@ -1,0 +1,367 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  kManyTypeArguments,
+  kNewPrefix,
+  kOneTypeArgument,
+  kSampleArgument,
+  kSampleList,
+} from "../../generic-rules/const/generic-rules.const.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  FunctionFrame,
+  GenericDraft,
+  GenericTarget,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  ClassDecl,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  ExprKind,
+  FunctionExpr,
+  MemberExpr,
+  Property,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  kTypeSeparator,
+} from "../../../code/array-rules/const/array-rules.const.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+
+partial class TypeSystem {
+  public readonly hasArgumentErrors(draft: Read<GenericDraft>): boolean {
+    for (const type of draft.given.values()) {
+      if (this.hasUnknownInside(type)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public readonly genericTellCode(home: int): Code {
+    if (this.isLibraryModule(home)) {
+      return Code.InstanceOfGenericLibrary;
+    }
+
+    return Code.InstanceOfGenericUnknown;
+  }
+
+  public readonly typeArgumentText(count: int): string {
+    if (count == 1) {
+      return `${count}${kOneTypeArgument}`;
+    }
+
+    return `${count}${kManyTypeArguments}`;
+  }
+
+  public readonly genericMethodErrors(
+    decl: ClassDecl,
+    fn: FunctionDecl,
+  ): SourceError[] {
+    const tree = this.program.tree;
+
+    const errors: SourceError[] = [];
+
+    const role = fn.role;
+    const isGeneric = tree.typeParamsOf(fn.typeParamsList).length > 0;
+    const isAbstract = role?.method == MethodKind.Abstract;
+    if (isGeneric && role != undefined && role.isOverride) {
+      errors.push({
+        code: Code.GenericOverride,
+        loc: fn.loc,
+        details: kNoDetails,
+      });
+    }
+    if (isGeneric && isAbstract) {
+      errors.push({
+        code: Code.GenericAbstract,
+        loc: fn.loc,
+        details: kNoDetails,
+      });
+    }
+
+    const isOpenClass = tree.typeParamsOf(decl.typeParamsList).length > 0;
+    if (
+      isAbstract &&
+      isOpenClass &&
+      tree.typeRefAt(fn.returnTypeId) == undefined
+    ) {
+      errors.push({
+        code: Code.AbstractGenericReturn,
+        loc: fn.loc,
+        details: {
+          word: fn.name,
+          other: decl.name ?? "",
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public readonly literalMethodCheck(
+    property: Property,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const value = tree.exprOf(property.valueId);
+    if (
+      value.kind != ExprKind.Function ||
+      tree.typeParamsOf(tree.functionOf(value.fnId).typeParamsList).length == 0
+    ) {
+      return undefined;
+    }
+
+    return {
+      code: Code.LiteralGenericMethod,
+      loc: property.loc,
+      details: kNoDetails,
+    };
+  }
+
+  public readonly nestedGenericCheck(
+    fn: FunctionDecl,
+    frame: Read<FunctionFrame>,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    if (
+      frame.fn == undefined ||
+      tree.typeParamsOf(fn.typeParamsList).length == 0
+    ) {
+      return undefined;
+    }
+
+    return { code: Code.GenericNotTopLevel, loc: fn.loc, details: kNoDetails };
+  }
+
+  public readonly callbackError(
+    draft: Read<GenericDraft>,
+    closure: FunctionExpr,
+    param: Type,
+    position: int,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const target = draft.target;
+    if (target.isLenient || this.hasArgumentErrors(draft)) {
+      return undefined;
+    }
+
+    const first = this.typeText(param);
+    const second = target.name;
+    const loc = closure.loc;
+    const own = tree.paramsOf(tree.functionOf(closure.fnId).paramsList)[
+      position
+    ];
+    if (own == undefined) {
+      return {
+        code: Code.CallbackParametersUninferred,
+        loc,
+        details: {
+          first,
+          second,
+        },
+      };
+    }
+
+    const word = own.name;
+
+    return {
+      code: Code.CallbackParameterUninferred,
+      loc,
+      details: {
+        word,
+        first,
+        second,
+      },
+    };
+  }
+
+  public readonly typeArgumentCountErrors(
+    target: Read<GenericTarget>,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const total = target.params.length;
+    const word = target.name;
+    const other = this.typeArgumentText(total);
+    const first = `${target.typeArgs.length}`;
+
+    if (!target.isLenient) {
+      errors.push({
+        code: Code.TypeArgumentsTooMany,
+        loc: target.loc,
+        details: {
+          word,
+          other,
+          first,
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public readonly uninferredError(
+    target: Read<GenericTarget>,
+    param: Type,
+  ): SourceError | undefined {
+    if (target.isLenient) {
+      return undefined;
+    }
+
+    const word = this.typeText(param);
+    const first = target.name;
+    const samples = target.params.map((one) => this.sampleOf(one));
+    const other = samples.join(kTypeSeparator);
+
+    return {
+      code: Code.CannotInferParameter,
+      loc: target.loc,
+      details: {
+        word,
+        first,
+        other,
+      },
+    };
+  }
+
+  public readonly sampleOf(param: Type): string {
+    if (this.isListParameter(param)) {
+      return kSampleList;
+    }
+
+    return kSampleArgument;
+  }
+
+  public readonly splitLists(shape: Read<FunctionShape>): Type[] {
+    const found: Type[] = [];
+
+    for (const param of shape.params) {
+      const type = param.type;
+      if (type.kind != TypeKind.Function || !this.store.hasRest(type)) {
+        continue;
+      }
+
+      const last =
+        this.store.paramsOf(type)[this.store.paramCount(type) - 1]?.type;
+      if (last == undefined || last.kind != TypeKind.Tuple) {
+        continue;
+      }
+
+      const lists = this.store
+        .itemsOf(last)
+        .filter(
+          (item) =>
+            this.isListParameter(item) && !this.isGivenList(shape, item),
+        );
+      if (lists.length > 1) {
+        for (const list of lists) {
+          found.push(list);
+        }
+      }
+    }
+
+    return found;
+  }
+
+  private readonly isGivenList(
+    shape: Read<FunctionShape>,
+    list: Type,
+  ): boolean {
+    return shape.params.some((param) => {
+      const type = param.type;
+
+      return (
+        type.id == list.id ||
+        (type.kind == TypeKind.Tuple &&
+          this.store.itemsOf(type).some((one) => one.id == list.id))
+      );
+    });
+  }
+
+  public readonly clash(
+    draft: GenericDraft,
+    index: int,
+    type: Type | undefined,
+    candidate: Type,
+  ): Checked<Type | undefined> {
+    const target = draft.target;
+    const param = target.params[index];
+
+    this.failParameter(draft, index);
+
+    if (param == undefined || target.isLenient) {
+      return { value: undefined };
+    }
+
+    const word = this.typeText(param);
+    const first = target.name;
+    const second = this.typeText(type ?? candidate);
+    const other = this.typeText(candidate);
+
+    return {
+      value: undefined,
+      error: {
+        code: Code.CandidatesClash,
+        loc: target.loc,
+        details: {
+          word,
+          first,
+          second,
+          other,
+        },
+      },
+    };
+  }
+
+  public readonly genericMethodValue(
+    expr: MemberExpr,
+    method: FunctionDecl,
+  ): Checked<boolean> {
+    const tree = this.program.tree;
+
+    const typeParams = tree.typeParamsOf(method.typeParamsList);
+    if (typeParams.length == 0) {
+      return { value: false };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.GenericMethodValue,
+        loc: expr.loc,
+        details: { word: expr.name },
+      },
+    };
+  }
+
+  public readonly refusedCode(isClass: boolean): Code {
+    if (isClass) {
+      return Code.GenericClassRefused;
+    }
+
+    return Code.GenericCallRefused;
+  }
+
+  public readonly refusedName(name: string, isClass: boolean): string {
+    if (isClass) {
+      return name.slice(kNewPrefix.length);
+    }
+
+    return name;
+  }
+}

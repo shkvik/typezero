@@ -17,7 +17,7 @@ import { NodeName } from "../../../node-value-rules/types/node-value-rules.types
 
 partial class ExpressionTypes {
   private readonly nodeNameOf(expr: Expr, module: int): NodeName | undefined {
-    if (expr.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+    if (expr.kind != ExprKind.Name || this.types.isLibraryModule(module)) {
       return undefined;
     }
 
@@ -30,7 +30,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const opened = this.program.modules[target.module];
+    const opened = this.types.program.modules[target.module];
     if (opened == undefined || !this.nodeValues.isKnown(opened.name)) {
       return undefined;
     }
@@ -38,19 +38,19 @@ partial class ExpressionTypes {
     return this.nodeValues.nodeName(opened.name, target.name);
   }
 
-  private readonly nodeValueCheck(expr: NameExpr, module: int): boolean {
+  private nodeValueCheck(expr: NameExpr, module: int): boolean {
     const node = this.nodeNameOf(expr, module);
     if (node == undefined) {
       return false;
     }
 
-    const isMemberObject = this.memberObjects.has(expr);
+    const isMemberObject = this.memberObjects.has(expr.id);
     const error = this.nodeValues.valueError(node, isMemberObject, expr.loc);
     if (error == undefined) {
       return false;
     }
 
-    this.reportFound(module, error);
+    this.errors.writeFound(module, error);
 
     return true;
   }
@@ -60,6 +60,8 @@ partial class ExpressionTypes {
     callee: NameExpr,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const node = this.nodeNameOf(callee, module);
     if (node == undefined) {
       return false;
@@ -70,8 +72,10 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.reportFound(module, error);
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, error);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
@@ -81,7 +85,10 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
-    const node = this.nodeNameOf(member.object, module);
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
+    const node = this.nodeNameOf(object, module);
     if (node == undefined || node.name != "") {
       return false;
     }
@@ -92,14 +99,19 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.reportFound(module, error);
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, error);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
 
-  private readonly nodeMemberReadCheck(expr: MemberExpr, module: int): boolean {
-    const node = this.nodeNameOf(expr.object, module);
+  private nodeMemberReadCheck(expr: MemberExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const node = this.nodeNameOf(object, module);
     if (node == undefined || node.name != "") {
       return false;
     }
@@ -110,7 +122,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.reportFound(module, error);
+    this.errors.writeFound(module, error);
 
     return true;
   }
@@ -121,17 +133,21 @@ partial class ExpressionTypes {
     home: int,
     module: int,
   ): Type | undefined {
-    const opened = this.program.modules[home];
-    if (opened == undefined || this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[home];
+    if (opened == undefined || this.types.isLibraryModule(module)) {
       return undefined;
     }
     if (!this.nodeValues.isFileClass(opened.name, word)) {
       return undefined;
     }
 
-    this.report(module, expr.loc, Code.FsClassNew, { word });
-    this.looseArguments(expr.args, module);
+    this.errors.write(module, expr.loc, Code.FsClassNew, { word });
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 }

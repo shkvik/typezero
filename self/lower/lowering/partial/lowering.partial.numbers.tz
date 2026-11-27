@@ -40,14 +40,16 @@ partial class Lowering {
     }
     const isResults =
       value.tz.kind == TypeKind.Result && target.kind == TypeKind.Result;
-    if (isResults && value.tz != target) {
+    if (isResults && value.tz.id != target.id) {
       return this.resultConverted(frame, value, target);
     }
     if (this.isReshaped(value.tz, target)) {
       return this.reshaped(frame, value, target, loc);
     }
     if (type == value.type) {
-      return this.retyped(value, type, target);
+      const kept = this.keptLent(value.tz, target);
+
+      return this.retyped(value, type, kept);
     }
     if (this.isInteger(value.tz) && this.isInteger(target)) {
       return this.integerConverted(frame, value, target, type);
@@ -74,6 +76,16 @@ partial class Lowering {
     this.notLowered(frame.module, loc, "this conversion");
 
     return undefined;
+  }
+
+  private keptLent(source: Type, target: Type): Type {
+    if (!this.isLookingArray(source) || target.kind != TypeKind.Array) {
+      return target;
+    }
+
+    return this.values.types.store.lentArrayOf(
+      this.values.types.store.itemOf(target),
+    );
   }
 
   private readonly integerConverted(
@@ -113,17 +125,17 @@ partial class Lowering {
     return this.ir.isConstant(value.value);
   }
 
-  private readonly doubleValue(value: double): IrValue {
-    const tz = this.store.plain(TypeKind.Double);
+  private doubleValue(value: double): IrValue {
+    const tz = this.values.types.store.plain(TypeKind.Double);
 
     return { type: kDoubleType, value: this.ir.real(value), tz };
   }
 
-  private readonly integerValue(type: string, text: string, tz: Type): IrValue {
+  private integerValue(type: string, text: string, tz: Type): IrValue {
     return { type, value: this.ir.integer(type, text), tz };
   }
 
-  private readonly saturated(
+  private saturated(
     frame: Read<Frame>,
     value: IrValue,
     target: Type,

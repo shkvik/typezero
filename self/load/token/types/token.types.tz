@@ -165,5 +165,3 @@ export type Token = {
   readonly newline: boolean;
   readonly hash: boolean;
 };
-
-export type InternedTokens = Interned<readonly Token[]>;

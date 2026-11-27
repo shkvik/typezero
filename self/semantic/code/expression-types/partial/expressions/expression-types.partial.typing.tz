@@ -27,6 +27,8 @@ partial class ExpressionTypes {
   }
 
   private typedByKind(expr: Expr, wanted: Type | undefined, module: int): Type {
+    const tree = this.types.program.tree;
+
     const literal = this.literalOf(expr, module);
     if (literal != undefined) {
       return this.literalTyped(expr, literal, wanted, module);
@@ -34,7 +36,7 @@ partial class ExpressionTypes {
 
     switch (expr.kind) {
       case ExprKind.Undefined:
-        return this.store.plain(TypeKind.Undefined);
+        return this.types.store.plain(TypeKind.Undefined);
       case ExprKind.RegexLit:
         return this.regexLiteralTyped(expr, module);
       case ExprKind.Template:
@@ -53,7 +55,7 @@ partial class ExpressionTypes {
         return this.conditionalTyped(expr, wanted, module);
       case ExprKind.Member:
         if (this.holderValueCheck(expr, wanted, module)) {
-          return this.store.plain(TypeKind.Error);
+          return this.types.store.plain(TypeKind.Error);
         }
 
         return this.memberTyped(expr, module);
@@ -64,7 +66,9 @@ partial class ExpressionTypes {
       case ExprKind.OptionalChain:
         return this.chainTyped(expr, wanted, module);
       case ExprKind.Call: {
-        this.noteArguments(expr.args);
+        const args = tree.argumentsOf(expr.argsList);
+
+        this.noteArguments(args);
         this.dictKeysCheck(expr, module);
         this.objectKeysCheck(expr, module);
         this.booleanCallCheck(expr, module);
@@ -75,7 +79,7 @@ partial class ExpressionTypes {
         this.disposeCallCheck(expr, module);
 
         if (this.legacyCallCheck(expr, module)) {
-          return this.store.plain(TypeKind.Error);
+          return this.types.store.plain(TypeKind.Error);
         }
 
         this.fsCallCheck(expr, module);
@@ -90,7 +94,7 @@ partial class ExpressionTypes {
         this.isJsonKnownCheck(expr, module);
 
         if (this.performanceCallCheck(expr, module)) {
-          return this.store.plain(TypeKind.Error);
+          return this.types.store.plain(TypeKind.Error);
         }
 
         const madeRegex = this.regExpCalled(expr, module);
@@ -100,19 +104,24 @@ partial class ExpressionTypes {
 
         const type = this.callTyped(expr, wanted, module);
 
-        if (this.isOwnCall(expr.callee, module)) {
+        const callee = tree.exprOf(expr.calleeId);
+        if (this.isOwnCall(callee, module)) {
           this.forgetCalledFields();
           this.forgetCallChanged(module);
         }
 
-        this.walkedArguments(expr.args, module);
+        const argsItem = tree.argumentsOf(expr.argsList);
+
+        this.walkedArguments(argsItem, module);
 
         return type;
       }
       case ExprKind.New: {
         const type = this.newTyped(expr, wanted, module);
 
-        this.walkedArguments(expr.args, module);
+        const exprArgs = tree.argumentsOf(expr.argsList);
+
+        this.walkedArguments(exprArgs, module);
 
         return type;
       }
@@ -120,13 +129,17 @@ partial class ExpressionTypes {
         return this.classExprTyped(expr, module);
       case ExprKind.Function:
         this.genericClosureCheck(expr, module);
-        this.iterablePlaceCheck(expr.fn, module);
+        const fn = tree.functionOf(expr.fnId);
+
+        this.iterablePlaceCheck(fn, module);
 
         return this.closureTyped(expr, wanted, module);
       case ExprKind.Assign:
         return this.assignedTyped(expr, module);
       case ExprKind.Update:
-        return this.updatedTyped(expr.target, module);
+        const target = tree.exprOf(expr.targetId);
+
+        return this.updatedTyped(target, module);
       case ExprKind.Yield:
         return this.yieldTyped(expr, module);
       case ExprKind.Cast:
@@ -163,7 +176,7 @@ partial class ExpressionTypes {
   ): void {
     this.constructorCastNote(given, wanted);
 
-    if (this.relation.converts(given, wanted)) {
+    if (this.types.converts(given, wanted)) {
       return;
     }
     if (this.literalTarget(expr, given, wanted, module) != undefined) {
@@ -172,13 +185,13 @@ partial class ExpressionTypes {
     if (this.isRangeProven(expr, given, wanted, module)) {
       return;
     }
-    if (this.functions.isFunctionAdapting(expr, given, wanted, module)) {
+    if (this.types.isFunctionAdapting(expr, given, wanted, module)) {
       return;
     }
-    if (this.mismatches.isUndecided(wanted)) {
+    if (this.types.isUndecided(wanted)) {
       return;
     }
-    if (this.mismatches.isIteratorFromClass(given, wanted)) {
+    if (this.types.isIteratorFromClass(given, wanted)) {
       return;
     }
     if (this.cstringMismatch(expr, given, wanted, module)) {

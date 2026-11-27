@@ -20,23 +20,27 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type {
-    const holder = member.object;
+    const tree = this.types.program.tree;
+
+    const holder = tree.exprOf(member.objectId);
     const word = member.name;
     const isVariable =
       holder.kind == ExprKind.Name &&
       this.targetOfName(holder, module)?.kind == SymbolKind.Variable;
     if (isVariable && holder.kind == ExprKind.Name) {
-      this.report(module, member.loc, Code.JsonNoMethodNamed, {
+      this.errors.write(module, member.loc, Code.JsonNoMethodNamed, {
         word,
         other: holder.name,
       });
     } else {
-      this.report(module, member.loc, Code.JsonNoMethod, { word });
+      this.errors.write(module, member.loc, Code.JsonNoMethod, { word });
     }
 
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private jsonStaticCheck(
@@ -44,7 +48,9 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     const isJson =
       object.kind == ExprKind.Name &&
       object.name == kJsonGlobalName &&
@@ -53,12 +59,12 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const second = expr.args[1]?.expr;
+    const second = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (member.name == "parse" && second == undefined) {
       this.jsonTextCheck(expr, module);
     }
     if (member.name == "parse" && second != undefined) {
-      this.report(module, second.loc, Code.JsonReviver, kNoDetails);
+      this.errors.write(module, second.loc, Code.JsonReviver, kNoDetails);
       this.nonNullArguments(expr, module);
 
       return true;
@@ -71,23 +77,25 @@ partial class ExpressionTypes {
   }
 
   private stringifyCheck(expr: CallExpr, module: int): boolean {
-    const value = expr.args[0]?.expr;
-    if (value == undefined || expr.args.length > 3) {
+    const tree = this.types.program.tree;
+
+    const value = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (value == undefined || tree.argumentsOf(expr.argsList).length > 3) {
       return false;
     }
 
     let isRefused = this.stringifiedValueCheck(value, module);
-    const replacer = expr.args[1]?.expr;
+    const replacer = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (replacer != undefined && this.isGivenOption(replacer, module)) {
       const type = this.typed(replacer, undefined, module);
       if (type.kind != TypeKind.Error) {
-        this.report(module, replacer.loc, Code.JsonReplacer, kNoDetails);
+        this.errors.write(module, replacer.loc, Code.JsonReplacer, kNoDetails);
       }
 
       isRefused = true;
     }
 
-    const space = expr.args[2]?.expr;
+    const space = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
     if (space != undefined && this.isGivenOption(space, module)) {
       const isSpace = this.spaceCheck(space, module);
 
@@ -101,8 +109,10 @@ partial class ExpressionTypes {
   }
 
   private nonNullArguments(expr: CallExpr, module: int): void {
-    for (const arg of expr.args) {
-      const value = arg.expr;
+    const tree = this.types.program.tree;
+
+    for (const arg of tree.argumentsOf(expr.argsList)) {
+      const value = tree.exprOf(arg.exprId);
       const isNull =
         value.kind == ExprKind.Name && this.isNullName(value, module);
       if (!isNull) {
@@ -115,7 +125,7 @@ partial class ExpressionTypes {
     const type = this.peekType(value, module);
 
     if (type.kind == TypeKind.Void) {
-      this.report(module, value.loc, Code.JsonVoidValue, kNoDetails);
+      this.errors.write(module, value.loc, Code.JsonVoidValue, kNoDetails);
 
       return true;
     }
@@ -123,17 +133,21 @@ partial class ExpressionTypes {
     const base = this.types.definedType(type);
     if (
       base.kind != TypeKind.Instance ||
-      this.modules.isLibraryModule(base.module)
+      this.types.isLibraryModule(base.module)
     ) {
       return false;
     }
 
-    const entry = this.classMember(base, "toJSON").entry;
+    const entryLookup = this.classMember(base, "toJSON");
+
+    const entry = entryLookup.entry;
     if (entry == undefined || entry.methods.length == 0) {
       return false;
     }
 
-    this.report(module, value.loc, Code.JsonToJsonClass, { word: base.name });
+    this.errors.write(module, value.loc, Code.JsonToJsonClass, {
+      word: base.name,
+    });
 
     return true;
   }
@@ -159,17 +173,20 @@ partial class ExpressionTypes {
       return true;
     }
 
-    this.report(module, space.loc, Code.JsonSpaceType, {
-      word: this.text.of(type),
+    this.errors.write(module, space.loc, Code.JsonSpaceType, {
+      word: this.types.typeText(type),
     });
 
     return false;
   }
 
   private jsonIndexed(expr: IndexExpr, module: int): Type {
-    const key = this.typed(expr.index, undefined, module);
+    const tree = this.types.program.tree;
+
+    const index = tree.exprOf(expr.indexId);
+    const key = this.typed(index, undefined, module);
     const base = this.types.apparent(key);
-    const json = this.store.plain(TypeKind.Json);
+    const json = this.types.store.plain(TypeKind.Json);
     const isKey =
       base.kind == TypeKind.Error ||
       base.kind == TypeKind.String ||
@@ -180,16 +197,18 @@ partial class ExpressionTypes {
       return this.types.optional(json);
     }
 
-    this.report(module, expr.index.loc, Code.JsonKeyType, {
-      word: this.text.of(key),
+    this.errors.write(module, tree.exprOf(expr.indexId).loc, Code.JsonKeyType, {
+      word: this.types.typeText(key),
     });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly jsonTextCheck(expr: CallExpr, module: int): void {
-    const arg = expr.args[0]?.expr;
-    if (arg == undefined || expr.args.length != 1) {
+  private jsonTextCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (arg == undefined || tree.argumentsOf(expr.argsList).length != 1) {
       return;
     }
 
@@ -198,7 +217,7 @@ partial class ExpressionTypes {
       return;
     }
     if (text.charCodeAt(0) == kByteOrderMark) {
-      return this.report(module, arg.loc, Code.JsonTextBom, kNoDetails);
+      return this.errors.write(module, arg.loc, Code.JsonTextBom, kNoDetails);
     }
 
     const problem = this.jsonTexts.problemOf(text);
@@ -208,14 +227,19 @@ partial class ExpressionTypes {
 
     const place = this.jsonTexts.position(text, problem.offset);
 
-    this.report(module, arg.loc, Code.JsonTextInvalid, {
+    this.errors.write(module, arg.loc, Code.JsonTextInvalid, {
       word: problem.message,
       first: `${place[0] ?? 1}`,
       other: `${place[1] ?? 1}`,
     });
   }
 
-  private readonly constantJsonText(arg: Expr, module: int): string | undefined {
+  private readonly constantJsonText(
+    arg: Expr,
+    module: int,
+  ): string | undefined {
+    const tree = this.types.program.tree;
+
     if (arg.kind == ExprKind.StringLit) {
       return arg.value;
     }
@@ -223,8 +247,8 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const callee = arg.callee;
-    const path = arg.args[0]?.expr;
+    const callee = tree.exprOf(arg.calleeId);
+    const path = tree.exprAt(tree.argumentsOf(arg.argsList)[0]?.exprId);
     if (callee.kind != ExprKind.Name || callee.name != kEmbedTextName) {
       return undefined;
     }
@@ -237,7 +261,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const home = this.program.modules[module]?.source.path ?? "";
+    const home = this.types.program.modules[module]?.source.path ?? "";
 
     return this.embedded.textOf(home, shown);
   }

@@ -1,0 +1,71 @@
+import { ClassDecl } from "../../types/ast.types.classes.tz";
+import { Expr, ExprKind } from "../../types/ast.types.expressions.tz";
+import {
+  BodySource,
+  FunctionDecl,
+  FunctionPlace,
+} from "../../types/ast.types.functions.tz";
+import { AstList } from "../../types/ast.types.span.tz";
+import { BlockStmt, Stmt, StmtKind } from "../../types/ast.types.statements.tz";
+import { TypeRef, TypeRefKind } from "../../types/ast.types.types.tz";
+
+export const kEmptyList: AstList = { start: 0, end: 0 };
+
+export const kMissingExpr: Expr = {
+  kind: ExprKind.Undefined,
+  id: -1,
+  loc: -1,
+};
+
+export const kMissingStmt: Stmt = {
+  kind: StmtKind.Empty,
+  id: -1,
+  loc: -1,
+};
+
+export const kMissingTypeRef: TypeRef = {
+  id: -1,
+  form: { kind: TypeRefKind.Invalid },
+  name: "",
+  loc: -1,
+  argsList: kEmptyList,
+};
+
+export const kMissingBlockStmt: BlockStmt = {
+  kind: StmtKind.Block,
+  id: -1,
+  loc: -1,
+  bodyList: kEmptyList,
+};
+
+export const kMissingFunctionDecl: FunctionDecl = {
+  kind: StmtKind.Function,
+  id: -1,
+  loc: -1,
+  name: "",
+  typeParamsList: kEmptyList,
+  paramsList: kEmptyList,
+  isArrow: false,
+  concise: false,
+  ownName: "",
+  place: FunctionPlace.Declared,
+  bodySource: BodySource.Written,
+  isGenerator: false,
+  isAsync: false,
+};
+
+export const kMissingClassDecl: ClassDecl = {
+  kind: StmtKind.Class,
+  id: -1,
+  loc: -1,
+  isAbstract: false,
+  isPartial: false,
+  baseArgsList: kEmptyList,
+  interfacesList: kEmptyList,
+  fieldsList: kEmptyList,
+  methodsList: kEmptyList,
+  constructorsList: kEmptyList,
+  expression: false,
+  decoratorsList: kEmptyList,
+  typeParamsList: kEmptyList,
+};

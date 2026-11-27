@@ -1,4 +1,6 @@
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 export type Binding = {
   readonly name: string;

@@ -27,7 +27,9 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
-    const callee = call.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
     if (this.isArrayCheck(callee, module)) {
       return this.arrayFacts(call, isTrue, module);
     }
@@ -50,11 +52,13 @@ partial class ExpressionTypes {
   }
 
   private readonly isArrayCheck(callee: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (callee.kind != ExprKind.Member || callee.name != kIsArrayName) {
       return false;
     }
 
-    const object = callee.object;
+    const object = tree.exprOf(callee.objectId);
 
     return (
       object.kind == ExprKind.Name &&
@@ -68,37 +72,40 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     const facts = new Map<string, Type>();
-    const arg = call.args[0];
+    const arg = tree.argumentsOf(call.argsList)[0];
     if (arg == undefined) {
       return facts;
     }
 
-    const slot = this.narrowable(arg.expr, module);
+    const expr = tree.exprOf(arg.exprId);
+    const slot = this.narrowable(expr, module);
     if (slot == undefined) {
       return facts;
     }
 
     const kept = this.types
       .unionMembers(slot.type)
-      .filter((part) => this.narrowings.isListType(part) == isTrue);
+      .filter((part) => this.types.isListType(part) == isTrue);
     const isUnknown = slot.type.kind == TypeKind.Unknown;
     if (isUnknown && isTrue) {
-      facts.set(slot.key, this.store.arrayOf(slot.type));
+      facts.set(slot.key, this.types.store.arrayOf(slot.type));
 
       return facts;
     }
 
     const isJson = this.types.definedType(slot.type).kind == TypeKind.Json;
     if (isJson && isTrue) {
-      const json = this.store.plain(TypeKind.Json);
+      const json = this.types.store.plain(TypeKind.Json);
 
-      facts.set(slot.key, this.store.arrayOf(json));
+      facts.set(slot.key, this.types.store.arrayOf(json));
 
       return facts;
     }
     if (kept.length > 0) {
-      const union = this.store.unionOf(kept);
+      const union = this.types.store.unionOf(kept);
 
       facts.set(slot.key, union);
     }
@@ -107,7 +114,9 @@ partial class ExpressionTypes {
   }
 
   private readonly isJsonCheck(callee: MemberExpr, module: int): boolean {
-    const object = callee.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
 
     return (
       callee.name == kIsJsonName &&
@@ -122,15 +131,18 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     const facts = new Map<string, Type>();
-    const arg = call.args[0];
+    const arg = tree.argumentsOf(call.argsList)[0];
     if (arg == undefined || !isTrue) {
       return facts;
     }
 
-    const slot = this.narrowable(arg.expr, module);
-    if (slot != undefined && this.objectMembers.isUnknownValue(slot.type)) {
-      facts.set(slot.key, this.store.plain(TypeKind.Json));
+    const expr = tree.exprOf(arg.exprId);
+    const slot = this.narrowable(expr, module);
+    if (slot != undefined && this.types.isUnknownValue(slot.type)) {
+      facts.set(slot.key, this.types.store.plain(TypeKind.Json));
     }
 
     return facts;
@@ -142,12 +154,14 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     const target = this.targetOfName(callee, module);
     if (target == undefined || target.kind != SymbolKind.Function) {
       return new Map<string, Type>();
     }
-    const isTyped = this.modules.isTypedLibrary(target.module);
-    if (this.modules.isLibraryModule(target.module) && !isTyped) {
+    const isTyped = this.types.isTypedLibrary(target.module);
+    if (this.types.isLibraryModule(target.module) && !isTyped) {
       return new Map<string, Type>();
     }
 
@@ -156,7 +170,8 @@ partial class ExpressionTypes {
       return new Map<string, Type>();
     }
 
-    const isPredicate = fn.returnType?.form.kind == TypeRefKind.Predicate;
+    const isPredicate =
+      tree.typeRefAt(fn.returnTypeId)?.form.kind == TypeRefKind.Predicate;
     const summary = this.summaryFacts(call, fn, target.module, isTrue, module);
     if (!isPredicate && summary != undefined) {
       return summary;
@@ -168,7 +183,7 @@ partial class ExpressionTypes {
     }
 
     return this.unknownFacts(
-      call.args.map((arg) => arg.expr),
+      tree.argumentsOf(call.argsList).map((arg) => tree.exprOf(arg.exprId)),
       module,
     );
   }
@@ -179,7 +194,9 @@ partial class ExpressionTypes {
     home: int,
     isTrue: boolean,
   ): Map<string, Type> | undefined {
-    const written = fn.returnType;
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(fn.returnTypeId);
     const form = written?.form;
     if (written == undefined || form == undefined) {
       return undefined;
@@ -188,10 +205,16 @@ partial class ExpressionTypes {
       return new Map<string, Type>();
     }
 
-    const index = fn.params.findIndex((param) => param.name == written.name);
-    const arg = call.args[index];
-    const ref = written.args[0];
-    if (arg == undefined || ref == undefined || fn.typeParams.length > 0) {
+    const index = tree
+      .paramsOf(fn.paramsList)
+      .findIndex((param) => param.name == written.name);
+    const arg = tree.argumentsOf(call.argsList)[index];
+    const ref = tree.typeRefsOf(written.argsList)[0];
+    if (
+      arg == undefined ||
+      ref == undefined ||
+      tree.typeParamsOf(fn.typeParamsList).length > 0
+    ) {
       return undefined;
     }
 
@@ -200,9 +223,11 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const guarded = this.resolver.resolve(ref, context);
+    const guarded = this.types.resolve(ref, context);
 
-    return this.guardedFacts(arg.expr, guarded, isTrue, home);
+    const expr = tree.exprOf(arg.exprId);
+
+    return this.guardedFacts(expr, guarded, isTrue, home);
   }
 
   private guardedFacts(
@@ -219,10 +244,10 @@ partial class ExpressionTypes {
 
     const parts = this.types.unionMembers(slot.type);
     const kept = parts.filter(
-      (part) => this.relation.converts(part, guarded) == isTrue,
+      (part) => this.types.converts(part, guarded) == isTrue,
     );
     if (kept.length > 0) {
-      const union = this.store.unionOf(kept);
+      const union = this.types.store.unionOf(kept);
 
       facts.set(slot.key, union);
     }
@@ -239,22 +264,29 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     const summary = this.methodSummaryFacts(call, callee, isTrue, module);
     if (summary != undefined) {
       return summary;
     }
 
-    const receiver = this.narrowable(callee.object, module);
-    const values = call.args.map((arg) => arg.expr);
+    const object = tree.exprOf(callee.objectId);
+    const receiver = this.narrowable(object, module);
+    const values = tree
+      .argumentsOf(call.argsList)
+      .map((arg) => tree.exprOf(arg.exprId));
 
     if (
       receiver == undefined ||
-      !this.narrowings.isOwnReceiver(receiver.type)
+      !this.types.isOwnReceiver(receiver.type)
     ) {
       return this.unknownFacts(values, module);
     }
 
-    values.push(callee.object);
+    const objectExpr = tree.exprOf(callee.objectId);
+
+    values.push(objectExpr);
 
     return this.unknownFacts(values, module);
   }
@@ -265,12 +297,17 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> | undefined {
-    const receiver = this.peekType(callee.object, module);
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(callee.objectId);
+    const receiver = this.peekType(object, module);
     if (receiver.kind != TypeKind.Instance) {
       return undefined;
     }
 
-    const entry = this.classMember(receiver, callee.name).entry;
+    const entryLookup = this.classMember(receiver, callee.name);
+
+    const entry = entryLookup.entry;
     const method = entry?.methods[0];
     if (entry == undefined || method == undefined || entry.isStatic) {
       return undefined;
@@ -278,7 +315,8 @@ partial class ExpressionTypes {
 
     const owner = entry.owner;
     const isGeneric =
-      method.typeParams.length > 0 || owner.typeParams.length > 0;
+      tree.typeParamsOf(method.typeParamsList).length > 0 ||
+      tree.typeParamsOf(owner.typeParamsList).length > 0;
     if (entry.methods.length != 1 || isGeneric) {
       return undefined;
     }
@@ -287,8 +325,8 @@ partial class ExpressionTypes {
     const type = this.methodFunction(owner, method, instance.module);
     const part = this.partOf(owner, method);
     const home = this.partModule(part, instance.module);
-    const summary = this.guardSummaries.get(`${home} ${method.loc}`);
-    if (summary == undefined || !this.narrowings.isBooleanFunction(type)) {
+    const summary = this.summaryAt(`${home} ${method.loc}`);
+    if (summary == undefined || !this.types.isBooleanFunction(type)) {
       return undefined;
     }
 
@@ -297,7 +335,7 @@ partial class ExpressionTypes {
 
   private unknownFacts(values: Read<Expr[]>, module: int): Map<string, Type> {
     const facts = new Map<string, Type>();
-    const unknown = this.store.plain(TypeKind.Error);
+    const unknown = this.types.store.plain(TypeKind.Error);
 
     for (const value of values) {
       const slot = this.narrowable(value, module);
@@ -305,11 +343,15 @@ partial class ExpressionTypes {
         continue;
       }
       if (slot.type.kind == TypeKind.Object) {
-        this.narrowings.unknownFields(slot.key, slot.type.fields, facts);
+        this.types.unknownFields(
+          slot.key,
+          this.types.store.fieldsOf(slot.type),
+          facts,
+        );
 
         continue;
       }
-      if (this.narrowings.isGuardable(slot.type)) {
+      if (this.types.isGuardable(slot.type)) {
         facts.set(slot.key, unknown);
       }
     }

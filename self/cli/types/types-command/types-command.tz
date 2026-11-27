@@ -6,14 +6,13 @@ import {
 } from "../../../program/module-types/types/module-types.types.tz";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
 import { SourceLines } from "../../../program/source-lines/source-lines.tz";
-import { TypeStore } from "../../../program/type/type-store/type-store.tz";
-import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { FrontEnd } from "../../../pipeline/front-end/front-end.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 import { Program } from "../../../program/module/types/module.types.tz";
 import { ExpressionTypes } from "../../../semantic/code/expression-types/expression-types.tz";
 import { OwnershipCheck } from "../../../semantic/ownership/ownership-check/ownership-check.tz";
+import { TypeSystem } from "../../../semantic/types/type-system/type-system.tz";
 import { Overlay } from "../../../load/loader/types/loader.types.tz";
 import {
   kOverlayFlag,
@@ -27,8 +26,6 @@ export class TypesCommand {
   private readonly isQuiet: boolean;
   private readonly overlays: Overlay[];
   private readonly report: ProgramReport;
-  private readonly store: TypeStore;
-  private readonly text: TypeText;
 
   public constructor(args: Read<string[]>) {
     this.entry = args[3];
@@ -36,8 +33,6 @@ export class TypesCommand {
     this.isQuiet = args.includes(kQuietFlag);
     this.overlays = [];
     this.report = new ProgramReport();
-    this.store = new TypeStore();
-    this.text = new TypeText(this.store);
 
     this.readOverlays(args);
   }
@@ -53,30 +48,35 @@ export class TypesCommand {
 
     const source = new ProgramSource();
     const loaded = source.loadWith(entry, this.overlays, false);
-    const program = loaded.program;
 
     this.report.loadProblems(loaded);
-    this.report.moduleErrors(program);
+    this.report.moduleErrors(loaded.program);
 
-    const front = new FrontEnd(this.store, program);
+    const front = new FrontEnd();
     if (this.report.hasFailed() && !front.isCheckable(loaded)) {
       return;
     }
 
-    const checked = front.run();
+    const checked = front.run(loaded.program);
 
     if (!this.isQuiet) {
       for (const typed of checked.typed) {
-        this.printTypes(typed);
+        this.printTypes(typed, checked.values.types);
       }
     }
 
-    for (const problems of front.problems(checked)) {
-      this.report.sourceErrors(problems.source, problems.errors);
+    const found = front.problems(checked);
+    const program = checked.values.types.program;
+
+    for (const problems of found) {
+      const module = program.modules[problems.module];
+      if (module != undefined) {
+        this.report.sourceErrors(module.source, problems.errors);
+      }
     }
 
     if (this.isOwnershipChecked) {
-      this.checkOwnership(program, checked.values);
+      this.checkOwnership(checked.values);
     }
   }
 
@@ -95,14 +95,16 @@ export class TypesCommand {
     }
   }
 
-  private checkOwnership(program: Program, values: Own<ExpressionTypes>): void {
-    const ownership = new OwnershipCheck(this.store, values, program);
+  private checkOwnership(values: Own<ExpressionTypes>): void {
+    const ownership = new OwnershipCheck(values);
 
     ownership.run();
 
     for (const line of ownership.hints()) {
       console.log(line);
     }
+
+    const program = ownership.values.types.program;
 
     for (const module of program.modules) {
       const errors = ownership.problems(module.id);
@@ -115,36 +117,46 @@ export class TypesCommand {
     }
   }
 
-  private readonly printTypes(types: Read<ModuleTypes>): void {
-    const module = types.module;
+  private readonly printTypes(
+    types: Read<ModuleTypes>,
+    system: Read<TypeSystem>,
+  ): void {
+    const module = system.program.modules[types.module];
+    if (module == undefined) {
+      return;
+    }
+
     const lines = new SourceLines(module.source.text);
 
     console.log(module.name);
 
     for (const declaration of types.declarations) {
       const place = lines.placeOf(declaration.loc);
-      const text = this.declarationText(declaration);
+      const text = this.declarationText(declaration, system);
 
       console.log(`  ${place.line}:${place.column} ${text}`);
     }
   }
 
-  private readonly declarationText(declaration: TypedDeclaration): string {
+  private readonly declarationText(
+    declaration: TypedDeclaration,
+    system: Read<TypeSystem>,
+  ): string {
     const name = declaration.name;
 
     switch (declaration.form) {
       case DeclarationForm.TypeAlias: {
-        const type = this.text.structure(declaration.type);
+        const type = system.structureText(declaration.type);
 
         return `type ${name} = ${type}`;
       }
       case DeclarationForm.Enum: {
-        const type = this.text.structure(declaration.type);
+        const type = system.structureText(declaration.type);
 
         return `enum ${name} = ${type}`;
       }
       default: {
-        const type = this.text.of(declaration.type);
+        const type = system.typeText(declaration.type);
 
         return `${name}: ${type}`;
       }

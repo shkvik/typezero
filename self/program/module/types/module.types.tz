@@ -1,14 +1,11 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
-import { ClassDecl } from "../../ast/types/ast.types.classes.tz";
+import { AstTree } from "../../ast/ast-tree/ast-tree.tz";
+import { DeclarationFile } from "../../ast/types/ast.types.declarations.tz";
 import {
-  DeclarationFile,
-  DeclaredClass,
-} from "../../ast/types/ast.types.declarations.tz";
-import {
-  ImportDecl,
   ModulePath,
   SourceFile,
 } from "../../ast/types/ast.types.modules.tz";
+import { AstList } from "../../ast/types/ast.types.span.tz";
 
 export type SourcePiece = { readonly path: string; readonly start: int };
 
@@ -57,10 +54,10 @@ export type Module = {
   readonly errors: readonly SourceError[];
   readonly declaration?: ParsedDeclaration;
   readonly links: readonly ModuleLink[];
-  readonly implicit: readonly ImportDecl[];
-  readonly parts: readonly ClassDecl[];
+  readonly implicitList: AstList;
+  readonly partsList: AstList;
   readonly isDeclarationOnly: boolean;
-  readonly declared: readonly DeclaredClass[];
+  readonly declaredList: AstList;
 };
 
 export enum BuiltinText {
@@ -74,19 +71,9 @@ export type BuiltinFile = {
 
 export type Program = {
   readonly modules: readonly Module[];
-  readonly order: readonly Module[];
-  readonly globals: readonly Module[];
-  readonly ambient: readonly Module[];
+  readonly order: readonly int[];
+  readonly globals: readonly int[];
+  readonly ambient: readonly int[];
   readonly builtins: readonly BuiltinFile[];
+  readonly tree: AstTree;
 };
-
-export type InternedModules = Interned<
-  | Program
-  | Module
-  | SourceText
-  | SourcePiece
-  | ParsedFile
-  | ParsedDeclaration
-  | ModuleLink
-  | BuiltinFile
->;

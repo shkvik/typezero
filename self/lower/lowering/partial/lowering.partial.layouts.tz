@@ -1,0 +1,551 @@
+import {
+  DeclaredMemberKind,
+} from "../../../program/ast/types/ast.types.declarations.tz";
+import {
+  InstanceField,
+} from "../../../program/expression-answers/types/expression-answers.types.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kFlagType,
+  kIntType,
+  kLayoutHead,
+  kObjectFree,
+  kTupleFlag,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  ClassLayout,
+  Frame,
+  IrValue,
+  LayoutField,
+  LayoutShape,
+  MethodTarget,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private layoutOf(type: Type): ClassLayout | undefined {
+    const known = this.layouts.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = this.madeLayout(type);
+    if (made != undefined) {
+      this.layouts.set(type.id, made);
+    }
+
+    return made;
+  }
+
+  private droppedFields(
+    type: Type,
+    placed: Read<LayoutField[]>,
+  ): LayoutField[] {
+    if (!this.values.types.store.isLentTuple(type)) {
+      return placed.slice();
+    }
+
+    const kept: LayoutField[] = [];
+
+    for (const field of placed) {
+      if (this.values.isCopy(field.type)) {
+        kept.push(field);
+      }
+    }
+
+    return kept;
+  }
+
+  private madeLayout(type: Type): ClassLayout | undefined {
+    const shape = this.layoutShape(type);
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    const parent = this.classParent(type);
+    const base = this.baseLayoutOf(parent);
+    if (parent != undefined && base == undefined) {
+      return undefined;
+    }
+
+    const own = this.ownShapeFields(shape, base);
+    const placed = this.placedAfter(own, base);
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const types = [kIntType, kPointerType].concat(
+      placed.map((field) => field.ir),
+    );
+    const struct = `{ ${types.join(", ")} }`;
+    const size = this.structSize(placed);
+    const name = shape.name;
+    const classId = this.nextClassId();
+    const disposers = this.disposeChain(type);
+    const title = this.layoutTitle(name);
+    const dropped = this.droppedFields(type, placed);
+    const drop = this.dropFunction(title, struct, dropped, disposers);
+    const slots = this.slotsOf(type);
+    const fullShape = this.shapeWithBase(shape, base);
+    const descriptor = this.layoutDescriptor(
+      fullShape,
+      drop,
+      placed,
+      classId,
+      slots,
+    );
+    const layout: ClassLayout = {
+      struct,
+      size,
+      descriptor,
+      classId,
+      drop,
+    };
+
+    this.layoutFields.set(classId, placed);
+    this.layoutShapes.set(classId, fullShape);
+    this.layoutSlots.set(classId, slots);
+
+    return layout;
+  }
+
+  private readonly fieldsOf(layout: ClassLayout): LayoutField[] {
+    const fields = this.layoutFields.get(layout.classId);
+    if (fields == undefined) {
+      return [];
+    }
+
+    return fields.slice();
+  }
+
+  private readonly shapeFieldsOf(layout: ClassLayout): InstanceField[] {
+    const shape = this.layoutShapes.get(layout.classId);
+    if (shape == undefined) {
+      return [];
+    }
+
+    return shape.fields.slice();
+  }
+
+  private readonly layoutField(
+    layout: ClassLayout | undefined,
+    name: string | undefined,
+  ): LayoutField | undefined {
+    if (layout == undefined) {
+      return undefined;
+    }
+
+    const fields = this.layoutFields.get(layout.classId) ?? [];
+
+    return fields.find((one) => one.name == name);
+  }
+
+  private readonly layoutFieldAt(
+    layout: ClassLayout | undefined,
+    index: int,
+  ): LayoutField | undefined {
+    if (layout == undefined) {
+      return undefined;
+    }
+
+    const fields = this.layoutFields.get(layout.classId) ?? [];
+
+    return fields[index];
+  }
+
+  private layoutShape(type: Type): LayoutShape | undefined {
+    if (type.kind == TypeKind.Object) {
+      const fields = this.values.types.store
+        .fieldsOf(type)
+        .map((field) => this.objectField(field));
+
+      return { name: "", fields, flags: 0 };
+    }
+    if (type.kind == TypeKind.Tuple) {
+      const fields = this.values.types.store
+        .itemsOf(type)
+        .map((item, index) => ({
+          name: `${index}`,
+          loc: 0,
+          type: item,
+        }));
+
+      return { name: "", fields, flags: kTupleFlag };
+    }
+
+    const declared = this.libraryShape(type);
+    if (declared != undefined) {
+      return declared;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const fields = this.values.instanceFields(type);
+    if (decl == undefined || fields == undefined || !this.isPlainClass(decl)) {
+      return undefined;
+    }
+
+    return { name: decl.name ?? "", fields, flags: 0 };
+  }
+
+  private libraryShape(type: Type): LayoutShape | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (type.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const opened = this.values.types.program.modules[type.module];
+    const loc = type.loc;
+    const decl = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == loc);
+    if (opened == undefined || decl == undefined || !opened.source.isLibrary) {
+      return undefined;
+    }
+
+    const context = this.values.types.classContext(
+      type,
+      tree.typeParamsOf(decl.typeParamsList),
+      type.module,
+    );
+    const fields: InstanceField[] = [];
+
+    for (const member of tree.declaredMembersOf(decl.membersList)) {
+      const written = tree.typeRefAt(member.typeId);
+      const isField = member.form.kind == DeclaredMemberKind.Field;
+      if (!isField || member.isStatic || written == undefined) {
+        continue;
+      }
+
+      const resolved = this.values.types.resolve(written, context);
+
+      fields.push({ name: member.name, loc: member.loc, type: resolved });
+    }
+
+    return { name: decl.name ?? "", fields, flags: 0 };
+  }
+
+  private layoutProblem(type: Type): string {
+    const shape = this.layoutShape(type);
+    if (shape == undefined) {
+      return `a ${this.kindName(type)} of this form`;
+    }
+
+    const failed = shape.fields.find(
+      (field) => this.irType(field.type) == undefined,
+    );
+    if (failed == undefined) {
+      return "a missing field";
+    }
+
+    return `type ${this.kindName(failed.type)}`;
+  }
+
+  private objectField(field: ObjectField): InstanceField {
+    const type = field.type;
+    const empty = this.values.types.store.plain(TypeKind.Undefined);
+    const isBare = this.optionalInner(type) == undefined;
+    if (field.optional && isBare) {
+      const optional = this.values.types.store.unionOf([type, empty]);
+
+      return { name: field.name, loc: 0, type: optional };
+    }
+
+    return { name: field.name, loc: 0, type };
+  }
+
+  private baseLayoutOf(parent: Type | undefined): ClassLayout | undefined {
+    if (parent == undefined) {
+      return undefined;
+    }
+
+    return this.layoutOf(parent);
+  }
+
+  private readonly ownShapeFields(
+    shape: Read<LayoutShape>,
+    base: Read<ClassLayout | undefined>,
+  ): InstanceField[] {
+    if (base == undefined) {
+      return shape.fields.slice();
+    }
+
+    const inherited = this.shapeFieldsOf(base).map((field) => field.name);
+
+    return shape.fields.filter((field) => !inherited.includes(field.name));
+  }
+
+  private readonly shapeWithBase(
+    shape: Read<LayoutShape>,
+    base: Read<ClassLayout | undefined>,
+  ): LayoutShape {
+    if (base == undefined) {
+      const fields = shape.fields.slice();
+
+      return { name: shape.name, fields, flags: shape.flags };
+    }
+
+    const own = this.ownShapeFields(shape, base);
+    const fields = this.shapeFieldsOf(base).concat(own);
+
+    return { name: shape.name, fields, flags: shape.flags };
+  }
+
+  private placedAfter(
+    fields: Read<InstanceField[]>,
+    base: Read<ClassLayout | undefined>,
+  ): LayoutField[] | undefined {
+    if (base == undefined) {
+      return this.placedFields(fields, 16, 0);
+    }
+
+    const baseFields = this.fieldsOf(base);
+    const end = this.structSize(baseFields);
+    const own = this.placedFields(fields, end, baseFields.length);
+    if (own == undefined) {
+      return undefined;
+    }
+
+    return baseFields.concat(own);
+  }
+
+  private slotsOf(type: Type): LLVMValue[] {
+    if (!this.isInHierarchy(type)) {
+      return [];
+    }
+
+    return this.slotTable(type);
+  }
+
+  private placedFields(
+    fields: Read<InstanceField[]>,
+    start: int,
+    first: int,
+  ): LayoutField[] | undefined {
+    const order = fields.slice();
+
+    order.sort((one, other) => this.fieldOrder(one, other));
+
+    const placed: LayoutField[] = [];
+    let offset: int = start;
+
+    for (let index = 0; index < order.length; index++) {
+      const field = order[index];
+      if (field == undefined) {
+        return undefined;
+      }
+
+      const ir = this.irType(field.type);
+      if (ir == undefined || ir == kVoidType) {
+        return undefined;
+      }
+
+      const align = this.alignOf(field.type);
+
+      offset = this.aligned(offset, align);
+      placed.push({
+        name: field.name,
+        index: first + index + 2,
+        offset,
+        type: field.type,
+        ir,
+      });
+      offset += this.sizeOf(field.type);
+    }
+
+    return placed;
+  }
+
+  private fieldOrder(first: InstanceField, second: InstanceField): int {
+    const isFirstTag = first.type.kind == TypeKind.Literal;
+    const isSecondTag = second.type.kind == TypeKind.Literal;
+    if (isFirstTag != isSecondTag) {
+      return this.choose(isFirstTag, -1, 1);
+    }
+
+    const isFirstCode = first.type.kind == TypeKind.Function;
+    const isSecondCode = second.type.kind == TypeKind.Function;
+    if (isFirstCode != isSecondCode) {
+      return this.choose(isSecondCode, -1, 1);
+    }
+
+    const firstAlign = this.alignOf(first.type);
+    const secondAlign = this.alignOf(second.type);
+    if (firstAlign != secondAlign) {
+      return secondAlign - firstAlign;
+    }
+    if (first.name < second.name) {
+      return -1;
+    }
+    if (first.name > second.name) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private structSize(fields: Read<LayoutField[]>): int {
+    let end: int = 16;
+
+    for (const field of fields) {
+      end = field.offset + this.sizeOf(field.type);
+    }
+
+    return this.aligned(end, 8);
+  }
+
+  private readonly aligned(offset: int, align: int): int {
+    const rest = offset % align;
+    if (rest == 0) {
+      return offset;
+    }
+
+    return offset + align - rest;
+  }
+
+  private dropFunction(
+    name: string,
+    struct: string,
+    fields: Read<LayoutField[]>,
+    disposers: Read<MethodTarget[]>,
+  ): LLVMValue {
+    const dropName = this.ir.uniqueName(`tz.drop.${name}.`);
+    const made = new IrFunction(this.ir, dropName, kVoidType, [kPointerType]);
+    const object = made.param(0);
+
+    for (const disposer of disposers) {
+      const disposing = this.ir.declare(disposer.name, kVoidType, [
+        kPointerType,
+      ]);
+
+      made.call(disposing, [object]);
+    }
+
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+      place: dropName,
+    };
+    const held: IrValue[] = [];
+
+    for (const field of fields) {
+      if (!this.isManaged(field.type)) {
+        continue;
+      }
+
+      const address = made.field(struct, object, field.index);
+      const value = made.load(field.ir, address);
+
+      held.push({ type: field.ir, value, tz: field.type, owned: true });
+    }
+
+    const freeing = this.ir.declare(kObjectFree, kVoidType, [kPointerType]);
+
+    made.call(freeing, [object]);
+
+    for (const value of held) {
+      this.dropping(frame, value);
+    }
+
+    made.finishVoid();
+
+    return made.callee.fn;
+  }
+
+  private layoutDescriptor(
+    shape: Read<LayoutShape>,
+    drop: LLVMValue,
+    placed: Read<LayoutField[]>,
+    classId: int,
+    methods: Read<LLVMValue[]>,
+  ): LLVMValue {
+    const entries: LLVMValue[] = [];
+    const name = shape.name;
+    const title = this.layoutTitle(name);
+
+    for (const field of shape.fields) {
+      const spot = placed.find((one) => one.name == field.name);
+      const type = this.descriptor(field.type) ?? this.ir.zero(kPointerType);
+      const offset = spot?.offset ?? 0;
+
+      entries.push(
+        this.ir.constStruct([
+          this.cText(field.name),
+          this.ir.integer(kFlagType, `${field.name.length}`),
+          this.ir.integer(kFlagType, `${offset}`),
+          type,
+        ]),
+      );
+    }
+
+    const entry = "{ ptr, i32, i32, ptr }";
+    const count = entries.length;
+    const tableName = this.ir.uniqueName(`tz.fields.${title}.`);
+    const tableType = `[${count} x ${entry}]`;
+    const values = this.ir.constArray(entry, entries);
+    const table = this.ir.global(tableName, tableType, values, true);
+    const head = this.ir.constStruct([
+      drop,
+      table,
+      this.ir.integer(kFlagType, `${count}`),
+      this.ir.integer(kFlagType, `${shape.flags}`),
+      this.nameText(name),
+      this.ir.integer(kFlagType, `${name.length}`),
+      this.ir.integer(kFlagType, `${classId}`),
+    ]);
+    const slots = this.ir.constArray(kPointerType, methods);
+    const descriptor = this.ir.constStruct([
+      head,
+      this.ir.zero(kPointerType),
+      slots,
+    ]);
+    const globalName = this.ir.uniqueName(`tz.layout.${title}.`);
+    const globalType = `{ ${kLayoutHead}, ptr, [${methods.length} x ptr] }`;
+
+    return this.ir.global(globalName, globalType, descriptor, true);
+  }
+
+  private readonly layoutTitle(name: string): string {
+    if (name.length == 0) {
+      return "object";
+    }
+
+    return name;
+  }
+
+  private nameText(name: string): LLVMValue {
+    if (name.length == 0) {
+      return this.ir.zero(kPointerType);
+    }
+
+    return this.cText(name);
+  }
+
+  private cText(text: string): LLVMValue {
+    const known = this.cTexts.get(text);
+    if (known != undefined) {
+      return known;
+    }
+
+    const bytes = Buffer.from(text, "utf8");
+    const name = this.ir.uniqueName(".name.");
+    const data = this.ir.bytes(bytes, true);
+    const array = `[${bytes.length + 1} x i8]`;
+    const global = this.ir.global(name, array, data, true);
+
+    this.cTexts.set(text, global);
+
+    return global;
+  }
+}

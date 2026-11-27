@@ -46,6 +46,9 @@ import {
   kPointerType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
+import {
+  SyntheticNode,
+} from "../../../program/ast/ast-tree/types/ast-tree.types.synthetic.tz";
 
 partial class Lowering {
   private memCall(
@@ -53,13 +56,19 @@ partial class Lowering {
     call: CallExpr,
     callee: NameExpr,
   ): IrValue | undefined {
-    const first = call.args[0];
-    const second = call.args[1];
+    const tree = this.values.types.program.tree;
+
+    const first = tree.argumentsOf(call.argsList)[0];
+    const second = tree.argumentsOf(call.argsList)[1];
     if (first != undefined && callee.name == kTakeName) {
-      return this.memTaken(frame, first.expr);
+      const expr = tree.exprOf(first.exprId);
+
+      return this.memTaken(frame, expr);
     }
     if (first != undefined && callee.name == kDropName) {
-      return this.memDropped(frame, first.expr);
+      const exprExpr = tree.exprOf(first.exprId);
+
+      return this.memDropped(frame, exprExpr);
     }
     if (first == undefined || second == undefined) {
       this.notLowered(frame.module, call.loc, "this call");
@@ -67,10 +76,20 @@ partial class Lowering {
       return undefined;
     }
     if (callee.name == kReplaceName) {
-      return this.memReplaced(frame, call.loc, first.expr, second.expr);
+      return this.memReplaced(
+        frame,
+        call.loc,
+        tree.exprOf(first.exprId),
+        tree.exprOf(second.exprId),
+      );
     }
     if (callee.name == kSwapName) {
-      return this.memSwapped(frame, call.loc, first.expr, second.expr);
+      return this.memSwapped(
+        frame,
+        call.loc,
+        tree.exprOf(first.exprId),
+        tree.exprOf(second.exprId),
+      );
     }
 
     this.notLowered(frame.module, call.loc, "a call of this function");
@@ -94,12 +113,15 @@ partial class Lowering {
       return handed;
     }
 
+    const tree = this.values.types.program.tree;
     const old = this.owning(frame, current);
+    const id = tree.syntheticId(SyntheticNode.ReplaceAssign, value.id);
     const assignment: AssignExpr = {
       kind: ExprKind.Assign,
+      id,
       loc,
-      target: place,
-      value,
+      targetId: place.id,
+      valueId: value.id,
     };
 
     this.assigned(frame, assignment);
@@ -113,7 +135,8 @@ partial class Lowering {
     current: IrValue,
     value: Expr,
   ): IrValue | undefined {
-    const isPlace = place.kind == ExprKind.Name || place.kind == ExprKind.Member;
+    const isPlace =
+      place.kind == ExprKind.Name || place.kind == ExprKind.Member;
     if (!isPlace || current.owned == true || !this.isManaged(current.tz)) {
       return undefined;
     }
@@ -146,48 +169,64 @@ partial class Lowering {
   }
 
   private stringCalled(frame: Frame, call: CallExpr): IrValue | undefined {
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined) {
       return this.stringValue("");
     }
 
-    return this.aloneValue(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+
+    return this.aloneValue(frame, expr);
   }
 
   private booleanCalled(frame: Frame, call: CallExpr): IrValue | undefined {
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined) {
       return this.booleanValue(false);
     }
 
-    const test = this.truth(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const test = this.truth(frame, expr);
     if (test == undefined) {
       return undefined;
     }
 
-    const tz = this.store.plain(TypeKind.Boolean);
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     return { type: kBooleanType, value: test, tz };
   }
 
   private clonedValue(frame: Frame, call: CallExpr): IrValue | undefined {
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined) {
       return undefined;
     }
 
-    const type = this.typeOf(argument.expr);
-    const given = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const type = this.typeOf(expr);
+    const exprExpr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, exprExpr);
     if (type == undefined || given == undefined) {
       return undefined;
     }
-    if (!this.isManaged(type) || this.isString(type) || this.traits.isCopy(type, this.values)) {
+    if (
+      !this.isManaged(type) ||
+      this.isString(type) ||
+      this.values.isCopy(type)
+    ) {
       return this.owning(frame, given);
     }
 
     const isFlat =
       type.kind == TypeKind.Array &&
-      (!this.isManaged(type.item) || this.isString(type.item));
+      (!this.isManaged(this.values.types.store.itemOf(type)) ||
+        this.isString(this.values.types.store.itemOf(type)));
     if (!isFlat) {
       this.notLowered(frame.module, call.loc, "a deep copy of this type");
 
@@ -203,8 +242,10 @@ partial class Lowering {
   }
 
   private memDropped(frame: Frame, value: Expr): IrValue | undefined {
-    const place = value.kind == ExprKind.Name ? this.targetPlace(frame, value) : undefined;
-    const empty = place == undefined ? undefined : this.undefinedValue(place.tz);
+    const place =
+      value.kind == ExprKind.Name ? this.targetPlace(frame, value) : undefined;
+    const empty =
+      place == undefined ? undefined : this.undefinedValue(place.tz);
 
     if (place != undefined && empty != undefined) {
       this.stored(frame, place, empty);
@@ -217,7 +258,7 @@ partial class Lowering {
       this.dropping(frame, given);
     }
 
-    const tz = this.store.plain(TypeKind.Void);
+    const tz = this.values.types.store.plain(TypeKind.Void);
 
     return { type: kVoidType, value: this.ir.zero(kCharType), tz };
   }
@@ -259,12 +300,16 @@ partial class Lowering {
     return old;
   }
 
-  private emptyValueOf(frame: Read<Frame>, type: Type, loc: int): IrValue | undefined {
+  private emptyValueOf(
+    frame: Read<Frame>,
+    type: Type,
+    loc: int,
+  ): IrValue | undefined {
     if (this.isString(type)) {
       return this.stringValue("");
     }
     if (type.kind == TypeKind.Array) {
-      const descriptor = this.descriptor(type.item);
+      const descriptor = this.descriptor(this.values.types.store.itemOf(type));
       if (descriptor != undefined) {
         const value = this.emptyArray(frame, descriptor);
 
@@ -297,12 +342,15 @@ partial class Lowering {
       return undefined;
     }
 
+    const tree = this.values.types.program.tree;
     const old = this.owning(frame, current);
+    const id = tree.syntheticId(SyntheticNode.SwapAssign, second.id);
     const toFirst: AssignExpr = {
       kind: ExprKind.Assign,
+      id,
       loc,
-      target: first,
-      value: second,
+      targetId: first.id,
+      valueId: second.id,
     };
 
     this.assigned(frame, toFirst);
@@ -314,7 +362,7 @@ partial class Lowering {
 
     this.stored(frame, place, old);
 
-    const tz = this.store.plain(TypeKind.Void);
+    const tz = this.values.types.store.plain(TypeKind.Void);
 
     return { type: kVoidType, value: this.ir.zero(kCharType), tz };
   }
@@ -341,7 +389,7 @@ partial class Lowering {
       return this.booleanCalled(frame, call);
     }
 
-    const opened = this.program.modules[module];
+    const opened = this.values.types.program.modules[module];
     if (opened != undefined && opened.name == kMemModule) {
       return this.memCall(frame, call, callee);
     }
@@ -392,8 +440,10 @@ partial class Lowering {
     call: CallExpr,
     callee: NameExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const which = kOsTexts.indexOf(callee.name);
-    if (which < 0 || call.args.length > 0) {
+    if (which < 0 || tree.argumentsOf(call.argsList).length > 0) {
       this.notLowered(frame.module, call.loc, "a call of this function");
 
       return undefined;
@@ -405,18 +455,26 @@ partial class Lowering {
   }
 
   private pathTexts(frame: Frame, call: CallExpr): IrValue[] | undefined {
-    const texts: IrValue[] = [];
-    const string = this.store.plain(TypeKind.String);
+    const tree = this.values.types.program.tree;
 
-    for (const argument of call.args) {
-      const given = this.value(frame, argument.expr);
+    const texts: IrValue[] = [];
+    const string = this.values.types.store.plain(TypeKind.String);
+
+    for (const argument of tree.argumentsOf(call.argsList)) {
+      const expr = tree.exprOf(argument.exprId);
+      const given = this.value(frame, expr);
       if (given == undefined || argument.spread) {
         this.notLowered(frame.module, call.loc, "these arguments");
 
         return undefined;
       }
 
-      const text = this.converted(frame, given, string, argument.expr.loc);
+      const text = this.converted(
+        frame,
+        given,
+        string,
+        tree.exprOf(argument.exprId).loc,
+      );
       if (text == undefined) {
         return undefined;
       }
@@ -427,7 +485,7 @@ partial class Lowering {
     return texts;
   }
 
-  private readonly pathStyle(): LLVMValue {
+  private pathStyle(): LLVMValue {
     return this.ir.integer(kIntType, `${kPathStyle}`);
   }
 
@@ -443,7 +501,7 @@ partial class Lowering {
     name: string,
   ): IrValue | undefined {
     const texts = this.pathTexts(frame, call);
-    const string = this.store.plain(TypeKind.String);
+    const string = this.values.types.store.plain(TypeKind.String);
     const descriptor = this.descriptor(string);
     if (texts == undefined || descriptor == undefined) {
       return undefined;
@@ -474,7 +532,7 @@ partial class Lowering {
     const list: IrValue = {
       type: kPointerType,
       value: array,
-      tz: this.store.arrayOf(string),
+      tz: this.values.types.store.arrayOf(string),
       owned: true,
     };
 
@@ -526,10 +584,7 @@ partial class Lowering {
     const hasSuffix = this.flagIf(suffix != undefined, 1);
     const args = this.textParts(frame, text)
       .concat(this.separatorParts(frame, suffix))
-      .concat([
-        this.ir.integer(kFlagType, `${hasSuffix}`),
-        this.pathStyle(),
-      ]);
+      .concat([this.ir.integer(kFlagType, `${hasSuffix}`), this.pathStyle()]);
     const params = [
       kPointerType,
       kIntType,
@@ -576,8 +631,12 @@ partial class Lowering {
     const args = this.textParts(frame, text).concat([this.pathStyle()]);
     const flag = frame.made.call(callee, args);
     const zero = this.ir.zero(kFlagType);
-    const value = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
-    const tz = this.store.plain(TypeKind.Boolean);
+    const value = frame.made.integerCompare(
+      IrIntPredicate.NotEqual,
+      flag,
+      zero,
+    );
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     this.textsDropped(frame, texts);
 

@@ -29,6 +29,8 @@ import { ExpressionTypes } from "../../../code/expression-types/expression-types
 
 partial class ExpressionTypes {
   private forgetPatterned(target: Expr, module: int): void {
+    const tree = this.types.program.tree;
+
     switch (target.kind) {
       case ExprKind.Name:
       case ExprKind.Member: {
@@ -40,21 +42,27 @@ partial class ExpressionTypes {
         return;
       }
       case ExprKind.ArrayLit:
-        for (const element of target.elements) {
-          this.forgetPatterned(element.expr, module);
+        for (const element of tree.elementsOf(target.elementsList)) {
+          const expr = tree.exprOf(element.exprId);
+
+          this.forgetPatterned(expr, module);
         }
 
         return;
       case ExprKind.ObjectLit:
-        for (const property of target.props) {
+        for (const property of tree.propertiesOf(target.propsList)) {
           if (property.form.kind != PropertyKind.Computed) {
-            this.forgetPatterned(property.value, module);
+            const value = tree.exprOf(property.valueId);
+
+            this.forgetPatterned(value, module);
           }
         }
 
         return;
       case ExprKind.Assign:
-        return this.forgetPatterned(target.target, module);
+        const targetExpr = tree.exprOf(target.targetId);
+
+        return this.forgetPatterned(targetExpr, module);
       default:
         return;
     }
@@ -85,9 +93,10 @@ partial class ExpressionTypes {
     }
 
     const keys: string[] = [];
-    const record = this.record(module);
 
     this.callChanged.set(module, []);
+
+    const record = this.records.get(module);
 
     if (record == undefined) {
       return keys;
@@ -107,7 +116,7 @@ partial class ExpressionTypes {
 
       const home = this.innermostFunction(functions, symbol.loc);
       const user = this.innermostFunction(functions, use.loc);
-      if (user != undefined && user != home) {
+      if (user != undefined && user.id != home?.id) {
         const key = `${module} ${symbol.loc}`;
 
         seen.add(symbol.loc);
@@ -207,7 +216,9 @@ partial class ExpressionTypes {
   }
 
   private forgetChangedPart(change: Expr, module: int): void {
-    const target = this.bounds.changedTarget(change);
+    const tree = this.types.program.tree;
+
+    const target = this.types.changedTarget(change);
     if (target == undefined) {
       return;
     }
@@ -223,7 +234,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const key = this.pathKey(target.object, module);
+    const object = tree.exprOf(target.objectId);
+    const key = this.pathKey(object, module);
     if (key != undefined) {
       this.forgetFacts(key);
     }

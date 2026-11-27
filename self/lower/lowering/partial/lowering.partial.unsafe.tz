@@ -20,7 +20,7 @@ import {
   kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private unsafeCall(
@@ -62,7 +62,11 @@ partial class Lowering {
       case "hashOf":
         return this.keyHash(frame, call, item);
       default:
-        this.notLowered(frame.module, call.loc, "a call of this unsafe function");
+        this.notLowered(
+          frame.module,
+          call.loc,
+          "a call of this unsafe function",
+        );
 
         return undefined;
     }
@@ -87,7 +91,9 @@ partial class Lowering {
     }
 
     const bytes = this.cellBytes(frame, cell, count);
-    const allocating = this.ir.declare(kMemoryAllocate, kPointerType, [kIntType]);
+    const allocating = this.ir.declare(kMemoryAllocate, kPointerType, [
+      kIntType,
+    ]);
     const value = frame.made.call(allocating, [bytes]);
 
     return this.rawMade(call, value);
@@ -131,19 +137,27 @@ partial class Lowering {
     cell: string,
     item: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const raw = this.rawArgument(frame, call, 0);
     const index = this.intArgument(frame, call, 1);
-    const argument = call.args[2];
+    const argument = tree.argumentsOf(call.argsList)[2];
     if (raw == undefined || index == undefined || argument == undefined) {
       return undefined;
     }
 
-    const given = this.wantedValue(frame, argument.expr, item);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.wantedValue(frame, expr, item);
     if (given == undefined) {
       return undefined;
     }
 
-    const value = this.converted(frame, given, item, argument.expr.loc);
+    const value = this.converted(
+      frame,
+      given,
+      item,
+      tree.exprOf(argument.exprId).loc,
+    );
     if (value == undefined) {
       return undefined;
     }
@@ -219,12 +233,15 @@ partial class Lowering {
   }
 
   private forgotten(frame: Frame, call: CallExpr): IrValue | undefined {
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined) {
       return undefined;
     }
 
-    const given = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
     if (given == undefined) {
       return undefined;
     }
@@ -233,12 +250,15 @@ partial class Lowering {
   }
 
   private arrayCellsOf(frame: Frame, call: CallExpr): IrValue | undefined {
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined) {
       return undefined;
     }
 
-    const array = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const array = this.value(frame, expr);
     if (array == undefined) {
       return undefined;
     }
@@ -253,18 +273,27 @@ partial class Lowering {
     call: CallExpr,
     item: Type,
   ): IrValue | undefined {
-    const argument = call.args[0];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
     if (argument == undefined) {
       return undefined;
     }
 
-    const given = this.value(frame, argument.expr);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
     if (given == undefined) {
       return undefined;
     }
     if (this.isString(item)) {
-      const target = { module: kMapModule, name: kTextHashName };
-      const hashed = this.runtimeFunctionCall(frame, target, [], [given], call.loc);
+      const target: RuntimeTarget = { module: kMapModule, name: kTextHashName };
+      const hashed = this.runtimeFunctionCall(
+        frame,
+        target,
+        [],
+        [given],
+        call.loc,
+      );
 
       this.dropping(frame, given);
 
@@ -278,7 +307,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
     const mixed = this.mixedBits(frame, bits);
 
     this.dropping(frame, given);
@@ -320,7 +349,7 @@ partial class Lowering {
     return frame.made.cast(IrOpcode.SExt, given.value, kIntType);
   }
 
-  private readonly mixedBits(frame: Read<Frame>, bits: LLVMValue): LLVMValue {
+  private mixedBits(frame: Read<Frame>, bits: LLVMValue): LLVMValue {
     const golden = this.ir.hexInteger(kIntType, kHashMultiplier);
     const shift = this.ir.integer(kIntType, "32");
     const spread = frame.made.binary(IrOpcode.Mul, bits, golden);
@@ -331,7 +360,7 @@ partial class Lowering {
     return frame.made.binary(IrOpcode.And, mixed, keep);
   }
 
-  private readonly cellBytes(
+  private cellBytes(
     frame: Read<Frame>,
     cell: string,
     count: LLVMValue,
@@ -346,12 +375,14 @@ partial class Lowering {
     call: CallExpr,
     position: int,
   ): LLVMValue | undefined {
-    const argument = call.args[position];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[position];
     if (argument == undefined) {
       return undefined;
     }
 
-    return this.value(frame, argument.expr)?.value;
+    return this.value(frame, tree.exprOf(argument.exprId))?.value;
   }
 
   private intArgument(
@@ -359,28 +390,33 @@ partial class Lowering {
     call: CallExpr,
     position: int,
   ): LLVMValue | undefined {
-    const argument = call.args[position];
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[position];
     if (argument == undefined) {
       return undefined;
     }
 
-    const int = this.store.integer(64, false);
-    const given = this.wantedValue(frame, argument.expr, int);
+    const int = this.values.types.store.integer(64, false);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.wantedValue(frame, expr, int);
     if (given == undefined) {
       return undefined;
     }
 
-    return this.converted(frame, given, int, argument.expr.loc)?.value;
+    return this.converted(frame, given, int, tree.exprOf(argument.exprId).loc)
+      ?.value;
   }
 
-  private readonly rawMade(call: CallExpr, value: LLVMValue): IrValue {
-    const type = this.typeOf(call) ?? this.store.plain(TypeKind.Error);
+  private rawMade(call: CallExpr, value: LLVMValue): IrValue {
+    const type =
+      this.typeOf(call) ?? this.values.types.store.plain(TypeKind.Error);
 
     return { type: kPointerType, value, tz: type, owned: true };
   }
 
-  private readonly nothing(): IrValue {
-    const tz = this.store.plain(TypeKind.Void);
+  private nothing(): IrValue {
+    const tz = this.values.types.store.plain(TypeKind.Void);
 
     return { type: kVoidType, value: this.ir.zero(kCharType), tz };
   }

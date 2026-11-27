@@ -3,12 +3,13 @@ import { Details, SourceError } from "../types/message.types.tz";
 import { TrialMark, WrittenError } from "./types/error-log.types.tz";
 
 export class ErrorLog {
-  private lists: Cell<Map<int, SourceError[]>>;
-  private reported: Cell<Set<string>>;
-  private kept: Cell<Set<string>>;
-  private written: Cell<WrittenError[]>;
-  private trials: Cell<TrialMark[]>;
-  private asked: Cell<int>;
+  private lists: Map<int, SourceError[]>;
+  private reported: Set<string>;
+  private kept: Set<string>;
+  private written: WrittenError[];
+  private trials: TrialMark[];
+  private asked: int;
+  private allowed?: Set<int>;
 
   public constructor() {
     this.lists = new Map<int, SourceError[]>();
@@ -20,10 +21,39 @@ export class ErrorLog {
   }
 
   public readonly of(module: int): SourceError[] {
-    return this.lists.get(module)?.slice() ?? [];
+    const list = this.lists.get(module);
+    if (list == undefined) {
+      return [];
+    }
+
+    return list.slice();
   }
 
-  public readonly write(module: int, loc: int, code: Code, details: Details): void {
+  public allow(module: int): void {
+    if (this.allowed == undefined) {
+      this.allowed = new Set<int>();
+    }
+
+    this.allowed.add(module);
+  }
+
+  public writeFound(module: int, error: SourceError | undefined): void {
+    if (error != undefined) {
+      this.write(module, error.loc, error.code, error.details);
+    }
+  }
+
+  public writeAll(module: int, errors: Read<SourceError[]>): void {
+    for (const error of errors) {
+      this.write(module, error.loc, error.code, error.details);
+    }
+  }
+
+  public write(module: int, loc: int, code: Code, details: Details): void {
+    if (this.allowed != undefined && !this.allowed.has(module)) {
+      return;
+    }
+
     const key = this.keyOf(module, loc, code);
 
     this.asked += 1;
@@ -35,23 +65,22 @@ export class ErrorLog {
     this.reported.add(key);
 
     const error: SourceError = { code, loc, details };
-
-    if (!this.lists.has(module)) {
-      this.lists.set(module, []);
+    const list = this.lists.get(module);
+    if (list == undefined) {
+      this.lists.set(module, [error]);
+    } else {
+      list.push(error);
     }
-
-    this.lists.get(module)?.push(error);
-
     if (this.trials.length > 0) {
       this.written.push({ module, loc, code });
     }
   }
 
-  public readonly beginTrial(): void {
+  public beginTrial(): void {
     this.trials.push({ written: this.written.length, asked: this.asked });
   }
 
-  public readonly endTrial(): boolean {
+  public endTrial(): boolean {
     const mark = this.trials.pop();
     if (mark == undefined) {
       return true;
@@ -79,7 +108,7 @@ export class ErrorLog {
     return this.written.length;
   }
 
-  public readonly keepSince(mark: int): void {
+  public keepSince(mark: int): void {
     for (let index = mark; index < this.written.length; index++) {
       const entry = this.written[index];
       if (entry != undefined) {
@@ -90,25 +119,29 @@ export class ErrorLog {
     }
   }
 
-  private readonly drop(entry: WrittenError): void {
+  private drop(entry: WrittenError): void {
     const key = this.keyOf(entry.module, entry.loc, entry.code);
     if (this.kept.has(key)) {
       return;
     }
 
     const place = this.lastPlace(entry);
-    if (place >= 0) {
-      this.lists.get(entry.module)?.splice(place, 1);
+    const list = this.lists.get(entry.module);
+    if (place >= 0 && list != undefined) {
+      list.splice(place, 1);
     }
 
     this.reported.delete(key);
   }
 
   private readonly lastPlace(entry: WrittenError): int {
-    const count = this.lists.get(entry.module)?.length ?? 0;
+    const list = this.lists.get(entry.module);
+    if (list == undefined) {
+      return -1;
+    }
 
-    for (let index = count - 1; index >= 0; index--) {
-      const error = this.lists.get(entry.module)?.[index];
+    for (let index = list.length - 1; index >= 0; index--) {
+      const error = list[index];
       const isSame =
         error != undefined &&
         error.loc == entry.loc &&
@@ -126,4 +159,3 @@ export class ErrorLog {
   }
 }
 
-export type InternedErrorLog = Interned<ErrorLog>;

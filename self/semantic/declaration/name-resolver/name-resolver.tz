@@ -11,48 +11,54 @@ import { ScopeTraversal } from "../scope-traversal/scope-traversal.tz";
 import { GlobalDraft, GlobalScope } from "./types/name-resolver.types.tz";
 
 export class NameResolver {
-  private readonly program: Program;
   private readonly names: ModuleNames[];
 
-  public constructor(program: Own<Program>, names: Own<ModuleNames[]>) {
-    this.program = program;
+  public constructor(names: Own<ModuleNames[]>) {
     this.names = names;
   }
 
-  public readonly run(): ModuleScopes[] {
-    const globals = this.globalScope();
-    const partMethods = this.partMethods();
+  public run(program: Read<Program>): ModuleScopes[] {
+    let globals: GlobalScope = this.globalScope(program);
+    const partMethods = this.partMethods(program);
     const resolved: ModuleScopes[] = [];
 
-    for (const names of this.names) {
+    for (const names of this.names.drain()) {
       const traversal = new ScopeTraversal(names, globals, partMethods.slice());
-      const scopes = traversal.run();
+      const scopes = traversal.run(program);
 
+      globals = traversal.takeGlobals();
       resolved.push(scopes);
     }
 
     return resolved;
   }
 
-  private readonly globalScope(): GlobalScope {
+  private readonly globalScope(program: Read<Program>): GlobalScope {
+    const tree = program.tree;
+
     const globals: GlobalDraft = {
       values: new Set<string>(),
       types: new Set<string>(),
       namespaces: new Map<string, Set<string>>(),
     };
 
-    for (const builtin of this.program.builtins) {
-      for (const item of builtin.parsed.file.items) {
-        this.addGlobal(globals, item);
+    for (const builtin of program.builtins) {
+      for (const item of tree.stmtsOf(builtin.parsed.file.itemsList)) {
+        this.addGlobal(program, globals, item);
       }
     }
 
-    for (const module of this.program.globals) {
+    for (const id of program.globals) {
+      const module = program.modules[id];
+      if (module == undefined) {
+        continue;
+      }
+
       const word = kLibrary.named(module.name)?.namespace;
       if (word == undefined) {
-        this.addDeclared(globals, module);
+        this.addDeclared(program, globals, module);
       } else {
-        this.addNamespace(globals, module, word);
+        this.addNamespace(program, globals, module, word);
       }
     }
 
@@ -63,20 +69,27 @@ export class NameResolver {
     };
   }
 
-  private readonly addDeclared(names: GlobalDraft, module: Module): void {
-    for (const item of module.file.items) {
-      this.addGlobal(names, item);
+  private readonly addDeclared(
+    program: Read<Program>,
+    names: GlobalDraft,
+    module: Read<Module>,
+  ): void {
+    const tree = program.tree;
+
+    for (const item of tree.stmtsOf(module.file.itemsList)) {
+      this.addGlobal(program, names, item);
     }
 
-    for (const one of module.declared) {
+    for (const one of tree.declaredClassesOf(module.declaredList)) {
       names.values.add(one.name);
       names.types.add(one.name);
     }
   }
 
   private readonly addNamespace(
+    program: Read<Program>,
     globals: GlobalDraft,
-    module: Module,
+    module: Read<Module>,
     word: string,
   ): void {
     const inside: GlobalDraft = {
@@ -85,7 +98,7 @@ export class NameResolver {
       namespaces: new Map<string, Set<string>>(),
     };
 
-    this.addDeclared(inside, module);
+    this.addDeclared(program, inside, module);
     globals.namespaces.set(word, inside.types);
 
     if (inside.values.size > 0) {
@@ -93,10 +106,16 @@ export class NameResolver {
     }
   }
 
-  private readonly addGlobal(globals: GlobalDraft, item: Stmt): void {
+  private readonly addGlobal(
+    program: Read<Program>,
+    globals: GlobalDraft,
+    item: Stmt,
+  ): void {
+    const tree = program.tree;
+
     switch (item.kind) {
       case StmtKind.VarDecl:
-        for (const decl of item.decls) {
+        for (const decl of tree.declaratorsOf(item.declsList)) {
           globals.values.add(decl.name);
         }
         break;
@@ -120,12 +139,14 @@ export class NameResolver {
     }
   }
 
-  private readonly partMethods(): FunctionDecl[] {
+  private readonly partMethods(program: Read<Program>): FunctionDecl[] {
+    const tree = program.tree;
+
     const methods: FunctionDecl[] = [];
 
-    for (const module of this.program.modules) {
-      for (const part of module.parts) {
-        for (const method of part.methods) {
+    for (const module of program.modules) {
+      for (const part of tree.classesOf(module.partsList)) {
+        for (const method of tree.functionsOf(part.methodsList)) {
           methods.push(method);
         }
       }

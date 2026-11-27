@@ -3,19 +3,25 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  Expr,
   ExprKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   BindingKind,
   NameOrigin,
-  VarDeclarator,
 } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
   StmtKind,
-  VarDeclStmt,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { Binding } from "../types/file-parser.types.variables.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  VarDeclStmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
 
 partial class FileParser {
   private varDecl(): VarDeclStmt {
@@ -81,25 +87,28 @@ partial class FileParser {
     }
 
     const written = this.initializer();
-    const init = this.namedClass(written, binding.name);
+    const name = binding.name;
+    const init = this.namedClass(written, name);
+    if (isConst && init != undefined) {
+      this.recordConstant(name, init);
+    }
 
     decls.push({
-      ...binding,
+      name: binding.name,
+      loc: binding.loc,
+      typeAnn: binding.typeAnn,
       origin: NameOrigin.Written,
       init,
       form: { kind: BindingKind.Plain },
     });
-    if (init == undefined) {
-      return true;
-    }
-    if (isConst) {
-      this.recordConstant(binding.name, init);
-    }
 
     return true;
   }
 
-  private readonly namedClass(init: Expr | undefined, name: string): Expr | undefined {
+  private readonly namedClass(
+    init: Own<Expr | undefined>,
+    name: string,
+  ): Expr | undefined {
     if (init == undefined || init.kind != ExprKind.Class) {
       return init;
     }

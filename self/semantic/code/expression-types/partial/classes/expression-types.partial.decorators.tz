@@ -34,23 +34,25 @@ import { kDecoratorPlaces } from "../../../decorator-rules/const/decorator-rules
 
 partial class ExpressionTypes {
   private decoratorChecks(decl: ClassDecl, module: int): void {
-    if (!this.decorators.isDecoratedClass(decl)) {
+    if (!this.types.isDecoratedClass(decl)) {
       return;
     }
 
-    const decoratedNamesErrors = this.decorators.decoratedNamesCheck(decl);
+    const decoratedNamesErrors = this.types.decoratedNamesCheck(decl);
 
-    this.reportAll(module, decoratedNamesErrors);
+    this.errors.writeAll(module, decoratedNamesErrors);
     const decoratedConstructorsError =
-      this.decorators.decoratedConstructorsCheck(decl);
+      this.types.decoratedConstructorsCheck(decl);
 
-    this.reportFound(module, decoratedConstructorsError);
+    this.errors.writeFound(module, decoratedConstructorsError);
 
-    for (const run of this.decorators.memberRuns(decl)) {
+    const runs = this.types.memberRuns(decl);
+
+    for (const run of runs) {
       this.decorate(run, module);
     }
 
-    const uses = this.decorators.classUses(decl);
+    const uses = this.types.classUses(decl);
     const at = uses[0]?.decorator.loc;
     if (at == undefined) {
       return;
@@ -69,11 +71,23 @@ partial class ExpressionTypes {
   }
 
   private decorate(run: Read<DecorateRun>, module: int): void {
+    const tree = this.types.program.tree;
+
     if (run.field?.accessor == true) {
-      return this.report(module, run.at, Code.DecoratorAccessor, kNoDetails);
+      return this.errors.write(
+        module,
+        run.at,
+        Code.DecoratorAccessor,
+        kNoDetails,
+      );
     }
     if (run.method?.role?.method == MethodKind.Abstract) {
-      return this.report(module, run.at, Code.DecoratorAbstract, kNoDetails);
+      return this.errors.write(
+        module,
+        run.at,
+        Code.DecoratorAbstract,
+        kNoDetails,
+      );
     }
 
     const types: Type[] = [];
@@ -81,23 +95,34 @@ partial class ExpressionTypes {
     let hasDescriptor = false;
 
     for (const use of run.uses) {
-      const place = this.decorators.usePlace(run, use);
-      const type = this.decoratorType(use.decorator.expr, module);
+      const place = this.types.usePlace(run, use);
+      const type = this.decoratorType(
+        tree.exprOf(use.decorator.exprId),
+        module,
+      );
       const count = this.decoratorFit(use, place, type, module);
 
       types.push(type);
       isFitting = isFitting && count >= 0;
       hasDescriptor =
-        hasDescriptor || this.decorators.isDescriptorUse(place, count);
+        hasDescriptor || this.types.isDescriptorUse(place, count);
     }
 
     if (!isFitting) {
       return;
     }
-    if (hasDescriptor && run.decl.typeParams.length > 0) {
-      return this.report(module, run.at, Code.DecoratorGenericDescriptor, {
-        word: run.decl.name ?? "",
-      });
+    if (
+      hasDescriptor &&
+      tree.typeParamsOf(run.decl.typeParamsList).length > 0
+    ) {
+      return this.errors.write(
+        module,
+        run.at,
+        Code.DecoratorGenericDescriptor,
+        {
+          word: run.decl.name ?? "",
+        },
+      );
     }
 
     for (let index = run.uses.length - 1; index >= 0; index--) {
@@ -111,7 +136,7 @@ partial class ExpressionTypes {
 
   private decoratorType(expr: Expr, module: int): Type {
     if (this.isMetadataDecorator(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (expr.kind != ExprKind.Name) {
       return this.typed(expr, undefined, module);
@@ -126,16 +151,18 @@ partial class ExpressionTypes {
   }
 
   private readonly isMetadataDecorator(expr: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Call) {
       return false;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member || callee.name != kMetadataName) {
       return false;
     }
 
-    const object = callee.object;
+    const object = tree.exprOf(callee.objectId);
     if (object.kind != ExprKind.Name || object.name != kReflectName) {
       return false;
     }
@@ -143,15 +170,15 @@ partial class ExpressionTypes {
     return this.targetOfName(object, module) == undefined;
   }
 
-  private readonly decoratorFit(
+  private decoratorFit(
     use: DecoratorUse,
     place: DecoratorPlace,
     type: Type,
     module: int,
   ): int {
-    const checked = this.decorators.decoratorFit(use, place, type);
+    const checked = this.types.decoratorFit(use, place, type);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -163,16 +190,22 @@ partial class ExpressionTypes {
     hasDescriptor: boolean,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (type.kind != TypeKind.Function) {
       return;
     }
 
-    const result = type.shape.result;
-    const place = this.decorators.usePlace(run, use);
+    const result = this.types.store.returnTypeOf(type);
+    const place = this.types.usePlace(run, use);
     const isClassPlace = place == DecoratorPlace.Class;
     const isReplacing =
       this.isReplacement(run.decl, type, module) ||
-      this.isExtendingDecorator(use.decorator.expr, result, module);
+      this.isExtendingDecorator(
+        tree.exprOf(use.decorator.exprId),
+        result,
+        module,
+      );
     if (isClassPlace && isReplacing) {
       return this.oldObjectCheck(run.decl, module);
     }
@@ -181,37 +214,38 @@ partial class ExpressionTypes {
       result.kind == TypeKind.Void ||
       result.kind == TypeKind.Undefined ||
       result.kind == TypeKind.Error;
-    if (isNothing || this.parts.mentionsParameter(result)) {
+    if (isNothing || this.types.mentionsParameter(result)) {
       return;
     }
 
-    const third = type.shape.params[2]?.type;
+    const third = this.types.store.paramsOf(type)[2]?.type;
     const isDescriptor = place == DecoratorPlace.Method && hasDescriptor;
-    if (isDescriptor && result == third) {
+    if (isDescriptor && result.id == third?.id) {
       return;
     }
     if (isClassPlace && this.isReplacing(run.decl, result, module)) {
       return;
     }
 
-    const word = this.decorators.decoratorLabel(use.decorator.expr);
-    const first = this.text.of(result);
+    const expr = tree.exprOf(use.decorator.exprId);
+    const word = this.types.decoratorLabel(expr);
+    const first = this.types.typeText(result);
     const loc = use.decorator.loc;
     if (isClassPlace && result.kind == TypeKind.Class && !result.exact) {
-      return this.report(module, loc, Code.DecoratorRuntimeClass, {
+      return this.errors.write(module, loc, Code.DecoratorRuntimeClass, {
         word,
         first,
         second: run.decl.name ?? "",
       });
     }
     if (isClassPlace) {
-      return this.report(module, loc, Code.DecoratorClassResult, {
+      return this.errors.write(module, loc, Code.DecoratorClassResult, {
         word,
         first,
       });
     }
     if (isDescriptor) {
-      return this.report(module, loc, Code.DecoratorMethodResult, {
+      return this.errors.write(module, loc, Code.DecoratorMethodResult, {
         word,
         first,
       });
@@ -219,38 +253,43 @@ partial class ExpressionTypes {
 
     const row = kDecoratorPlaces.find((one) => one.place == place);
 
-    this.report(module, loc, Code.DecoratorOtherResult, {
+    this.errors.write(module, loc, Code.DecoratorOtherResult, {
       word,
       first,
       second: row?.noun ?? "",
     });
   }
 
-  private readonly isReplacement(
+  private isReplacement(
     decl: ClassDecl,
     decorator: Type,
     module: int,
   ): boolean {
-    if (decorator.kind != TypeKind.Function || decl.typeParams.length > 0) {
+    const tree = this.types.program.tree;
+
+    if (
+      decorator.kind != TypeKind.Function ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return false;
     }
 
-    const result = decorator.shape.result;
+    const result = this.types.store.returnTypeOf(decorator);
     if (result.kind != TypeKind.Class || !result.exact) {
       return false;
     }
 
-    const own = this.resolver.classInstance(module, decl, []);
-    if (result.instance == own) {
+    const own = this.types.classInstance(module, decl, []);
+    if (this.types.store.classInstanceOf(result).id == own.id) {
       return false;
     }
 
-    const given = decorator.shape.params[0]?.type;
+    const given = this.types.store.paramsOf(decorator)[0]?.type;
     if (given?.kind == TypeKind.TypeParameter) {
-      return this.isBuiltOnGiven(result.instance);
+      return this.isBuiltOnGiven(this.types.store.classInstanceOf(result));
     }
 
-    return this.relation.converts(result.instance, own);
+    return this.types.converts(this.types.store.classInstanceOf(result), own);
   }
 
   private readonly isExtendingDecorator(
@@ -258,6 +297,8 @@ partial class ExpressionTypes {
     result: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     if (result.kind != TypeKind.Error || expr.kind != ExprKind.Name) {
       return false;
     }
@@ -268,13 +309,19 @@ partial class ExpressionTypes {
     }
 
     const fn = this.record(target.module)?.functions.get(target.loc);
-    const given = fn?.params[0]?.name;
-    const body = fn?.body;
-    if (given == undefined || body == undefined || fn?.typeParams.length == 0) {
+    const given = tree.paramsOf(fn?.paramsList)[0]?.name;
+    const body = tree.blockAt(fn?.bodyId);
+    if (
+      given == undefined ||
+      body == undefined ||
+      tree.typeParamsOf(fn?.typeParamsList).length == 0
+    ) {
       return false;
     }
 
-    const returned = body.body.filter((one) => one.kind == StmtKind.Return);
+    const returned = tree
+      .stmtsOf(body.bodyList)
+      .filter((one) => one.kind == StmtKind.Return);
 
     return (
       returned.length > 0 &&
@@ -283,39 +330,43 @@ partial class ExpressionTypes {
   }
 
   private readonly isGivenSubclass(statement: Stmt, given: string): boolean {
+    const tree = this.types.program.tree;
+
     if (statement.kind != StmtKind.Return) {
       return false;
     }
 
-    const value = statement.value;
+    const value = tree.exprAt(statement.valueId);
     if (value == undefined || value.kind != ExprKind.Class) {
       return false;
     }
 
-    const decl = value.decl;
-    const base = decl.baseExpr;
+    const decl = tree.classOf(value.declId);
+    const base = tree.exprAt(decl.baseExprId);
     if (base != undefined && base.kind == ExprKind.Name) {
       return base.name == given;
     }
 
-    return decl.base?.name == given;
+    return tree.typeRefAt(decl.baseId)?.name == given;
   }
 
   private readonly isBuiltOnGiven(instance: Type): boolean {
+    const tree = this.types.program.tree;
+
     if (instance.kind != TypeKind.Instance) {
       return false;
     }
 
     const made = this.classOf(instance);
     const module = instance.module;
-    const base = made?.base;
+    const base = tree.typeRefAt(made?.baseId);
     if (base != undefined) {
       const target = this.targetOfUse(base.loc, base.name, module);
 
       return target?.kind == SymbolKind.Parameter;
     }
 
-    const expr = made?.baseExpr;
+    const expr = tree.exprAt(made?.baseExprId);
     if (expr == undefined || expr.kind != ExprKind.Name) {
       return false;
     }
@@ -324,17 +375,19 @@ partial class ExpressionTypes {
   }
 
   private oldObjectCheck(decl: ClassDecl, module: int): void {
-    const own = this.resolver.classInstance(module, decl, []);
+    const tree = this.types.program.tree;
+
+    const own = this.types.classInstance(module, decl, []);
     const owner: StaticOwner = { decl, module };
 
-    for (const field of decl.fields) {
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       if (field.form != FieldKind.Static) {
         continue;
       }
 
       const type = this.staticHeldType(field, owner);
       if (type != undefined && this.isHolding(type, own)) {
-        return this.report(module, field.loc, Code.DecoratorOldObject, {
+        return this.errors.write(module, field.loc, Code.DecoratorOldObject, {
           word: decl.name ?? "",
           other: field.name,
         });
@@ -346,34 +399,45 @@ partial class ExpressionTypes {
     field: ClassField,
     owner: StaticOwner,
   ): Type | undefined {
-    if (field.type != undefined) {
-      return this.staticFieldType(field.type, field.presence, owner);
+    const tree = this.types.program.tree;
+
+    const typeRef = tree.typeRefAt(field.typeId);
+    if (typeRef != undefined) {
+      return this.staticFieldType(
+        tree.typeRefAt(field.typeId),
+        field.presence,
+        owner,
+      );
     }
-    if (field.init == undefined) {
+    const init = tree.exprAt(field.initId);
+    if (init == undefined) {
       return undefined;
     }
 
-    return this.peekType(field.init, owner.module);
+    return this.peekType(init, owner.module);
   }
 
   private readonly isHolding(type: Type, own: Type): boolean {
-    if (type == own) {
+    if (type.id == own.id) {
       return true;
     }
 
-    return this.parts.typeParts(type).some((part) => this.isHolding(part, own));
+    return this.types.typeParts(type).some((part) => this.isHolding(part, own));
   }
 
-  private readonly isReplacing(decl: ClassDecl, result: Type, module: int): boolean {
+  private isReplacing(decl: ClassDecl, result: Type, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (result.kind != TypeKind.Class || !result.exact) {
       return false;
     }
-    if (decl.typeParams.length > 0) {
+    const typeParams = tree.typeParamsOf(decl.typeParamsList);
+    if (typeParams.length > 0) {
       return true;
     }
 
-    const own = this.resolver.classInstance(module, decl, []);
+    const own = this.types.classInstance(module, decl, []);
 
-    return this.relation.converts(result.instance, own);
+    return this.types.converts(this.types.store.classInstanceOf(result), own);
   }
 }

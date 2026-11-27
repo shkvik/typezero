@@ -9,7 +9,7 @@ partial class ExpressionTypes {
 
     this.resultsChecked.add(module);
 
-    const reads = this.results.readLocs(record);
+    const reads = this.types.readLocs(record);
 
     for (const [loc, variable] of record.variables) {
       const door = this.doors.get(`${module} ${loc}`);
@@ -19,9 +19,9 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const code = this.results.resultHoldCode(door.type);
+      const code = this.types.resultHoldCode(door.type);
       if (code != undefined) {
-        this.report(module, loc, code, { word: variable.decl.name });
+        this.errors.write(module, loc, code, { word: variable.decl.name });
       }
     }
   }

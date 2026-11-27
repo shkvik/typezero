@@ -2,9 +2,7 @@ import { replace } from "tz:mem";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import { MethodKind } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
-  BodySource,
   FunctionDecl,
   Param,
   ParamKind,
@@ -14,7 +12,9 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kThisParameter } from "../../../../types/type-resolver/const/type-resolver.const.tables.tz";
+import {
+  kThisParameter,
+} from "../../../../types/type-resolver/const/type-resolver.const.tables.tz";
 import {
   DoorState,
   ParameterSite,
@@ -22,7 +22,6 @@ import {
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import {
-  kInferenceRounds,
   kNoPlace,
   kUnsafeMemory,
   kUnsafeReason,
@@ -36,17 +35,14 @@ import {
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
   FunctionDoor,
-  FunctionFrame,
   ParameterShape,
-  ReturnedValue,
-  StalledFunction,
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   public readonly functionOf(module: int, loc: int): Type {
     const door = this.functionDoors.get(`${module} ${loc}`);
     if (door == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return door.type;
@@ -56,26 +52,30 @@ partial class ExpressionTypes {
     return this.functionAt(module, loc);
   }
 
-  private readonly unsafeMarkCheck(fn: FunctionDecl, module: int): void {
+  private unsafeMarkCheck(fn: FunctionDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     const mark = fn.unsafe;
     if (mark == undefined) {
       return;
     }
 
-    const options = mark.options;
+    const options = tree.exprAt(mark.optionsId);
     const reason = this.unsafeReason(options);
     if (reason == undefined || reason.trim().length == 0) {
-      this.report(module, mark.loc, Code.OwnUnsafeReason, kNoDetails);
+      this.errors.write(module, mark.loc, Code.OwnUnsafeReason, kNoDetails);
     }
   }
 
   private readonly unsafeReason(options: Expr | undefined): string | undefined {
+    const tree = this.types.program.tree;
+
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
       return undefined;
     }
 
-    for (const property of options.props) {
-      const value = property.value;
+    for (const property of tree.propertiesOf(options.propsList)) {
+      const value = tree.exprOf(property.valueId);
       const isReason =
         property.name == kUnsafeReason && value.kind == ExprKind.StringLit;
       if (isReason && value.kind == ExprKind.StringLit) {
@@ -86,44 +86,51 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly unsafeUsesCheck(fn: FunctionDecl, module: int): void {
+  private unsafeUsesCheck(fn: FunctionDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     const mark = fn.unsafe;
     if (mark == undefined) {
       return;
     }
 
-    const listed = this.unsafeUses(mark.options);
-    const isUsed = this.unsafeUsed.has(fn);
+    const options = tree.exprAt(mark.optionsId);
+    const listed = this.unsafeUses(options);
+    const isUsed = this.unsafeUsed.has(fn.id);
 
     for (const name of listed) {
       if (!kUnsafeUses.includes(name)) {
-        this.report(module, mark.loc, Code.OwnUnsafeUses, { word: name });
+        this.errors.write(module, mark.loc, Code.OwnUnsafeUses, { word: name });
       } else if (name != kUnsafeMemory || !isUsed) {
-        this.report(module, mark.loc, Code.OwnUnsafeUnused, { word: name });
+        this.errors.write(module, mark.loc, Code.OwnUnsafeUnused, {
+          word: name,
+        });
       }
     }
 
     if (isUsed && !listed.includes(kUnsafeMemory)) {
-      this.report(module, mark.loc, Code.OwnUnsafeUses, {
+      this.errors.write(module, mark.loc, Code.OwnUnsafeUses, {
         word: kUnsafeMemory,
       });
     }
   }
 
   private readonly unsafeUses(options: Expr | undefined): string[] {
+    const tree = this.types.program.tree;
+
     const names: string[] = [];
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
       return names;
     }
 
-    for (const property of options.props) {
-      const value = property.value;
+    for (const property of tree.propertiesOf(options.propsList)) {
+      const value = tree.exprOf(property.valueId);
       if (property.name != kUnsafeUsesName || value.kind != ExprKind.ArrayLit) {
         continue;
       }
 
-      for (const element of value.elements) {
-        const item = element.expr;
+      for (const element of tree.elementsOf(value.elementsList)) {
+        const item = tree.exprOf(element.exprId);
         if (item.kind == ExprKind.Member) {
           names.push(item.name);
         }
@@ -142,7 +149,7 @@ partial class ExpressionTypes {
         continue;
       }
       if (fn.unsafe != undefined) {
-        this.unsafeUsed.add(fn);
+        this.unsafeUsed.add(fn.id);
 
         return;
       }
@@ -151,7 +158,9 @@ partial class ExpressionTypes {
       }
     }
 
-    this.report(module, name.loc, Code.OwnUnsafeOutside, { word: name.name });
+    this.errors.write(module, name.loc, Code.OwnUnsafeOutside, {
+      word: name.name,
+    });
   }
 
   public readonly typedFunctionOf(module: int, loc: int): Type | undefined {
@@ -166,7 +175,7 @@ partial class ExpressionTypes {
   private functionAt(module: int, loc: int): Type {
     const fn = this.record(module)?.functions.get(loc);
     if (fn == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.functionType(fn, module);
@@ -179,9 +188,10 @@ partial class ExpressionTypes {
       return known.type;
     }
 
+    const error = this.types.store.plain(TypeKind.Error);
     const door: FunctionDoor = {
       state: DoorState.InWork,
-      type: this.store.plain(TypeKind.Error),
+      type: error,
       isAssumed: false,
     };
 
@@ -193,40 +203,79 @@ partial class ExpressionTypes {
     this.functionDoors.set(key, door);
     this.functionOrder.push(key);
     this.walking.push(key);
-    this.openFunction(door, fn, module);
+    this.openFunction(key, fn, module);
     this.errors.keepSince(owned);
     this.walking.pop();
     this.facts = before;
-    door.state = DoorState.Done;
 
-    return door.type;
+    return this.functionDone(key, error);
   }
 
-  private openFunction(
-    door: FunctionDoor,
-    fn: FunctionDecl,
-    module: int,
-  ): void {
+  private functionDone(key: string, error: Type): Type {
+    const door = this.functionDoors.get(key);
+    if (door == undefined) {
+      return error;
+    }
+
+    const type = door.type;
+
+    this.functionDoors.set(key, {
+      state: DoorState.Done,
+      type,
+      isAssumed: door.isAssumed,
+    });
+
+    return type;
+  }
+
+  private setFunctionType(key: string, type: Type): void {
+    const door = this.functionDoors.get(key);
+    if (door == undefined) {
+      return;
+    }
+
+    const state = door.state;
+    const isAssumed = door.isAssumed;
+
+    this.functionDoors.set(key, { state, type, isAssumed });
+  }
+
+  private assumeFunctionType(key: string, type: Type): void {
+    const door = this.functionDoors.get(key);
+    if (door == undefined) {
+      return;
+    }
+
+    const state = door.state;
+
+    this.functionDoors.set(key, { state, type, isAssumed: true });
+  }
+
+  private openFunction(key: string, fn: FunctionDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
 
-    this.resolver.typeParameters(module, fn.typeParams);
+    const typeParams = tree.typeParamsOf(fn.typeParamsList);
+
+    this.types.typeParameters(module, typeParams);
     this.captureRequirements(fn, module);
     this.iterablePlaceCheck(fn, module);
     this.constructorArgsCheck(fn, module);
-    const parameterPlaceErrors = this.decorators.parameterPlaceCheck(fn);
+    const parameterPlaceErrors = this.types.parameterPlaceCheck(fn);
 
-    this.reportAll(module, parameterPlaceErrors);
+    this.errors.writeAll(module, parameterPlaceErrors);
 
     const shape = this.parameterShape(fn, context, module);
 
     this.foreignCheck(fn, shape, context, module);
 
-    const self = shape.self ?? this.literalOwners.get(fn);
-    const place = this.functions.functionPlace(fn, self);
+    const self = shape.self ?? this.literalOwners.get(fn.id);
+    const place = this.types.functionPlace(fn, self);
 
     if (self != undefined) {
       this.selves.push(self);
@@ -237,7 +286,7 @@ partial class ExpressionTypes {
 
     this.unsafeMarkCheck(fn, module);
     this.openFunctions.push(fn);
-    this.openBody(door, fn, shape, context, module);
+    this.openBody(key, fn, shape, context, module);
     this.errorPathsCheck(fn, module);
     this.openFunctions.pop();
     this.unsafeUsesCheck(fn, module);
@@ -251,229 +300,77 @@ partial class ExpressionTypes {
   }
 
   private openBody(
-    door: FunctionDoor,
+    key: string,
     fn: FunctionDecl,
     shape: Read<ParameterShape>,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): void {
-    const written = fn.returnType;
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(fn.returnTypeId);
 
     if (written != undefined) {
-      const result = this.resolver.returnType(written, context);
+      const result = this.types.returnType(written, context);
 
-      const asyncResultError = this.functions.asyncResultCheck(
-        fn,
-        written,
-        result,
-      );
+      const asyncResultError = this.types.asyncResultCheck(fn, written, result);
 
-      this.reportFound(module, asyncResultError);
+      this.errors.writeFound(module, asyncResultError);
       this.predicateDeclCheck(fn, written, module);
 
-      door.type = this.functions.signatureOf(shape, result);
+      const signature = this.types.signatureOf(shape, result);
+
+      this.setFunctionType(key, signature);
 
       return this.walkWritten(fn, result, module);
     }
 
     const inherited = this.inheritedResult(fn, module);
     if (inherited != undefined) {
-      door.type = this.functions.signatureOf(shape, inherited);
+      const signature = this.types.signatureOf(shape, inherited);
+
+      this.setFunctionType(key, signature);
 
       return this.walkWritten(fn, inherited, module);
     }
 
-    this.inferRounds(door, fn, shape, module);
-  }
-
-  private inferRounds(
-    door: FunctionDoor,
-    fn: FunctionDecl,
-    shape: Read<ParameterShape>,
-    module: int,
-  ): void {
-    const key = `${module} ${fn.loc}`;
-    let assumed: Type | undefined = undefined;
-
-    for (let round = 1; round <= kInferenceRounds; round++) {
-      const doors = this.doorOrder.length;
-      const functions = this.functionOrder.length;
-      const pending = this.recursions.length;
-      const used = this.assumedCalls.length;
-      const frame = this.inferredFrame(fn, module);
-      if (frame == undefined) {
-        const unknown = this.store.plain(TypeKind.Error);
-
-        door.type = this.functions.signatureOf(shape, unknown);
-
-        return;
-      }
-
-      const hits = this.recursions.slice(pending);
-      const uses = this.assumedCalls.slice(used);
-      const isOwn = hits.includes(key) || uses.includes(key);
-      if (!isOwn && hits.length > 0) {
-        const found = this.quietResult(fn, frame, module);
-
-        this.stall(fn, frame, hits, module);
-        door.type = this.functions.signatureOf(shape, found);
-
-        return;
-      }
-
-      const found = this.cycleResult(fn, frame, isOwn, assumed, module);
-      const next = this.functions.widenedResult(assumed, found);
-      if (isOwn && assumed != undefined && next.kind == TypeKind.Error) {
-        const word = this.functions.functionName(fn);
-
-        this.report(module, fn.loc, Code.ReturnsCycleDiffer, { word });
-        door.type = this.functions.signatureOf(shape, next);
-
-        return;
-      }
-
-      const isLast = round == kInferenceRounds || next.kind == TypeKind.Error;
-      if (!isOwn || next == assumed || isLast) {
-        const result = this.frameResult(fn, frame, module);
-
-        door.type = this.functions.signatureOf(shape, result);
-
-        return;
-      }
-
-      assumed = next;
-      door.type = this.functions.signatureOf(shape, next);
-      door.isAssumed = true;
-      this.forgetSince(doors, functions);
-    }
-  }
-
-  private stall(
-    fn: FunctionDecl,
-    frame: Read<FunctionFrame>,
-    hits: Read<string[]>,
-    module: int,
-  ): void {
-    const isValued = frame.returns.some(
-      (one) => !this.functions.isVoided(one.value),
-    );
-    if (isValued || frame.recursive.length == 0) {
-      return;
-    }
-
-    for (const hit of hits) {
-      const stall: StalledFunction = { fn, module };
-
-      if (!this.stalled.has(hit)) {
-        this.stalled.set(hit, []);
-      }
-
-      this.stalled.get(hit)?.push(stall);
-    }
-  }
-
-  private forgetSince(doors: int, functions: int): void {
-    for (const key of this.doorOrder.slice(doors)) {
-      this.doors.delete(key);
-    }
-
-    for (const key of this.functionOrder.slice(functions)) {
-      this.functionDoors.delete(key);
-    }
-  }
-
-  private cycleResult(
-    fn: FunctionDecl,
-    frame: Read<FunctionFrame>,
-    isOwn: boolean,
-    assumed: Type | undefined,
-    module: int,
-  ): Type {
-    const found = this.quietResult(fn, frame, module);
-    if (!isOwn || assumed != undefined || found.kind != TypeKind.Error) {
-      return found;
-    }
-
-    const known = frame.returns.filter(
-      (one) =>
-        !this.functions.isVoided(one.value) && one.type.kind != TypeKind.Error,
-    );
-    if (known.length == 0 || known.length == frame.returns.length) {
-      return found;
-    }
-
-    this.errors.beginTrial();
-
-    const joined = this.joinedReturns(fn, known, module);
-
-    this.errors.endTrial();
-
-    return joined ?? found;
-  }
-
-  private quietResult(
-    fn: FunctionDecl,
-    frame: Read<FunctionFrame>,
-    module: int,
-  ): Type {
-    this.errors.beginTrial();
-
-    const result = this.frameResult(fn, frame, module);
-
-    this.errors.endTrial();
-
-    return result;
-  }
-
-  private usedFunction(module: int, loc: int): Type {
-    const fn = this.record(module)?.functions.get(loc);
-    const type = this.functionAt(module, loc);
-
-    if (fn == undefined || fn.typeParams.length > 0) {
-      return this.store.plain(TypeKind.Error);
-    }
-    if (type.kind != TypeKind.Function) {
-      return type;
-    }
-
-    const shape = type.shape;
-    const isBroken =
-      shape.result.kind == TypeKind.Error ||
-      shape.params.some((param) => param.type.kind == TypeKind.Error);
-    if (isBroken) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return type;
+    this.inferRounds(key, fn, shape, module);
   }
 
   private parameterShape(
     fn: FunctionDecl,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): ParameterShape {
+    const tree = this.types.program.tree;
+
     const params: FunctionParameter[] = [];
     let self: Type | undefined = undefined;
     let rest = false;
     let isAfterOptional = false;
 
-    for (const param of fn.params) {
+    for (const param of tree.paramsOf(fn.paramsList)) {
       const kind = param.form.kind;
       const type = this.methodParameter(fn, param, context, module);
-      const inside = this.functions.insideType(type, kind);
+      const inside = this.types.insideType(type, kind);
 
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
       if (param.name == kThisParameter) {
-        const thisParameterErrors = this.calls.thisParameterCheck(fn, param);
+        const thisParameterErrors = this.types.thisParameterCheck(fn, param);
 
-        this.reportAll(module, thisParameterErrors);
+        this.errors.writeAll(module, thisParameterErrors);
         self = type;
 
         continue;
       }
       if (kind == ParamKind.Required && isAfterOptional) {
-        this.report(module, param.loc, Code.RequiredAfterOptional, kNoDetails);
+        this.errors.write(
+          module,
+          param.loc,
+          Code.RequiredAfterOptional,
+          kNoDetails,
+        );
       }
 
       const optional =
@@ -487,8 +384,14 @@ partial class ExpressionTypes {
     return { params, rest, self };
   }
 
-  private parameterOf(param: Param, context: Read<TypeContext>, module: int): Type {
-    const written = param.type;
+  private parameterOf(
+    param: Param,
+    context: Read<TypeContext>,
+    module: int,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(param.typeId);
     const form = param.form;
     const word = param.name;
 
@@ -500,27 +403,32 @@ partial class ExpressionTypes {
         type: written,
         isDeclared: true,
       };
-      const type = this.resolver.parameterType(site, context);
+      const type = this.types.parameterType(site, context);
       if (form.kind == ParamKind.Defaulted && type.kind != TypeKind.Error) {
-        this.checked(form.defaultValue, type, module, kNoPlace);
+        const defaultValue = tree.exprOf(form.defaultValueId);
+
+        this.checked(defaultValue, type, module, kNoPlace);
       }
 
       return type;
     }
     if (form.kind != ParamKind.Defaulted) {
-      this.report(module, param.loc, Code.ParameterNeedsType, {
-        word: this.sources.parameterText(param, module),
+      this.errors.write(module, param.loc, Code.ParameterNeedsType, {
+        word: this.types.parameterText(param, module),
       });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (!this.shapes.isPlainLiteral(form.defaultValue)) {
-      this.report(module, param.loc, Code.DefaultNeedsType, { word });
+    const formDefaultValue = tree.exprOf(form.defaultValueId);
+    if (!this.types.isPlainLiteral(formDefaultValue)) {
+      this.errors.write(module, param.loc, Code.DefaultNeedsType, { word });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.typed(form.defaultValue, undefined, module);
+    const defaultValueExpr = tree.exprOf(form.defaultValueId);
+
+    return this.typed(defaultValueExpr, undefined, module);
   }
 
   private methodParameter(
@@ -529,13 +437,15 @@ partial class ExpressionTypes {
     context: Read<TypeContext>,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const isOpen =
-      param.type == undefined &&
+      tree.typeRefAt(param.typeId) == undefined &&
       param.form.kind != ParamKind.Defaulted &&
       fn.role != undefined &&
       this.isExtending();
     if (isOpen || this.isLibraryOverride(fn)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const type = this.parameterOf(param, context, module);
@@ -543,261 +453,48 @@ partial class ExpressionTypes {
     return this.hookedParameter(fn, param, type);
   }
 
-  private readonly isLibraryOverride(fn: FunctionDecl): boolean {
+  private isLibraryOverride(fn: FunctionDecl): boolean {
+    const tree = this.types.program.tree;
+
     const current = this.ownerClasses[this.ownerClasses.length - 1];
     if (current == undefined || fn.role == undefined) {
       return false;
     }
 
     const decl = current.decl;
-    if (decl.base == undefined || decl.typeParams.length > 0) {
+    if (
+      tree.typeRefAt(decl.baseId) == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return false;
     }
 
-    const self = this.resolver.classInstance(current.module, decl, []);
+    const self = this.types.classInstance(current.module, decl, []);
     if (self.kind != TypeKind.Instance) {
       return false;
     }
 
-    const parent = this.classes.parentOf(self, decl);
-    if (parent == undefined || !this.modules.isLibraryModule(parent.module)) {
+    const parent = this.types.parentOf(self, decl);
+    if (parent == undefined || !this.types.isLibraryModule(parent.module)) {
       return false;
     }
-    if (this.modules.isTypedLibrary(parent.module)) {
+    if (this.types.isTypedLibrary(parent.module)) {
       return false;
     }
 
     const owner = this.record(parent.module)?.classes.get(parent.loc);
-    const isOwn = owner?.methods.some((one) => one.name == fn.name) == true;
+    const isOwn = this.types.hasClassMethod(owner, fn.name) == true;
 
     return isOwn || this.receiverMember(parent, fn.name, true) != undefined;
   }
 
   private readonly isExtending(): boolean {
+    const tree = this.types.program.tree;
+
     const current = this.ownerClasses[this.ownerClasses.length - 1];
 
-    return current != undefined && current.decl.base != undefined;
-  }
-
-  private readonly isBodyWalked(fn: FunctionDecl, module: int): boolean {
-    const opened = this.program.modules[module];
-    if (opened == undefined) {
-      return false;
-    }
-    if (opened.source.isLibrary && !this.modules.isTypedLibrary(module)) {
-      return false;
-    }
-    if (fn.role?.method == MethodKind.Abstract) {
-      return false;
-    }
-
-    return fn.body != undefined && fn.bodySource == BodySource.Written;
-  }
-
-  private walkWritten(fn: FunctionDecl, result: Type, module: int): void {
-    const body = fn.body;
-    if (body == undefined || !this.isBodyWalked(fn, module)) {
-      return;
-    }
-    if (this.functions.isAssertion(fn)) {
-      return;
-    }
-
-    const inner = this.functions.innerResult(result, fn);
-    const frame = this.functions.frameOf(fn, inner);
-
-    this.enterGenerator(frame, result);
-    this.initStart(fn);
-    this.walkStatements(body.body, frame, module);
-    this.initEnd(fn, body, module);
-    this.leaveGenerator(frame);
-    this.rememberGuard(fn, frame, module);
-    const writtenResultError = this.functions.writtenResultCheck(
-      fn,
-      result,
-      frame,
+    return (
+      current != undefined && tree.typeRefAt(current.decl.baseId) != undefined
     );
-
-    this.reportFound(module, writtenResultError);
-
-    const isOpen =
-      inner.kind == TypeKind.Void ||
-      inner.kind == TypeKind.Error ||
-      inner.kind == TypeKind.Unknown ||
-      inner.kind == TypeKind.Undefined ||
-      this.types.isOptional(inner);
-    if (isOpen || this.isAlwaysReturning(body, module)) {
-      return;
-    }
-
-    const word = this.functions.functionLabel(fn);
-    const first = this.text.of(inner);
-
-    this.report(module, fn.loc, Code.ReturnOnEveryPath, { word, first });
-  }
-
-  private inferredFrame(
-    fn: FunctionDecl,
-    module: int,
-  ): FunctionFrame | undefined {
-    const body = fn.body;
-    if (body == undefined || !this.isBodyWalked(fn, module)) {
-      return undefined;
-    }
-
-    const frame = this.functions.frameOf(fn, undefined);
-
-    this.facts = new Map<string, Type>();
-    this.enterGenerator(frame, undefined);
-    this.initStart(fn);
-    this.walkStatements(body.body, frame, module);
-    this.initEnd(fn, body, module);
-    this.leaveGenerator(frame);
-    this.rememberGuard(fn, frame, module);
-
-    return frame;
-  }
-
-  private frameResult(
-    fn: FunctionDecl,
-    frame: Read<FunctionFrame>,
-    module: int,
-  ): Type {
-    const generator = frame.generator;
-    if (generator != undefined) {
-      return this.generatorResult(fn, frame, generator, module);
-    }
-    if (fn.isGenerator) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const value = this.commonResult(fn, frame, module);
-    if (!fn.isAsync || value.kind == TypeKind.Error) {
-      return value;
-    }
-
-    return this.store.promiseOf(value);
-  }
-
-  private commonResult(
-    fn: FunctionDecl,
-    frame: Read<FunctionFrame>,
-    module: int,
-  ): Type {
-    const returns = frame.returns;
-    const isValued = returns.some((one) => !this.functions.isVoided(one.value));
-    if (!isValued && frame.recursive.length > 0) {
-      return this.reportRecursive(fn, frame, module);
-    }
-    if (!isValued) {
-      return this.store.plain(TypeKind.Void);
-    }
-
-    const isUnknown = returns.some((one) => one.type.kind == TypeKind.Error);
-    if (isUnknown) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const common = this.joinedReturns(fn, returns, module);
-    if (common != undefined && common.kind == TypeKind.Error) {
-      return common;
-    }
-
-    const isFallingOff = !this.isAlwaysReturning(fn.body, module);
-    const isUndefined =
-      isFallingOff ||
-      frame.hasEmptyReturn ||
-      returns.some((one) => one.type.kind == TypeKind.Undefined);
-    if (common != undefined && isUndefined && common.kind != TypeKind.Void) {
-      return this.types.optional(common);
-    }
-    if (common != undefined) {
-      return common;
-    }
-
-    const word = this.functions.functionName(fn);
-
-    this.report(module, fn.loc, Code.ReturnsOnlyUndefined, { word });
-
-    return this.store.plain(TypeKind.Error);
-  }
-
-  private readonly reportRecursive(
-    fn: FunctionDecl,
-    frame: Read<FunctionFrame>,
-    module: int,
-  ): Type {
-    const key = `${module} ${fn.loc}`;
-    const word = this.functions.functionName(fn);
-    const isSelfOnly =
-      !this.calledBack.has(key) && frame.recursive.every((call) => call == key);
-
-    if (isSelfOnly) {
-      this.report(module, fn.loc, Code.ReturnsOnlySelfCalls, { word });
-    } else {
-      this.report(module, fn.loc, Code.ReturnsOnlyCalledBack, { word });
-    }
-
-    for (const one of this.stalled.get(key) ?? []) {
-      const other = this.functions.functionName(one.fn);
-
-      this.report(one.module, one.fn.loc, Code.ReturnsOnlyCalledBack, {
-        word: other,
-      });
-    }
-
-    return this.store.plain(TypeKind.Error);
-  }
-
-  private joinedReturns(
-    fn: FunctionDecl,
-    returns: Read<ReturnedValue[]>,
-    module: int,
-    code: Code = Code.ReturnsDiffer,
-  ): Type | undefined {
-    const ordered = this.literalsLast(returns, module);
-    let common: Type | undefined = undefined;
-
-    for (const one of ordered) {
-      if (common == undefined) {
-        common = one.type;
-
-        continue;
-      }
-
-      const adapted = this.literalTarget(one.value, one.type, common, module);
-      if (one.type != common && adapted != undefined) {
-        continue;
-      }
-
-      const joined = this.unifier.unionUnify(common, one.type);
-      if (joined == undefined || joined.kind == TypeKind.Error) {
-        const word = this.functions.functionName(fn);
-        const first = this.text.of(one.type);
-        const second = this.text.of(common);
-
-        const at = this.yieldOf.get(one.value) ?? one.value.loc;
-
-        this.report(module, at, code, { word, first, second });
-
-        return this.store.plain(TypeKind.Error);
-      }
-
-      common = joined;
-    }
-
-    return common;
-  }
-
-  private literalsLast(returns: Read<ReturnedValue[]>, module: int): ReturnedValue[] {
-    const typed = returns.filter((one) => one.type.kind != TypeKind.Undefined);
-    const plain = typed.filter((one) => !this.isWholeReturn(one, module));
-    const wholes = typed.filter((one) => this.isWholeReturn(one, module));
-
-    return plain.concat(wholes);
-  }
-
-  private isWholeReturn(one: ReturnedValue, module: int): boolean {
-    return one.type.kind == TypeKind.Int && this.isWholeTree(one.value, module);
   }
 }

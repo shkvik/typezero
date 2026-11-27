@@ -4,5 +4,6 @@ export type BuildOptions = {
   readonly libraries: string[];
   readonly isEmittingIr: boolean;
   readonly isAuditing: boolean;
+  readonly isCheckingCounts: boolean;
   readonly isWrong: boolean;
 };

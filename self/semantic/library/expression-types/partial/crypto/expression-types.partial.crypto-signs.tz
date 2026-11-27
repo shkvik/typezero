@@ -31,8 +31,10 @@ partial class ExpressionTypes {
     isCounted: boolean,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const expr = call.expr;
-    const keyArg = expr.args[2]?.expr;
+    const keyArg = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
     if (!isCounted || keyArg == undefined) {
       return;
     }
@@ -80,7 +82,7 @@ partial class ExpressionTypes {
 
     const key = this.cryptoOptionAt(expr, 2, kKeyOption);
     if (key == undefined) {
-      return this.report(module, keyArg.loc, Code.CryptoNeedsKey, {
+      return this.errors.write(module, keyArg.loc, Code.CryptoNeedsKey, {
         word: shown,
       });
     }
@@ -90,33 +92,35 @@ partial class ExpressionTypes {
 
   private cryptoKeyDataCheck(key: Expr, label: string, module: int): void {
     const given = this.peekType(key, module);
-    const dataError = this.crypto.dataError(
+    const dataError = this.types.dataError(
       key.loc,
       label,
       kAnyCryptoData,
       given,
     );
 
-    this.reportFound(module, dataError);
+    this.errors.writeFound(module, dataError);
   }
 
-  private readonly argonCheck(call: CryptoCall, module: int): void {
+  private argonCheck(call: CryptoCall, module: int): void {
+    const tree = this.types.program.tree;
+
     const expr = call.expr;
-    const first = expr.args[0]?.expr;
-    if (expr.args.length != 2 || first == undefined) {
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (tree.argumentsOf(expr.argsList).length != 2 || first == undefined) {
       return;
     }
 
     const algorithm = this.constantText(first);
     if (algorithm != undefined) {
-      const choiceError = this.crypto.choiceError(
+      const choiceError = this.types.choiceError(
         first.loc,
         kArgonLabel,
         algorithm,
         kArgonAlgorithms,
       );
       if (choiceError != undefined) {
-        return this.reportFound(module, choiceError);
+        return this.errors.writeFound(module, choiceError);
       }
     }
     if (!this.cryptoOptionsFine(expr, 1, call.shown, kArgonOptions, module)) {
@@ -126,9 +130,11 @@ partial class ExpressionTypes {
     this.argonNeedsCheck(call, module);
   }
 
-  private readonly argonNeedsCheck(call: CryptoCall, module: int): void {
+  private argonNeedsCheck(call: CryptoCall, module: int): void {
+    const tree = this.types.program.tree;
+
     const expr = call.expr;
-    const options = expr.args[1]?.expr;
+    const options = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
       return;
     }
@@ -140,15 +146,17 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, options.loc, Code.CryptoNeeds, {
+    this.errors.write(module, options.loc, Code.CryptoNeeds, {
       word: call.shown,
       other: missing,
     });
   }
 
   private primeCheck(call: CryptoCall, module: int): void {
+    const tree = this.types.program.tree;
+
     const expr = call.expr;
-    const count = expr.args.length;
+    const count = tree.argumentsOf(expr.argsList).length;
     if (count < 1 || count > 2) {
       return;
     }
@@ -161,12 +169,14 @@ partial class ExpressionTypes {
 
     const big = this.cryptoOptionAt(expr, 1, kBigintName);
     if (big != undefined) {
-      this.report(module, big.loc, Code.CryptoPrimeBigint, kNoDetails);
+      this.errors.write(module, big.loc, Code.CryptoPrimeBigint, kNoDetails);
     }
   }
 
   private cryptoIntAt(expr: CallExpr, index: int, module: int): void {
-    const arg = expr.args[index]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[index]?.exprId);
     if (arg == undefined) {
       return;
     }
@@ -177,7 +187,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const wanted = this.store.integer(64, false);
+    const wanted = this.types.store.integer(64, false);
 
     this.coerce(arg, given, wanted, module, "");
   }

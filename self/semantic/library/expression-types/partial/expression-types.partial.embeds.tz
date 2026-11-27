@@ -12,26 +12,28 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly embedCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+  private embedCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Name || this.types.isLibraryModule(module)) {
       return;
     }
 
     const name = callee.name;
     const isEmbed =
       kEmbedNames.includes(name) && this.isGlobalUse(callee, module);
-    const hasSpread = expr.args.some((one) => one.spread);
+    const hasSpread = tree.argumentsOf(expr.argsList).some((one) => one.spread);
     if (!isEmbed || hasSpread) {
       return;
     }
 
-    const count = expr.args.length;
-    const path = expr.args[0]?.expr;
+    const count = tree.argumentsOf(expr.argsList).length;
+    const path = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (count != 1 || path == undefined) {
-      const word = this.calls.argumentCountText(1, 1, false);
+      const word = this.types.argumentCountText(1, 1, false);
 
-      return this.report(module, callee.loc, Code.ArgumentCount, {
+      return this.errors.write(module, callee.loc, Code.ArgumentCount, {
         word,
         other: `${count}`,
       });
@@ -40,25 +42,30 @@ partial class ExpressionTypes {
     const other = this.embedExample(name);
     const shown = this.constantText(path);
     if (shown == undefined) {
-      return this.report(module, path.loc, Code.EmbedLiteral, {
+      return this.errors.write(module, path.loc, Code.EmbedLiteral, {
         word: name,
         other,
       });
     }
     if (shown.includes("\\")) {
-      return this.report(module, path.loc, Code.EmbedBackslash, kNoDetails);
+      return this.errors.write(
+        module,
+        path.loc,
+        Code.EmbedBackslash,
+        kNoDetails,
+      );
     }
     if (!this.isRelativePath(shown)) {
-      return this.report(module, path.loc, Code.EmbedRelative, {
+      return this.errors.write(module, path.loc, Code.EmbedRelative, {
         word: name,
         other,
       });
     }
 
-    const home = this.program.modules[module]?.source.path ?? "";
+    const home = this.types.program.modules[module]?.source.path ?? "";
     const size = this.embedded.sizeOf(home, shown);
     if (size == undefined) {
-      this.report(module, path.loc, Code.EmbedUnread, {
+      this.errors.write(module, path.loc, Code.EmbedUnread, {
         word: shown,
         other: kMissingFileReason,
       });

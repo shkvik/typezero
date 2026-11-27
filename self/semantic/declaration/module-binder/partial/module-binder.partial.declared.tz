@@ -7,51 +7,61 @@ import {
   Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
-import { BoundModule } from "../types/module-binder.types.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ModuleBinder {
-  private readonly declareNames(bound: Read<BoundModule>): void {
-    const module = bound.names.module;
+  private declareNames(program: Read<Program>, at: int): void {
+    const tree = program.tree;
 
-    for (const item of module.file.items) {
-      this.declareItem(bound, item);
+    const module = this.moduleAt(program, at);
+    if (module == undefined) {
+      return;
     }
 
-    for (const one of module.declared) {
-      this.declare(bound, one.name, one.loc);
+    for (const item of tree.stmtsOf(module.file.itemsList)) {
+      this.declareItem(program, at, item);
+    }
+
+    for (const one of tree.declaredClassesOf(module.declaredList)) {
+      this.declare(at, one.name, one.loc);
     }
   }
 
-  private readonly declareItem(bound: Read<BoundModule>, item: Stmt): void {
+  private declareItem(program: Read<Program>, at: int, item: Stmt): void {
+    const tree = program.tree;
+
     switch (item.kind) {
       case StmtKind.VarDecl:
-        this.declareVariables(bound, item.decls);
+        const decls = tree.declaratorsOf(item.declsList);
+
+        this.declareVariables(at, decls);
         break;
       case StmtKind.Function:
       case StmtKind.TypeAlias:
       case StmtKind.Enum:
       case StmtKind.Handle:
-        this.declare(bound, item.name, item.loc);
+        this.declare(at, item.name, item.loc);
         break;
       case StmtKind.Class:
-        this.declare(bound, item.name ?? "", item.loc);
+        this.declare(at, item.name ?? "", item.loc);
         break;
       default:
         break;
     }
   }
 
-  private readonly declareVariables(bound: Read<BoundModule>, decls: Read<VarDeclarator[]>): void {
+  private declareVariables(at: int, decls: Read<VarDeclarator[]>): void {
     for (const decl of decls) {
       if (decl.origin == NameOrigin.Written) {
-        this.declare(bound, decl.name, decl.loc);
+        this.declare(at, decl.name, decl.loc);
       }
     }
   }
 
-  private readonly declare(bound: Read<BoundModule>, name: string, loc: int): void {
-    if (name != "" && !bound.names.declared.has(name)) {
-      bound.names.declared.set(name, loc);
+  private declare(at: int, name: string, loc: int): void {
+    const bound = this.ordered[at];
+    if (name != "" && bound != undefined && !bound.declared.has(name)) {
+      bound.declared.set(name, loc);
     }
   }
 }

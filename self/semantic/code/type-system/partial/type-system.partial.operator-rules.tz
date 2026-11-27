@@ -1,0 +1,628 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+  CastExpr,
+  Expr,
+  ExprKind,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  IntType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  OperandHints,
+  OperandPair,
+} from "../../expression-types/types/expression-types.types.tz";
+import { kIntLimits } from "../../integer-math/const/integer-math.const.tz";
+import { OperandTexts } from "../../source-texts/types/source-texts.types.tz";
+import { kHiddenMark } from "../../source-texts/const/source-texts.const.tz";
+import {
+  kUnaryTexts,
+} from "../../operator-rules/const/operator-rules.const.tz";
+import {
+  NumberConversion,
+} from "../../operator-rules/types/operator-rules.types.tz";
+
+partial class TypeSystem {
+  public literalSideHint(
+    isLiteral: boolean,
+    other: Type,
+    hint: Type | undefined,
+  ): Type | undefined {
+    if (!isLiteral) {
+      return hint;
+    }
+
+    const plain = this.definedType(other);
+    if (plain.kind == TypeKind.Decimal) {
+      return plain;
+    }
+
+    return hint;
+  }
+
+  public readonly operandHints(
+    op: BinaryOp,
+    expected: Type | undefined,
+  ): OperandHints {
+    const isBitwise = this.isOperatorBitwise(op);
+    const isPower = op == BinaryOp.Pow;
+    const hint = this.operatorNumberHint(expected, isBitwise);
+    const isDecimalPower =
+      isPower && hint != undefined && hint.kind == TypeKind.Decimal;
+    const canHint = !isBitwise && !isPower;
+
+    if (isDecimalPower) {
+      return { left: hint, isBitwise, canHint };
+    }
+
+    return { left: hint, right: hint, isBitwise, canHint };
+  }
+
+  public readonly powerSide(
+    isFloatPower: boolean,
+    left: Type,
+    right: Type,
+  ): Type {
+    if (isFloatPower) {
+      return left;
+    }
+
+    return right;
+  }
+
+  public commonNumber(
+    hasNumbers: boolean,
+    left: Type,
+    right: Type,
+  ): Type | undefined {
+    if (!hasNumbers) {
+      return undefined;
+    }
+
+    return this.unifierCommonType(left, right);
+  }
+
+  public readonly shiftHint(
+    expr: BinaryExpr,
+    isInteger: boolean,
+    expected: Type | undefined,
+  ): Type | undefined {
+    const tree = this.program.tree;
+
+    if (!isInteger || !this.isIntTree(tree.exprOf(expr.lhsId))) {
+      return undefined;
+    }
+
+    return expected;
+  }
+
+  public readonly isNothingChanged(expr: BinaryExpr, left: Type): boolean {
+    const tree = this.program.tree;
+
+    const isOrZero = expr.op == BinaryOp.BitOr || expr.op == BinaryOp.UShr;
+    const zero = tree.exprOf(expr.rhsId);
+    const isZero = zero.kind == ExprKind.IntLit && zero.value == 0;
+
+    return (
+      isOrZero &&
+      isZero &&
+      this.isNumeric(left) &&
+      !this.isOperatorWrapping(left)
+    );
+  }
+
+  public readonly mixedConversion(left: Type, right: Type): NumberConversion {
+    if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
+      const target = this.store.plain(TypeKind.Double);
+      const isLeftConverted = left.kind != TypeKind.Double;
+
+      return { target, isLeftConverted };
+    }
+    if (this.holds(left, right)) {
+      return { target: left, isLeftConverted: false };
+    }
+    if (this.holds(right, left)) {
+      return { target: right, isLeftConverted: true };
+    }
+
+    const int = this.store.integer(64, false);
+
+    return { target: int, isLeftConverted: left.id != int.id };
+  }
+
+  public readonly isOperatorBitwise(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.BitAnd:
+      case BinaryOp.BitOr:
+      case BinaryOp.BitXor:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly isOperatorShift(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.Shl:
+      case BinaryOp.Shr:
+      case BinaryOp.UShr:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly isOperatorWrapping(type: Type): boolean {
+    return type.kind == TypeKind.Int && type.wraps;
+  }
+
+  public readonly withoutNever(pair: OperandPair): OperandPair {
+    const left = pair.left;
+    const right = pair.right;
+    const isLeftNever = left.kind == TypeKind.Never;
+    const isRightNever = right.kind == TypeKind.Never;
+    if (isLeftNever && isRightNever) {
+      const double = this.store.plain(TypeKind.Double);
+
+      return { left: double, right: double };
+    }
+    if (isLeftNever && this.isNeverTarget(right)) {
+      return { left: right, right };
+    }
+    if (isRightNever && this.isNeverTarget(left)) {
+      return { left, right: left };
+    }
+
+    return pair;
+  }
+
+  public readonly castHint(isArray: boolean, to: Type): Type | undefined {
+    if (!isArray || to.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return to;
+  }
+
+  public castCode(from: Type, to: Type, isArray: boolean): Code {
+    if (from.kind == TypeKind.Error || to.kind == TypeKind.Error) {
+      return Code.CastPlain;
+    }
+    if (isArray) {
+      return Code.CastDeclare;
+    }
+    if (this.converts(from, to)) {
+      return Code.CastItself;
+    }
+
+    const defined = this.definedType(from);
+    if (this.isOptional(from) && this.converts(defined, to)) {
+      return Code.CastUndefined;
+    }
+
+    return this.castConversion(this.apparent(from), to);
+  }
+
+  public readonly castWord(expr: CastExpr, code: Code, to: Type): string {
+    const tree = this.program.tree;
+
+    if (code == Code.CastDeclare || code == Code.CastItself) {
+      return this.typeText(to);
+    }
+
+    const operand = tree.exprOf(expr.operandId);
+
+    return this.operandName(operand);
+  }
+
+  public readonly fractionText(left: Type, texts: OperandTexts): string {
+    if (left.kind == TypeKind.Double) {
+      return texts.left;
+    }
+
+    return texts.right;
+  }
+
+  public readonly droppedValue(type: Type): Type {
+    if (type.kind != TypeKind.Promise) {
+      return type;
+    }
+
+    return this.store.valueOf(type);
+  }
+
+  public readonly droppedCode(isPromised: boolean): Code {
+    if (isPromised) {
+      return Code.VoidDropsAsyncResult;
+    }
+
+    return Code.VoidDropsResult;
+  }
+
+  public readonly operatorAssertedText(expr: Expr): string | undefined {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Name:
+        if (expr.name.startsWith(kHiddenMark)) {
+          return undefined;
+        }
+
+        return expr.name;
+      case ExprKind.IntLit:
+        return `${expr.value}`;
+      case ExprKind.Member: {
+        const objectExpr = tree.exprOf(expr.objectId);
+        const object = this.operatorAssertedText(objectExpr);
+        const dot = this.memberDot(expr.optional);
+
+        if (object == undefined) {
+          return undefined;
+        }
+
+        return `${object}${dot}${expr.name}`;
+      }
+      case ExprKind.Index: {
+        const exprObject = tree.exprOf(expr.objectId);
+        const object = this.operatorAssertedText(exprObject);
+        const indexExpr = tree.exprOf(expr.indexId);
+        const index = this.operatorAssertedText(indexExpr);
+        if (object == undefined || index == undefined) {
+          return undefined;
+        }
+
+        return `${object}[${index}]`;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  public signHint(expr: UnaryExpr, wanted: Type | undefined): Type | undefined {
+    const tree = this.program.tree;
+
+    const plain = this.wantedPart(wanted);
+    if (plain == undefined) {
+      return undefined;
+    }
+
+    const isFraction = tree.exprOf(expr.operandId).kind == ExprKind.FloatLit;
+    const member = this.numberMember(plain, isFraction);
+    const target = member ?? plain;
+    if (!this.isNumberLike(target)) {
+      return undefined;
+    }
+
+    return target;
+  }
+
+  public readonly integerOf(type: Type | undefined): Type | undefined {
+    if (type == undefined || type.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  public readonly unaryText(op: UnaryOp): string {
+    const row = kUnaryTexts.find((one) => one.op == op);
+
+    return row?.text ?? "";
+  }
+
+  public readonly bitsOfDoubleError(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): SourceError | undefined {
+    const other = this.operatorText(expr.op);
+    const texts = this.operandTexts(expr, module);
+    const fraction = this.fractionText(left, texts);
+    const word = this.shownOperand(fraction);
+
+    return { code: Code.BitsOfDouble, loc: expr.loc, details: { other, word } };
+  }
+
+  public readonly mixedError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): SourceError | undefined {
+    const left = pair.left;
+    const right = pair.right;
+    const op = this.operatorText(expr.op);
+    const conversion = this.mixedConversion(left, right);
+    const texts = this.operandTexts(expr, module);
+    const method = this.conversionName(conversion.target);
+    const first = this.typeText(left);
+    const second = this.typeText(right);
+
+    if (conversion.isLeftConverted) {
+      const shown = this.operandText(texts.left);
+      const word = `${shown}.${method}() ${op} ${texts.right}`;
+
+      return {
+        code: Code.MixedNumbers,
+        loc: expr.loc,
+        details: {
+          first,
+          second,
+          other: op,
+          word,
+        },
+      };
+    }
+
+    const shown = this.operandText(texts.right);
+    const word = `${texts.left} ${op} ${shown}.${method}()`;
+
+    return {
+      code: Code.MixedNumbers,
+      loc: expr.loc,
+      details: {
+        first,
+        second,
+        other: op,
+        word,
+      },
+    };
+  }
+
+  public readonly nothingChangedError(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): SourceError | undefined {
+    const other = this.operatorText(expr.op);
+    const texts = this.operandTexts(expr, module);
+    const word = this.namedText(texts.left);
+
+    if (left.kind == TypeKind.Double) {
+      return {
+        code: Code.NoOpBitsTrunc,
+        loc: expr.loc,
+        details: {
+          word,
+          other,
+        },
+      };
+    }
+
+    const first = this.shownOperand(texts.left);
+
+    if (expr.op == BinaryOp.UShr) {
+      return {
+        code: Code.NoOpBitsWrapUnsigned,
+        loc: expr.loc,
+        details: {
+          word,
+          other,
+          first,
+        },
+      };
+    }
+
+    return {
+      code: Code.NoOpBitsWrap,
+      loc: expr.loc,
+      details: { word, other, first },
+    };
+  }
+
+  public readonly operandsError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+  ): SourceError | undefined {
+    const left = pair.left;
+    const right = pair.right;
+    const other = this.operatorText(expr.op);
+    const first = this.typeText(left);
+    const second = this.typeText(right);
+    const isUndefined =
+      this.isOptional(left) ||
+      this.isOptional(right) ||
+      left.kind == TypeKind.Undefined ||
+      right.kind == TypeKind.Undefined;
+    if (isUndefined) {
+      return {
+        code: Code.OperandTypesUndefined,
+        loc: expr.loc,
+        details: {
+          first,
+          second,
+          other,
+        },
+      };
+    }
+
+    return {
+      code: Code.OperandTypes,
+      loc: expr.loc,
+      details: { first, second, other },
+    };
+  }
+
+  public readonly overflowError(
+    expr: Expr,
+    type: IntType,
+    shown: string,
+    wrapped: decimal,
+  ): SourceError | undefined {
+    const code = this.integers.overflowCode(type);
+    const first = this.typeText(type);
+    const other = `${wrapped}`;
+
+    return {
+      code,
+      loc: expr.loc,
+      details: { word: shown, first, other },
+    };
+  }
+
+  public readonly signedShiftError(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): SourceError | undefined {
+    if (left.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    const texts = this.operandTexts(expr, module);
+    const word = this.shownOperand(texts.left);
+    const second = this.countText(texts.right);
+    const unsigned = this.store.integer(left.bits, true);
+    const other = this.conversionName(unsigned);
+    const first = this.typeText(left);
+
+    return {
+      code: Code.SignedShift,
+      loc: expr.loc,
+      details: {
+        first,
+        word,
+        other,
+        second,
+      },
+    };
+  }
+
+  public readonly parameterArithmetic(
+    expr: BinaryExpr,
+    pair: OperandPair,
+  ): Checked<Type> {
+    const left = pair.left;
+    const right = pair.right;
+    const isOpen = this.isOpenParameter(left) || this.isOpenParameter(right);
+    const isKnown = left.kind != TypeKind.Error && right.kind != TypeKind.Error;
+    const hasText =
+      left.kind == TypeKind.String || right.kind == TypeKind.String;
+    const isJoin = expr.op == BinaryOp.Add && hasText;
+    if (isOpen && isKnown && !isJoin) {
+      const operandsError = this.operandsError(expr, pair);
+
+      return { value: this.store.plain(TypeKind.Error), error: operandsError };
+    }
+
+    return { value: this.store.plain(TypeKind.Error) };
+  }
+
+  public readonly reportsBits(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): Checked<boolean> {
+    const left = pair.left;
+    const right = pair.right;
+
+    if (this.isNothingChanged(expr, left)) {
+      const nothingChangedError = this.nothingChangedError(expr, left, module);
+
+      return { value: true, error: nothingChangedError };
+    }
+    if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
+      const bitsOfDoubleError = this.bitsOfDoubleError(expr, left, module);
+
+      return { value: true, error: bitsOfDoubleError };
+    }
+    if (left.kind != TypeKind.Int || right.kind != TypeKind.Int) {
+      const operandsError = this.operandsError(expr, pair);
+
+      return { value: true, error: operandsError };
+    }
+    if (expr.op == BinaryOp.UShr && !left.unsigned) {
+      const signedShiftError = this.signedShiftError(expr, left, module);
+
+      return { value: true, error: signedShiftError };
+    }
+
+    return { value: false };
+  }
+
+  private readonly operatorNumberHint(
+    expected: Type | undefined,
+    isBitwise: boolean,
+  ): Type | undefined {
+    if (expected == undefined || isBitwise) {
+      return undefined;
+    }
+    if (this.isNumeric(expected) || expected.kind == TypeKind.Decimal) {
+      return expected;
+    }
+
+    return undefined;
+  }
+
+  private readonly holds(wide: Type, narrow: Type): boolean {
+    if (wide.kind != TypeKind.Int || narrow.kind != TypeKind.Int) {
+      return false;
+    }
+
+    const wideBits = wide.bits;
+    const wideUnsigned = wide.unsigned;
+    const narrowBits = narrow.bits;
+    const narrowUnsigned = narrow.unsigned;
+    const big = kIntLimits.find(
+      (row) => row.bits == wideBits && row.unsigned == wideUnsigned,
+    );
+    const small = kIntLimits.find(
+      (row) => row.bits == narrowBits && row.unsigned == narrowUnsigned,
+    );
+    if (big == undefined || small == undefined) {
+      return false;
+    }
+
+    return small.lowest <= big.lowest && small.highest <= big.highest;
+  }
+
+  private readonly isNeverTarget(type: Type): boolean {
+    return type.kind != TypeKind.Error && type.kind != TypeKind.Void;
+  }
+
+  private readonly castConversion(from: Type, to: Type): Code {
+    const number = this.numberCode(from, to);
+    if (number == Code.ConvertExplicitly) {
+      return Code.CastConvert;
+    }
+    if (number == Code.RoundThenConvert) {
+      return Code.CastRound;
+    }
+    if (from.kind == TypeKind.Double && to.kind == TypeKind.Decimal) {
+      return Code.CastToDecimal;
+    }
+    if (from.kind == TypeKind.Decimal && this.isNumber(to)) {
+      return Code.CastToNumber;
+    }
+    if (from.kind == TypeKind.Json) {
+      return Code.CastJson;
+    }
+
+    return Code.CastCannot;
+  }
+
+  private readonly numberMember(
+    type: Type,
+    isFraction: boolean,
+  ): Type | undefined {
+    if (type.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    return this.store
+      .partsOf(type)
+      .find(
+        (part) =>
+          this.isNumberLike(part) && (!isFraction || part.kind != TypeKind.Int),
+      );
+  }
+}

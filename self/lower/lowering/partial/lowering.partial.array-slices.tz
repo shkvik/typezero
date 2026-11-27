@@ -1,0 +1,517 @@
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kAppendName,
+  kAppendTakenName,
+  kArrayAppend,
+  kArrayAppendTaken,
+  kArrayLengthField,
+  kArrayModule,
+  kArraySetLength,
+  kArraySlice,
+  kArraySliceLent,
+  kArraySplice,
+  kBooleanType,
+  kCharType,
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kSliceName,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  GivenNumber,
+  IrValue,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
+import {
+  SyntheticNode,
+} from "../../../program/ast/ast-tree/types/ast-tree.types.synthetic.tz";
+
+partial class Lowering {
+  private arraySliced(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    const start = this.integerArgument(frame, call, 0);
+    const end = this.integerArgument(frame, call, 1);
+    if (array == undefined || start == undefined || end == undefined) {
+      return undefined;
+    }
+
+    if (
+      object.kind == TypeKind.Array &&
+      this.isPlainElement(this.values.types.store.itemOf(object))
+    ) {
+      const target: RuntimeTarget = { module: kArrayModule, name: kSliceName };
+      const int = this.values.types.store.integer(64, false);
+      const boolean = this.values.types.store.plain(TypeKind.Boolean);
+      const isEnded = this.ir.integer(kBooleanType, `${end.given}`);
+      const given: IrValue[] = [
+        array,
+        { type: kIntType, value: start.value, tz: int },
+        { type: kIntType, value: end.value, tz: int },
+        { type: kBooleanType, value: isEnded, tz: boolean },
+      ];
+      const items = [this.values.types.store.itemOf(object)];
+      const sliced = this.runtimeFunctionCall(
+        frame,
+        target,
+        items,
+        given,
+        call.loc,
+      );
+
+      this.dropping(frame, array);
+
+      return sliced;
+    }
+
+    const hasEnd = this.ir.integer(kFlagType, `${end.given}`);
+    const result = this.slicedType(call, object);
+    const name = this.pick(
+      this.isLookingArray(result),
+      kArraySliceLent,
+      kArraySlice,
+    );
+    const slicing = this.ir.declare(name, kPointerType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+    ]);
+    const value = frame.made.call(slicing, [
+      array.value,
+      start.value,
+      end.value,
+      hasEnd,
+    ]);
+
+    this.dropping(frame, array);
+
+    return { type: kPointerType, value, tz: result, owned: true };
+  }
+
+  private slicedType(call: CallExpr, object: Type): Type {
+    const answered = this.typeOf(call);
+    if (answered == undefined || object.kind != TypeKind.Array) {
+      return object;
+    }
+    if (!this.isLookingArray(answered)) {
+      return object;
+    }
+
+    return this.values.types.store.lentArrayOf(
+      this.values.types.store.itemOf(object),
+    );
+  }
+
+  private drainedArray(
+    frame: Frame,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const slots = frame.made.slot(kPointerType, "drain.slots");
+    const splicing = this.ir.declare(kArraySplice, kPointerType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+      kIntType,
+      kPointerType,
+    ]);
+    const zero = this.ir.integer(kIntType, "0");
+    const none = this.ir.integer(kFlagType, "0");
+    const removed = frame.made.call(splicing, [
+      array.value,
+      zero,
+      zero,
+      none,
+      zero,
+      slots,
+    ]);
+
+    this.dropping(frame, array);
+
+    return { type: kPointerType, value: removed, tz: object, owned: true };
+  }
+
+  private retainedArray(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const id = tree.syntheticId(SyntheticNode.FilterMember, member.id);
+    const asFilter: MemberExpr = {
+      kind: ExprKind.Member,
+      id,
+      loc: member.loc,
+      objectId: member.objectId,
+      name: "filter",
+      known: member.known,
+      optional: member.optional,
+      typeArgsList: member.typeArgsList,
+    };
+    const kept = this.callbackMethod(frame, call, asFilter, object);
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    if (kept == undefined || array == undefined) {
+      return undefined;
+    }
+
+    const cutting = this.ir.declare(kArraySetLength, kVoidType, [
+      kPointerType,
+      kIntType,
+    ]);
+    const appending = this.ir.declare(kArrayAppend, kVoidType, [
+      kPointerType,
+      kPointerType,
+    ]);
+
+    frame.made.call(cutting, [array.value, this.ir.integer(kIntType, "0")]);
+    frame.made.call(appending, [array.value, kept.value]);
+    this.dropping(frame, kept);
+    this.dropping(frame, array);
+
+    const tz = this.values.types.store.plain(TypeKind.Void);
+
+    return { type: kVoidType, value: this.ir.zero(kCharType), tz };
+  }
+
+  private integerArgument(
+    frame: Frame,
+    call: CallExpr,
+    position: int,
+  ): GivenNumber | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[position];
+    if (argument == undefined) {
+      return { value: this.ir.zero(kIntType), given: 0 };
+    }
+
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.value(frame, expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const int = this.values.types.store.integer(64, false);
+    const value = this.converted(
+      frame,
+      given,
+      int,
+      tree.exprOf(argument.exprId).loc,
+    );
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return { value: value.value, given: 1 };
+  }
+
+  private popped(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const result = this.typeOf(call);
+    const resultIr = this.typeOrUndefined(result);
+    if (result == undefined || resultIr == undefined) {
+      const kind = this.kindName(result);
+
+      this.notLowered(frame.module, call.loc, `a result of type ${kind}`);
+
+      return undefined;
+    }
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const element = this.irType(this.values.types.store.itemOf(object));
+    if (element == undefined) {
+      return undefined;
+    }
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const lengthField = this.arrayField(frame, array.value, kArrayLengthField);
+    const length = frame.made.load(kFlagType, lengthField);
+    const zero = this.ir.zero(kFlagType);
+    const isEmpty = frame.made.integerCompare(
+      IrIntPredicate.Equal,
+      length,
+      zero,
+    );
+    const before = frame.made.currentBlock();
+    const take = frame.made.block("pop.take");
+    const end = frame.made.block("pop.end");
+
+    frame.made.conditionalBranch(isEmpty, end, take);
+    frame.made.open(take);
+
+    const one = this.ir.integer(kFlagType, "1");
+    const last = frame.made.binary(IrOpcode.Sub, length, one);
+    const data = this.arrayData(frame, array.value);
+    const at = frame.made.cast(IrOpcode.ZExt, last, kIntType);
+    const address = frame.made.element(element, data, at);
+    const item: IrValue = {
+      type: element,
+      value: frame.made.load(element, address),
+      tz: this.values.types.store.itemOf(object),
+      owned: true,
+    };
+
+    frame.made.store(last, lengthField);
+
+    const placed = this.converted(frame, item, result, call.loc);
+    const takeEnd = frame.made.currentBlock();
+
+    frame.made.branch(end);
+    frame.made.open(end);
+
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const missing = this.ir.zero(resultIr);
+    const value = frame.made.phi(
+      resultIr,
+      [missing, placed.value],
+      [before, takeEnd],
+    );
+
+    this.dropping(frame, array);
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private joinedArrays(
+    frame: Frame,
+    call: CallExpr,
+    array: IrValue,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const items = [this.values.types.store.itemOf(object)];
+    const isCopy = this.values.isCopy(this.values.types.store.itemOf(object));
+    const copy = this.joinedBase(frame, call, array, object, isCopy);
+    if (copy == undefined) {
+      return undefined;
+    }
+
+    const name = this.pick(isCopy, kAppendName, kAppendTakenName);
+    const appending: RuntimeTarget = { module: kArrayModule, name };
+
+    for (const argument of tree.argumentsOf(call.argsList)) {
+      const passed = this.wantedValue(
+        frame,
+        tree.exprOf(argument.exprId),
+        object,
+      );
+      if (passed == undefined) {
+        return undefined;
+      }
+
+      const other = this.converted(
+        frame,
+        passed,
+        object,
+        tree.exprOf(argument.exprId).loc,
+      );
+      if (other == undefined || argument.spread) {
+        this.notLowered(
+          frame.module,
+          tree.exprOf(argument.exprId).loc,
+          "this argument",
+        );
+
+        return undefined;
+      }
+
+      this.runtimeFunctionCall(
+        frame,
+        appending,
+        items,
+        [copy, other],
+        call.loc,
+      );
+      if (isCopy) {
+        this.dropping(frame, other);
+      }
+    }
+
+    return copy;
+  }
+
+  private joinedBase(
+    frame: Frame,
+    call: CallExpr,
+    array: IrValue,
+    object: Type,
+    isCopy: boolean,
+  ): IrValue | undefined {
+    if (!isCopy && array.owned == true) {
+      return array;
+    }
+
+    const items = [this.values.types.store.itemOf(object)];
+    const int = this.values.types.store.integer(64, false);
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
+    const zero: IrValue = {
+      type: kIntType,
+      value: this.ir.zero(kIntType),
+      tz: int,
+    };
+    const whole: IrValue = {
+      type: kBooleanType,
+      value: this.ir.zero(kBooleanType),
+      tz: boolean,
+    };
+    const slicing: RuntimeTarget = { module: kArrayModule, name: kSliceName };
+    const given = [array, zero, zero, whole];
+    const copy = this.runtimeFunctionCall(
+      frame,
+      slicing,
+      items,
+      given,
+      call.loc,
+    );
+
+    this.dropping(frame, array);
+
+    return copy;
+  }
+
+  private concatArrays(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(member.objectId);
+    const array = this.value(frame, objectExpr);
+    if (array == undefined) {
+      return undefined;
+    }
+    if (
+      object.kind == TypeKind.Array &&
+      this.isPlainElement(this.values.types.store.itemOf(object))
+    ) {
+      return this.joinedArrays(frame, call, array, object);
+    }
+
+    const isCopy = this.values.isCopy(this.values.types.store.itemOf(object));
+    const copy = this.concatBase(frame, array, isCopy);
+
+    for (const argument of tree.argumentsOf(call.argsList)) {
+      const given = this.wantedValue(
+        frame,
+        tree.exprOf(argument.exprId),
+        object,
+      );
+      if (given == undefined) {
+        return undefined;
+      }
+
+      const other = this.converted(
+        frame,
+        given,
+        object,
+        tree.exprOf(argument.exprId).loc,
+      );
+      if (other == undefined || argument.spread) {
+        this.notLowered(
+          frame.module,
+          tree.exprOf(argument.exprId).loc,
+          "this argument",
+        );
+
+        return undefined;
+      }
+
+      this.concatAppend(frame, copy, other, isCopy);
+    }
+
+    return { type: kPointerType, value: copy, tz: object, owned: true };
+  }
+
+  private concatBase(frame: Frame, array: IrValue, isCopy: boolean): LLVMValue {
+    if (!isCopy && array.owned == true) {
+      return array.value;
+    }
+
+    const copying = this.ir.declare(kArraySlice, kPointerType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+    ]);
+    const zero = this.ir.zero(kIntType);
+    const none = this.ir.zero(kFlagType);
+    const copy = frame.made.call(copying, [array.value, zero, zero, none]);
+
+    this.dropping(frame, array);
+
+    return copy;
+  }
+
+  private concatAppend(
+    frame: Frame,
+    copy: LLVMValue,
+    other: IrValue,
+    isCopy: boolean,
+  ): void {
+    const isMoved = !isCopy && other.owned == true;
+    const name = this.pick(isMoved, kArrayAppendTaken, kArrayAppend);
+    const appending = this.ir.declare(name, kVoidType, [
+      kPointerType,
+      kPointerType,
+    ]);
+
+    frame.made.call(appending, [copy, other.value]);
+    this.dropping(frame, other);
+  }
+}

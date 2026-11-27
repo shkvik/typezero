@@ -1,0 +1,270 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  AssignExpr,
+  BinaryExpr,
+  ConditionalExpr,
+  Expr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { TruthUse } from "../../../flow/truth-rules/types/truth-rules.types.tz";
+import {
+  kUndefinedText,
+  kUnnamedOperand,
+} from "../../source-texts/const/source-texts.const.tz";
+import {
+  kAndText,
+  kEmptyText,
+  kEquals,
+  kNotEquals,
+  kOrText,
+  kOtherPlaceholder,
+  kZeroText,
+} from "../../logic-rules/const/logic-rules.const.tz";
+import {
+  kNegation,
+} from "../../../flow/truth-rules/const/truth-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly equalsText(isNegated: boolean): string {
+    if (isNegated) {
+      return kNotEquals;
+    }
+
+    return kEquals;
+  }
+
+  public emptyTest(type: Type, isNegated: boolean): string {
+    const test = this.equalsText(!isNegated);
+    const base = this.definedType(type);
+
+    if (this.isOptional(type)) {
+      return `${test} ${kUndefinedText}`;
+    }
+    if (base.kind == TypeKind.String) {
+      return `${test} ${kEmptyText}`;
+    }
+
+    return `${test} ${kZeroText}`;
+  }
+
+  public readonly logicalUse(isAnd: boolean): TruthUse {
+    if (isAnd) {
+      return TruthUse.And;
+    }
+
+    return TruthUse.Or;
+  }
+
+  public rightHint(
+    isAnd: boolean,
+    left: Type,
+    expected: Type | undefined,
+  ): Type | undefined {
+    const isPlain =
+      isAnd || left.kind == TypeKind.Error || left.kind == TypeKind.Undefined;
+    if (isPlain) {
+      return expected;
+    }
+
+    return this.definedType(left);
+  }
+
+  public readonly logicalText(isAnd: boolean): string {
+    if (isAnd) {
+      return kAndText;
+    }
+
+    return kOrText;
+  }
+
+  public readonly negatedText(test: string, isAnd: boolean): string {
+    if (isAnd) {
+      return test;
+    }
+
+    return kNegation + test;
+  }
+
+  public keptLeft(left: Type, isAnd: boolean): Type {
+    if (!isAnd) {
+      return this.definedType(left);
+    }
+
+    const base = this.definedType(left);
+    const isAlwaysTruthy =
+      base.kind == TypeKind.Array ||
+      base.kind == TypeKind.Function ||
+      this.isTruthyObject(base);
+    if (isAlwaysTruthy) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return left;
+  }
+
+  public readonly noCommonCode(isAnd: boolean): Code {
+    if (isAnd) {
+      return Code.LogicalAndNoCommon;
+    }
+
+    return Code.LogicalOrNoCommon;
+  }
+
+  public branchHint(
+    literal: Expr,
+    other: Type,
+    wanted: Type | undefined,
+  ): Type | undefined {
+    if (this.isNumberTree(literal)) {
+      return this.decimalHint(other, wanted);
+    }
+    if (wanted != undefined) {
+      return wanted;
+    }
+    if (other.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return other;
+  }
+
+  public elseHint(
+    expr: ConditionalExpr,
+    thenType: Type,
+    wanted: Type | undefined,
+    isElseWaitingOnly: boolean,
+  ): Type | undefined {
+    const tree = this.program.tree;
+
+    if (isElseWaitingOnly) {
+      const elseExpr = tree.exprOf(expr.elseExprId);
+
+      return this.branchHint(elseExpr, thenType, wanted);
+    }
+    const elseExprExpr = tree.exprOf(expr.elseExprId);
+    if (this.isNumberTree(elseExprExpr)) {
+      return this.decimalHint(thenType, wanted);
+    }
+
+    return wanted;
+  }
+
+  public assignmentConditionError(
+    expr: AssignExpr,
+    type: Type,
+    use: TruthUse,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const isNegated = use == TruthUse.Not;
+    const target = tree.exprOf(expr.targetId);
+    const first = this.hintText(target, kUnnamedOperand);
+    const value = tree.exprOf(expr.valueId);
+    const second = this.hintText(value, kOtherPlaceholder);
+    const base = this.definedType(type);
+    const isTestable =
+      this.isOptional(type) ||
+      this.isNumberLike(base) ||
+      base.kind == TypeKind.String;
+    const isCompared =
+      this.isWrittenLiteral(tree.exprOf(expr.valueId)) ||
+      type.kind == TypeKind.Error ||
+      !isTestable;
+    if (isCompared) {
+      const word = this.equalsText(isNegated);
+
+      return {
+        code: Code.AssignmentCompared,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+          second,
+        },
+      };
+    }
+
+    const other = this.emptyTest(type, isNegated);
+
+    return {
+      code: Code.AssignmentTested,
+      loc: expr.loc,
+      details: {
+        first,
+        second,
+        other,
+      },
+    };
+  }
+
+  public readonly rightVoid(expr: BinaryExpr, isAnd: boolean): Checked<Type> {
+    const tree = this.program.tree;
+
+    const word = this.logicalText(isAnd);
+    const lhs = tree.exprOf(expr.lhsId);
+    const test = this.hintText(lhs, kUnnamedOperand);
+    const first = this.negatedText(test, isAnd);
+    const rhs = tree.exprOf(expr.rhsId);
+    const second = this.hintText(rhs, kOtherPlaceholder);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.RightSideVoid,
+        loc: expr.loc,
+        details: { word, first, second },
+      },
+    };
+  }
+
+  public logicalResult(
+    expr: BinaryExpr,
+    left: Type,
+    right: Type,
+    isAnd: boolean,
+  ): Checked<Type> {
+    const isBroken =
+      left.kind == TypeKind.Error || right.kind == TypeKind.Error;
+    if (isBroken) {
+      return { value: this.store.plain(TypeKind.Error) };
+    }
+
+    const isBoolean =
+      left.kind == TypeKind.Boolean && right.kind == TypeKind.Boolean;
+    if (isBoolean) {
+      return { value: left };
+    }
+    if (right.kind == TypeKind.Void) {
+      return this.rightVoid(expr, isAnd);
+    }
+
+    const kept = this.keptLeft(left, isAnd);
+    const result = this.unify(kept, right);
+    if (result != undefined) {
+      return { value: result };
+    }
+
+    const first = this.typeText(kept);
+    const second = this.typeText(right);
+    const code = this.noCommonCode(isAnd);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: { code, loc: expr.loc, details: { first, second } },
+    };
+  }
+
+  private decimalHint(other: Type, hint: Type | undefined): Type | undefined {
+    const plain = this.definedType(other);
+    if (plain.kind == TypeKind.Decimal) {
+      return plain;
+    }
+
+    return hint;
+  }
+}

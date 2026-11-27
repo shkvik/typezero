@@ -3,22 +3,15 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import { Mark } from "../../cursor/types/cursor.types.tz";
-import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
 import {
-  Expr,
   ExprKind,
-  FunctionExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
-  BlockStmt,
-  Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   BodySource,
-  FunctionDecl,
   FunctionPlace,
-  Param,
   ParamKind,
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
@@ -29,6 +22,21 @@ import {
   ArrowHead,
   ParamPattern,
 } from "../types/file-parser.types.functions.tz";
+import {
+  Expr,
+  FunctionExpr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+} from "../../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  BlockStmt,
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+import {
+  TypeParamDecl,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 partial class FileParser {
   private tryAsyncFunction(): Expr | undefined {
@@ -270,7 +278,9 @@ partial class FileParser {
     return this.arrowBlock();
   }
 
-  private readonly onlyStatement(body: BlockStmt): Stmt | undefined {
+  private readonly onlyStatement(
+    body: Lent<BlockStmt>,
+  ): Read<Stmt | undefined> {
     if (body.body.length != 1) {
       return undefined;
     }

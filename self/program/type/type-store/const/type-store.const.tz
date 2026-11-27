@@ -1,1 +1,17 @@
+import { PlainKind, TypeKind } from "../../types/type.types.tz";
+
 export const kParentDepthLimit = 64;
+export const kPlainKinds: readonly PlainKind[] = [
+  TypeKind.Void,
+  TypeKind.Undefined,
+  TypeKind.Never,
+  TypeKind.Unknown,
+  TypeKind.Boolean,
+  TypeKind.Double,
+  TypeKind.Decimal,
+  TypeKind.String,
+  TypeKind.Json,
+  TypeKind.AnyObject,
+];
+export const kIntegerBits: readonly int[] = [8, 16, 32, 64];
+export const kLentModes = ["Read", "Lent"];

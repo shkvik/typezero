@@ -1,0 +1,224 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kFlagsText,
+  kFsCalls,
+  kFsConstants,
+  kFsModule,
+  kFsPromisesModule,
+  kOpenFlags,
+  kSyncSuffix,
+  kThrowIfNoEntry,
+  kUtf8Names,
+} from "../../fs-rules/const/fs-rules.const.tz";
+import { FsCall } from "../../fs-rules/types/fs-rules.types.tz";
+
+partial class TypeSystem {
+  public readonly isFsModule(name: string): boolean {
+    return name == kFsModule;
+  }
+
+  public readonly isFlag(text: string): boolean {
+    return kOpenFlags.includes(text);
+  }
+
+  public readonly isConstant(name: string): boolean {
+    return kFsConstants.includes(name);
+  }
+
+  public readonly isUtf8(name: string): boolean {
+    return kUtf8Names.includes(name.toLowerCase());
+  }
+
+  public isWritable(type: Type): boolean {
+    const base = this.definedType(type);
+    if (base.kind == TypeKind.String || base.kind == TypeKind.Error) {
+      return true;
+    }
+    if (base.kind == TypeKind.Union) {
+      return this.store.partsOf(base).every((part) => this.isByteView(part));
+    }
+
+    return this.isByteView(base);
+  }
+
+  public fsDataError(
+    loc: int,
+    name: string,
+    found: Type,
+  ): SourceError {
+    const base = this.definedType(found);
+    const first = this.typeText(found);
+    const other = this.dataHint(base);
+    const details: Details = { word: name, first, other };
+
+    return { code: Code.FsData, loc, details };
+  }
+
+  public readonly fsEncodingLiteralError(loc: int, name: string): SourceError {
+    return { code: Code.FsEncodingLiteral, loc, details: { word: name } };
+  }
+
+  public readonly utf8OnlyError(
+    loc: int,
+    name: string,
+    encoding: string,
+  ): SourceError {
+    const details: Details = { word: name, first: encoding };
+
+    return { code: Code.FsEncodingUtf8Only, loc, details };
+  }
+
+  public readonly dependsError(loc: int, name: string): SourceError {
+    return { code: Code.FsEncodingDepends, loc, details: { word: name } };
+  }
+
+  public readonly forTextError(loc: int, name: string): SourceError {
+    return { code: Code.FsEncodingForText, loc, details: { word: name } };
+  }
+
+  public readonly flagError(
+    loc: int,
+    name: string,
+    written: string | undefined,
+  ): SourceError {
+    if (written == undefined) {
+      const details: Details = { word: name, other: kFlagsText };
+
+      return { code: Code.FsFlagLiteral, loc, details };
+    }
+
+    const details: Details = { word: name, first: written, other: kFlagsText };
+
+    return { code: Code.FsFlagUnknown, loc, details };
+  }
+
+  public readonly bigintError(loc: int): SourceError {
+    return { code: Code.FsBigint, loc, details: kNoDetails };
+  }
+
+  public readonly rmdirError(loc: int): SourceError {
+    return { code: Code.FsRmdirOptions, loc, details: kNoDetails };
+  }
+
+  public readonly copyModeError(loc: int, name: string): SourceError {
+    return { code: Code.FsCopyMode, loc, details: { word: name } };
+  }
+
+  public readonly constantError(loc: int, name: string): SourceError {
+    return { code: Code.FsConstantNotYet, loc, details: { word: name } };
+  }
+
+  public readonly fsOptionsLiteralError(
+    loc: int,
+    name: string,
+    first: string,
+  ): SourceError {
+    return {
+      code: Code.NodeOptionsLiteral,
+      loc,
+      details: { word: name, first },
+    };
+  }
+
+  public readonly byNameError(
+    loc: int,
+    name: string,
+    first: string,
+  ): SourceError {
+    return {
+      code: Code.NodeOptionsByName,
+      loc,
+      details: { word: name, first },
+    };
+  }
+
+  public readonly unknownOptionError(
+    loc: int,
+    name: string,
+    option: string,
+    allowed: Read<string[]>,
+  ): SourceError {
+    const other = this.namesText(allowed);
+    const details: Details = { word: name, first: option, other };
+
+    return { code: Code.NodeOptionUnknown, loc, details };
+  }
+
+  public readonly flagOptionError(
+    loc: int,
+    name: string,
+    option: string,
+  ): SourceError {
+    return {
+      code: Code.NodeOptionFlag,
+      loc,
+      details: { word: name, first: option },
+    };
+  }
+
+  public readonly isPromisesModule(name: string): boolean {
+    return name == kFsPromisesModule;
+  }
+
+  public readonly promiseCall(name: string): FsCall | undefined {
+    const row = this.tables.fsCall(`${name}${kSyncSuffix}`);
+    if (row == undefined) {
+      return undefined;
+    }
+
+    const options = row.options.filter((one) => one != kThrowIfNoEntry);
+
+    return {
+      name,
+      shape: row.shape,
+      options,
+      isUtf8Only: row.isUtf8Only,
+    };
+  }
+
+  private dataHint(base: Type): string {
+    const isPlain =
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double ||
+      base.kind == TypeKind.Boolean;
+    if (isPlain) {
+      return "; convert it first, e.g. 'String(x)'";
+    }
+    if (this.isBytesType(base)) {
+      return "; write a view of it, e.g. 'new Uint8Array(buffer)'";
+    }
+
+    return "";
+  }
+
+  private readonly namesText(names: Read<string[]>): string {
+    const parts: string[] = [];
+
+    for (let index = 0; index < names.length; index++) {
+      const name = names[index] ?? "";
+      const mark = this.nameJoint(index, names.length);
+
+      parts.push(`${mark}${name}`);
+    }
+
+    return parts.join("");
+  }
+
+  private readonly nameJoint(index: int, count: int): string {
+    if (index == 0) {
+      return "";
+    }
+    if (index + 1 == count) {
+      return " and ";
+    }
+
+    return ", ";
+  }
+}

@@ -38,6 +38,7 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import { DoorState } from "../../../types/type-resolver/types/type-resolver.types.tz";
+import { AstList } from "../../../../program/ast/types/ast.types.span.tz";
 
 export type DeclaredVariable = {
   readonly decl: VarDeclarator;
@@ -147,9 +148,9 @@ export type ValueTarget = {
 };
 
 export type FunctionDoor = {
-  state: Cell<DoorState>;
-  type: Cell<Type>;
-  isAssumed: Cell<boolean>;
+  readonly state: DoorState;
+  readonly type: Type;
+  readonly isAssumed: boolean;
 };
 
 export type StalledFunction = {
@@ -186,7 +187,7 @@ export type GuardSummary = {
 
 export type GeneratorFrame = {
   readonly fn: FunctionDecl;
-  readonly yields: Cell<ReturnedValue[]>;
+  readonly yields: ReturnedValue[];
   readonly isOpen: boolean;
   readonly yielded?: Type;
   readonly sent?: Type;
@@ -241,9 +242,9 @@ export type ArgumentSlot = {
 export type RankedVariant = {
   readonly fn: FunctionDecl;
   readonly type: FunctionType;
-  ranks: Cell<int[]>;
-  isAdapted: Cell<boolean>;
-  failed: Cell<int>;
+  ranks: int[];
+  isAdapted: boolean;
+  failed: int;
 };
 
 export type CallTarget = {
@@ -273,13 +274,12 @@ export type LiteralValue = {
 };
 
 export type VariableDoor = {
-  state: Cell<DoorState>;
-  type: Cell<Type>;
-  given?: Cell<Type>;
-  literal?: Cell<LiteralValue>;
-  constant?: Cell<decimal>;
-  isWhole: Cell<boolean>;
-  texts?: Cell<string[]>;
+  readonly state: DoorState;
+  readonly type: Type;
+  readonly given?: Type;
+  readonly literal?: LiteralValue;
+  readonly constant?: decimal;
+  readonly isWhole: boolean;
 };
 
 export type ArrayDraft = {
@@ -344,13 +344,13 @@ export type InitFrame = {
   readonly fn: FunctionDecl;
   readonly decl: ClassDecl;
   readonly isDerived: boolean;
-  readonly closures: Cell<boolean[]>;
+  readonly closures: boolean[];
 };
 
 export type OverriddenSite = {
   readonly self: InstanceType;
   readonly children: ClassDecl[];
-  readonly visited: Set<FunctionDecl>;
+  readonly visited: Set<int>;
   readonly module: int;
 };
 
@@ -381,9 +381,9 @@ export type InitializingVariable = {
 
 export type SuperFrame = {
   readonly isConstructor: boolean;
-  readonly roots: Cell<Set<Expr>>;
+  readonly roots: Set<int>;
   readonly parent: string;
-  isBefore: Cell<boolean>;
+  isBefore: boolean;
 };
 
 export type Linear = {
@@ -454,13 +454,14 @@ export enum ArgumentForm {
 
 export type GenericDraft = {
   readonly target: GenericTarget;
+  readonly argsList?: AstList;
   readonly args: CallArgument[];
   readonly wanted?: Type;
   readonly bound: Map<int, Type>;
   readonly given: Map<int, Type>;
   readonly settled: Set<int>;
   readonly literals: int[];
-  readonly contextual: int[];
+  contextual: int[];
   readonly inference: InferenceSet;
   isInferred: boolean;
 };
@@ -529,6 +530,11 @@ export enum RequirementKind {
   StaticCapture,
 }
 
+export type ModuleClass = {
+  readonly module: int;
+  readonly decl: ClassDecl;
+};
+
 export type Requirement = {
   readonly kind: RequirementKind;
   readonly word: string;
@@ -581,21 +587,3 @@ export type PromiseValues = {
   readonly tuple: Type[];
 };
 
-export type InternedDoors = Interned<FunctionDoor | VariableDoor>;
-
-export type InternedExpressionParts = Interned<
-  | SuperFrame
-  | InitFrame
-  | GeneratorFrame
-  | ValueRecord
-  | GuardSummary
-  | PendingCall
-  | ReturnedValue
-  | CallTarget
-  | GenericTarget
-  | RankedVariant
-  | ClassMemberEntry
-  | ClassLookup
-  | DecorateRun
-  | ReflectedNew
->;

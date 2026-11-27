@@ -1,7 +1,7 @@
 // Methods of arrays written in tz (library/core/array.tz): lower calls a copy of
 // the tz function for the type of the elements instead of a function of C.
 class Point {
-  public readonly x: int;
+  public x: int;
 
   public constructor(x: int) {
     this.x = x;
@@ -27,13 +27,13 @@ function words(): void {
 }
 
 function points(): void {
-  const first = new Point(1);
-  const second = new Point(2);
+  const items: Point[] = [new Point(1), new Point(2)];
   const other = new Point(1);
-  const items: Point[] = [];
+  const second = items[1];
+  if (second == undefined) {
+    return;
+  }
 
-  items.push(first);
-  items.push(second);
   console.log(items.indexOf(second), items.includes(other));
   items.reverse();
   console.log(items.map((point) => point.x).join(","));

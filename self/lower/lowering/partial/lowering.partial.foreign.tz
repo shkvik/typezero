@@ -36,6 +36,8 @@ import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private isHandleType(type: Type): boolean {
+    const tree = this.values.types.program.tree;
+
     if (type.kind != TypeKind.Instance) {
       return false;
     }
@@ -45,13 +47,13 @@ partial class Lowering {
       return known;
     }
 
-    const opened = this.program.modules[type.module];
+    const opened = this.values.types.program.modules[type.module];
     const loc = type.loc;
     const isHandle =
       opened != undefined &&
-      opened.file.items.some(
-        (item) => item.kind == StmtKind.Handle && item.loc == loc,
-      );
+      tree
+        .stmtsOf(opened.file.itemsList)
+        .some((item) => item.kind == StmtKind.Handle && item.loc == loc);
 
     this.handles.set(type.id, isHandle);
 
@@ -59,7 +61,7 @@ partial class Lowering {
   }
 
   private readonly isCString(type: Type): boolean {
-    const opened = this.program.modules[this.typeModule(type)];
+    const opened = this.values.types.program.modules[this.typeModule(type)];
 
     return (
       type.kind == TypeKind.Instance &&
@@ -82,7 +84,7 @@ partial class Lowering {
       return false;
     }
 
-    const opened = this.program.modules[type.module];
+    const opened = this.values.types.program.modules[type.module];
 
     return (
       opened != undefined &&
@@ -97,13 +99,18 @@ partial class Lowering {
     return frame.made.load(kPointerType, field);
   }
 
-  private readonly declaredFunction(module: int, loc: int): FunctionDecl | undefined {
-    const opened = this.program.modules[module];
+  private readonly declaredFunction(
+    module: int,
+    loc: int,
+  ): FunctionDecl | undefined {
+    const tree = this.values.types.program.tree;
+
+    const opened = this.values.types.program.modules[module];
     if (opened == undefined) {
       return undefined;
     }
 
-    for (const item of opened.file.items) {
+    for (const item of tree.stmtsOf(opened.file.itemsList)) {
       if (item.kind == StmtKind.Function && item.loc == loc) {
         return item;
       }
@@ -137,7 +144,7 @@ partial class Lowering {
     return { type: kPointerType, value: global, tz };
   }
 
-  private readonly definedOf(type: Type): Type {
+  private definedOf(type: Type): Type {
     const inner = this.optionalInner(type);
     if (inner == undefined) {
       return type;
@@ -161,19 +168,21 @@ partial class Lowering {
     fn: FunctionDecl,
     shape: Read<FunctionShape>,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const given: IrValue[] = [];
     const args: LLVMValue[] = [];
     const params: string[] = [];
 
     for (let index = 0; index < shape.params.length; index++) {
       const param = shape.params[index];
-      const argument = call.args[index];
+      const argument = tree.argumentsOf(call.argsList)[index];
       if (param == undefined) {
         return undefined;
       }
 
       const wanted = this.passedType(param);
-      const expr = argument?.expr;
+      const expr = tree.exprAt(argument?.exprId);
       const value = this.foreignArgument(frame, expr, wanted, call.loc);
       if (value == undefined) {
         return undefined;
@@ -229,7 +238,7 @@ partial class Lowering {
     return value;
   }
 
-  private readonly foreignValue(frame: Read<Frame>, value: IrValue): LLVMValue {
+  private foreignValue(frame: Read<Frame>, value: IrValue): LLVMValue {
     const type = this.definedOf(value.tz);
     if (this.isCString(type)) {
       const none = this.ir.zero(kPointerType);
@@ -295,7 +304,7 @@ partial class Lowering {
     return { type, value, tz: result, owned: true };
   }
 
-  private readonly cstringCopied(
+  private cstringCopied(
     frame: Read<Frame>,
     value: LLVMValue,
     isOptional: boolean,
@@ -310,7 +319,11 @@ partial class Lowering {
     }
 
     const none = this.ir.zero(kPointerType);
-    const isAbsent = frame.made.integerCompare(IrIntPredicate.Equal, value, none);
+    const isAbsent = frame.made.integerCompare(
+      IrIntPredicate.Equal,
+      value,
+      none,
+    );
     const before = frame.made.currentBlock();
     const copy = frame.made.block("foreign.copy");
     const end = frame.made.block("foreign.copied");
@@ -327,7 +340,7 @@ partial class Lowering {
     return frame.made.phi(kPointerType, [none, copied], [before, copyEnd]);
   }
 
-  private readonly notNullChecked(
+  private notNullChecked(
     frame: Read<Frame>,
     value: LLVMValue,
     fn: FunctionDecl,

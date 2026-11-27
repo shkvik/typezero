@@ -1,0 +1,56 @@
+import {
+  ClassField,
+  Decorator,
+  EnumMember,
+} from "../../types/ast.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+} from "../../types/ast.types.declarations.tz";
+import {
+  ArrayElement,
+  Expr,
+  Property,
+} from "../../types/ast.types.expressions.tz";
+import { Param } from "../../types/ast.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+  ModuleName,
+} from "../../types/ast.types.modules.tz";
+import { VarDeclarator } from "../../types/ast.types.patterns.tz";
+import { Stmt, SwitchCase } from "../../types/ast.types.statements.tz";
+import {
+  FunctionTypeParam,
+  ObjectTypeField,
+  TupleElement,
+  TypeParamDecl,
+  TypeRef,
+} from "../../types/ast.types.types.tz";
+
+export type AstTables = {
+  readonly exprs: readonly Expr[];
+  readonly stmts: readonly Stmt[];
+  readonly typeRefs: readonly TypeRef[];
+  readonly exprIds: readonly int[];
+  readonly stmtIds: readonly int[];
+  readonly typeRefIds: readonly int[];
+  readonly texts: readonly string[];
+  readonly arrayElements: readonly ArrayElement[];
+  readonly classFields: readonly ClassField[];
+  readonly declaredClasses: readonly DeclaredClass[];
+  readonly declaredMembers: readonly DeclaredMember[];
+  readonly decorators: readonly Decorator[];
+  readonly enumMembers: readonly EnumMember[];
+  readonly exportDecls: readonly ExportDecl[];
+  readonly functionTypeParams: readonly FunctionTypeParam[];
+  readonly importDecls: readonly ImportDecl[];
+  readonly moduleNames: readonly ModuleName[];
+  readonly objectTypeFields: readonly ObjectTypeField[];
+  readonly params: readonly Param[];
+  readonly properties: readonly Property[];
+  readonly switchCases: readonly SwitchCase[];
+  readonly tupleElements: readonly TupleElement[];
+  readonly typeParamDecls: readonly TypeParamDecl[];
+  readonly varDeclarators: readonly VarDeclarator[];
+};

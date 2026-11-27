@@ -16,11 +16,11 @@ import {
 
 partial class ExpressionTypes {
   private variantMember(expr: MemberExpr, union: UnionType, module: int): Type {
-    const isUnknown = union.parts.some(
+    const isUnknown = this.types.store.partsOf(union).some(
       (part) => part.kind == TypeKind.Error || part.kind == TypeKind.Operation,
     );
     if (isUnknown) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const byteMember = this.byteUnionMember(expr, union, module);
@@ -37,38 +37,38 @@ partial class ExpressionTypes {
     if (common != undefined) {
       return this.memberOf(expr, common, module);
     }
-    if (this.relation.isTagged(union.parts)) {
+    if (this.types.isTagged(this.types.store.partsOf(union))) {
       return this.reportValueMember(expr, union, module);
     }
 
     const types: Type[] = [];
 
-    for (const part of union.parts) {
+    for (const part of this.types.store.partsOf(union)) {
       const found = this.variantField(expr, part, union, module);
       if (found == undefined) {
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
-      if (!types.includes(found)) {
+      if (!types.some((one) => one.id == found.id)) {
         types.push(found);
       }
     }
 
-    const joined = this.store.unionOf(types);
-    if (this.resolver.unionProblem(joined) != undefined) {
-      return this.store.plain(TypeKind.Error);
+    const joined = this.types.store.unionOf(types);
+    if (this.types.unionProblem(joined) != undefined) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return joined;
   }
 
-  private readonly reportValueMember(
+  private reportValueMember(
     expr: MemberExpr,
     union: UnionType,
     module: int,
   ): Type {
-    const checked = this.objectMembers.reportValueMember(expr, union);
+    const checked = this.types.reportValueMember(expr, union);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -109,18 +109,22 @@ partial class ExpressionTypes {
 
   private partField(part: Type, name: string): Type | undefined {
     if (part.kind == TypeKind.Object) {
-      const field = part.fields.find((one) => one.name == name);
+      const field = this.types.store
+        .fieldsOf(part)
+        .find((one) => one.name == name);
       if (field == undefined) {
         return undefined;
       }
 
-      return this.objects.fieldWanted(field);
+      return this.types.fieldWanted(field);
     }
     if (part.kind != TypeKind.Instance) {
       return undefined;
     }
 
-    const entry = this.classMember(part, name).entry;
+    const entryLookup = this.classMember(part, name);
+
+    const entry = entryLookup.entry;
     const field = entry?.field;
     if (entry == undefined || field == undefined) {
       return undefined;
@@ -136,26 +140,26 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const word = expr.name;
-    const isPlain = union.parts.every(
+    const isPlain = this.types.store.partsOf(union).every(
       (one) =>
         one.kind == TypeKind.Object && this.partField(one, word) == undefined,
     );
     if (isPlain) {
-      const first = this.text.of(union);
+      const first = this.types.typeText(union);
       const place = this.errnoHint(word);
 
-      return this.report(module, expr.loc, Code.UnionNoField, {
+      return this.errors.write(module, expr.loc, Code.UnionNoField, {
         word,
         first,
         place,
       });
     }
 
-    const first = this.text.of(part);
-    const second = this.text.of(union);
+    const first = this.types.typeText(part);
+    const second = this.types.typeText(union);
     const place = this.lackingHint(expr, union);
 
-    this.report(module, expr.loc, Code.UnionMayLack, {
+    this.errors.write(module, expr.loc, Code.UnionMayLack, {
       word,
       first,
       second,
@@ -164,11 +168,11 @@ partial class ExpressionTypes {
   }
 
   private lackingHint(expr: MemberExpr, union: UnionType): string {
-    const first = union.parts[0];
+    const first = this.types.store.partsOf(union)[0];
     let fallback = "";
 
     if (first != undefined && first.kind == TypeKind.Object) {
-      for (const tag of first.fields) {
+      for (const tag of this.types.store.fieldsOf(first)) {
         const hint = this.tagHint(expr, union, tag.name);
         if (hint != undefined && this.isTagUnique(expr, union, tag.name)) {
           return hint;
@@ -191,6 +195,8 @@ partial class ExpressionTypes {
     union: UnionType,
     tagName: string,
   ): string | undefined {
+    const tree = this.types.program.tree;
+
     if (!this.isTagField(union, tagName)) {
       return undefined;
     }
@@ -200,17 +206,18 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const field = this.objects.chainField(expr.object, tagName);
-    const shown = this.text.of(tag);
+    const object = tree.exprOf(expr.objectId);
+    const field = this.types.chainField(object, tagName);
+    const shown = this.types.typeText(tag);
 
     return `, e.g. 'if (${field} == ${shown})'`;
   }
 
   private isTagField(union: UnionType, tagName: string): boolean {
-    return union.parts.every((part) => {
+    return this.types.store.partsOf(union).every((part) => {
       const type = this.partField(part, tagName);
 
-      return type != undefined && this.objects.isLiteralSet(type);
+      return type != undefined && this.types.isLiteralSet(type);
     });
   }
 
@@ -219,7 +226,7 @@ partial class ExpressionTypes {
     union: UnionType,
     tagName: string,
   ): Type | undefined {
-    for (const part of union.parts) {
+    for (const part of this.types.store.partsOf(union)) {
       const tag = this.partField(part, tagName);
       const holds = this.partField(part, expr.name) != undefined;
       if (holds && tag != undefined && tag.kind == TypeKind.Literal) {
@@ -240,13 +247,13 @@ partial class ExpressionTypes {
       return false;
     }
 
-    for (const part of union.parts) {
+    for (const part of this.types.store.partsOf(union)) {
       const isLacking = this.partField(part, expr.name) == undefined;
       const set = this.partField(part, tagName);
       if (
         isLacking &&
         set != undefined &&
-        this.objects.holdsLiteral(set, tag)
+        this.types.holdsLiteral(set, tag)
       ) {
         return false;
       }
@@ -256,7 +263,7 @@ partial class ExpressionTypes {
   }
 
   private holderHint(expr: MemberExpr, union: UnionType): string {
-    const holders = union.parts.filter(
+    const holders = this.types.store.partsOf(union).filter(
       (part) => this.partField(part, expr.name) != undefined,
     );
     const holder = holders[holders.length - 1];
@@ -264,17 +271,17 @@ partial class ExpressionTypes {
       return "";
     }
     if (holder.kind == TypeKind.Instance) {
-      return `, e.g. 'if (x instanceof ${this.text.of(holder)})'`;
+      return `, e.g. 'if (x instanceof ${this.types.typeText(holder)})'`;
     }
 
     return `, e.g. 'if ("${expr.name}" in x)'`;
   }
 
-  private readonly commonBaseWith(union: UnionType, name: string): Type | undefined {
-    const isAllClasses = union.parts.every(
+  private commonBaseWith(union: UnionType, name: string): Type | undefined {
+    const isAllClasses = this.types.store.partsOf(union).every(
       (part) => part.kind == TypeKind.Instance,
     );
-    const first = union.parts[0];
+    const first = this.types.store.partsOf(union)[0];
     if (!isAllClasses || first == undefined) {
       return undefined;
     }
@@ -290,8 +297,8 @@ partial class ExpressionTypes {
         return candidate;
       }
 
-      for (const parent of this.store.parentsOf(candidate)) {
-        if (!chain.includes(parent)) {
+      for (const parent of this.types.store.parentsOf(candidate)) {
+        if (!chain.some((one) => one.id == parent.id)) {
           chain.push(parent);
         }
       }
@@ -306,17 +313,21 @@ partial class ExpressionTypes {
     union: UnionType,
     module: int,
   ): void {
-    const lacking = union.parts.find((part) =>
+    const tree = this.types.program.tree;
+
+    const lacking = this.types.store.partsOf(union).find((part) =>
       this.isLackingMethod(part, member.name),
     );
     if (lacking == undefined) {
       return;
     }
 
-    this.looseArguments(expr.args, module);
-    this.report(module, member.loc, Code.VariantLacksMethod, {
-      word: this.text.of(union),
-      first: this.text.of(lacking),
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
+    this.errors.write(module, member.loc, Code.VariantLacksMethod, {
+      word: this.types.typeText(union),
+      first: this.types.typeText(lacking),
       other: member.name,
     });
   }
@@ -324,47 +335,58 @@ partial class ExpressionTypes {
   private readonly isLackingMethod(part: Type, name: string): boolean {
     if (
       part.kind != TypeKind.Instance ||
-      this.modules.isLibraryModule(part.module)
+      this.types.isLibraryModule(part.module)
     ) {
       return false;
     }
 
-    return this.classMember(part, name).entry == undefined;
+    const lookup = this.classMember(part, name);
+
+    return lookup.entry == undefined;
   }
 
-  private readonly unionInCheck(
+  private unionInCheck(
     expr: BinaryExpr,
     name: string,
     union: UnionType,
     module: int,
   ): void {
-    const parts = union.parts;
+    const parts = this.types.store.partsOf(union);
     const isObjects = parts.every(
       (part) =>
-        part.kind == TypeKind.Object && !this.resolver.isLibraryShape(part),
+        part.kind == TypeKind.Object && !this.types.isLibraryShape(part),
     );
     if (!isObjects) {
       return;
     }
 
     const having = parts.filter((part) =>
-      this.objects.hasFieldNamed(part, name),
+      this.types.hasFieldNamed(part, name),
     );
-    const first = this.text.of(union);
+    const first = this.types.typeText(union);
     if (having.length == parts.length) {
-      this.report(module, expr.loc, Code.InUnionTrue, { word: name, first });
+      this.errors.write(module, expr.loc, Code.InUnionTrue, {
+        word: name,
+        first,
+      });
     }
     if (having.length == 0) {
-      this.report(module, expr.loc, Code.InUnionFalse, { word: name, first });
+      this.errors.write(module, expr.loc, Code.InUnionFalse, {
+        word: name,
+        first,
+      });
     }
   }
 
   private unionTargetCheck(target: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (target.kind != ExprKind.Member) {
       return false;
     }
 
-    const object = this.peekType(target.object, module);
+    const objectExpr = tree.exprOf(target.objectId);
+    const object = this.peekType(objectExpr, module);
 
     if (object.kind != TypeKind.Union || this.types.isOptional(object)) {
       return false;
@@ -372,12 +394,12 @@ partial class ExpressionTypes {
 
     const types: Type[] = [];
 
-    for (const part of object.parts) {
+    for (const part of this.types.store.partsOf(object)) {
       const field = this.ownFieldType(part, target.name);
       if (field == undefined) {
         return false;
       }
-      if (!types.includes(field)) {
+      if (!types.some((one) => one.id == field.id)) {
         types.push(field);
       }
     }
@@ -388,43 +410,48 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, target.loc, Code.UnionFieldsDiffer, {
-      word: this.text.of(object),
+    this.errors.write(module, target.loc, Code.UnionFieldsDiffer, {
+      word: this.types.typeText(object),
       other: target.name,
-      first: this.text.of(first),
-      second: this.text.of(second),
+      first: this.types.typeText(first),
+      second: this.types.typeText(second),
     });
 
     return true;
   }
 
   private readonly ownFieldType(part: Type, name: string): Type | undefined {
-    if (part.kind != TypeKind.Object || this.resolver.isLibraryShape(part)) {
+    if (part.kind != TypeKind.Object || this.types.isLibraryShape(part)) {
       return undefined;
     }
 
-    return part.fields.find((field) => field.name == name)?.type;
+    return this.types.store.fieldsOf(part).find((field) => field.name == name)
+      ?.type;
   }
 
-  private readonly isCommonBase(
+  private isCommonBase(
     candidate: Type,
     union: UnionType,
     name: string,
   ): boolean {
-    const isShared = union.parts.every((part) =>
-      this.relation.converts(part, candidate),
+    const isShared = this.types.store.partsOf(union).every((part) =>
+      this.types.converts(part, candidate),
     );
     if (!isShared) {
       return false;
     }
     if (candidate.kind == TypeKind.Object) {
-      return candidate.fields.some((field) => field.name == name);
+      return this.types.store
+        .fieldsOf(candidate)
+        .some((field) => field.name == name);
     }
     if (candidate.kind != TypeKind.Instance) {
       return false;
     }
 
-    const entry = this.classMember(candidate, name).entry;
+    const entryLookup = this.classMember(candidate, name);
+
+    const entry = entryLookup.entry;
 
     return entry != undefined && !entry.isStatic;
   }

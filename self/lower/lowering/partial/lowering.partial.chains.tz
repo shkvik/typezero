@@ -14,13 +14,13 @@ import { kSameArrayMethods, kThisName } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private readonly typeOf(expr: Expr): Type | undefined {
-    const known = this.knownTypes.get(expr);
+  private typeOf(expr: Expr): Type | undefined {
+    const known = this.knownTypes.get(expr.id);
     if (known != undefined) {
       return known;
     }
 
-    const answered = this.answers.typeOf(expr);
+    const answered = this.values.answers.typeOf(expr);
 
     return this.boundOrNone(answered);
   }
@@ -54,21 +54,25 @@ partial class Lowering {
   private readonly literalTypeOf(expr: Expr): Type | undefined {
     switch (expr.kind) {
       case ExprKind.StringLit:
-        return this.store.plain(TypeKind.String);
+        return this.values.types.store.plain(TypeKind.String);
       case ExprKind.BoolLit:
-        return this.store.plain(TypeKind.Boolean);
+        return this.values.types.store.plain(TypeKind.Boolean);
       case ExprKind.IntLit:
-        return this.store.integer(64, false);
+        return this.values.types.store.integer(64, false);
       case ExprKind.Undefined:
-        return this.store.plain(TypeKind.Undefined);
+        return this.values.types.store.plain(TypeKind.Undefined);
       default:
         return undefined;
     }
   }
 
   private nullishTypeIn(frame: Frame, expr: BinaryExpr): Type | undefined {
-    const left = this.typeIn(frame, expr.lhs);
-    const right = this.typeIn(frame, expr.rhs);
+    const tree = this.values.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.typeIn(frame, lhs);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.typeIn(frame, rhs);
     if (left == undefined || right == undefined) {
       return undefined;
     }
@@ -77,34 +81,37 @@ partial class Lowering {
     }
 
     const defined = this.definedOf(left);
-    if (this.widened(right) == defined) {
+    if (this.widened(right).id == defined.id) {
       return defined;
     }
 
-    return this.store.unionOf([defined, right]);
+    return this.values.types.store.unionOf([defined, right]);
   }
 
-  private chainTypeIn(
-    frame: Frame,
-    expr: OptionalChainExpr,
-  ): Type | undefined {
-    const inner = this.typeIn(frame, expr.chain);
+  private chainTypeIn(frame: Frame, expr: OptionalChainExpr): Type | undefined {
+    const tree = this.values.types.program.tree;
+
+    const chain = tree.exprOf(expr.chainId);
+    const inner = this.typeIn(frame, chain);
     if (inner == undefined || inner.kind == TypeKind.Error) {
       return undefined;
     }
 
-    const empty = this.store.plain(TypeKind.Undefined);
+    const empty = this.values.types.store.plain(TypeKind.Undefined);
 
-    return this.store.unionOf([inner, empty]);
+    return this.values.types.store.unionOf([inner, empty]);
   }
 
   private resultTypeOf(frame: Frame, call: CallExpr): Type | undefined {
-    const callee = call.callee;
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
     if (callee.kind != ExprKind.Member) {
       return undefined;
     }
 
-    const object = this.typeIn(frame, callee.object);
+    const objectExpr = tree.exprOf(callee.objectId);
+    const object = this.typeIn(frame, objectExpr);
     if (object != undefined && object.kind == TypeKind.Dict) {
       return this.dictResultOf(callee.name, object);
     }
@@ -116,7 +123,7 @@ partial class Lowering {
     }
 
     const decl = this.values.classDeclOf(object);
-    const fn = decl?.methods.find((one) => one.name == callee.name);
+    const fn = this.values.types.classMethodNamed(decl, callee.name);
     if (decl == undefined || fn == undefined) {
       return undefined;
     }
@@ -132,17 +139,23 @@ partial class Lowering {
     return undefined;
   }
 
-  private readonly dictResultOf(name: string, dict: Type): Type | undefined {
+  private dictResultOf(name: string, dict: Type): Type | undefined {
     if (dict.kind != TypeKind.Dict || name != "get") {
       return undefined;
     }
 
-    const empty = this.store.plain(TypeKind.Undefined);
+    const empty = this.values.types.store.plain(TypeKind.Undefined);
 
-    return this.store.unionOf([dict.value, empty]);
+    return this.values.types.store.unionOf([
+      this.values.types.store.valueOf(dict),
+      empty,
+    ]);
   }
 
-  private readonly declaredTypeOf(frame: Read<Frame>, expr: NameExpr): Type | undefined {
+  private readonly declaredTypeOf(
+    frame: Read<Frame>,
+    expr: NameExpr,
+  ): Type | undefined {
     const self = frame.self;
     if (expr.name == kThisName && self != undefined) {
       return self.tz;
@@ -159,7 +172,10 @@ partial class Lowering {
   }
 
   private fieldTypeOf(frame: Frame, expr: MemberExpr): Type | undefined {
-    const object = this.typeIn(frame, expr.object);
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(expr.objectId);
+    const object = this.typeIn(frame, objectExpr);
     if (object == undefined) {
       return undefined;
     }
@@ -169,7 +185,7 @@ partial class Lowering {
 
     for (const part of parts) {
       const layout = this.layoutOf(part);
-      const field = layout?.fields.find((one) => one.name == expr.name);
+      const field = this.layoutField(layout, expr.name);
       if (field != undefined) {
         types.push(field.type);
       }
@@ -179,28 +195,28 @@ partial class Lowering {
     if (first == undefined) {
       return undefined;
     }
-    if (types.every((type) => type == first)) {
+    if (types.every((type) => type.id == first.id)) {
       return first;
     }
 
-    return this.store.unionOf(types);
+    return this.values.types.store.unionOf(types);
   }
 
   private readonly objectParts(type: Type): Type[] {
     if (type.kind == TypeKind.Union) {
-      return type.parts;
+      return this.values.types.store.partsOf(type);
     }
 
     return [type];
   }
 
   private readyValue(expr: Expr): IrValue | undefined {
-    const ready = this.evaluated.get(expr);
+    const ready = this.evaluated.get(expr.id);
     if (ready == undefined) {
       return undefined;
     }
 
-    this.evaluated.delete(expr);
+    this.evaluated.delete(expr.id);
 
     return ready;
   }
@@ -209,6 +225,8 @@ partial class Lowering {
     frame: Frame,
     expr: OptionalChainExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeIn(frame, expr);
     const type = this.typeOrUndefined(result);
     if (result == undefined || type == undefined) {
@@ -224,7 +242,8 @@ partial class Lowering {
 
     this.chainExits.push(missing);
 
-    const given = this.value(frame, expr.chain);
+    const chainExpr = tree.exprOf(expr.chainId);
+    const given = this.value(frame, chainExpr);
 
     this.chainExits.pop();
 
@@ -247,9 +266,15 @@ partial class Lowering {
     frame.made.open(end);
 
     const none = this.ir.zero(type);
-    const value = frame.made.phi(type, [owned.value, none], [valueEnd, missing]);
+    const value = frame.made.phi(
+      type,
+      [owned.value, none],
+      [valueEnd, missing],
+    );
 
-    return { type, value, tz: result, owned: !isLent };
+    const isStatic = converted.isStatic;
+
+    return { type, value, tz: result, owned: !isLent, isStatic };
   }
 
   private chainOwned(frame: Read<Frame>, value: IrValue): IrValue {
@@ -282,20 +307,22 @@ partial class Lowering {
     frame.made.open(present);
 
     if (inner == undefined) {
-      this.evaluated.set(object, given);
+      this.evaluated.set(object.id, given);
 
       return true;
     }
 
     const inside = this.insideValue(frame, given, inner);
 
-    this.evaluated.set(object, inside);
-    this.knownTypes.set(object, inner);
+    this.evaluated.set(object.id, inside);
+    this.knownTypes.set(object.id, inner);
 
     return true;
   }
 
   private readonly optionalObject(expr: Expr): Expr | undefined {
+    const tree = this.values.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.Member:
       case ExprKind.Index:
@@ -303,14 +330,14 @@ partial class Lowering {
           return undefined;
         }
 
-        return expr.object;
+        return tree.exprOf(expr.objectId);
       case ExprKind.Call: {
-        const callee = expr.callee;
+        const callee = tree.exprOf(expr.calleeId);
         if (callee.kind != ExprKind.Member || !callee.optional) {
           return undefined;
         }
 
-        return callee.object;
+        return tree.exprOf(callee.objectId);
       }
       default:
         return undefined;

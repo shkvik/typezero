@@ -13,37 +13,59 @@ import {
   Place,
   Variable,
 } from "../types/ownership-check.types.tz";
-import { kElementStep, kThisKey } from "../const/ownership-check.const.tz";
+import {
+  kElementStep,
+  kStepJoin,
+  kThisKey,
+} from "../const/ownership-check.const.tz";
 
 partial class OwnershipCheck {
-  private readonly extended(place: Read<Place>, step: string): Place {
-    const path = place.path.concat([step]);
+  private readonly wholePlace(root: int): Place {
+    return { root, path: "", depth: 0 };
+  }
 
-    return { root: place.root, path };
+  private readonly extended(place: Place, step: string): Place {
+    const depth = place.depth + 1;
+    if (place.depth == 0) {
+      return { root: place.root, path: step, depth };
+    }
+
+    const path = `${place.path}${kStepJoin}${step}`;
+
+    return { root: place.root, path, depth };
+  }
+
+  private readonly joined(outer: Place, inner: Place): Place {
+    const depth = outer.depth + inner.depth;
+    if (inner.depth == 0) {
+      return { root: outer.root, path: outer.path, depth };
+    }
+    if (outer.depth == 0) {
+      return { root: outer.root, path: inner.path, depth };
+    }
+
+    const path = `${outer.path}${kStepJoin}${inner.path}`;
+
+    return { root: outer.root, path, depth };
+  }
+
+  private readonly stepsOf(place: Place): string[] {
+    if (place.depth == 0) {
+      return [];
+    }
+
+    return place.path.split(kStepJoin);
   }
 
   private readonly isPrefix(shorter: Place, longer: Place): boolean {
-    if (shorter.root != longer.root) {
+    if (shorter.root != longer.root || shorter.depth > longer.depth) {
       return false;
     }
-    if (shorter.path.length > longer.path.length) {
-      return false;
+    if (shorter.depth == 0 || shorter.path == longer.path) {
+      return true;
     }
 
-    for (let index: int = 0; index < shorter.path.length; index++) {
-      if (!this.isSameStep(shorter.path[index], longer.path[index])) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  private readonly isSameStep(
-    first: string | undefined,
-    second: string | undefined,
-  ): boolean {
-    return first == second;
+    return longer.path.startsWith(`${shorter.path}${kStepJoin}`);
   }
 
   private readonly overlaps(first: Place, second: Place): boolean {
@@ -52,9 +74,10 @@ partial class OwnershipCheck {
 
   private readonly placeText(place: Place): string {
     const root = this.rootName(place.root);
+    const steps = this.stepsOf(place);
     let text: string = root;
 
-    for (const step of place.path) {
+    for (const step of steps) {
       text = this.stepText(text, step);
     }
 
@@ -83,25 +106,34 @@ partial class OwnershipCheck {
   }
 
   private readonly exprText(expr: Expr): string {
+    const tree = this.values.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.Name:
         return expr.name;
       case ExprKind.Member: {
-        const object = this.exprText(expr.object);
+        const objectExpr = tree.exprOf(expr.objectId);
+        const object = this.exprText(objectExpr);
 
         return `${object}.${expr.name}`;
       }
       case ExprKind.Index: {
-        const object = this.exprText(expr.object);
+        const exprObject = tree.exprOf(expr.objectId);
+        const object = this.exprText(exprObject);
 
         return `${object}[...]`;
       }
       case ExprKind.Cast:
-        return this.exprText(expr.operand);
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.exprText(operand);
       case ExprKind.OptionalChain:
-        return this.exprText(expr.chain);
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.exprText(chain);
       case ExprKind.Call: {
-        const callee = this.exprText(expr.callee);
+        const calleeExpr = tree.exprOf(expr.calleeId);
+        const callee = this.exprText(calleeExpr);
 
         return `${callee}(...)`;
       }
@@ -127,7 +159,12 @@ partial class OwnershipCheck {
     except: int,
   ): void {
     for (const target of this.underlying(place)) {
-      const isReported = this.checkWriteOn(target, loc, [except, place.root], isMove);
+      const isReported = this.checkWriteOn(
+        target,
+        loc,
+        [except, place.root],
+        isMove,
+      );
       if (isReported) {
         return;
       }
@@ -140,38 +177,52 @@ partial class OwnershipCheck {
     except: Read<int[]>,
     isMove: boolean,
   ): boolean {
-    const frame = this.frame();
-    if (frame == undefined) {
+    const found = this.conflictOn(place, loc, except, isMove);
+    if (found == undefined) {
       return false;
     }
 
-    for (const variable of new Map(frame.variables).values()) {
+    this.reportInUse(place, found, loc);
+
+    return true;
+  }
+
+  private readonly conflictOn(
+    place: Read<Place>,
+    loc: int,
+    except: Read<int[]>,
+    isMove: boolean,
+  ): int | undefined {
+    const frame = this.frame();
+    if (frame == undefined) {
+      return undefined;
+    }
+
+    for (const variable of frame.variables.values()) {
       if (except.includes(variable.key) || !this.isLive(variable, loc)) {
         continue;
       }
 
       const loan = this.conflictingLoan(variable, place, isMove);
       if (loan != undefined) {
-        this.reportInUse(place, variable, loc);
-
-        return true;
+        return variable.key;
       }
     }
 
-    return false;
+    return undefined;
   }
 
   private readonly conflictingLoan(
     variable: Read<Variable>,
-    place: Place,
+    place: Read<Place>,
     isMove: boolean,
   ): Loan | undefined {
-    for (const loan of variable.loans.slice()) {
+    for (const loan of variable.loans) {
       if (!this.overlaps(loan.place, place)) {
         continue;
       }
 
-      const isAbove = place.path.length < loan.place.path.length;
+      const isAbove = place.depth < loan.place.depth;
       if (loan.frozen && isAbove && !isMove) {
         continue;
       }
@@ -182,20 +233,32 @@ partial class OwnershipCheck {
     return undefined;
   }
 
-  private reportInUse(place: Place, variable: Read<Variable>, loc: int): void {
-    const frame = this.frame();
+  private reportInUse(place: Place, key: int, loc: int): void {
+    const variable = this.variableOf(key);
+    if (variable == undefined) {
+      return;
+    }
+
+    const lastUse = variable.lastUse;
+    const declared = variable.declared;
+    const name = variable.name;
+    const isBinding = this.isLoopBinding(key);
     const word = this.placeText(place);
-    const first = this.lineOf(variable.lastUse);
+    const first = this.lineOf(lastUse);
 
-    if (frame != undefined && frame.bindings.has(variable.key)) {
-      const other = this.lineOf(variable.declared);
+    if (isBinding) {
+      const other = this.lineOf(declared);
 
-      this.report(loc, Code.OwnLoopChanged, { word, other });
+      this.errors.write(this.home, loc, Code.OwnLoopChanged, { word, other });
 
       return;
     }
 
-    this.report(loc, Code.OwnInUse, { word, other: variable.name, first });
+    this.errors.write(this.home, loc, Code.OwnInUse, {
+      word,
+      other: name,
+      first,
+    });
   }
 
   private readonly underlying(place: Own<Place>): Place[] {
@@ -206,34 +269,39 @@ partial class OwnershipCheck {
 
     const found: Place[] = [];
 
-    for (const loan of variable.loans.slice()) {
-      const path = loan.place.path.concat(place.path);
-
-      found.push({ root: loan.place.root, path });
+    for (const loan of variable.loans) {
+      found.push(this.joined(loan.place, place));
     }
 
     return found;
   }
 
   private checkUsable(place: Place, loc: int): boolean {
-    for (const moved of this.state.moved.slice()) {
-      if (!this.overlaps(moved.place, place)) {
-        continue;
-      }
-
-      const word = this.placeText(moved.place);
-      const other = this.lineOf(moved.loc);
-
-      if (moved.loc >= loc) {
-        this.report(loc, Code.OwnMovedInLoop, { word });
-      } else {
-        this.report(loc, Code.OwnMovedUsed, { word, other });
-      }
-
-      return false;
+    const moved = this.movedOver(place);
+    if (moved == undefined) {
+      return true;
     }
 
-    return true;
+    const word = this.placeText(moved.place);
+    const other = this.lineOf(moved.loc);
+
+    if (moved.loc >= loc) {
+      this.errors.write(this.home, loc, Code.OwnMovedInLoop, { word });
+    } else {
+      this.errors.write(this.home, loc, Code.OwnMovedUsed, { word, other });
+    }
+
+    return false;
+  }
+
+  private readonly movedOver(place: Read<Place>): Moved | undefined {
+    for (const moved of this.state.moved) {
+      if (this.overlaps(moved.place, place)) {
+        return moved;
+      }
+    }
+
+    return undefined;
   }
 
   private markMoved(place: Own<Place>, loc: int): void {
@@ -252,7 +320,10 @@ partial class OwnershipCheck {
     return { moved, isDead: state.isDead };
   }
 
-  private readonly merged(first: Read<FlowState>, second: Read<FlowState>): FlowState {
+  private readonly merged(
+    first: Read<FlowState>,
+    second: Read<FlowState>,
+  ): FlowState {
     if (first.isDead) {
       return this.copyState(second);
     }
@@ -275,10 +346,14 @@ partial class OwnershipCheck {
   private readonly isSamePlace(first: Moved, second: Moved): boolean {
     const isPrefix = this.isPrefix(first.place, second.place);
 
-    return isPrefix && first.place.path.length == second.place.path.length;
+    return isPrefix && first.place.depth == second.place.depth;
   }
 
-  private readonly loanOn(place: Own<Place>, kind: LoanKind, frozen: boolean): Loan {
+  private readonly loanOn(
+    place: Own<Place>,
+    kind: LoanKind,
+    frozen: boolean,
+  ): Loan {
     return { place, kind, frozen };
   }
 }

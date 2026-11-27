@@ -16,30 +16,34 @@ import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
   private forAwaitCheck(statement: ForOfStmt, module: int): void {
-    if (statement.keys || this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    if (statement.keys || this.types.isLibraryModule(module)) {
       return;
     }
 
     const fn = this.openFunctions[this.openFunctions.length - 1];
     const isOutside = fn != undefined && !fn.isAsync;
     if (statement.isAwait && isOutside) {
-      this.report(module, statement.loc, Code.ForAwaitPlace, kNoDetails);
+      this.errors.write(module, statement.loc, Code.ForAwaitPlace, kNoDetails);
 
       return;
     }
 
-    const iterable = statement.iterable;
+    const iterable = tree.exprOf(statement.iterableId);
     const given = this.peekType(iterable, module);
     const base = this.types.definedType(given);
     if (base.kind == TypeKind.Error) {
       return;
     }
 
-    const isAsyncIterator = base.kind == TypeKind.Iterator && base.shape.async;
+    const isAsyncIterator =
+      base.kind == TypeKind.Iterator &&
+      this.types.store.iteratorShapeOf(base).async;
     if (!statement.isAwait && isAsyncIterator) {
-      const word = this.text.of(given);
+      const word = this.types.typeText(given);
 
-      this.report(module, iterable.loc, Code.ForOfLater, { word });
+      this.errors.write(module, iterable.loc, Code.ForOfLater, { word });
 
       return;
     }
@@ -54,9 +58,11 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Decimal ||
       base.kind == TypeKind.Boolean;
     if (statement.isAwait && isPlainValue) {
-      const word = this.text.of(given);
+      const word = this.types.typeText(given);
 
-      this.report(module, iterable.loc, Code.ForAwaitNotIterable, { word });
+      this.errors.write(module, iterable.loc, Code.ForAwaitNotIterable, {
+        word,
+      });
     }
   }
 
@@ -66,18 +72,24 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const base = this.types.definedType(object);
-    const isAsync = base.kind == TypeKind.Iterator && base.shape.async;
+    const isAsync =
+      base.kind == TypeKind.Iterator &&
+      this.types.store.iteratorShapeOf(base).async;
     if (!isAsync || member.name != "next") {
       return undefined;
     }
 
-    this.report(module, member.loc, Code.AsyncNextNotYet, {
+    this.errors.write(module, member.loc, Code.AsyncNextNotYet, {
       word: member.name,
     });
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private asyncMethodCheck(
@@ -85,11 +97,13 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): void {
-    if (this.modules.isLibraryModule(instance.module)) {
+    if (this.types.isLibraryModule(instance.module)) {
       return;
     }
 
-    const entry = this.classMember(instance, kAsyncIteratorKey).entry;
+    const entryLookup = this.classMember(instance, kAsyncIteratorKey);
+
+    const entry = entryLookup.entry;
     const method = entry?.methods[0];
     if (entry == undefined || method == undefined) {
       return;
@@ -100,15 +114,17 @@ partial class ExpressionTypes {
       return;
     }
 
-    const result = type.shape.result;
-    const isAsync = result.kind == TypeKind.Iterator && result.shape.async;
+    const result = this.types.store.returnTypeOf(type);
+    const isAsync =
+      result.kind == TypeKind.Iterator &&
+      this.types.store.iteratorShapeOf(result).async;
     if (isAsync || result.kind == TypeKind.Error) {
       return;
     }
 
-    this.report(module, iterable.loc, Code.AsyncIteratorMethodResult, {
-      word: this.text.of(instance),
-      first: this.text.of(result),
+    this.errors.write(module, iterable.loc, Code.AsyncIteratorMethodResult, {
+      word: this.types.typeText(instance),
+      first: this.types.typeText(result),
     });
   }
 
@@ -117,41 +133,42 @@ partial class ExpressionTypes {
 
     switch (base.kind) {
       case TypeKind.Iterator:
-        return this.awaitedItem(base.shape.yielded);
+        return this.awaitedItem(this.types.store.iteratorShapeOf(base).yielded);
       case TypeKind.Array:
-        return this.awaitedItem(base.item);
+        return this.awaitedItem(this.types.store.itemOf(base));
       case TypeKind.Instance:
         return this.asyncInstanceItem(base);
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
     }
   }
 
   private asyncInstanceItem(instance: InstanceType): Type {
-    const entry = this.classMember(instance, kAsyncIteratorKey).entry;
+    const entryLookup = this.classMember(instance, kAsyncIteratorKey);
+    const entry = entryLookup.entry;
     const method = entry?.methods[0];
     if (entry == undefined || method == undefined) {
       const item = this.instanceItem(instance);
 
-      return this.awaitedItem(item ?? this.store.plain(TypeKind.Error));
+      return this.awaitedItem(item ?? this.types.store.plain(TypeKind.Error));
     }
 
     const type = this.methodTypeOf(entry, method);
     if (type.kind != TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const result = type.shape.result;
+    const result = this.types.store.returnTypeOf(type);
     if (result.kind != TypeKind.Iterator) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return result.shape.yielded;
+    return this.types.store.iteratorShapeOf(result).yielded;
   }
 
   private readonly awaitedItem(item: Type): Type {
     if (item.kind == TypeKind.Promise) {
-      return item.value;
+      return this.types.store.valueOf(item);
     }
 
     return item;

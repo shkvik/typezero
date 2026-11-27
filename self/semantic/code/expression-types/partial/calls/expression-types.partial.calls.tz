@@ -43,14 +43,16 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
 
     if (expr.tagged && !this.isOwnTag(callee, module)) {
       if (callee.kind == ExprKind.Member) {
         this.stringRawCheck(expr, callee, module);
       }
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     if (this.isSuperName(callee, module)) {
@@ -77,7 +79,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return !this.modules.isLibraryModule(target.module);
+    return !this.types.isLibraryModule(target.module);
   }
 
   private namedCall(
@@ -86,10 +88,12 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     this.stringCallCheck(expr, callee, module);
 
     if (this.nodeCallCheck(expr, callee, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.isResultMakerCall(callee, module)) {
       return this.resultMakerCall(expr, callee, wanted, module);
@@ -100,7 +104,7 @@ partial class ExpressionTypes {
 
     const target = this.targetOfName(callee, module);
     if (target == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const eventsMade = this.eventsFunctionCall(expr, callee, target, module);
@@ -108,7 +112,7 @@ partial class ExpressionTypes {
       return eventsMade;
     }
 
-    const isLibrary = this.modules.isLibraryModule(target.module);
+    const isLibrary = this.types.isLibraryModule(target.module);
     const isClass = target.kind == SymbolKind.Class;
     if (isLibrary && isClass && callee.name == kDateName) {
       return this.dateFunctionCall(expr, callee, module);
@@ -117,7 +121,7 @@ partial class ExpressionTypes {
       return this.numberCall(expr, module);
     }
     if (isLibrary && target.kind != SymbolKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.earlyCallCheck(expr, callee, target, module);
@@ -126,35 +130,40 @@ partial class ExpressionTypes {
       case SymbolKind.Function:
         return this.functionCall(expr, callee, target, wanted, module);
       case SymbolKind.Class:
-        this.report(module, callee.loc, Code.NameNotFunction, {
+        this.errors.write(module, callee.loc, Code.NameNotFunction, {
           word: callee.name,
         });
-        this.looseArguments(expr.args, module);
+        const args = tree.argumentsOf(expr.argsList);
 
-        return this.store.plain(TypeKind.Error);
+        this.looseArguments(args, module);
+
+        return this.types.store.plain(TypeKind.Error);
       default:
         return this.valueCall(expr, module);
     }
   }
 
   private numberCall(expr: CallExpr, module: int): Type {
-    const double = this.store.plain(TypeKind.Double);
-    const arg = expr.args[0];
+    const tree = this.types.program.tree;
+
+    const double = this.types.store.plain(TypeKind.Double);
+    const arg = tree.argumentsOf(expr.argsList)[0];
     if (arg == undefined) {
       return double;
     }
 
-    const given = this.typed(arg.expr, undefined, module);
-    if (!this.decimals.isTextType(given)) {
+    const exprExpr = tree.exprOf(arg.exprId);
+    const given = this.typed(exprExpr, undefined, module);
+    if (!this.types.isDecimalTextType(given)) {
       return double;
     }
 
-    const error = this.resolver.libraryShape(kNumberErrorName, []);
+    const error = this.types.libraryShape(kNumberErrorName, []);
     if (error == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.store.resultOf(double, error);
+    return this.types.store.resultOf(double, error);
   }
 
   private functionCall(
@@ -164,22 +173,27 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const fn = this.record(target.module)?.functions.get(target.loc);
     if (fn == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (fn.typeParams.length == 0 && callee.typeArgs.length > 0) {
-      this.report(module, callee.loc, Code.NotGenericFunction, {
+    if (
+      tree.typeParamsOf(fn.typeParamsList).length == 0 &&
+      tree.typeRefsOf(callee.typeArgsList).length > 0
+    ) {
+      this.errors.write(module, callee.loc, Code.NotGenericFunction, {
         word: callee.name,
       });
     }
     const home = target.module;
-    const isLibraryHome = this.modules.isLibraryModule(home);
+    const isLibraryHome = this.types.isLibraryModule(home);
     if (isLibraryHome && this.isOverloaded(fn, home)) {
       return this.overloadedLibraryCall(expr, callee, fn, home, module);
     }
     if (!this.isCallable(fn, target.module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const key = `${target.module} ${target.loc}`;
@@ -187,7 +201,7 @@ partial class ExpressionTypes {
     const isInferring =
       door != undefined &&
       door.state == DoorState.InWork &&
-      fn.returnType == undefined;
+      tree.typeRefAt(fn.returnTypeId) == undefined;
     const isAssumed = door?.isAssumed == true;
     if (isInferring && !isAssumed) {
       const caller = this.walking[this.walking.length - 1];
@@ -198,7 +212,7 @@ partial class ExpressionTypes {
 
       this.recursions.push(key);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (isInferring) {
       this.assumedCalls.push(key);
@@ -206,70 +220,81 @@ partial class ExpressionTypes {
 
     const type = this.functionAt(target.module, target.loc);
     if (type.kind != TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.program.modules[target.module]?.name == kUnsafeModuleName) {
+    if (this.types.program.modules[target.module]?.name == kUnsafeModuleName) {
       this.unsafeCallCheck(callee, module);
     }
-    if (fn.typeParams.length > 0) {
+    const typeParams = tree.typeParamsOf(fn.typeParamsList);
+    if (typeParams.length > 0) {
       const generic = this.genericFunction(callee, fn, type, target);
 
       return this.genericResult(expr, generic, wanted, module);
     }
 
-    const shape = type.shape;
-    const params = this.calls.directParams(shape.params, shape.self);
+    const shape = this.types.store.functionShapeOf(type);
+    const params = this.types.directParams(shape.params, shape.self);
     const rest = shape.rest;
 
     const loc = callee.loc;
-    const isLenient = this.modules.isLibraryModule(target.module);
+    const isLenient = this.types.isLibraryModule(target.module);
     const isListed = kStrictGlobals.includes(callee.name);
-    const isStrict = isLenient && isListed && this.calls.isStrictShape(params);
+    const isStrict = isLenient && isListed && this.types.isStrictShape(params);
     const isCounted = isStrict || kCountedGlobals.includes(callee.name);
     const call: CallTarget = {
       params,
       rest,
       loc,
       isLenient: isLenient && !isStrict,
-      kind: this.calls.libraryKind(isLenient),
+      kind: this.types.libraryKind(isLenient),
       isCounted: isLenient && isCounted,
       method: callee.name,
       isTagged: expr.tagged,
     };
 
     if (isLenient) {
-      this.lenientCalls.add(expr);
+      this.lenientCalls.add(expr.id);
     }
 
-    const isPassed = this.argumentsCheck(expr.args, call, module);
+    const isPassed = this.argumentsCheck(
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      call,
+      module,
+    );
 
     if (!isLenient && isPassed) {
       this.changedArguments(expr, module);
     }
     if (!isPassed) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return shape.result;
   }
 
-  private readonly genericFunction(
+  private genericFunction(
     callee: NameExpr,
     fn: FunctionDecl,
     type: FunctionType,
     target: ValueTarget,
   ): GenericTarget {
+    const tree = this.types.program.tree;
+
     const home = target.module;
 
     return {
       name: fn.name,
-      params: this.resolver.parameterTypes(home, fn.typeParams),
-      decls: fn.typeParams,
+      params: this.types.parameterTypes(
+        home,
+        tree.typeParamsOf(fn.typeParamsList),
+      ),
+      decls: tree.typeParamsOf(fn.typeParamsList),
       home,
-      shape: type.shape,
+      shape: this.types.store.functionShapeOf(type),
       loc: callee.loc,
-      typeArgs: callee.typeArgs,
-      isLenient: this.modules.isLibraryModule(home),
+      typeArgs: tree.typeRefsOf(callee.typeArgsList),
+      isLenient: this.types.isLibraryModule(home),
     };
   }
 
@@ -281,28 +306,41 @@ partial class ExpressionTypes {
   }
 
   private changedArguments(expr: CallExpr, module: int): void {
-    this.forgetLengths(expr.args, module);
+    const tree = this.types.program.tree;
+
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.forgetLengths(args, module);
     this.forgetAllLengths();
   }
 
   private genericResult(
     expr: CallExpr,
-    generic: Read<GenericTarget>,
+    generic: Own<GenericTarget>,
     wanted: Type | undefined,
     module: int,
   ): Type {
-    if (generic.isLenient) {
-      this.lenientCalls.add(expr);
+    const tree = this.types.program.tree;
+
+    const isLenient = generic.isLenient;
+    if (isLenient) {
+      this.lenientCalls.add(expr.id);
     }
 
-    const result = this.genericCall(generic, expr.args, wanted, module);
+    const result = this.genericCall(
+      generic,
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      wanted,
+      module,
+    );
 
-    if (!generic.isLenient) {
+    if (!isLenient) {
       this.changedArguments(expr, module);
     }
 
-    if (generic.isLenient && this.parts.isOpaqueResult(result)) {
-      return this.store.plain(TypeKind.Error);
+    if (isLenient && this.types.isOpaqueResult(result)) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return result;
@@ -322,12 +360,15 @@ partial class ExpressionTypes {
 
     return (
       fn.bodySource == BodySource.External &&
-      this.modules.isLibraryModule(module)
+      this.types.isLibraryModule(module)
     );
   }
 
   private readonly isOverloaded(fn: FunctionDecl, module: int): boolean {
-    const items = this.program.modules[module]?.file.items ?? [];
+    const tree = this.types.program.tree;
+
+    const items =
+      tree.stmtsOf(this.types.program.modules[module]?.file.itemsList) ?? [];
     const same = items.filter(
       (item) => item.kind == StmtKind.Function && item.name == fn.name,
     );
@@ -336,7 +377,9 @@ partial class ExpressionTypes {
   }
 
   private valueCall(expr: CallExpr, module: int): Type {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     const type = this.typed(callee, undefined, module);
     const link = this.linkOf(type, expr.optional);
 
@@ -344,35 +387,41 @@ partial class ExpressionTypes {
   }
 
   private calledValue(expr: CallExpr, type: Type, module: int): Type {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     const loc = callee.loc;
 
     if (type.kind == TypeKind.Function) {
       return this.calledWith(expr, type, loc, CallKind.Own, module);
     }
-    if (type.kind == TypeKind.Union && this.calls.isOptionalFunction(type)) {
-      this.report(module, loc, Code.FunctionMayBeUndefined, kNoDetails);
-      this.looseArguments(expr.args, module);
+    if (type.kind == TypeKind.Union && this.types.isOptionalFunction(type)) {
+      this.errors.write(module, loc, Code.FunctionMayBeUndefined, kNoDetails);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (!this.calls.isUncallable(type)) {
-      return this.store.plain(TypeKind.Error);
+    if (!this.types.isUncallable(type)) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const first = this.text.of(type);
+    const first = this.types.typeText(type);
 
     if (callee.kind == ExprKind.Name) {
       const word = callee.name;
 
-      this.report(module, loc, Code.NotFunction, { word, first });
+      this.errors.write(module, loc, Code.NotFunction, { word, first });
     } else {
-      this.report(module, loc, Code.NotCallable, { first });
+      this.errors.write(module, loc, Code.NotCallable, { first });
     }
 
-    this.looseArguments(expr.args, module);
+    const argsItem = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(argsItem, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private calledWith(
@@ -382,27 +431,31 @@ partial class ExpressionTypes {
     kind: CallKind,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const isLenient = kind != CallKind.Own;
     const positions = replace(this.positionMask, []);
     const method = this.positionMethod;
-    const shape = type.shape;
+    const shape = this.types.store.functionShapeOf(type);
 
     this.positionMethod = "";
 
     if (shape.self != undefined) {
-      this.report(module, loc, Code.FunctionTakesThis, kNoDetails);
-      this.looseArguments(expr.args, module);
+      this.errors.write(module, loc, Code.FunctionTakesThis, kNoDetails);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return shape.result;
     }
 
-    const params = shape.params;
+    const params = shape.params.slice();
     const rest = shape.rest;
-    const isOpen = this.calls.isOpenRest(params, rest);
+    const isOpen = this.types.isOpenRest(params, rest);
     const isChecked = kind != CallKind.Own;
-    const isPlainRest = !rest || this.calls.isPlainRest(params);
+    const isPlainRest = !rest || this.types.isPlainRest(params);
     const isStrict =
-      isChecked && isPlainRest && this.calls.isStrictShape(params);
+      isChecked && isPlainRest && this.types.isStrictShape(params);
     const isLoose = (isLenient && !isStrict) || isOpen;
     const call: CallTarget = {
       params,
@@ -416,16 +469,21 @@ partial class ExpressionTypes {
     };
 
     if (isLenient) {
-      this.lenientCalls.add(expr);
+      this.lenientCalls.add(expr.id);
     }
     if (this.spreadRefused(expr, kind, method, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const isPassed = this.argumentsCheck(expr.args, call, module);
-    const isUnknown = isLenient && this.parts.isOpaqueResult(shape.result);
+    const isPassed = this.argumentsCheck(
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      call,
+      module,
+    );
+    const isUnknown = isLenient && this.types.isOpaqueResult(shape.result);
     if (!isPassed || isUnknown) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return shape.result;
@@ -437,7 +495,9 @@ partial class ExpressionTypes {
     method: string,
     module: int,
   ): boolean {
-    const spread = expr.args.find((arg) => arg.spread);
+    const tree = this.types.program.tree;
+
+    const spread = tree.argumentsOf(expr.argsList).find((arg) => arg.spread);
     if (spread == undefined) {
       return false;
     }
@@ -448,8 +508,15 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, spread.expr.loc, Code.SpreadNotRest, kNoDetails);
-    this.looseArguments(expr.args, module);
+    this.errors.write(
+      module,
+      tree.exprOf(spread.exprId).loc,
+      Code.SpreadNotRest,
+      kNoDetails,
+    );
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }

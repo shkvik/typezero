@@ -1,0 +1,160 @@
+import { TypeSystem } from "../../type-system.tz";
+import {
+  DeclaredClass,
+} from "../../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import { kLibrary } from "../../../../../program/library/library-modules/const/library-modules.const.tz";
+import { NameUse } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  kNamePoint,
+} from "../../../type-resolver/const/type-resolver.const.tables.tz";
+import {
+  ModuleOrigin,
+  ModuleRecord,
+  TypeDeclaration,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  private indexGlobals(): void {
+    for (let index = 0; index < this.program.builtins.length; index++) {
+      this.indexModule(-1 - index);
+    }
+
+    for (const module of this.program.globals) {
+      const name = this.program.modules[module]?.name ?? "";
+      const word = kLibrary.named(name)?.namespace;
+      if (word == undefined) {
+        this.prefixes.set(module, "");
+        this.indexModule(module);
+      } else {
+        this.prefixes.set(module, `${word}${kNamePoint}`);
+        this.namespaces.set(word, module);
+      }
+    }
+
+    for (const row of kLibrary.members()) {
+      const inside = this.moduleNamed(row.module);
+      if (inside != undefined && this.namespaces.has(row.owner)) {
+        this.prefixes.set(inside, `${row.owner}${kNamePoint}`);
+      }
+    }
+  }
+
+  private indexModule(module: int): void {
+    const record = this.record(module);
+    if (record == undefined) {
+      return;
+    }
+
+    const declared = Array.from(record.declarations.keys());
+    const classes = Array.from(record.classes.keys());
+
+    for (const name of declared) {
+      this.globals.set(name, module);
+    }
+
+    for (const name of classes) {
+      this.globals.set(name, module);
+    }
+  }
+
+  private record(module: int): Read<ModuleRecord> | undefined {
+    if (!this.records.has(module)) {
+      const record = this.openRecord(module);
+      if (record != undefined) {
+        this.records.set(module, record);
+      }
+    }
+
+    return this.records.get(module);
+  }
+
+  private readonly openRecord(module: int): ModuleRecord | undefined {
+    const tree = this.program.tree;
+
+    if (module < 0) {
+      const builtin = this.program.builtins[-1 - module];
+      if (builtin == undefined) {
+        return undefined;
+      }
+
+      const items = tree.stmtsOf(builtin.parsed.file.itemsList);
+      const none = new Map<int, NameUse>();
+
+      return this.recordOf(items, [], none, { library: true, native: false });
+    }
+
+    const opened = this.program.modules[module];
+    if (opened == undefined) {
+      return undefined;
+    }
+
+    const uses = new Map<int, NameUse>();
+
+    for (const use of this.scopes.get(module)?.uses ?? []) {
+      if (use.isType) {
+        uses.set(use.loc, use);
+      }
+    }
+
+    return this.recordOf(
+      tree.stmtsOf(opened.file.itemsList),
+      tree.declaredClassesOf(opened.declaredList),
+      uses,
+      {
+        library: opened.source.isLibrary,
+        native: opened.isDeclarationOnly,
+      },
+    );
+  }
+
+  private readonly recordOf(
+    items: Read<Stmt[]>,
+    declared: Read<DeclaredClass[]>,
+    uses: Own<Map<int, NameUse>>,
+    origin: ModuleOrigin,
+  ): ModuleRecord {
+    const declarations = new Map<string, TypeDeclaration>();
+    const classes = new Map<string, DeclaredClass>();
+
+    for (const item of items) {
+      switch (item.kind) {
+        case StmtKind.TypeAlias:
+        case StmtKind.Enum:
+        case StmtKind.Handle:
+          this.declareFirst(declarations, item.name, item);
+          break;
+        case StmtKind.Class:
+          this.declareFirst(declarations, item.name ?? "", item);
+          break;
+        default:
+          break;
+      }
+    }
+
+    for (const one of declared) {
+      classes.set(one.name, one);
+    }
+
+    return {
+      library: origin.library,
+      native: origin.native,
+      uses,
+      declarations,
+      classes,
+    };
+  }
+
+  private readonly declareFirst(
+    declarations: Map<string, TypeDeclaration>,
+    name: string,
+    item: TypeDeclaration,
+  ): void {
+    if (!declarations.has(name)) {
+      declarations.set(name, item);
+    }
+  }
+}

@@ -1,0 +1,112 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kDerefName,
+  kUnsupportedTargets,
+  kWeakRefName,
+} from "../../weak-ref-rules/const/weak-ref-rules.const.tz";
+
+partial class TypeSystem {
+  public isWeakRef(type: Type): boolean {
+    const base = this.definedType(type);
+
+    return (
+      base.kind == TypeKind.Instance &&
+      base.name == kWeakRefName &&
+      this.isLibraryModule(base.module)
+    );
+  }
+
+  public readonly isWeakRefName(name: string): boolean {
+    return name == kWeakRefName;
+  }
+
+  public readonly isDeref(name: string): boolean {
+    return name == kDerefName;
+  }
+
+  public targetError(loc: int, target: Type): SourceError | undefined {
+    const base = this.definedType(target);
+    if (this.isUnknownYet(base)) {
+      return undefined;
+    }
+
+    const isUnsupported =
+      base.kind == TypeKind.Instance &&
+      this.isLibraryModule(base.module) &&
+      kUnsupportedTargets.includes(base.name);
+    if (isUnsupported) {
+      const word = this.typeText(base);
+
+      return { code: Code.WeakRefNotYet, loc, details: { word } };
+    }
+
+    const isObject =
+      (base.kind == TypeKind.Object ||
+        base.kind == TypeKind.Instance ||
+        base.kind == TypeKind.Tuple ||
+        base.kind == TypeKind.Dict) &&
+      !this.isWeakRef(base);
+    if (isObject && !this.isOptional(target)) {
+      return undefined;
+    }
+
+    const word = this.typeText(target);
+    const other = this.objectHint(this.isOptional(target));
+
+    return { code: Code.WeakRefNotObject, loc, details: { word, other } };
+  }
+
+  public readonly oneObjectError(loc: int): SourceError {
+    return { code: Code.WeakRefOneObject, loc, details: kNoDetails };
+  }
+
+  public readonly typeArgumentsError(loc: int): SourceError {
+    return { code: Code.WeakRefTypeArguments, loc, details: kNoDetails };
+  }
+
+  public readonly noMethodError(
+    loc: int,
+    name: string,
+    type: Type,
+  ): SourceError {
+    const first = this.typeText(type);
+
+    return { code: Code.WeakRefNoMethod, loc, details: { word: name, first } };
+  }
+
+  public readonly derefValueError(loc: int, name: string): SourceError {
+    return { code: Code.WeakRefDerefValue, loc, details: { word: name } };
+  }
+
+  public readonly weakRefReadError(
+    loc: int,
+    name: string,
+    type: Type,
+  ): SourceError {
+    if (this.isDeref(name)) {
+      return this.derefValueError(loc, name);
+    }
+
+    return this.noMethodError(loc, name, type);
+  }
+
+  private readonly objectHint(isOptional: boolean): string {
+    if (isOptional) {
+      return "; make it of the object and check for undefined before";
+    }
+
+    return "; hold the value itself";
+  }
+
+  private readonly isUnknownYet(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Error ||
+      type.kind == TypeKind.TypeParameter ||
+      type.kind == TypeKind.Operation
+    );
+  }
+}

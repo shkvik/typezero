@@ -11,14 +11,14 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private readonly unknownMemberCheck(
+  private unknownMemberCheck(
     expr: MemberExpr,
     object: Type,
     module: int,
   ): boolean {
-    const checked = this.objectMembers.unknownMemberCheck(expr, object);
+    const checked = this.types.unknownMemberCheck(expr, object);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -29,20 +29,24 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    if (!this.objectMembers.isUnknownValue(object)) {
+    const tree = this.types.program.tree;
+
+    if (!this.types.isUnknownValue(object)) {
       return false;
     }
 
     const what = `method '${member.name}'`;
 
-    this.looseArguments(expr.args, module);
-    const unknownUseError = this.objectMembers.unknownUseError(
-      member.object,
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
+    const unknownUseError = this.types.unknownUseError(
+      tree.exprOf(member.objectId),
       object,
       what,
     );
 
-    this.reportFound(module, unknownUseError);
+    this.errors.writeFound(module, unknownUseError);
 
     return true;
   }
@@ -52,28 +56,32 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    if (!this.objectMembers.isUnknownValue(object)) {
+    const tree = this.types.program.tree;
+
+    if (!this.types.isUnknownValue(object)) {
       return false;
     }
 
-    this.walkedPart(expr.index, module);
-    const unknownUseError = this.objectMembers.unknownUseError(
-      expr.object,
+    const index = tree.exprOf(expr.indexId);
+
+    this.walkedPart(index, module);
+    const unknownUseError = this.types.unknownUseError(
+      tree.exprOf(expr.objectId),
       object,
       "",
     );
 
-    this.reportFound(module, unknownUseError);
+    this.errors.writeFound(module, unknownUseError);
 
     return true;
   }
 
-  private readonly unknownCheckText(expr: Expr, given: Type, wanted: Type): string {
-    const shown = this.sources.operandName(expr);
+  private unknownCheckText(expr: Expr, given: Type, wanted: Type): string {
+    const shown = this.types.operandName(expr);
     const only = this.types.onlyPart(wanted);
     const target = this.types.definedType(only);
     if (target.kind == TypeKind.Instance) {
-      return `${shown} instanceof ${this.text.of(target)}`;
+      return `${shown} instanceof ${this.types.typeText(target)}`;
     }
     if (given.kind == TypeKind.AnyObject) {
       return `${shown} instanceof C`;

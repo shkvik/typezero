@@ -10,26 +10,36 @@ import { EnumHome } from "../../../../types/type-resolver/types/type-resolver.ty
 
 partial class ExpressionTypes {
   private enumIndexed(expr: IndexExpr, home: EnumHome, module: int): Type {
-    const whole = this.store.integer(64, false);
-    const index = this.typed(expr.index, whole, module);
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const whole = this.types.store.integer(64, false);
+    const indexExpr = tree.exprOf(expr.indexId);
+    const index = this.typed(indexExpr, whole, module);
+    const error = this.types.store.plain(TypeKind.Error);
     if (index.kind == TypeKind.Error) {
       return error;
     }
 
     const decl = home.decl;
-    const values = this.resolver.declaredEnum(home.module, decl);
+    const values = this.types.declaredEnum(home.module, decl);
     if (values.kind != TypeKind.Int) {
-      this.report(module, expr.loc, Code.EnumStringIndex, { word: decl.name });
+      this.errors.write(module, expr.loc, Code.EnumStringIndex, {
+        word: decl.name,
+      });
 
       return error;
     }
 
     const base = this.types.apparent(index);
     if (base.kind != TypeKind.Int) {
-      this.report(module, expr.index.loc, Code.EnumIndexNotInteger, {
-        word: this.text.of(index),
-      });
+      this.errors.write(
+        module,
+        tree.exprOf(expr.indexId).loc,
+        Code.EnumIndexNotInteger,
+        {
+          word: this.types.typeText(index),
+        },
+      );
 
       return error;
     }
@@ -43,27 +53,32 @@ partial class ExpressionTypes {
     whole: Type,
     module: int,
   ): Type {
-    const value = this.intConstant(expr.index, whole, module);
-    const text = this.store.plain(TypeKind.String);
-    if (value == undefined) {
-      const nothing = this.store.plain(TypeKind.Undefined);
+    const tree = this.types.program.tree;
 
-      return this.store.unionOf([text, nothing]);
+    const index = tree.exprOf(expr.indexId);
+    const value = this.intConstant(index, whole, module);
+    const text = this.types.store.plain(TypeKind.String);
+    if (value == undefined) {
+      const nothing = this.types.store.plain(TypeKind.Undefined);
+
+      return this.types.store.unionOf([text, nothing]);
     }
 
     const name = this.memberNamed(home, value);
     if (name == undefined) {
-      return this.store.plain(TypeKind.Undefined);
+      return this.types.store.plain(TypeKind.Undefined);
     }
 
-    return this.store.literal(LiteralKind.String, name);
+    return this.types.store.literal(LiteralKind.String, name);
   }
 
-  private readonly memberNamed(home: EnumHome, value: decimal): string | undefined {
+  private memberNamed(home: EnumHome, value: decimal): string | undefined {
+    const tree = this.types.program.tree;
+
     let found: string | undefined = undefined;
 
-    for (const member of home.decl.members) {
-      const step = this.resolver.enumMember(
+    for (const member of tree.enumMembersOf(home.decl.membersList)) {
+      const step = this.types.enumMember(
         home.module,
         home.decl,
         member.name,

@@ -31,7 +31,10 @@ partial class ExpressionTypes {
   }
 
   private processStreamTyped(expr: MemberExpr, module: int): Type | undefined {
-    if (!this.isProcessName(expr.object, module)) {
+    const tree = this.types.program.tree;
+
+    const objectExpr = tree.exprOf(expr.objectId);
+    if (!this.isProcessName(objectExpr, module)) {
       return undefined;
     }
 
@@ -42,7 +45,9 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const home = this.program.modules.find((one) => one.name == row.module);
+    const home = this.types.program.modules.find(
+      (one) => one.name == row.module,
+    );
     if (home == undefined) {
       return undefined;
     }
@@ -52,16 +57,21 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    this.memberObjects.add(expr.object);
+    const object = tree.exprOf(expr.objectId);
+
+    this.memberObjects.add(object.id);
 
     return this.variableTyped(target, undefined);
   }
 
-  private readonly processMemberRead(expr: MemberExpr, module: int): boolean {
-    if (!this.isProcessName(expr.object, module)) {
+  private processMemberRead(expr: MemberExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    if (!this.isProcessName(object, module)) {
       return this.streamPartRead(expr, module);
     }
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return false;
     }
 
@@ -72,18 +82,21 @@ partial class ExpressionTypes {
 
     const code = this.process.valueCode(name);
 
-    this.report(module, expr.loc, code, { word: name });
+    this.errors.write(module, expr.loc, code, { word: name });
 
     return true;
   }
 
-  private readonly streamPartRead(expr: MemberExpr, module: int): boolean {
-    const stream = this.streamName(expr.object, module);
+  private streamPartRead(expr: MemberExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const stream = this.streamName(object, module);
     if (stream == undefined || !this.process.isStreamPart(expr.name)) {
       return false;
     }
 
-    this.report(module, expr.loc, Code.ProcessStreamPart, {
+    this.errors.write(module, expr.loc, Code.ProcessStreamPart, {
       word: stream,
       first: expr.name,
     });
@@ -92,9 +105,11 @@ partial class ExpressionTypes {
   }
 
   private readonly streamName(expr: Expr, module: int): string | undefined {
+    const tree = this.types.program.tree;
+
     if (
       expr.kind != ExprKind.Member ||
-      !this.isProcessName(expr.object, module)
+      !this.isProcessName(tree.exprOf(expr.objectId), module)
     ) {
       return undefined;
     }
@@ -110,17 +125,25 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const stream = this.streamName(member.object, module);
-    if (stream != undefined && member.name == kTtyName) {
-      this.report(module, member.loc, Code.ProcessTtyValue, { word: stream });
-      this.looseArguments(expr.args, module);
+    const tree = this.types.program.tree;
 
-      return this.store.plain(TypeKind.Error);
+    const object = tree.exprOf(member.objectId);
+    const stream = this.streamName(object, module);
+    if (stream != undefined && member.name == kTtyName) {
+      this.errors.write(module, member.loc, Code.ProcessTtyValue, {
+        word: stream,
+      });
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (!this.isProcessName(member.object, module)) {
+    const objectExpr = tree.exprOf(member.objectId);
+    if (!this.isProcessName(objectExpr, module)) {
       return undefined;
     }
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return undefined;
     }
 
@@ -134,10 +157,12 @@ partial class ExpressionTypes {
 
     const code = this.process.callCode(name);
 
-    this.report(module, member.loc, code, { word: name });
-    this.looseArguments(expr.args, module);
+    this.errors.write(module, member.loc, code, { word: name });
+    const argsItem = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(argsItem, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private signalCall(
@@ -145,90 +170,128 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const event = expr.args[0];
-    if (event == undefined || expr.args.length != 2 || event.spread) {
+    const tree = this.types.program.tree;
+
+    const event = tree.argumentsOf(expr.argsList)[0];
+    if (
+      event == undefined ||
+      tree.argumentsOf(expr.argsList).length != 2 ||
+      event.spread
+    ) {
       return undefined;
     }
 
-    const written = this.textCoders.literalLabel(event.expr);
+    const exprExpr = tree.exprOf(event.exprId);
+    const written = this.types.literalLabel(exprExpr);
     const isThrown =
       written != undefined &&
       this.process.isThrownListener(member.name, written);
     if (isThrown) {
-      this.looseCallbacks(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseCallbacks(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
     if (written != undefined && !this.process.isSignal(written)) {
-      this.report(module, event.expr.loc, Code.ProcessSignal, {
-        word: member.name,
-        first: written,
-      });
-      this.looseCallbacks(expr.args, module);
+      this.errors.write(
+        module,
+        tree.exprOf(event.exprId).loc,
+        Code.ProcessSignal,
+        {
+          word: member.name,
+          first: written,
+        },
+      );
+      const argsItem = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseCallbacks(argsItem, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    this.memberObjects.add(member.object);
+    const objectExpr = tree.exprOf(member.objectId);
 
-    const object = this.typed(member.object, undefined, module);
+    this.memberObjects.add(objectExpr.id);
+
+    const memberObject = tree.exprOf(member.objectId);
+    const object = this.typed(memberObject, undefined, module);
     const found = this.processMethod(object, member.name);
     if (found == undefined || found.kind != TypeKind.Function) {
-      this.looseCallbacks(expr.args, module);
+      const exprArgs = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Void);
+      this.looseCallbacks(exprArgs, module);
+
+      return this.types.store.plain(TypeKind.Void);
     }
 
-    const params = found.shape.params;
+    const params = this.types.store.paramsOf(found);
 
-    for (let index = 0; index < expr.args.length; index++) {
-      const arg = expr.args[index];
+    for (
+      let index = 0;
+      index < tree.argumentsOf(expr.argsList).length;
+      index++
+    ) {
+      const arg = tree.argumentsOf(expr.argsList)[index];
       const param = params[index];
       if (arg != undefined && param != undefined) {
-        this.checked(arg.expr, param.type, module, "");
+        const argExpr = tree.exprOf(arg.exprId);
+
+        this.checked(argExpr, param.type, module, "");
       }
     }
 
-    return found.shape.result;
+    return this.types.store.returnTypeOf(found);
   }
 
-  private readonly processMethod(object: Type, name: string): Type | undefined {
+  private processMethod(object: Type, name: string): Type | undefined {
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Object) {
       return undefined;
     }
 
-    const field = base.fields.find((one) => one.name == name);
+    const field = this.types.store
+      .fieldsOf(base)
+      .find((one) => one.name == name);
 
     return field?.type;
   }
 
   private processAssignCheck(expr: AssignExpr, module: int): boolean {
-    const target = expr.target;
+    const tree = this.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
     if (target.kind != ExprKind.Member) {
       return false;
     }
-    if (!this.isProcessName(target.object, module)) {
+    const object = tree.exprOf(target.objectId);
+    if (!this.isProcessName(object, module)) {
       return this.streamAssignCheck(expr, target, module);
     }
     if (target.name != kExitCodeName) {
-      this.report(module, target.loc, Code.ProcessAssigned, {
+      this.errors.write(module, target.loc, Code.ProcessAssigned, {
         word: target.name,
       });
-      this.typed(expr.value, undefined, module);
+      const value = tree.exprOf(expr.valueId);
+
+      this.typed(value, undefined, module);
 
       return true;
     }
     if (expr.op != undefined) {
-      this.report(module, expr.loc, Code.ProcessExitCodeOp, kNoDetails);
-      this.typed(expr.value, undefined, module);
+      this.errors.write(module, expr.loc, Code.ProcessExitCodeOp, kNoDetails);
+      const valueExpr = tree.exprOf(expr.valueId);
+
+      this.typed(valueExpr, undefined, module);
 
       return true;
     }
 
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
 
-    this.checked(expr.value, int, module, "");
+    const exprValue = tree.exprOf(expr.valueId);
+
+    this.checked(exprValue, int, module, "");
 
     return true;
   }
@@ -238,21 +301,32 @@ partial class ExpressionTypes {
     target: MemberExpr,
     module: int,
   ): boolean {
-    const stream = this.streamName(target.object, module);
-    const object = target.object;
+    const tree = this.types.program.tree;
+
+    const objectExpr = tree.exprOf(target.objectId);
+    const stream = this.streamName(objectExpr, module);
+    const object = tree.exprOf(target.objectId);
     if (stream == undefined || object.kind != ExprKind.Member) {
       return false;
     }
 
-    this.report(module, target.loc, Code.ProcessChanged, { word: object.name });
-    this.typed(expr.value, undefined, module);
+    this.errors.write(module, target.loc, Code.ProcessChanged, {
+      word: object.name,
+    });
+    const value = tree.exprOf(expr.valueId);
+
+    this.typed(value, undefined, module);
 
     return true;
   }
 
   private looseCallbacks(args: Read<CallArgument[]>, module: int): void {
+    const tree = this.types.program.tree;
+
     for (const arg of args) {
-      this.listenerLoose(arg.expr, module);
+      const expr = tree.exprOf(arg.exprId);
+
+      this.listenerLoose(expr, module);
     }
   }
 }

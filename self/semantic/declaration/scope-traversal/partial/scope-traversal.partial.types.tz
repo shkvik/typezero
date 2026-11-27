@@ -5,21 +5,27 @@ import {
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ScopeTraversal {
-  private traverseOptionalType(ref: TypeRef | undefined): void {
+  private traverseOptionalType(
+    program: Read<Program>,
+    ref: TypeRef | undefined,
+  ): void {
     if (ref != undefined) {
-      this.traverseType(ref);
+      this.traverseType(program, ref);
     }
   }
 
-  private traverseTypes(refs: Read<TypeRef[]>): void {
+  private traverseTypes(program: Read<Program>, refs: Read<TypeRef[]>): void {
     for (const ref of refs) {
-      this.traverseType(ref);
+      this.traverseType(program, ref);
     }
   }
 
-  private traverseType(ref: TypeRef): void {
+  private traverseType(program: Read<Program>, ref: TypeRef): void {
+    const tree = program.tree;
+
     const form = ref.form;
 
     switch (form.kind) {
@@ -27,53 +33,75 @@ partial class ScopeTraversal {
       case TypeRefKind.Generic:
         this.useType(ref.name, ref.loc);
 
-        return this.traverseTypes(ref.args);
+        const args = tree.typeRefsOf(ref.argsList);
+
+        return this.traverseTypes(program, args);
       case TypeRefKind.TypeOf:
-        return this.useValue(form.names[0] ?? "", ref.loc);
+        return this.useValue(tree.textsOf(form.namesList)[0] ?? "", ref.loc);
       case TypeRefKind.Mapped:
-        return this.traverseMapped(ref);
+        return this.traverseMapped(program, ref);
       case TypeRefKind.Conditional:
-        return this.traverseConditional(ref);
+        return this.traverseConditional(program, ref);
       case TypeRefKind.Object:
-        return this.traverseObjectType(form.fields);
+        return this.traverseObjectType(
+          program,
+          tree.objectFieldsOf(form.fieldsList),
+        );
       default:
-        return this.traverseTypes(this.childTypes(ref));
+        return this.traverseTypes(program, this.childTypes(program, ref));
     }
   }
 
-  private traverseObjectType(fields: Read<ObjectTypeField[]>): void {
+  private traverseObjectType(
+    program: Read<Program>,
+    fields: Read<ObjectTypeField[]>,
+  ): void {
+    const tree = program.tree;
+
     for (const field of fields) {
       this.scopes.open();
-      this.declareTypeParams(field.typeParams);
-      this.traverseType(field.type);
+      const typeParams = tree.typeParamsOf(field.typeParamsList);
+
+      this.declareTypeParams(program, typeParams);
+      const typeRef = tree.typeRefOf(field.typeId);
+
+      this.traverseType(program, typeRef);
       this.scopes.close();
     }
   }
 
-  private traverseMapped(ref: TypeRef): void {
+  private traverseMapped(program: Read<Program>, ref: TypeRef): void {
+    const tree = program.tree;
+
     this.scopes.open();
     this.scopes.declareType({
       name: ref.name,
       kind: SymbolKind.TypeParameter,
       loc: ref.loc,
     });
-    this.traverseTypes(ref.args);
+    const args = tree.typeRefsOf(ref.argsList);
+
+    this.traverseTypes(program, args);
     this.scopes.close();
   }
 
-  private traverseConditional(ref: TypeRef): void {
+  private traverseConditional(program: Read<Program>, ref: TypeRef): void {
+    const tree = program.tree;
+
     this.scopes.open();
 
-    const extended = ref.args[1];
+    const extended = tree.typeRefsOf(ref.argsList)[1];
     if (extended != undefined) {
-      this.declareInferred(extended);
+      this.declareInferred(program, extended);
     }
 
-    this.traverseTypes(ref.args);
+    const args = tree.typeRefsOf(ref.argsList);
+
+    this.traverseTypes(program, args);
     this.scopes.close();
   }
 
-  private declareInferred(ref: TypeRef): void {
+  private declareInferred(program: Read<Program>, ref: TypeRef): void {
     if (ref.form.kind == TypeRefKind.Infer) {
       this.scopes.declareType({
         name: ref.name,
@@ -82,22 +110,26 @@ partial class ScopeTraversal {
       });
     }
 
-    for (const child of this.childTypes(ref)) {
-      this.declareInferred(child);
+    for (const child of this.childTypes(program, ref)) {
+      this.declareInferred(program, child);
     }
   }
 
-  private readonly childTypes(ref: TypeRef): TypeRef[] {
+  private readonly childTypes(program: Read<Program>, ref: TypeRef): TypeRef[] {
+    const tree = program.tree;
+
     const form = ref.form;
-    const children = ref.args.slice();
+    const children = tree.typeRefsOf(ref.argsList).slice();
 
     switch (form.kind) {
       case TypeRefKind.Function: {
-        for (const param of form.params) {
-          children.push(param.type);
+        for (const param of tree.functionTypeParamsOf(form.paramsList)) {
+          const typeRef = tree.typeRefOf(param.typeId);
+
+          children.push(typeRef);
         }
 
-        const result = form.result;
+        const result = tree.typeRefAt(form.resultId);
         if (result != undefined) {
           children.push(result);
         }
@@ -105,14 +137,18 @@ partial class ScopeTraversal {
         return children;
       }
       case TypeRefKind.Object:
-        for (const field of form.fields) {
-          children.push(field.type);
+        for (const field of tree.objectFieldsOf(form.fieldsList)) {
+          const fieldType = tree.typeRefOf(field.typeId);
+
+          children.push(fieldType);
         }
 
         return children;
       case TypeRefKind.Tuple:
-        for (const element of form.elements) {
-          children.push(element.type);
+        for (const element of tree.tupleElementsOf(form.elementsList)) {
+          const elementType = tree.typeRefOf(element.typeId);
+
+          children.push(elementType);
         }
 
         return children;

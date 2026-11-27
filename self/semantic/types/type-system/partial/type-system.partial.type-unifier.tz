@@ -1,0 +1,300 @@
+import { TypeSystem } from "../type-system.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { UnifyAnswer } from "../../type-unifier/types/type-unifier.types.tz";
+
+partial class TypeSystem {
+  public unify(first: Type, second: Type): Type | undefined {
+    const known = this.shortUnify(first, second);
+    if (known.decided) {
+      return known.type;
+    }
+
+    const plainFirst = this.definedType(first);
+    const plainSecond = this.definedType(second);
+    const isResults =
+      plainFirst.kind == TypeKind.Result && plainSecond.kind == TypeKind.Result;
+    if (isResults && plainFirst.id != plainSecond.id) {
+      const result = this.resultUnify(plainFirst, plainSecond);
+
+      return this.optionalLike(first, second, result);
+    }
+
+    const base = this.baseUnify(plainFirst, plainSecond);
+
+    return this.optionalLike(first, second, base);
+  }
+
+  public unionUnify(first: Type, second: Type): Type | undefined {
+    const common = this.unify(first, second);
+    if (common != undefined) {
+      return common;
+    }
+
+    return this.unionFallback(first, second);
+  }
+
+  public unifierCommonType(
+    first: Type,
+    second: Type,
+  ): Type | undefined {
+    if (this.converts(first, second)) {
+      return second;
+    }
+    if (this.converts(second, first)) {
+      return first;
+    }
+
+    return undefined;
+  }
+
+  private shortUnify(first: Type, second: Type): UnifyAnswer {
+    if (first.id == second.id) {
+      return this.unifierDecided(first);
+    }
+    if (first.kind == TypeKind.Error || second.kind == TypeKind.Error) {
+      const error = this.store.plain(TypeKind.Error);
+
+      return this.unifierDecided(error);
+    }
+    if (first.kind == TypeKind.Never) {
+      return this.unifierDecided(second);
+    }
+    if (second.kind == TypeKind.Never) {
+      return this.unifierDecided(first);
+    }
+    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
+      return this.unifierDecided(undefined);
+    }
+    if (first.kind == TypeKind.Undefined) {
+      const optional = this.optional(second);
+
+      return this.unifierDecided(optional);
+    }
+    if (second.kind == TypeKind.Undefined) {
+      const optional = this.optional(first);
+
+      return this.unifierDecided(optional);
+    }
+    if (first.kind == TypeKind.Unknown || second.kind == TypeKind.Unknown) {
+      const unknown = this.store.plain(TypeKind.Unknown);
+
+      return this.unifierDecided(unknown);
+    }
+
+    const plainFirst = this.definedType(first);
+    const plainSecond = this.definedType(second);
+    if (this.isChoice(plainFirst) || this.isChoice(plainSecond)) {
+      const wider = this.unifierCommonType(plainFirst, plainSecond);
+      const unified = this.optionalLike(first, second, wider);
+
+      return this.unifierDecided(unified);
+    }
+
+    const isText =
+      plainFirst.kind == TypeKind.String && plainSecond.kind == TypeKind.String;
+    if (isText) {
+      const unified = this.optionalLike(first, second, plainFirst);
+
+      return this.unifierDecided(unified);
+    }
+
+    return { decided: false };
+  }
+
+  private readonly unifierDecided(type: Type | undefined): UnifyAnswer {
+    return { decided: true, type };
+  }
+
+  private readonly isChoice(type: Type): boolean {
+    return type.kind == TypeKind.Literal || type.kind == TypeKind.Union;
+  }
+
+  private resultUnify(first: Type, second: Type): Type | undefined {
+    if (first.kind != TypeKind.Result || second.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const value = this.halfUnify(
+      this.store.valueOf(first),
+      this.store.valueOf(second),
+    );
+    const error = this.halfUnify(
+      this.store.errorOf(first),
+      this.store.errorOf(second),
+    );
+    if (value == undefined || error == undefined) {
+      return undefined;
+    }
+
+    return this.store.resultOf(value, error);
+  }
+
+  private halfUnify(first: Type, second: Type): Type | undefined {
+    if (first.id == second.id || second.kind == TypeKind.Never) {
+      return first;
+    }
+    if (first.kind == TypeKind.Never) {
+      return second;
+    }
+    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    const common = this.unionUnify(first, second);
+    if (common == undefined || common.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return common;
+  }
+
+  private baseUnify(first: Type, second: Type): Type | undefined {
+    if (first.id == second.id) {
+      return first;
+    }
+
+    return (
+      this.widerOfRelated(first, second) ??
+      this.widerJson(first, second) ??
+      this.commonParent(first, second) ??
+      this.widerArray(first, second) ??
+      this.settledPromise(first, second) ??
+      this.commonConstructor(first, second) ??
+      this.commonAnyObject(first, second)
+    );
+  }
+
+  private widerOfRelated(first: Type, second: Type): Type | undefined {
+    const isNumbers = this.isNumberLike(first) && this.isNumberLike(second);
+    const isObjects = this.isObjectKind(first) && this.isObjectKind(second);
+    const isIterators =
+      first.kind == TypeKind.Iterator && second.kind == TypeKind.Iterator;
+    if (!isNumbers && !isObjects && !isIterators) {
+      return undefined;
+    }
+
+    return this.unifierCommonType(first, second);
+  }
+
+  private widerJson(first: Type, second: Type): Type | undefined {
+    if (first.kind != TypeKind.Json && second.kind != TypeKind.Json) {
+      return undefined;
+    }
+
+    return this.unifierCommonType(second, first);
+  }
+
+  private commonParent(first: Type, second: Type): Type | undefined {
+    if (first.kind != TypeKind.Instance || second.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    let current: Type | undefined = first;
+
+    while (current != undefined) {
+      if (this.converts(second, current)) {
+        return current;
+      }
+
+      current = this.baseClassOf(current);
+    }
+
+    return undefined;
+  }
+
+  private widerArray(first: Type, second: Type): Type | undefined {
+    if (first.kind != TypeKind.Array || second.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    return this.unifierCommonType(first, second);
+  }
+
+  private readonly settledPromise(first: Type, second: Type): Type | undefined {
+    if (first.kind != TypeKind.Promise || second.kind != TypeKind.Promise) {
+      return undefined;
+    }
+    if (this.store.valueOf(first).kind == TypeKind.Never) {
+      return second;
+    }
+    if (this.store.valueOf(second).kind == TypeKind.Never) {
+      return first;
+    }
+
+    return undefined;
+  }
+
+  private commonConstructor(
+    first: Type,
+    second: Type,
+  ): Type | undefined {
+    if (first.kind != TypeKind.Class || second.kind != TypeKind.Class) {
+      return undefined;
+    }
+
+    const made = this.commonParent(
+      this.store.classInstanceOf(first),
+      this.store.classInstanceOf(second),
+    );
+    if (made == undefined) {
+      const any = this.store.plain(TypeKind.AnyObject);
+
+      return this.store.classOf(any, false);
+    }
+
+    return this.store.classOf(made, false);
+  }
+
+  private readonly commonAnyObject(
+    first: Type,
+    second: Type,
+  ): Type | undefined {
+    const hasAnyObject =
+      first.kind == TypeKind.AnyObject || second.kind == TypeKind.AnyObject;
+    const isReferences =
+      this.isObjectReference(first) && this.isObjectReference(second);
+    if (!hasAnyObject || !isReferences) {
+      return undefined;
+    }
+
+    return this.store.plain(TypeKind.AnyObject);
+  }
+
+  private unionFallback(first: Type, second: Type): Type | undefined {
+    if (first.kind == TypeKind.Error || second.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    const plainFirst = this.definedType(first);
+    const plainSecond = this.definedType(second);
+    if (this.isNumberLike(plainFirst) && this.isNumberLike(plainSecond)) {
+      return undefined;
+    }
+
+    const joined = this.store.unionOf([first, second]);
+    const problem = this.unionProblem(joined);
+    if (joined.kind == TypeKind.Error || problem != undefined) {
+      return undefined;
+    }
+
+    return joined;
+  }
+
+  private optionalLike(
+    first: Type,
+    second: Type,
+    base: Type | undefined,
+  ): Type | undefined {
+    if (base == undefined) {
+      return undefined;
+    }
+    if (this.isOptional(first) || this.isOptional(second)) {
+      return this.optional(base);
+    }
+
+    return base;
+  }
+}

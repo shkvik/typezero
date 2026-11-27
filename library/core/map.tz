@@ -430,9 +430,8 @@ export function mapEntries<K, V>(map: Lent<HashMap<K, V>>): [Read<K>, Read<V>][]
   while (entry >= 0) {
     const key = map.keyAt(entry);
     const value = map.valueAt(entry);
-    const pair: [Read<K>, Read<V>] = [key, value];
 
-    items.push(pair);
+    items.push([key, value]);
     entry = map.next(entry + 1);
   }
 

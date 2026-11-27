@@ -1,0 +1,199 @@
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrCallee,
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kArrayRetain,
+  kImmortalFloor,
+  kOwnDrop,
+  kIntType,
+  kObjectHeader,
+  kPointerType,
+  kSharedDropText,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { CountForm, Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isCheckedDrop(value: Read<IrValue>): boolean {
+    return this.isCheckingCounts && this.isSingleOwner(value);
+  }
+
+  private isSingleOwner(value: Read<IrValue>): boolean {
+    const type = value.tz;
+    if (value.type != kPointerType) {
+      return false;
+    }
+    if (this.isString(type) || this.isDecimal(type)) {
+      return false;
+    }
+    if (this.optionalInner(type) != undefined || this.values.isCopy(type)) {
+      return false;
+    }
+    if (this.hasCopyPart(type)) {
+      return false;
+    }
+
+    return this.isArray(type) || this.isCounted(type);
+  }
+
+  private hasCopyPart(type: Type): boolean {
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    const parts = this.values.types.store.partsOf(type).slice();
+
+    for (const part of parts) {
+      if (this.values.isCopy(part)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private ownDropChecked(frame: Read<Frame>, value: Read<IrValue>): void {
+    const made = frame.made;
+    const check = made.block("own.check");
+    const shared = made.block("own.shared");
+    const done = made.block("own.done");
+    const none = this.ir.zero(kPointerType);
+    const isObject = made.integerCompare(
+      IrIntPredicate.NotEqual,
+      value.value,
+      none,
+    );
+
+    made.conditionalBranch(isObject, check, done);
+    made.open(check);
+
+    const count = made.load(kIntType, value.value);
+    const one = this.ir.integer(kIntType, "1");
+    const floor = this.ir.integer(kIntType, kImmortalFloor);
+    const isAlone = made.integerCompare(IrIntPredicate.Equal, count, one);
+    const isImmortal = made.integerCompare(
+      IrIntPredicate.SignedLess,
+      floor,
+      count,
+    );
+    const isFine = made.binary(IrOpcode.Or, isAlone, isImmortal);
+
+    made.conditionalBranch(isFine, done, shared);
+    made.open(shared);
+    this.panic(frame, this.sharedDropText(frame, value.tz));
+    made.open(done);
+  }
+
+  private sharedDropText(frame: Read<Frame>, type: Type): string {
+    const module = this.values.types.program.modules[frame.module];
+    const what = this.values.types.typeText(type);
+    const where = frame.place ?? "";
+    if (module == undefined) {
+      return `${kSharedDropText}: ${what} in ${where}`;
+    }
+
+    const lines = this.linesOf(frame.module, module.source.text);
+    const line = lines?.placeOf(this.statementLoc).line ?? 0;
+    const path = module.source.path;
+
+    return `${kSharedDropText}: ${what} in ${where} near ${path}:${line}`;
+  }
+
+  private ownCount(
+    frame: Read<Frame>,
+    isRetain: boolean,
+    value: Read<IrValue>,
+  ): void {
+    if (isRetain && this.isCheckingCounts) {
+      const counting = this.countHelper(kArrayRetain, true, CountForm.Pointer);
+
+      frame.made.call(counting, [value.value]);
+
+      return;
+    }
+    if (isRetain) {
+      return;
+    }
+
+    const helper = this.ownDropHelper(value.tz);
+
+    frame.made.call(helper, [value.value]);
+  }
+
+  private ownDropHelper(type: Type): IrCallee {
+    const isArray = type.kind == TypeKind.Array;
+    const key = this.choose(isArray, type.id, 0);
+    const name = `${kOwnDrop}.${key}`;
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, name, kVoidType, [kPointerType]);
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+      place: name,
+    };
+    const object = made.param(0);
+    const counted = made.block("counted");
+    const freed = made.block("free");
+    const done = made.block("done");
+    const none = this.ir.zero(kPointerType);
+    const isObject = made.integerCompare(IrIntPredicate.NotEqual, object, none);
+
+    made.conditionalBranch(isObject, counted, done);
+    made.open(counted);
+
+    const count = made.load(kIntType, object);
+    const one = this.ir.integer(kIntType, "1");
+    const isAlone = made.integerCompare(IrIntPredicate.Equal, count, one);
+
+    made.conditionalBranch(isAlone, freed, done);
+    made.open(freed);
+    this.ownFreed(frame, object, type);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
+  }
+
+  private ownFreed(frame: Read<Frame>, object: LLVMValue, type: Type): void {
+    if (type.kind == TypeKind.Array) {
+      return this.cellsReleased(frame, object, type);
+    }
+
+    const made = frame.made;
+    const kind = made.field(kObjectHeader, object, 1);
+    const layout = made.load(kPointerType, kind);
+    const dropper = made.load(kPointerType, layout);
+    const dropType = this.ir.signature(kVoidType, [kPointerType]);
+
+    made.indirectCall(dropType, dropper, [object]);
+  }
+
+  private isManagedItems(type: Type): boolean {
+    if (type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    return this.isManaged(this.values.types.store.itemOf(type));
+  }
+
+  private isLookingArray(type: Type): boolean {
+    if (!this.values.types.store.isLentArray(type)) {
+      return false;
+    }
+
+    return !this.values.isCopy(this.values.types.store.itemOf(type));
+  }
+}

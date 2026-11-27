@@ -1,0 +1,406 @@
+import { RegexSyntax } from "../regex-syntax.tz";
+import {
+  kBinaryNames,
+  kCategoryNames,
+  kScriptNames,
+} from "../const/regex-names.const.tz";
+import {
+  kAsciiEnd,
+  kBackslashCode,
+  kBackspaceCode,
+  kCategoryKeys,
+  kClassEscapeText,
+  kControlBase,
+  kDecimalEscapeText,
+  kDollarCode,
+  kEscapeText,
+  kFormFeedCode,
+  kGroupNameText,
+  kInvalidPropertyText,
+  kMaxPropertyText,
+  kNamedReferenceText,
+  kNewlineCode,
+  kNoUnit,
+  kOctalBase,
+  kOctalDigits,
+  kReturnCode,
+  kScriptKeys,
+  kSetEscapes,
+  kSetPunctuators,
+  kSmallOctalDigits,
+  kStringProperties,
+  kStringPropertyText,
+  kSyntaxChars,
+  kTabCode,
+  kUnderscoreCode,
+  kUnicodeEscapeText,
+  kVerticalTabCode,
+} from "../const/regex-syntax.const.tz";
+
+partial class RegexSyntax {
+  public readonly isSetEscape(letter: string): boolean {
+    return kSetEscapes.includes(letter);
+  }
+
+  public propertyEscape(isNegated: boolean): boolean {
+    if (!this.cursor.accept("{")) {
+      return this.cursor.fail(kInvalidPropertyText);
+    }
+
+    let name = "";
+    let value = "";
+    let hasValue = false;
+
+    while (!this.cursor.isAt("}")) {
+      const char = this.cursor.current();
+      if (char == "=" && !hasValue) {
+        hasValue = true;
+        this.cursor.index += 1;
+
+        continue;
+      }
+
+      const isTooLong =
+        name.length >= kMaxPropertyText || value.length >= kMaxPropertyText;
+      if (!this.isPropertyChar(char, hasValue) || isTooLong) {
+        return this.cursor.fail(kInvalidPropertyText);
+      }
+
+      if (hasValue) {
+        value += char;
+      } else {
+        name += char;
+      }
+
+      this.cursor.index += 1;
+    }
+
+    this.cursor.index += 1;
+
+    const isOfStrings =
+      this.cursor.isSets &&
+      !hasValue &&
+      !isNegated &&
+      kStringProperties.includes(name);
+    if (isOfStrings) {
+      return this.cursor.fail(kStringPropertyText);
+    }
+
+    const isEmpty = name == "" || (hasValue && value == "");
+    if (isEmpty || !this.isPropertyKnown(name, value, hasValue)) {
+      return this.cursor.fail(kInvalidPropertyText);
+    }
+
+    return true;
+  }
+
+  public characterEscape(isInClass: boolean): int {
+    const start = this.cursor.index;
+    const char = this.cursor.current();
+    const code = this.cursor.nextChar();
+    const simple = this.simpleEscape(char, isInClass);
+    if (simple != kNoUnit) {
+      return simple;
+    }
+
+    switch (char) {
+      case "c":
+        return this.controlEscape(start, isInClass);
+      case "0":
+        if (!this.cursor.isDigitAt(this.cursor.index)) {
+          return 0;
+        }
+        if (this.cursor.isUnicode) {
+          return this.failed(this.zeroEscapeText(isInClass));
+        }
+
+        break;
+      case "x":
+        return this.hexEscape();
+      case "u":
+        return this.unicodeLetterEscape();
+      default:
+        break;
+    }
+
+    return this.otherEscape(start, char, code, isInClass);
+  }
+
+  public groupName(): string | undefined {
+    let name = "";
+
+    while (!this.cursor.accept(">")) {
+      if (this.cursor.isAtEnd()) {
+        return this.failedName();
+      }
+
+      const char = this.nameChar();
+      if (char == kNoUnit) {
+        return undefined;
+      }
+      if (!this.isNameChar(char, name == "")) {
+        return this.failedName();
+      }
+
+      name += `${char} `;
+    }
+
+    if (name == "") {
+      return this.failedName();
+    }
+
+    return name;
+  }
+
+  private readonly isPropertyChar(char: string, hasValue: boolean): boolean {
+    if (char.length != 1) {
+      return false;
+    }
+
+    const isLetter =
+      (char >= "a" && char <= "z") || (char >= "A" && char <= "Z");
+    const isDigit = hasValue && char >= "0" && char <= "9";
+
+    return isLetter || isDigit || char == "_";
+  }
+
+  private readonly isPropertyKnown(
+    name: string,
+    value: string,
+    hasValue: boolean,
+  ): boolean {
+    if (!hasValue) {
+      return kCategoryNames.includes(name) || kBinaryNames.includes(name);
+    }
+    if (kCategoryKeys.includes(name)) {
+      return kCategoryNames.includes(value);
+    }
+    if (kScriptKeys.includes(name)) {
+      return kScriptNames.includes(value);
+    }
+
+    return false;
+  }
+
+  private readonly simpleEscape(char: string, isInClass: boolean): int {
+    switch (char) {
+      case "f":
+        return kFormFeedCode;
+      case "n":
+        return kNewlineCode;
+      case "r":
+        return kReturnCode;
+      case "t":
+        return kTabCode;
+      case "v":
+        return kVerticalTabCode;
+      case "b":
+        return this.backspaceEscape(isInClass);
+      default:
+        return kNoUnit;
+    }
+  }
+
+  private readonly backspaceEscape(isInClass: boolean): int {
+    if (isInClass) {
+      return kBackspaceCode;
+    }
+
+    return kNoUnit;
+  }
+
+  private controlEscape(start: int, isInClass: boolean): int {
+    const letter = this.cursor.current();
+    const isLetter =
+      letter.length == 1 &&
+      ((letter >= "a" && letter <= "z") || (letter >= "A" && letter <= "Z"));
+    const isLegacyClassChar =
+      isInClass &&
+      !this.cursor.isUnicode &&
+      (this.cursor.isDigitAt(this.cursor.index) || letter == "_");
+    if (isLetter || isLegacyClassChar) {
+      const unit = this.cursor.unitAt(this.cursor.index);
+
+      this.cursor.index += 1;
+
+      return unit % kControlBase;
+    }
+    if (this.cursor.isUnicode) {
+      return this.failed(kUnicodeEscapeText);
+    }
+
+    this.cursor.index = start;
+
+    return kBackslashCode;
+  }
+
+  private hexEscape(): int {
+    const value = this.cursor.readHex(2);
+    if (value >= 0) {
+      return value;
+    }
+    if (this.cursor.isUnicode) {
+      return this.failed(kEscapeText);
+    }
+
+    return this.cursor.unitAt(this.cursor.index - 1);
+  }
+
+  private unicodeLetterEscape(): int {
+    const value = this.cursor.unicodeEscape(this.cursor.isUnicode);
+    if (value >= 0) {
+      return value;
+    }
+    if (this.cursor.isUnicode) {
+      return this.failed(kUnicodeEscapeText);
+    }
+
+    return this.cursor.unitAt(this.cursor.index - 1);
+  }
+
+  private otherEscape(
+    start: int,
+    char: string,
+    code: int,
+    isInClass: boolean,
+  ): int {
+    if (!this.cursor.isUnicode && kOctalDigits.includes(char)) {
+      return this.octalEscape(char);
+    }
+    if (this.cursor.isUnicode) {
+      return this.unicodeOtherEscape(start, char, code, isInClass);
+    }
+    if (char == "k" && this.cursor.hasNames) {
+      this.cursor.index = start;
+
+      return this.failed(this.namedEscapeText(isInClass));
+    }
+
+    return code;
+  }
+
+  private unicodeOtherEscape(
+    start: int,
+    char: string,
+    code: int,
+    isInClass: boolean,
+  ): int {
+    const isSyntax =
+      kSyntaxChars.includes(char) || char == "/" || (isInClass && char == "-");
+    if (isSyntax) {
+      return code;
+    }
+    if (this.cursor.isSets && isInClass && kSetPunctuators.includes(char)) {
+      return code;
+    }
+
+    this.cursor.index = start;
+
+    return this.failed(this.escapeText(isInClass));
+  }
+
+  private octalEscape(char: string): int {
+    let value = this.cursor.digitAt(this.cursor.index - 1);
+    if (!kOctalDigits.includes(this.cursor.current())) {
+      return value;
+    }
+
+    value = value * kOctalBase + this.cursor.digitAt(this.cursor.index);
+    this.cursor.index += 1;
+
+    const isThird =
+      kSmallOctalDigits.includes(char) &&
+      kOctalDigits.includes(this.cursor.current());
+    if (isThird) {
+      value = value * kOctalBase + this.cursor.digitAt(this.cursor.index);
+      this.cursor.index += 1;
+    }
+
+    return value;
+  }
+
+  private nameChar(): int {
+    if (this.cursor.accept("\\")) {
+      return this.escapedNameChar();
+    }
+
+    const pair = this.cursor.pairAt(this.cursor.index);
+    if (pair != kNoUnit) {
+      this.cursor.index += 2;
+
+      return pair;
+    }
+
+    const unit = this.cursor.unitAt(this.cursor.index);
+
+    this.cursor.index += 1;
+
+    return unit;
+  }
+
+  private escapedNameChar(): int {
+    if (!this.cursor.accept("u")) {
+      return this.failed(kUnicodeEscapeText);
+    }
+
+    const value = this.cursor.unicodeEscape(true);
+    if (value < 0) {
+      return this.failed(kUnicodeEscapeText);
+    }
+
+    return value;
+  }
+
+  private readonly isNameChar(char: int, isFirst: boolean): boolean {
+    if (char >= kAsciiEnd) {
+      return true;
+    }
+
+    const text = String.fromCharCode(char);
+    const isLetter =
+      (text >= "a" && text <= "z") || (text >= "A" && text <= "Z");
+    const isDigit = text >= "0" && text <= "9";
+    const isMark = char == kDollarCode || char == kUnderscoreCode;
+    if (isFirst) {
+      return isLetter || isMark;
+    }
+
+    return isLetter || isMark || isDigit;
+  }
+
+  private failedName(): string | undefined {
+    this.cursor.fail(kGroupNameText);
+
+    return undefined;
+  }
+
+  private failed(message: string): int {
+    this.cursor.fail(message);
+
+    return kNoUnit;
+  }
+
+  private readonly zeroEscapeText(isInClass: boolean): string {
+    if (isInClass) {
+      return kClassEscapeText;
+    }
+
+    return kDecimalEscapeText;
+  }
+
+  private readonly escapeText(isInClass: boolean): string {
+    if (isInClass) {
+      return kClassEscapeText;
+    }
+
+    return kEscapeText;
+  }
+
+  private readonly namedEscapeText(isInClass: boolean): string {
+    if (isInClass) {
+      return kEscapeText;
+    }
+
+    return kNamedReferenceText;
+  }
+}

@@ -1,0 +1,120 @@
+import { TypeSystem } from "../../type-system.tz";
+import {
+  TypeParamDecl,
+} from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  DeclaredClass,
+} from "../../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  StmtKind,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import { Type } from "../../../../../program/type/types/type.types.tz";
+import {
+  ClassHome,
+  LibraryClass,
+} from "../../../type-resolver/types/type-resolver.types.tz";
+
+partial class TypeSystem {
+  public libraryShape(name: string, args: Own<Type[]>): Type | undefined {
+    const tree = this.program.tree;
+
+    const module = this.globals.get(name);
+    if (module == undefined) {
+      return undefined;
+    }
+
+    const found = this.record(module)?.declarations.get(name);
+    if (found == undefined || found.kind != StmtKind.TypeAlias) {
+      return undefined;
+    }
+    const typeParams = tree.typeParamsOf(found.typeParamsList);
+    if (typeParams.length != args.length) {
+      return undefined;
+    }
+
+    this.errors.beginTrial();
+
+    const shape = this.alias(module, found, args, false);
+
+    this.errors.endTrial();
+
+    return shape;
+  }
+
+  public readonly isLibraryShape(type: Type): boolean {
+    return this.libraryShapes.has(type.id);
+  }
+
+  public libraryClass(name: string): LibraryClass | undefined {
+    const module = this.globals.get(name);
+    if (module == undefined) {
+      return undefined;
+    }
+
+    const declared = this.record(module)?.classes.get(name);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    return { module, declared };
+  }
+
+  public libraryInstance(name: string, args: Read<Type[]>): Type | undefined {
+    const found = this.libraryClass(name);
+    if (found == undefined) {
+      return undefined;
+    }
+
+    return this.declaredInstance(found.module, found.declared, args);
+  }
+
+  public declaredInstance(
+    module: int,
+    declared: DeclaredClass,
+    args: Read<Type[]>,
+  ): Type | undefined {
+    const tree = this.program.tree;
+
+    const typeParams = tree.typeParamsOf(declared.typeParamsList);
+    if (!this.isFilling(typeParams, args)) {
+      return undefined;
+    }
+
+    const name = declared.name;
+    const parents = this.parentRefs(
+      tree.typeRefAt(declared.baseId),
+      tree.typeRefsOf(declared.implementedList),
+    );
+    const home: ClassHome = { module, name, loc: declared.loc };
+
+    this.errors.beginTrial();
+
+    const instance = this.instance(
+      home,
+      tree.typeParamsOf(declared.typeParamsList),
+      args,
+      parents,
+    );
+
+    this.errors.endTrial();
+
+    return instance;
+  }
+
+  private readonly isFilling(
+    params: Read<TypeParamDecl[]>,
+    args: Read<Type[]>,
+  ): boolean {
+    const tree = this.program.tree;
+
+    if (args.length > params.length) {
+      return false;
+    }
+
+    const missing = params.slice(args.length);
+
+    return missing.every(
+      (param) => tree.typeRefAt(param.defaultTypeId) != undefined,
+    );
+  }
+}

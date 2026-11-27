@@ -1,6 +1,7 @@
 import { Code } from "../../../../diagnostic/code.tz";
 import { TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
+  EnumStep,
   GenericBuiltin,
   GenericTypeName,
   JsonKind,
@@ -91,26 +92,6 @@ export const kPlainTypes: PlainTypeName[] = [
 ];
 
 export const kGenericTypes: GenericTypeName[] = [
-  {
-    name: "Cell",
-    type: GenericBuiltin.Mode,
-    least: 1,
-    most: 1,
-    example: "Cell<int>",
-    values: 0,
-    few: Code.ModeNeedsType,
-    many: Code.ModeTakesOne,
-  },
-  {
-    name: "Interned",
-    type: GenericBuiltin.Interned,
-    least: 1,
-    most: 1,
-    example: "Interned<Node>",
-    values: 0,
-    few: Code.ModeNeedsType,
-    many: Code.ModeTakesOne,
-  },
   {
     name: "Read",
     type: GenericBuiltin.Mode,
@@ -277,4 +258,4 @@ export const kFewArgumentCodes = new Map<string, Code>([
 ]);
 export const kFunctionUtilities = ["ReturnType", "Parameters"];
 
-export const kCellName = "Cell";
+export const kNoEnumSteps: readonly EnumStep[] = [];

@@ -1,21 +1,16 @@
 import {
-  BinaryExpr,
   CallExpr,
   Expr,
-  ExprKind,
   IndexExpr,
   MemberExpr,
-  UnaryExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
-import { kRewritingMethods } from "../../../index-rules/const/index-rules.const.tz";
+import {
+  kRewritingMethods,
+} from "../../../index-rules/const/index-rules.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
-  DictKind,
-  DictType,
-  LiteralKind,
-  ObjectType,
   TupleType,
   Type,
   TypeKind,
@@ -27,18 +22,25 @@ import {
 
 partial class ExpressionTypes {
   private indexTyped(expr: IndexExpr, module: int): Type {
-    const isMade = expr.index.loc == expr.loc;
+    const tree = this.types.program.tree;
+
+    const isMade = tree.exprOf(expr.indexId).loc == expr.loc;
     if (isMade) {
       return this.patternElement(expr, module);
     }
 
-    const home = this.enumHomeOf(expr.object, module);
+    const objectExpr = tree.exprOf(expr.objectId);
+    const home = this.enumHomeOf(objectExpr, module);
     if (home != undefined) {
       return this.enumIndexed(expr, home, module);
     }
 
-    const object = this.receiverOf(expr.object, expr.optional, module);
-    if (this.library.isJsonHolder(object)) {
+    const object = this.receiverOf(
+      tree.exprOf(expr.objectId),
+      expr.optional,
+      module,
+    );
+    if (this.types.isJsonHolder(object)) {
       return this.jsonIndexed(expr, module);
     }
 
@@ -60,47 +62,51 @@ partial class ExpressionTypes {
   }
 
   private otherIndexed(expr: IndexExpr, object: Type, module: int): Type {
+    const tree = this.types.program.tree;
+
     if (this.unknownIndexCheck(expr, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     if (object.kind == TypeKind.Array || object.kind == TypeKind.String) {
       return this.listIndexed(expr, object, module);
     }
 
-    const element = this.bytes.elementOf(object);
+    const element = this.types.elementOf(object);
     if (element != undefined) {
       return this.bytesIndexed(expr, element, module);
     }
     if (this.byteIndexCheck(expr, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.genericIndexCheck(expr, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    this.walkedPart(expr.index, module);
+    const index = tree.exprOf(expr.indexId);
+
+    this.walkedPart(index, module);
 
     const defined = this.types.definedType(object);
     const isList =
       defined.kind == TypeKind.Array || defined.kind == TypeKind.String;
     if (this.types.isOptional(object) && isList) {
-      this.report(
+      this.errors.write(
         module,
-        expr.object.loc,
+        tree.exprOf(expr.objectId).loc,
         Code.IndexMaybeUndefined,
         kNoDetails,
       );
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.indexes.isUnindexable(object)) {
-      const first = this.text.of(object);
+    if (this.types.isUnindexable(object)) {
+      const first = this.types.typeText(object);
 
-      this.report(module, expr.loc, Code.NotIndexable, { first });
+      this.errors.write(module, expr.loc, Code.NotIndexable, { first });
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private genericIndexCheck(
@@ -108,11 +114,14 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     if (object.kind != TypeKind.TypeParameter) {
       return false;
     }
 
-    const key = this.peekType(expr.index, module);
+    const index = tree.exprOf(expr.indexId);
+    const key = this.peekType(index, module);
     const base = this.types.definedType(key);
     const isText =
       base.kind == TypeKind.String || base.kind == TypeKind.Template;
@@ -120,50 +129,75 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, expr.index.loc, Code.GenericIndexKey, {
-      word: this.text.of(object),
-      other: this.text.of(key),
-    });
+    this.errors.write(
+      module,
+      tree.exprOf(expr.indexId).loc,
+      Code.GenericIndexKey,
+      {
+        word: this.types.typeText(object),
+        other: this.types.typeText(key),
+      },
+    );
 
     return true;
   }
 
   private listIndexed(expr: IndexExpr, list: Type, module: int): Type {
-    const int = this.store.integer(64, false);
-    const key = this.typed(expr.index, int, module);
-    const item = this.indexes.listItem(list);
-    if (key.kind != TypeKind.Int || item == undefined) {
-      this.indexPositionCheck(expr.index, key, module);
+    const tree = this.types.program.tree;
 
-      return this.store.plain(TypeKind.Error);
+    const int = this.types.store.integer(64, false);
+    const index = tree.exprOf(expr.indexId);
+    const key = this.typed(index, int, module);
+    const item = this.types.listItem(list);
+    if (key.kind != TypeKind.Int || item == undefined) {
+      const indexExpr = tree.exprOf(expr.indexId);
+
+      this.indexPositionCheck(indexExpr, key, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.isProvenIndex(expr.object, expr.index, module)) {
+    if (
+      this.isProvenIndex(
+        tree.exprOf(expr.objectId),
+        tree.exprOf(expr.indexId),
+        module,
+      )
+    ) {
       return item;
     }
 
     return this.types.optional(item);
   }
 
-  private readonly indexPositionCheck(index: Expr, key: Type, module: int): void {
+  private indexPositionCheck(index: Expr, key: Type, module: int): void {
     const base = this.types.apparent(this.types.definedType(key));
     const isNumber = base.kind == TypeKind.Double || base.kind == TypeKind.Int;
     if (key.kind == TypeKind.Error || !isNumber) {
       return;
     }
 
-    const code = this.calls.positionCode(key, base);
-    const word = this.text.of(key);
+    const code = this.types.positionCode(key, base);
+    const word = this.types.typeText(key);
 
-    this.report(module, index.loc, code, { word });
+    this.errors.write(module, index.loc, code, { word });
   }
 
   private bytesIndexed(expr: IndexExpr, item: Type, module: int): Type {
-    const int = this.store.integer(64, false);
-    const key = this.typed(expr.index, int, module);
+    const tree = this.types.program.tree;
+
+    const int = this.types.store.integer(64, false);
+    const index = tree.exprOf(expr.indexId);
+    const key = this.typed(index, int, module);
     if (key.kind != TypeKind.Int) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.isProvenIndex(expr.object, expr.index, module)) {
+    if (
+      this.isProvenIndex(
+        tree.exprOf(expr.objectId),
+        tree.exprOf(expr.indexId),
+        module,
+      )
+    ) {
       return item;
     }
     if (this.isMadeIndex(expr, key, module)) {
@@ -174,8 +208,12 @@ partial class ExpressionTypes {
   }
 
   private isMadeIndex(expr: IndexExpr, key: Type, module: int): boolean {
-    const count = this.shapes.madeCount(expr.object);
-    const at = this.intConstant(expr.index, key, module);
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const count = this.types.madeCount(object);
+    const index = tree.exprOf(expr.indexId);
+    const at = this.intConstant(index, key, module);
     if (count == undefined || at == undefined) {
       return false;
     }
@@ -184,38 +222,52 @@ partial class ExpressionTypes {
   }
 
   private tupleIndexed(expr: IndexExpr, tuple: TupleType, module: int): Type {
-    const int = this.store.integer(64, false);
-    const key = this.typed(expr.index, int, module);
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const int = this.types.store.integer(64, false);
+    const index = tree.exprOf(expr.indexId);
+    const key = this.typed(index, int, module);
+    const error = this.types.store.plain(TypeKind.Error);
 
     if (key.kind == TypeKind.Error) {
       return error;
     }
     if (key.kind != TypeKind.Int && key.kind != TypeKind.Literal) {
-      const first = this.text.of(key);
+      const first = this.types.typeText(key);
 
-      this.report(module, expr.index.loc, Code.TupleKeyNotNumber, { first });
+      this.errors.write(
+        module,
+        tree.exprOf(expr.indexId).loc,
+        Code.TupleKeyNotNumber,
+        {
+          first,
+        },
+      );
 
       return error;
     }
 
-    const value = this.intConstant(expr.index, key, module);
+    const indexExpr = tree.exprOf(expr.indexId);
+    const value = this.intConstant(indexExpr, key, module);
     if (value == undefined) {
-      this.report(module, expr.loc, Code.TupleKeyNotConstant, kNoDetails);
+      this.errors.write(module, expr.loc, Code.TupleKeyNotConstant, kNoDetails);
 
       return error;
     }
 
-    const position = this.indexes.positionOf(value, tuple.items.length);
-    const item = tuple.items[position];
+    const position = this.types.positionOf(
+      value,
+      this.types.store.itemsOf(tuple).length,
+    );
+    const item = this.types.store.itemsOf(tuple)[position];
     if (position < 0 || item == undefined) {
-      const tupleRangeError = this.indexes.tupleRangeError(
+      const tupleRangeError = this.types.tupleRangeError(
         expr,
         tuple,
         `${value}`,
       );
 
-      this.reportFound(module, tupleRangeError);
+      this.errors.writeFound(module, tupleRangeError);
 
       return error;
     }
@@ -226,389 +278,19 @@ partial class ExpressionTypes {
     return item;
   }
 
-  private objectIndexed(
-    expr: IndexExpr,
-    object: ObjectType,
-    module: int,
-  ): Type {
-    const key = this.typed(expr.index, undefined, module);
-    const error = this.store.plain(TypeKind.Error);
-
-    if (key.kind == TypeKind.Error || this.resolver.isLibraryShape(object)) {
-      return error;
-    }
-
-    const name = this.constantKeyOf(expr.index, key, module);
-    if (name != undefined) {
-      const member = this.indexes.keyedMember(expr, name);
-
-      return this.memberOf(member, object, module);
-    }
-
-    const choices = this.keyChoices(expr.index, key, module);
-    const chosen = this.chosenField(object, choices);
-    if (chosen != undefined) {
-      return chosen;
-    }
-
-    const first = this.text.of(object);
-    const defined = this.types.definedType(key);
-    if (this.types.isNumber(defined)) {
-      this.report(module, expr.loc, Code.ObjectNumberedKey, { first });
-
-      return error;
-    }
-    if (defined.kind == TypeKind.String || defined.kind == TypeKind.Template) {
-      this.report(module, expr.loc, Code.ObjectRuntimeKey, { first });
-
-      return error;
-    }
-    if (defined.kind == TypeKind.Boolean) {
-      const shown = this.text.of(key);
-
-      this.report(module, expr.index.loc, Code.ObjectKeyNotString, {
-        first: shown,
-      });
-    }
-
-    return error;
-  }
-
-  private readonly chosenField(
-    object: ObjectType,
-    choices: Type | undefined,
-  ): Type | undefined {
-    if (choices == undefined) {
-      return undefined;
-    }
-
-    return this.keyedFieldType(object, choices);
-  }
-
-  private keyChoices(index: Expr, key: Type, module: int): Type | undefined {
-    if (this.isTextChoice(key)) {
-      return key;
-    }
-    if (index.kind != ExprKind.Name) {
-      return undefined;
-    }
-
-    const texts = this.doorOfName(index, module)?.texts;
-    if (texts == undefined) {
-      return undefined;
-    }
-
-    const literals = texts.map((text) =>
-      this.store.literal(LiteralKind.String, text),
-    );
-
-    return this.store.unionOf(literals);
-  }
-
-  private readonly isTextChoice(key: Type): boolean {
-    const parts = this.generics.partsOfType(key);
-
-    return parts.every(
-      (part) =>
-        part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
-    );
-  }
-
-  private readonly keyedFieldType(object: ObjectType, key: Type): Type | undefined {
-    let common: Type | undefined = undefined;
-
-    for (const part of this.generics.partsOfType(key)) {
-      if (part.kind != TypeKind.Literal) {
-        return undefined;
-      }
-
-      const name = part.text;
-      const field = object.fields.find((one) => one.name == name);
-      if (field == undefined) {
-        return undefined;
-      }
-
-      const type = this.objects.fieldWanted(field);
-      if (common != undefined && type != common) {
-        return undefined;
-      }
-
-      common = type;
-    }
-
-    return common;
-  }
-
-  private keyedWriteCheck(target: Expr, module: int): boolean {
-    if (target.kind != ExprKind.Index) {
-      return false;
-    }
-
-    const holder = this.peekType(target.object, module);
-    const object = this.types.definedType(holder);
-    if (object.kind != TypeKind.Object) {
-      return false;
-    }
-
-    const key = this.peekType(target.index, module);
-    if (this.constantKeyOf(target.index, key, module) != undefined) {
-      return false;
-    }
-    if (this.isEnumKey(key)) {
-      return false;
-    }
-
-    const choices = this.keyChoices(target.index, key, module);
-    const field = this.chosenField(object, choices);
-    if (choices == undefined || field == undefined) {
-      return false;
-    }
-
-    const names: string[] = [];
-
-    for (const part of this.generics.partsOfType(choices)) {
-      if (part.kind == TypeKind.Literal) {
-        names.push(part.text);
-      }
-    }
-
-    return this.keyedFieldWrite(target, object, field, names, module);
-  }
-
-  private readonly isEnumKey(key: Type): boolean {
-    const label = this.store.labelOf(key);
-    if (label == undefined) {
-      return false;
-    }
-
-    for (let index = 0; index < this.program.modules.length; index++) {
-      const opened = this.program.modules[index];
-      if (opened == undefined || opened.source.isLibrary) {
-        continue;
-      }
-
-      const record = this.record(index);
-      if (record == undefined) {
-        continue;
-      }
-
-      for (const decl of record.enums.values()) {
-        if (decl.name == label) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  private keyedFieldWrite(
-    target: Expr,
-    object: ObjectType,
-    field: Type,
-    names: Read<string[]>,
-    module: int,
-  ): boolean {
-    const isReadonly = object.fields.some(
-      (one) => names.includes(one.name) && one.readonly,
-    );
-    if (isReadonly) {
-      this.report(module, target.loc, Code.KeyedReadonly, kNoDetails);
-
-      return true;
-    }
-
-    const assigned = this.assignedFieldNames();
-    const isKnown = names.every((name) => assigned.has(name));
-    const isLoose =
-      this.types.isOptional(field) ||
-      field.kind == TypeKind.Union ||
-      field.kind == TypeKind.Literal;
-    if (!isLoose || isKnown) {
-      return false;
-    }
-
-    this.report(module, target.loc, Code.KeyedByName, {
-      word: this.text.of(field),
-    });
-
-    return true;
-  }
-
-  private constantKeyOf(
-    index: Expr,
-    key: Type,
-    module: int,
-  ): string | undefined {
-    if (index.kind == ExprKind.StringLit) {
-      return index.value;
-    }
-    if (key.kind == TypeKind.Literal && key.literal == LiteralKind.String) {
-      return key.text;
-    }
-    if (index.kind != ExprKind.Name) {
-      return undefined;
-    }
-
-    const door = this.doorOfName(index, module);
-    const literal = door?.literal;
-    if (literal == undefined || literal.kind != LiteralKind.String) {
-      return undefined;
-    }
-
-    return literal.text;
-  }
-
-  private dictIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
-    const word = this.sources.tupleText(expr.object);
-    const error = this.store.plain(TypeKind.Error);
-
-    switch (dict.dict) {
-      case DictKind.Map:
-        this.walkedPart(expr.index, module);
-        this.report(module, expr.loc, Code.MapIndex, { word });
-
-        return error;
-      case DictKind.Set:
-        this.walkedPart(expr.index, module);
-        this.report(module, expr.loc, Code.SetIndex, { word });
-
-        return error;
-      default:
-        return this.recordIndexed(expr, dict, module);
-    }
-  }
-
-  private recordIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
-    const key = this.typed(expr.index, dict.key, module);
-    const defined = this.types.definedType(key);
-    if (defined.kind == TypeKind.Int || defined.kind == TypeKind.Double) {
-      const first = this.text.of(key);
-
-      this.report(module, expr.index.loc, Code.RecordNumberKey, { first });
-
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return this.types.optional(dict.value);
-  }
-
-  private keyInTyped(expr: BinaryExpr, module: int): Type {
-    const boolean = this.store.plain(TypeKind.Boolean);
-    const object = this.typed(expr.rhs, undefined, module);
-
-    this.walkedPart(expr.lhs, module);
-
-    if (this.dictInCheck(expr, object, module)) {
-      return boolean;
-    }
-    if (this.listInCheck(expr, object, module)) {
-      return boolean;
-    }
-
-    const lhs = expr.lhs;
-    const isUnion = object.kind == TypeKind.Union;
-
-    if (lhs.kind == ExprKind.StringLit && object.kind == TypeKind.Union) {
-      this.unionInCheck(expr, lhs.value, object, module);
-    }
-    if (lhs.kind != ExprKind.StringLit || object.kind != TypeKind.Object) {
-      return boolean;
-    }
-    if (isUnion || this.resolver.isLibraryShape(object)) {
-      return boolean;
-    }
-
-    const name = lhs.value;
-    const field = object.fields.find((one) => one.name == name);
-    if (field == undefined) {
-      const first = this.text.of(object);
-
-      this.report(module, expr.loc, Code.InObjectFalse, { word: name, first });
-
-      return boolean;
-    }
-    if (field.optional || this.types.isOptional(field.type)) {
-      const word = `${this.sources.tupleText(expr.rhs)}.${name}`;
-
-      this.report(module, expr.loc, Code.InObjectMaybe, { word });
-
-      return boolean;
-    }
-
-    this.report(module, expr.loc, Code.InObjectTrue, kNoDetails);
-
-    return boolean;
-  }
-
-  private deleteTyped(expr: UnaryExpr, module: int): Type {
-    const target = expr.operand;
-    const boolean = this.store.plain(TypeKind.Boolean);
-
-    if (this.dictDeleteCheck(expr, module)) {
-      return boolean;
-    }
-    if (this.plainDeleteCheck(expr, target, module)) {
-      return boolean;
-    }
-    if (target.kind == ExprKind.Index) {
-      if (this.indexDeleteCheck(expr, target, module)) {
-        return boolean;
-      }
-    }
-
-    const name = this.deletedName(target, module);
-    const holder = this.indexes.deletedHolder(target);
-    if (name == undefined || holder == undefined) {
-      return boolean;
-    }
-
-    const object = this.typed(holder, undefined, module);
-    if (
-      object.kind != TypeKind.Object ||
-      this.resolver.isLibraryShape(object)
-    ) {
-      return boolean;
-    }
-
-    const field = object.fields.find((one) => one.name == name);
-    if (field == undefined) {
-      return boolean;
-    }
-    if (field.optional || this.types.isOptional(field.type)) {
-      const first = `${this.sources.tupleText(holder)}.${name}`;
-
-      this.report(module, expr.loc, Code.DeleteOptional, { word: name, first });
-
-      return boolean;
-    }
-
-    this.report(module, expr.loc, Code.DeleteRequired, { word: name });
-
-    return boolean;
-  }
-
-  private deletedName(target: Expr, module: int): string | undefined {
-    if (target.kind == ExprKind.Member) {
-      return target.name;
-    }
-    if (target.kind == ExprKind.Index) {
-      return this.constantKey(target.index, module);
-    }
-
-    return undefined;
-  }
-
   private tupleCall(
     expr: CallExpr,
     member: MemberExpr,
     tuple: TupleType,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const word = member.name;
-    const first = this.sources.tupleText(member.object);
-    const error = this.store.plain(TypeKind.Error);
-    const element = this.indexes.tupleElement(tuple);
+    const object = tree.exprOf(member.objectId);
+    const first = this.types.sourceTupleText(object);
+    const error = this.types.store.plain(TypeKind.Error);
+    const element = this.types.tupleElement(tuple);
     const isResizing = kResizingMethods.includes(word);
     const isRewriting = kRewritingMethods.includes(word);
 
@@ -616,14 +298,14 @@ partial class ExpressionTypes {
       return error;
     }
     if (element != undefined && !isResizing && !isRewriting) {
-      const list = this.store.arrayOf(element);
+      const list = this.types.store.arrayOf(element);
 
-      this.tupleCalls.add(expr);
+      this.tupleCalls.add(expr.id);
 
       return this.receiverCall(expr, member, list, undefined, module);
     }
     if (isResizing) {
-      this.report(module, member.loc, Code.TupleResized, { word, first });
+      this.errors.write(module, member.loc, Code.TupleResized, { word, first });
 
       return error;
     }
@@ -631,20 +313,23 @@ partial class ExpressionTypes {
     if (this.tupleUnion(tuple) == undefined) {
       const code = Code.TupleMethodDestructure;
 
-      this.report(module, member.loc, code, { word, first });
+      this.errors.write(module, member.loc, code, { word, first });
 
       return error;
     }
 
-    this.report(module, member.loc, Code.TupleMethodCopy, { word, first });
+    this.errors.write(module, member.loc, Code.TupleMethodCopy, {
+      word,
+      first,
+    });
 
     return error;
   }
 
-  private readonly tupleUnion(tuple: TupleType): Type | undefined {
+  private tupleUnion(tuple: TupleType): Type | undefined {
     let joined: Type | undefined = undefined;
 
-    for (const item of tuple.items) {
+    for (const item of this.types.store.itemsOf(tuple)) {
       joined = this.joinedUnion(joined, item);
       if (joined == undefined || joined.kind == TypeKind.Error) {
         return undefined;
@@ -654,17 +339,19 @@ partial class ExpressionTypes {
     return joined;
   }
 
-  private readonly joinedUnion(joined: Type | undefined, item: Type): Type | undefined {
+  private joinedUnion(joined: Type | undefined, item: Type): Type | undefined {
     if (joined == undefined) {
       return item;
     }
 
-    return this.unifier.unionUnify(joined, item);
+    return this.types.unionUnify(joined, item);
   }
 
-  private readonly isArrayMethod(name: string, tuple: TupleType): boolean {
-    const item = tuple.items[0] ?? this.store.plain(TypeKind.Error);
-    const list = this.store.arrayOf(item);
+  private isArrayMethod(name: string, tuple: TupleType): boolean {
+    const item =
+      this.types.store.itemsOf(tuple)[0] ??
+      this.types.store.plain(TypeKind.Error);
+    const list = this.types.store.arrayOf(item);
     const receiver = this.libraryReceiver(list);
     if (receiver == undefined) {
       return false;

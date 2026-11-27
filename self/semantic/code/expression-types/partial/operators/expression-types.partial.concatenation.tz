@@ -18,10 +18,16 @@ import { ConcatLink } from "../../../concatenation-rules/types/concatenation-rul
 
 partial class ExpressionTypes {
   private concatenated(expr: BinaryExpr, pair: OperandPair, module: int): Type {
-    this.textCheck(expr.lhs, pair.left, module);
-    this.textCheck(expr.rhs, pair.right, module);
+    const tree = this.types.program.tree;
 
-    return this.store.plain(TypeKind.String);
+    const lhs = tree.exprOf(expr.lhsId);
+
+    this.textCheck(lhs, pair.left, module);
+    const rhs = tree.exprOf(expr.rhsId);
+
+    this.textCheck(rhs, pair.right, module);
+
+    return this.types.store.plain(TypeKind.String);
   }
 
   private textCheck(operand: Expr, type: Type, module: int): void {
@@ -35,44 +41,49 @@ partial class ExpressionTypes {
       return this.requireOf(base, RequirementKind.Text, "");
     }
 
-    const answer = this.concatenations.textAnswer(type, base);
+    const answer = this.types.textAnswer(type, base);
     if (answer != undefined) {
-      this.report(module, operand.loc, answer.code, answer.details);
+      this.errors.write(module, operand.loc, answer.code, answer.details);
     }
   }
 
-  private readonly instanceTextCheck(operand: Expr, base: Type, module: int): void {
+  private instanceTextCheck(operand: Expr, base: Type, module: int): void {
+    const tree = this.types.program.tree;
+
     if (this.byteTextCheck(operand, base, module)) {
       return;
     }
     if (
       base.kind != TypeKind.Instance ||
-      this.modules.isLibraryModule(base.module)
+      this.types.isLibraryModule(base.module)
     ) {
       return;
     }
 
     const decl = this.classOf(base);
-    if (decl == undefined || decl.typeParams.length > 0) {
+    if (
+      decl == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return;
     }
 
-    const hasOwn = decl.methods.some((one) => one.name == kToStringName);
+    const hasOwn = this.types.hasClassMethod(decl, kToStringName);
     if (!hasOwn) {
-      this.report(module, operand.loc, Code.ObjectToText, kNoDetails);
+      this.errors.write(module, operand.loc, Code.ObjectToText, kNoDetails);
 
       return;
     }
 
-    const word = this.sources.tupleText(operand);
+    const word = this.types.sourceTupleText(operand);
 
-    this.report(module, operand.loc, Code.OwnToString, { word });
+    this.errors.write(module, operand.loc, Code.OwnToString, { word });
   }
 
-  private readonly checkMixedConcat(links: Read<ConcatLink[]>, module: int): void {
-    const answer = this.concatenations.mixedAnswer(links, module);
+  private checkMixedConcat(links: Read<ConcatLink[]>, module: int): void {
+    const answer = this.types.mixedAnswer(links, module);
     if (answer != undefined) {
-      this.report(module, answer.loc, answer.code, answer.details);
+      this.errors.write(module, answer.loc, answer.code, answer.details);
     }
   }
 }

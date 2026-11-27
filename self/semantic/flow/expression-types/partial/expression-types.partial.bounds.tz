@@ -33,7 +33,7 @@ partial class ExpressionTypes {
   private linearOf(expr: Expr, module: int): Linear | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
-        return this.bounds.constantLinear(expr.value);
+        return this.types.constantLinear(expr.value);
       case ExprKind.Name: {
         const key = this.pathKey(expr, module);
         const type = this.valueTypeOf(expr, module);
@@ -63,12 +63,14 @@ partial class ExpressionTypes {
   }
 
   private readonly negatedLinear(expr: UnaryExpr): Linear | undefined {
-    const operand = expr.operand;
+    const tree = this.types.program.tree;
+
+    const operand = tree.exprOf(expr.operandId);
     if (expr.op != UnaryOp.Neg || operand.kind != ExprKind.IntLit) {
       return undefined;
     }
 
-    const value = this.bounds.constantLinear(operand.value);
+    const value = this.types.constantLinear(operand.value);
     if (value == undefined) {
       return undefined;
     }
@@ -90,6 +92,8 @@ partial class ExpressionTypes {
   }
 
   private lengthLinear(expr: Expr, module: int): Linear | undefined {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -100,16 +104,20 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const key = this.pathKey(expr.object, module);
+    const object = tree.exprOf(expr.objectId);
+    const key = this.pathKey(object, module);
     if (key == undefined) {
       return undefined;
     }
 
     const term = kLengthTerm + key;
 
-    this.rememberFixedCount(expr.object, term, module);
+    const objectExpr = tree.exprOf(expr.objectId);
 
-    if (this.isFixedLength(expr.object, module)) {
+    this.rememberFixedCount(objectExpr, term, module);
+
+    const exprObject = tree.exprOf(expr.objectId);
+    if (this.isFixedLength(exprObject, module)) {
       this.fixedLengths.add(term);
     }
 
@@ -132,7 +140,9 @@ partial class ExpressionTypes {
     return count.offset;
   }
 
-  private readonly pinnedLinear(linear: Linear | undefined): Linear | undefined {
+  private readonly pinnedLinear(
+    linear: Linear | undefined,
+  ): Linear | undefined {
     if (linear == undefined || linear.term == kZeroTerm) {
       return linear;
     }
@@ -147,6 +157,8 @@ partial class ExpressionTypes {
   }
 
   private constLength(object: Expr, module: int): Linear | undefined {
+    const tree = this.types.program.tree;
+
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -157,7 +169,7 @@ partial class ExpressionTypes {
     }
 
     const variable = this.record(target.module)?.variables.get(target.loc);
-    const init = variable?.decl.init;
+    const init = tree.exprAt(variable?.decl.initId);
     if (variable == undefined || !variable.isConst || init == undefined) {
       return undefined;
     }
@@ -166,28 +178,35 @@ partial class ExpressionTypes {
   }
 
   private isByteLength(expr: MemberExpr, module: int): boolean {
-    const object = expr.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
     if (expr.name != kByteLengthName || object.kind != ExprKind.Name) {
       return false;
     }
 
     const type = this.valueTypeOf(object, module);
 
-    return type != undefined && this.bytes.isByteSized(type);
+    return type != undefined && this.types.isByteSized(type);
   }
 
   private shiftedLinear(expr: BinaryExpr, module: int): Linear | undefined {
+    const tree = this.types.program.tree;
+
     const isAdd = expr.op == BinaryOp.Add;
     if (!isAdd && expr.op != BinaryOp.Sub) {
       return undefined;
     }
-    const base = this.linearOf(expr.lhs, module);
-    const step = this.pinnedLinear(this.linearOf(expr.rhs, module));
+    const lhs = tree.exprOf(expr.lhsId);
+    const base = this.linearOf(lhs, module);
+    const step = this.pinnedLinear(
+      this.linearOf(tree.exprOf(expr.rhsId), module),
+    );
     if (base == undefined || step == undefined) {
       return undefined;
     }
     if (isAdd) {
-      return this.bounds.linearSum(base, step);
+      return this.types.linearSum(base, step);
     }
     if (step.term != kZeroTerm) {
       return undefined;
@@ -196,7 +215,11 @@ partial class ExpressionTypes {
     return { term: base.term, offset: base.offset - step.offset };
   }
 
-  private readonly canProve(lower: string, upper: string, room: decimal): boolean {
+  private readonly canProve(
+    lower: string,
+    upper: string,
+    room: decimal,
+  ): boolean {
     const found = this.bestRoom(lower, upper);
 
     return found != undefined && found >= room;
@@ -242,14 +265,14 @@ partial class ExpressionTypes {
     const lengths = new Set<string>();
 
     for (const key of this.facts.keys()) {
-      const edge = this.bounds.edgeOf(key);
+      const edge = this.types.edgeOf(key);
       if (edge == undefined) {
         continue;
       }
 
       edges.push(edge);
-      this.bounds.keepLength(edge.upper, lengths);
-      this.bounds.keepLength(edge.lower, lengths);
+      this.types.keepLength(edge.upper, lengths);
+      this.types.keepLength(edge.lower, lengths);
     }
 
     for (const length of lengths) {
@@ -285,29 +308,35 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const tree = this.types.program.tree;
+
     const facts = new Map<string, Type>();
-    const left = this.linearOf(cond.lhs, module);
-    const right = this.linearOf(cond.rhs, module);
+    const lhs = tree.exprOf(cond.lhsId);
+    const left = this.linearOf(lhs, module);
+    const rhs = tree.exprOf(cond.rhsId);
+    const right = this.linearOf(rhs, module);
     if (left == undefined || right == undefined) {
       return facts;
     }
 
     switch (cond.op) {
       case BinaryOp.Lt:
-        return this.bounds.orderBounds(facts, left, right, isTrue, 1);
+        return this.types.orderBounds(facts, left, right, isTrue, 1);
       case BinaryOp.Le:
-        return this.bounds.orderBounds(facts, left, right, isTrue, 0);
+        return this.types.orderBounds(facts, left, right, isTrue, 0);
       case BinaryOp.Gt:
-        return this.bounds.orderBounds(facts, right, left, isTrue, 1);
+        return this.types.orderBounds(facts, right, left, isTrue, 1);
       case BinaryOp.Ge:
-        return this.bounds.orderBounds(facts, right, left, isTrue, 0);
+        return this.types.orderBounds(facts, right, left, isTrue, 0);
       default:
-        return this.bounds.equalBounds(facts, cond.op, left, right, isTrue);
+        return this.types.equalBounds(facts, cond.op, left, right, isTrue);
     }
   }
 
   private declaredBounds(decl: VarDeclarator, module: int): void {
-    const init = decl.init;
+    const tree = this.types.program.tree;
+
+    const init = tree.exprAt(decl.initId);
     if (init == undefined) {
       return;
     }
@@ -327,12 +356,14 @@ partial class ExpressionTypes {
     const own: Linear = { term: kValueTerm + key, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    this.bounds.addEquality(facts, own, value);
+    this.types.addEquality(facts, own, value);
     this.facts = facts;
   }
 
   private assignedBounds(expr: AssignExpr, module: int): void {
-    const target = expr.target;
+    const tree = this.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
     if (expr.op != undefined || target.kind != ExprKind.Name) {
       return;
     }
@@ -342,10 +373,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.literalLength(key, expr.value);
-    this.madeLength(key, expr.value, module);
+    const valueExpr = tree.exprOf(expr.valueId);
 
-    const value = this.linearOf(expr.value, module);
+    this.literalLength(key, valueExpr);
+    const exprValue = tree.exprOf(expr.valueId);
+
+    this.madeLength(key, exprValue, module);
+
+    const value = this.linearOf(tree.exprOf(expr.valueId), module);
     if (value == undefined) {
       return;
     }
@@ -358,7 +393,7 @@ partial class ExpressionTypes {
     const own: Linear = { term, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    this.bounds.addEquality(facts, own, value);
+    this.types.addEquality(facts, own, value);
     this.facts = facts;
   }
 
@@ -379,11 +414,11 @@ partial class ExpressionTypes {
     const zero: Linear = { term: kZeroTerm, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    if (lo != undefined && this.bounds.isBoundConstant(lo)) {
-      this.bounds.addBound(facts, own, zero, lo);
+    if (lo != undefined && this.types.isBoundConstant(lo)) {
+      this.types.addBound(facts, own, zero, lo);
     }
-    if (hi != undefined && this.bounds.isBoundConstant(hi)) {
-      this.bounds.addBound(facts, zero, own, -hi);
+    if (hi != undefined && this.types.isBoundConstant(hi)) {
+      this.types.addBound(facts, zero, own, -hi);
     }
 
     this.facts = facts;
@@ -400,13 +435,19 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return this.bytes.elementOf(type) != undefined || this.bytes.isRaw(type);
+    return this.types.elementOf(type) != undefined || this.types.isRaw(type);
   }
 
   private forgetLengths(args: Read<CallArgument[]>, module: int): void {
+    const tree = this.types.program.tree;
+
     for (const arg of args) {
-      const key = this.pathKey(arg.expr, module);
-      if (key != undefined && !this.isFixedLength(arg.expr, module)) {
+      const expr = tree.exprOf(arg.exprId);
+      const key = this.pathKey(expr, module);
+      if (
+        key != undefined &&
+        !this.isFixedLength(tree.exprOf(arg.exprId), module)
+      ) {
         this.forgetLength(key);
       }
     }
@@ -417,7 +458,7 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>();
 
     for (const [known, type] of this.facts) {
-      const edge = this.bounds.edgeOf(known);
+      const edge = this.types.edgeOf(known);
       const isLength =
         edge != undefined && (edge.upper == length || edge.lower == length);
       if (!isLength) {
@@ -434,10 +475,10 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>();
 
     for (const [known, type] of this.facts) {
-      const edge = this.bounds.edgeOf(known);
+      const edge = this.types.edgeOf(known);
       if (
         edge == undefined ||
-        this.bounds.isKeptBound(edge, value, length, kept)
+        this.types.isKeptBound(edge, value, length, kept)
       ) {
         facts.set(known, type);
       }
@@ -446,7 +487,11 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private readonly loopDirection(changes: Read<Expr[]>, loc: int, module: int): BoundSide {
+  private readonly loopDirection(
+    changes: Read<Expr[]>,
+    loc: int,
+    module: int,
+  ): BoundSide {
     let side: BoundSide = BoundSide.None;
 
     for (const change of changes) {
@@ -465,7 +510,9 @@ partial class ExpressionTypes {
   }
 
   private readonly stepSide(change: Expr, loc: int, module: int): BoundSide {
-    const target = this.bounds.changedTarget(change);
+    const tree = this.types.program.tree;
+
+    const target = this.types.changedTarget(change);
     if (target == undefined || target.kind != ExprKind.Name) {
       return BoundSide.None;
     }
@@ -482,7 +529,7 @@ partial class ExpressionTypes {
     }
     if (
       change.kind != ExprKind.Assign ||
-      change.value.kind != ExprKind.IntLit
+      tree.exprOf(change.valueId).kind != ExprKind.IntLit
     ) {
       return BoundSide.Both;
     }
@@ -500,7 +547,7 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>();
 
     for (const [known, type] of this.facts) {
-      const edge = this.bounds.edgeOf(known);
+      const edge = this.types.edgeOf(known);
       const isLength =
         edge != undefined &&
         (edge.upper.startsWith(kLengthTerm) ||
@@ -539,11 +586,15 @@ partial class ExpressionTypes {
     isCompound: boolean,
     module: int,
   ): void {
-    const at = this.linearOf(target.index, module);
-    const key = this.pathKey(target.object, module);
-    const code = this.bounds.writeCode(isCompound);
+    const tree = this.types.program.tree;
+
+    const index = tree.exprOf(target.indexId);
+    const at = this.linearOf(index, module);
+    const object = tree.exprOf(target.objectId);
+    const key = this.pathKey(object, module);
+    const code = this.types.writeCode(isCompound);
     if (at == undefined || key == undefined) {
-      this.report(module, target.loc, code, kNoDetails);
+      this.errors.write(module, target.loc, code, kNoDetails);
 
       return;
     }
@@ -551,12 +602,12 @@ partial class ExpressionTypes {
     const length = kLengthTerm + key;
     const isLength = at.term.startsWith(kLengthTerm) && at.offset >= 0;
     const isNatural = isLength || this.canProve(kZeroTerm, at.term, -at.offset);
-    const room = this.bounds.writeRoom(isCompound, at.offset);
+    const room = this.types.writeRoom(isCompound, at.offset);
     const isFirst = at.term == kZeroTerm && at.offset == 0 && !isCompound;
     const isInside =
       isFirst || (isNatural && this.canProve(at.term, length, room));
     if (!isInside) {
-      this.report(module, target.loc, code, kNoDetails);
+      this.errors.write(module, target.loc, code, kNoDetails);
     }
   }
 }

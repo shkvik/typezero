@@ -22,7 +22,7 @@ import {
   kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private readonly isTzMap(type: Type): boolean {
@@ -37,17 +37,25 @@ partial class Lowering {
     return type.kind == TypeKind.Dict && type.dict == DictKind.Set;
   }
 
-  private readonly mapHome(): Module | undefined {
-    return this.program.modules.find((one) => one.name == kMapModule);
+  private readonly mapHome(): int | undefined {
+    const module = this.values.types.program.modules.find(
+      (one) => one.name == kMapModule,
+    );
+
+    return module?.id;
   }
 
   private readonly mapClass(): ClassDecl | undefined {
+    const tree = this.values.types.program.tree;
+
     const home = this.mapHome();
     if (home == undefined) {
       return undefined;
     }
 
-    for (const item of home.file.items) {
+    const items = this.values.types.program.modules[home]?.file.itemsList;
+
+    for (const item of tree.stmtsOf(items)) {
       if (item.kind == StmtKind.Class && item.name == kHashMapName) {
         return item;
       }
@@ -56,7 +64,7 @@ partial class Lowering {
     return undefined;
   }
 
-  private readonly mapInstance(type: Type): Type | undefined {
+  private mapInstance(type: Type): Type | undefined {
     const home = this.mapHome();
     const decl = this.mapClass();
     if (home == undefined || decl == undefined || type.kind != TypeKind.Dict) {
@@ -65,15 +73,18 @@ partial class Lowering {
 
     const value = this.mapValueType(type);
 
-    return this.resolver.classInstance(home.id, decl, [type.key, value]);
+    return this.values.types.classInstance(home, decl, [
+      this.values.types.store.keyOf(type),
+      value,
+    ]);
   }
 
   private readonly mapValueType(type: Type): Type {
     if (type.kind != TypeKind.Dict || type.dict == DictKind.Set) {
-      return this.store.plain(TypeKind.Boolean);
+      return this.values.types.store.plain(TypeKind.Boolean);
     }
 
-    return type.value;
+    return this.values.types.store.valueOf(type);
   }
 
   private setAdded(
@@ -83,6 +94,8 @@ partial class Lowering {
     passed: Read<CallArgument[]>,
     loc: int,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const argument = passed[0];
     if (argument == undefined || type.kind != TypeKind.Dict) {
       this.notLowered(frame.module, loc, "a call of Set.add");
@@ -91,28 +104,48 @@ partial class Lowering {
     }
 
     const set = this.value(frame, owner);
-    const given = this.wantedValue(frame, argument.expr, type.key);
+    const given = this.wantedValue(
+      frame,
+      tree.exprOf(argument.exprId),
+      this.values.types.store.keyOf(type),
+    );
     if (set == undefined || given == undefined) {
       return undefined;
     }
 
-    const item = this.converted(frame, given, type.key, argument.expr.loc);
+    const item = this.converted(
+      frame,
+      given,
+      this.values.types.store.keyOf(type),
+      tree.exprOf(argument.exprId).loc,
+    );
     if (item == undefined) {
       return undefined;
     }
 
-    const target = { module: kMapModule, name: kSetAddName };
+    const target: RuntimeTarget = { module: kMapModule, name: kSetAddName };
 
-    this.runtimeFunctionCall(frame, target, [type.key], [set, item], loc);
-    this.dropping(frame, item);
+    this.runtimeFunctionCall(
+      frame,
+      target,
+      [this.values.types.store.keyOf(type)],
+      [set, item],
+      loc,
+    );
 
     return set;
   }
 
-  private mapMade(frame: Read<Frame>, type: Type, loc: int): IrValue | undefined {
+  private mapMade(
+    frame: Read<Frame>,
+    type: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const instance = this.mapInstance(type);
     const decl = this.mapClass();
-    const ctor = decl?.constructors[0];
+    const ctor = tree.functionsOf(decl?.constructorsList)[0];
     if (instance == undefined || decl == undefined || ctor == undefined) {
       this.notLowered(frame.module, loc, "a map of these types");
 
@@ -143,9 +176,11 @@ partial class Lowering {
     passed: Read<CallArgument[]>,
     loc: int,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const instance = this.mapInstance(type);
     const decl = this.mapClass();
-    const fn = decl?.methods.find((one) => one.name == name);
+    const fn = this.values.types.classMethodNamed(decl, name);
     if (instance == undefined || decl == undefined || fn == undefined) {
       this.notLowered(frame.module, loc, `a call of Map.${name}`);
 
@@ -184,7 +219,7 @@ partial class Lowering {
     }
 
     const answer: IrValue = { type: result, value, tz: target.shape.result };
-    const returned = this.callResult(frame, answer, fn, [map]);
+    const returned = this.receiverResult(frame, answer, fn, [map], map);
 
     this.dropping(frame, map);
 
@@ -202,10 +237,16 @@ partial class Lowering {
       return undefined;
     }
 
-    const target = { module: kMapModule, name };
+    const target: RuntimeTarget = { module: kMapModule, name };
     const value = this.mapValueType(type);
-    const items = [type.key, value];
-    const listed = this.runtimeFunctionCall(frame, target, items, [map], owner.loc);
+    const items = [this.values.types.store.keyOf(type), value];
+    const listed = this.runtimeFunctionCall(
+      frame,
+      target,
+      items,
+      [map],
+      owner.loc,
+    );
 
     this.dropping(frame, map);
 
@@ -226,16 +267,25 @@ partial class Lowering {
 
     if (this.isTzSet(type)) {
       const name = this.pick(isCopy, kSetAddedName, kSetTakenName);
-      const target = { module: kMapModule, name };
+      const target: RuntimeTarget = { module: kMapModule, name };
 
-      this.runtimeFunctionCall(frame, target, [type.key], [map, entries], 0);
+      this.runtimeFunctionCall(
+        frame,
+        target,
+        [this.values.types.store.keyOf(type)],
+        [map, entries],
+        0,
+      );
 
       return;
     }
 
     const name = this.pick(isCopy, kMapAddedName, kMapTakenName);
-    const target = { module: kMapModule, name };
-    const items = [type.key, type.value];
+    const target: RuntimeTarget = { module: kMapModule, name };
+    const items = [
+      this.values.types.store.keyOf(type),
+      this.values.types.store.valueOf(type),
+    ];
 
     this.runtimeFunctionCall(frame, target, items, [map, entries], 0);
   }
@@ -245,13 +295,19 @@ partial class Lowering {
       return true;
     }
 
-    const isKeyCopy = this.traits.isCopy(type.key, this.values);
-    const isValueCopy = type.dict == DictKind.Set || this.traits.isCopy(type.value, this.values);
+    const isKeyCopy = this.values.isCopy(this.values.types.store.keyOf(type));
+    const isValueCopy =
+      type.dict == DictKind.Set ||
+      this.values.isCopy(this.values.types.store.valueOf(type));
 
     return isKeyCopy && isValueCopy;
   }
 
-  private mapMoved(frame: Frame, source: Expr, type: Type): IrValue | undefined {
+  private mapMoved(
+    frame: Frame,
+    source: Expr,
+    type: Type,
+  ): IrValue | undefined {
     const map = this.value(frame, source);
     if (map == undefined) {
       return undefined;

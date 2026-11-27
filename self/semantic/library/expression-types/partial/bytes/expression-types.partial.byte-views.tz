@@ -20,33 +20,37 @@ import {
 
 partial class ExpressionTypes {
   private dataViewCheck(expr: NewExpr, buffer: Expr, module: int): void {
+    const tree = this.types.program.tree;
+
     const found = this.peekType(buffer, module);
     const base = this.types.definedType(found);
     if (base.kind == TypeKind.Error) {
       return;
     }
-    if (!this.byteSources.isArrayBuffer(base)) {
-      const viewOverError = this.byteSources.viewOverError(buffer.loc, found);
+    if (!this.types.isArrayBuffer(base)) {
+      const viewOverError = this.types.viewOverError(buffer.loc, found);
 
-      return this.reportFound(module, viewOverError);
+      return this.errors.writeFound(module, viewOverError);
     }
 
-    const offset = expr.args[1]?.expr;
-    const length = expr.args[2]?.expr;
+    const offset = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
+    const length = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
 
     this.viewCheck(buffer, offset, length, 1, kDataViewWhat, module);
   }
 
   private typedViewCheck(expr: NewExpr, made: Type, module: int): void {
-    const buffer = expr.args[0]?.expr;
-    const size = this.byteSources.elementSize(made);
-    const name = this.byteSources.typedName(made);
+    const tree = this.types.program.tree;
+
+    const buffer = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const size = this.types.elementSize(made);
+    const name = this.types.typedName(made);
     if (buffer == undefined || size == undefined || name == undefined) {
       return;
     }
 
-    const offset = expr.args[1]?.expr;
-    const length = expr.args[2]?.expr;
+    const offset = tree.exprAt(tree.argumentsOf(expr.argsList)[1]?.exprId);
+    const length = tree.exprAt(tree.argumentsOf(expr.argsList)[2]?.exprId);
 
     this.viewCheck(buffer, offset, length, size, `the ${name}`, module);
   }
@@ -112,13 +116,13 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const offsetAlignedError = this.byteSources.offsetAlignedError(
+    const offsetAlignedError = this.types.offsetAlignedError(
       offset.loc,
       what,
       size,
     );
 
-    this.reportFound(module, offsetAlignedError);
+    this.errors.writeFound(module, offsetAlignedError);
 
     return false;
   }
@@ -141,13 +145,13 @@ partial class ExpressionTypes {
       }
     }
 
-    const sizeAlignedError = this.byteSources.sizeAlignedError(
+    const sizeAlignedError = this.types.sizeAlignedError(
       buffer.loc,
       what,
       size,
     );
 
-    this.reportFound(module, sizeAlignedError);
+    this.errors.writeFound(module, sizeAlignedError);
   }
 
   private viewFitCheck(
@@ -162,16 +166,16 @@ partial class ExpressionTypes {
     const count = this.viewCount(length, size, module);
     const whole = this.measuredLength(buffer, module);
     if (from != undefined && count != undefined && whole != undefined) {
-      const sum = this.bounds.linearSum(from, count);
+      const sum = this.types.linearSum(from, count);
       if (sum != undefined && this.isLinearUpTo(sum, whole, 0)) {
         return;
       }
     }
 
     const shownOffset = this.shownOffset(offset, module);
-    const shownLength = this.sources.valueText(length, module);
-    const shownBuffer = this.sources.valueText(buffer, module);
-    const notFitsError = this.byteSources.notFitsError(
+    const shownLength = this.types.valueText(length, module);
+    const shownBuffer = this.types.valueText(buffer, module);
+    const notFitsError = this.types.notFitsError(
       length.loc,
       what,
       shownOffset,
@@ -180,7 +184,7 @@ partial class ExpressionTypes {
       shownBuffer,
     );
 
-    this.reportFound(module, notFitsError);
+    this.errors.writeFound(module, notFitsError);
   }
 
   private viewCount(
@@ -235,17 +239,19 @@ partial class ExpressionTypes {
     field: string,
     module: int,
   ): string | undefined {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Member || expr.name != field) {
       return undefined;
     }
 
-    const object = expr.object;
+    const object = tree.exprOf(expr.objectId);
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
 
     const type = this.peekType(object, module);
-    if (!this.byteSources.isByteView(type)) {
+    if (!this.types.isByteView(type)) {
       return undefined;
     }
 
@@ -253,12 +259,15 @@ partial class ExpressionTypes {
   }
 
   private viewOwnerSize(buffer: Expr, module: int): decimal | undefined {
+    const tree = this.types.program.tree;
+
     if (buffer.kind != ExprKind.Member) {
       return undefined;
     }
 
-    const type = this.peekType(buffer.object, module);
+    const object = tree.exprOf(buffer.objectId);
+    const type = this.peekType(object, module);
 
-    return this.byteSources.elementSize(type);
+    return this.types.elementSize(type);
   }
 }

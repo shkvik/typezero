@@ -3,28 +3,16 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  TypeParamDecl,
-  TypeRef,
-} from "../../../../program/ast/types/ast.types.types.tz";
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
-import {
-  BlockStmt,
-  Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   BodySource,
-  FunctionDecl,
   FunctionPlace,
-  Param,
-  ParamForm,
   ParamKind,
   ParamProperty,
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   Access,
-  ClassMember,
   MethodKind,
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import { FunctionKind } from "../types/file-parser.types.context.tz";
@@ -33,6 +21,28 @@ import {
   ParamName,
   ParamPattern,
 } from "../types/file-parser.types.functions.tz";
+import {
+  ClassMember,
+} from "../../../../program/syntax/types/syntax.types.classes.tz";
+import {
+  Expr,
+} from "../../../../program/syntax/types/syntax.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamForm,
+} from "../../../../program/syntax/types/syntax.types.functions.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  BlockStmt,
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 partial class FileParser {
   private functionDeclaration(isAsync: boolean): Stmt {
@@ -192,14 +202,15 @@ partial class FileParser {
         return this.brokenParams(params, opened);
       }
 
+      const rest = param.form.kind == ParamKind.Rest;
+      const paramLoc = param.loc;
+
       params.push(param);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
-
-      const rest = param.form.kind == ParamKind.Rest;
       if (rest && !this.cursor.is(TokenKind.RParen)) {
-        this.cursor.report(param.loc, Code.RestParameterNotLast);
+        this.cursor.report(paramLoc, Code.RestParameterNotLast);
       }
     }
 
@@ -311,7 +322,7 @@ partial class FileParser {
   private readonly paramForm(
     rest: boolean,
     optional: boolean,
-    defaultValue: Expr | undefined,
+    defaultValue: Own<Expr | undefined>,
   ): ParamForm {
     if (rest) {
       return { kind: ParamKind.Rest };
@@ -379,7 +390,7 @@ partial class FileParser {
   }
 
   private withPrologue(
-    body: BlockStmt | undefined,
+    body: Own<BlockStmt | undefined>,
     patterns: Read<ParamPattern[]>,
   ): BlockStmt | undefined {
     if (patterns.length == 0 || body == undefined) {
@@ -404,7 +415,12 @@ partial class FileParser {
 
     const statements = prologue.concat(body.body);
 
-    return { kind: StmtKind.Block, loc: body.loc, body: statements, end: body.end };
+    return {
+      kind: StmtKind.Block,
+      loc: body.loc,
+      body: statements,
+      end: body.end,
+    };
   }
 
   private readonly asyncFunctionAhead(): boolean {
@@ -481,7 +497,7 @@ partial class FileParser {
     generator: boolean,
     isAsync: boolean,
     place: FunctionPlace,
-    role: ClassMember | undefined,
+    role: Own<ClassMember | undefined>,
   ): FunctionDecl {
     const outer = this.context;
     const functionKind = this.functionKindOf(generator);

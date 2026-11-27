@@ -14,31 +14,36 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import {
   ClassMemberEntry,
+  ModuleClass,
   OverriddenSite,
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private redeclareChecks(decl: ClassDecl, module: int): void {
-    const hasParent = decl.base != undefined || decl.baseExpr != undefined;
+    const tree = this.types.program.tree;
+
+    const hasParent =
+      tree.typeRefAt(decl.baseId) != undefined ||
+      tree.exprAt(decl.baseExprId) != undefined;
     const self = this.declaredInstance(decl, module);
     if (self == undefined) {
       return;
     }
 
-    const parent = this.classes.parentOf(self, decl);
+    const parent = this.types.parentOf(self, decl);
 
-    for (const field of decl.fields) {
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       if (field.form == FieldKind.Static) {
         continue;
       }
       if (parent == undefined) {
-        const lonelyOverrideError = this.overrides.lonelyOverrideCheck(
+        const lonelyOverrideError = this.types.lonelyOverrideCheck(
           decl,
           field,
           hasParent,
         );
 
-        this.reportFound(module, lonelyOverrideError);
+        this.errors.writeFound(module, lonelyOverrideError);
 
         continue;
       }
@@ -47,12 +52,17 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly declaredInstance(
+  private declaredInstance(
     decl: ClassDecl,
     module: int,
   ): InstanceType | undefined {
-    const params = this.resolver.parameterTypes(module, decl.typeParams);
-    const instance = this.resolver.classInstance(module, decl, params);
+    const tree = this.types.program.tree;
+
+    const params = this.types.parameterTypes(
+      module,
+      tree.typeParamsOf(decl.typeParamsList),
+    );
+    const instance = this.types.classInstance(module, decl, params);
     if (instance.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -76,19 +86,19 @@ partial class ExpressionTypes {
     }
 
     const inherited = entry?.field;
-    if (inherited != undefined && this.classes.isArrowField(inherited)) {
+    if (inherited != undefined && this.types.isArrowField(inherited)) {
       return;
     }
     if (entry == undefined || inherited == undefined) {
-      const newFieldError = this.overrides.newFieldCheck(field, parent);
+      const newFieldError = this.types.newFieldCheck(field, parent);
 
-      return this.reportFound(module, newFieldError);
+      return this.errors.writeFound(module, newFieldError);
     }
 
     const owner = entry.owner.name ?? "";
 
     if (inherited.access == Access.Private) {
-      this.report(module, field.loc, Code.FieldPrivateInParent, {
+      this.errors.write(module, field.loc, Code.FieldPrivateInParent, {
         word,
         first: owner,
       });
@@ -96,21 +106,21 @@ partial class ExpressionTypes {
       return;
     }
 
-    const fieldAccessError = this.classes.fieldAccessCheck(
+    const fieldAccessError = this.types.fieldAccessCheck(
       decl,
       field,
       inherited,
       owner,
     );
 
-    this.reportFound(module, fieldAccessError);
-    const redeclaredValueError = this.overrides.redeclaredValueCheck(
+    this.errors.writeFound(module, fieldAccessError);
+    const redeclaredValueError = this.types.redeclaredValueCheck(
       decl,
       field,
       owner,
     );
 
-    this.reportFound(module, redeclaredValueError);
+    this.errors.writeFound(module, redeclaredValueError);
 
     const own: ClassMemberEntry = {
       owner: decl,
@@ -123,31 +133,34 @@ partial class ExpressionTypes {
     this.fieldLayoutCheck(decl, own, entry, module);
   }
 
-  private readonly parentMethodChecks(decl: ClassDecl, module: int): void {
+  private parentMethodChecks(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     const self = this.declaredInstance(decl, module);
     if (self == undefined) {
       return;
     }
 
-    const parent = this.classes.parentOf(self, decl);
+    const parent = this.types.parentOf(self, decl);
     if (parent == undefined) {
       return;
     }
 
-    for (const field of decl.fields) {
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       if (field.form != FieldKind.Static) {
         this.parentMethodCheck(field, parent, module);
       }
     }
   }
 
-  private readonly parentMethodCheck(
+  private parentMethodCheck(
     field: ClassField,
     parent: InstanceType,
     module: int,
   ): void {
     const word = field.name;
-    const entry = this.classMember(parent, word).entry;
+    const entryLookup = this.classMember(parent, word);
+    const entry = entryLookup.entry;
     if (entry == undefined || entry.isStatic || entry.methods.length == 0) {
       return;
     }
@@ -157,7 +170,10 @@ partial class ExpressionTypes {
 
     const first = parent.name;
 
-    this.report(module, field.loc, Code.ParentMethodField, { word, first });
+    this.errors.write(module, field.loc, Code.ParentMethodField, {
+      word,
+      first,
+    });
   }
 
   private fieldLayoutCheck(
@@ -176,66 +192,71 @@ partial class ExpressionTypes {
     const theirType = this.fieldTypeOf(theirs, inherited);
     const isOpen =
       ownType.kind == TypeKind.Error || theirType.kind == TypeKind.Error;
-    if (isOpen || this.classes.isSameLayout(ownType, theirType)) {
+    if (isOpen || this.types.isClassSameLayout(ownType, theirType)) {
       return;
     }
 
-    this.report(module, field.loc, Code.FieldLayout, {
+    this.errors.write(module, field.loc, Code.FieldLayout, {
       word: field.name,
       first: decl.name ?? "",
-      second: this.text.of(ownType),
+      second: this.types.typeText(ownType),
       other: theirs.owner.name ?? "",
-      place: this.text.of(theirType),
+      place: this.types.typeText(theirType),
     });
   }
 
-  private readonly methodOverFieldCheck(
+  private methodOverFieldCheck(
     method: FunctionDecl,
     entry: Read<ClassMemberEntry>,
     parent: InstanceType,
     module: int,
   ): boolean {
-    const checked = this.overrides.methodOverFieldCheck(method, entry, parent);
+    const checked = this.types.methodOverFieldCheck(method, entry, parent);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly extendsCycleCheck(decl: ClassDecl, module: int): void {
-    const base = decl.base;
+  private extendsCycleCheck(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
+    const base = tree.typeRefAt(decl.baseId);
     const self = this.declaredInstance(decl, module);
     if (base == undefined || self == undefined) {
       return;
     }
 
     const cycle = this.cycleThrough(self, decl);
-    const earliest = this.classes.earliestOf(cycle);
+    const earliest = this.types.earliestOf(cycle);
     if (earliest == undefined) {
       return;
     }
 
-    const before = this.classes.previousInCycle(cycle, earliest);
-    if (before != self) {
+    const before = this.types.previousInCycle(cycle, earliest);
+    if (before == undefined || before.id != self.id) {
       return;
     }
-    if (earliest == self) {
-      this.report(module, base.loc, Code.ExtendsItself, {
+    if (earliest.id == self.id) {
+      this.errors.write(module, base.loc, Code.ExtendsItself, {
         first: self.name,
       });
 
       return;
     }
 
-    this.report(module, base.loc, Code.ExtendsItselfThrough, {
+    this.errors.write(module, base.loc, Code.ExtendsItselfThrough, {
       first: self.name,
       word: earliest.name,
     });
   }
 
-  private readonly cycleThrough(self: InstanceType, decl: ClassDecl): InstanceType[] {
+  private readonly cycleThrough(
+    self: InstanceType,
+    decl: ClassDecl,
+  ): InstanceType[] {
     const chain: InstanceType[] = [self];
-    let current = this.classes.parentOf(self, decl);
+    let current = this.types.parentOf(self, decl);
 
     while (current != undefined) {
       const step = current;
@@ -250,35 +271,43 @@ partial class ExpressionTypes {
       }
 
       chain.push(step);
-      current = this.classes.parentOf(step, stepDecl);
+      current = this.types.parentOf(step, stepDecl);
     }
 
     return [];
   }
 
   private noteSelfCall(member: MemberExpr, module: int): void {
+    const tree = this.types.program.tree;
+
     const fn = this.openFunctions[this.openFunctions.length - 1];
     if (fn == undefined || fn.role == undefined || fn.isArrow) {
       return;
     }
-    if (!this.isThisName(member.object, module)) {
+    const object = tree.exprOf(member.objectId);
+    if (!this.isThisName(object, module)) {
       return;
     }
 
-    const isKnown = this.selfCalls.get(fn)?.includes(member) ?? false;
+    const isKnown = this.selfCalls.get(fn.id)?.includes(member) ?? false;
     if (isKnown) {
       return;
     }
-    if (!this.selfCalls.has(fn)) {
-      this.selfCalls.set(fn, []);
+    if (!this.selfCalls.has(fn.id)) {
+      this.selfCalls.set(fn.id, []);
     }
 
-    this.selfCalls.get(fn)?.push(member);
+    this.selfCalls.get(fn.id)?.push(member);
   }
 
-  private readonly overriddenCallChecks(decl: ClassDecl, module: int): void {
+  private overriddenCallChecks(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
     const self = this.declaredInstance(decl, module);
-    if (self == undefined || decl.typeParams.length > 0) {
+    if (
+      self == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return;
     }
 
@@ -287,9 +316,16 @@ partial class ExpressionTypes {
       return;
     }
 
-    for (const fn of decl.constructors) {
-      for (const site of this.selfCalls.get(fn) ?? []) {
-        const visited = new Set<FunctionDecl>([fn]);
+    for (const fn of tree.functionsOf(decl.constructorsList)) {
+      const count = this.selfCalls.get(fn.id)?.length ?? 0;
+
+      for (let at = 0; at < count; at++) {
+        const site = this.selfCallAt(fn, at);
+        if (site == undefined) {
+          continue;
+        }
+
+        const visited = new Set<int>([fn.id]);
         const found: OverriddenSite = {
           self,
           children: children.slice(),
@@ -302,33 +338,46 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly overriddenCall(
+  private readonly selfCallAt(
+    fn: FunctionDecl,
+    at: int,
+  ): MemberExpr | undefined {
+    const calls = this.selfCalls.get(fn.id) ?? [];
+
+    return calls[at];
+  }
+
+  private overriddenCall(
     found: OverriddenSite,
     site: MemberExpr,
     call: MemberExpr,
     decl: ClassDecl,
   ): boolean {
     const word = call.name;
-    const overrider = this.overrides.overridingChild(found.children, word);
+    const overrider = this.types.overridingChild(found.children, word);
     if (overrider != undefined) {
       const first = decl.name ?? "";
       const other = overrider.name ?? "";
-      const code = this.overrides.overriddenCode(site, call);
+      const code = this.types.overriddenCode(site, call);
 
-      this.report(found.module, site.loc, code, { first, word, other });
+      this.errors.write(found.module, site.loc, code, { first, word, other });
 
       return true;
     }
 
-    const method = this.classMember(found.self, word).entry?.methods[0];
-    if (method == undefined || found.visited.has(method)) {
+    const lookup = this.classMember(found.self, word);
+    const method = lookup.entry?.methods[0];
+    if (method == undefined || found.visited.has(method.id)) {
       return false;
     }
 
-    found.visited.add(method);
+    found.visited.add(method.id);
 
-    for (const inner of this.selfCalls.get(method) ?? []) {
-      if (this.overriddenCall(found, site, inner, decl)) {
+    const count = this.selfCalls.get(method.id)?.length ?? 0;
+
+    for (let at = 0; at < count; at++) {
+      const inner = this.selfCallAt(method, at);
+      if (inner != undefined && this.overriddenCall(found, site, inner, decl)) {
         return true;
       }
     }
@@ -336,26 +385,36 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly childClassesOf(self: InstanceType): ClassDecl[] {
+  private childClassesOf(self: InstanceType): ClassDecl[] {
+    const classes: ModuleClass[] = [];
     const children: ClassDecl[] = [];
 
     for (const [module, record] of this.records) {
       for (const decl of record.classes.values()) {
-        if (this.isChildClass(decl, module, self)) {
-          children.push(decl);
-        }
+        classes.push({ module, decl });
+      }
+    }
+
+    for (const one of classes) {
+      if (this.isChildClass(one.decl, one.module, self)) {
+        children.push(one.decl);
       }
     }
 
     return children;
   }
 
-  private readonly isChildClass(
+  private isChildClass(
     decl: ClassDecl,
     module: int,
     ancestor: InstanceType,
   ): boolean {
-    if (decl.base == undefined || decl.typeParams.length > 0) {
+    const tree = this.types.program.tree;
+
+    if (
+      tree.typeRefAt(decl.baseId) == undefined ||
+      tree.typeParamsOf(decl.typeParamsList).length > 0
+    ) {
       return false;
     }
 
@@ -374,7 +433,7 @@ partial class ExpressionTypes {
     decl: ClassDecl,
   ): InstanceType[] {
     const chain: InstanceType[] = [];
-    let current = this.classes.parentOf(self, decl);
+    let current = this.types.parentOf(self, decl);
 
     while (current != undefined) {
       const step = current;
@@ -385,7 +444,7 @@ partial class ExpressionTypes {
       }
 
       chain.push(step);
-      current = this.classes.parentOf(step, stepDecl);
+      current = this.types.parentOf(step, stepDecl);
     }
 
     return chain;

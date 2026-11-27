@@ -12,20 +12,29 @@ import {
   NameSymbol,
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ScopeTraversal {
-  private declareImports(): void {
-    for (const decl of this.module.file.imports) {
-      this.declareImport(decl);
+  private declareImports(program: Read<Program>): void {
+    const tree = program.tree;
+
+    for (const decl of tree.importsOf(
+      program.modules[this.module]?.file.importsList,
+    )) {
+      this.declareImport(program, decl);
     }
 
-    for (const decl of this.module.implicit) {
-      this.declareImport(decl);
+    for (const decl of tree.importsOf(
+      program.modules[this.module]?.implicitList,
+    )) {
+      this.declareImport(program, decl);
     }
   }
 
-  private declareImport(decl: ImportDecl): void {
-    for (const name of decl.names) {
+  private declareImport(program: Read<Program>, decl: ImportDecl): void {
+    const tree = program.tree;
+
+    for (const name of tree.namesOf(decl.namesList)) {
       const bound = this.names.imports.get(name.as);
 
       this.declareImported({
@@ -51,46 +60,56 @@ partial class ScopeTraversal {
     this.scopes.declareType(symbol);
   }
 
-  private declareStatements(statements: Read<Stmt[]>): void {
+  private declareStatements(
+    program: Read<Program>,
+    statements: Read<Stmt[]>,
+  ): void {
     for (const statement of statements) {
-      this.declareStatement(statement);
+      this.declareStatement(program, statement);
     }
   }
 
-  private declareStatement(statement: Stmt): void {
+  private declareStatement(program: Read<Program>, statement: Stmt): void {
+    const tree = program.tree;
+
     const loc = statement.loc;
 
     switch (statement.kind) {
       case StmtKind.VarDecl:
-        for (const decl of statement.decls) {
+        for (const decl of tree.declaratorsOf(statement.declsList)) {
           this.declareValue(
+            program,
             { name: decl.name, kind: SymbolKind.Variable, loc: decl.loc },
             false,
           );
         }
         break;
       case StmtKind.Function:
-        this.declareFunction(statement);
+        this.declareFunction(program, statement);
         break;
       case StmtKind.Class:
-        this.declareBoth({
+        this.declareBoth(program, {
           name: statement.name ?? "",
           kind: SymbolKind.Class,
           loc,
         });
         break;
       case StmtKind.Enum:
-        this.declareBoth({ name: statement.name, kind: SymbolKind.Enum, loc });
+        this.declareBoth(program, {
+          name: statement.name,
+          kind: SymbolKind.Enum,
+          loc,
+        });
         break;
       case StmtKind.TypeAlias:
-        this.declareType({
+        this.declareType(program, {
           name: statement.name,
           kind: SymbolKind.TypeAlias,
           loc,
         });
         break;
       case StmtKind.Handle:
-        this.declareBoth({
+        this.declareBoth(program, {
           name: statement.name,
           kind: SymbolKind.Handle,
           loc,
@@ -101,19 +120,29 @@ partial class ScopeTraversal {
     }
   }
 
-  private declareFunction(fn: FunctionDecl): void {
+  private declareFunction(program: Read<Program>, fn: FunctionDecl): void {
+    const tree = program.tree;
+
     const name = fn.name;
     const previous = this.scopes.declaredValue(name)?.symbol;
     const anotherSignature =
-      fn.body == undefined && previous?.kind == SymbolKind.Function;
+      tree.blockAt(fn.bodyId) == undefined &&
+      previous?.kind == SymbolKind.Function;
     if (!anotherSignature) {
-      this.declareValue({ name, kind: SymbolKind.Function, loc: fn.loc }, true);
+      this.declareValue(
+        program,
+        { name, kind: SymbolKind.Function, loc: fn.loc },
+        true,
+      );
     }
   }
 
-  private declareClasses(classes: Read<DeclaredClass[]>): void {
+  private declareClasses(
+    program: Read<Program>,
+    classes: Read<DeclaredClass[]>,
+  ): void {
     for (const one of classes) {
-      this.declareBoth({
+      this.declareBoth(program, {
         name: one.name,
         kind: SymbolKind.Class,
         loc: one.loc,
@@ -121,13 +150,17 @@ partial class ScopeTraversal {
     }
   }
 
-  private declareBoth(symbol: NameSymbol): void {
-    if (this.declareValue(symbol, true)) {
-      this.declareType(symbol);
+  private declareBoth(program: Read<Program>, symbol: NameSymbol): void {
+    if (this.declareValue(program, symbol, true)) {
+      this.declareType(program, symbol);
     }
   }
 
-  private declareValue(symbol: NameSymbol, live: boolean): boolean {
+  private declareValue(
+    program: Read<Program>,
+    symbol: NameSymbol,
+    live: boolean,
+  ): boolean {
     const name = symbol.name;
     if (name == "") {
       return false;
@@ -141,14 +174,17 @@ partial class ScopeTraversal {
     }
 
     const code = this.duplicateCode(symbol, previous);
-    const other = this.lineOf(previous.loc);
+    const other = this.lineOf(program, previous.loc);
 
     this.report(symbol.loc, code, { word: name, other });
 
     return false;
   }
 
-  private readonly duplicateCode(symbol: NameSymbol, previous: NameSymbol): Code {
+  private readonly duplicateCode(
+    symbol: NameSymbol,
+    previous: NameSymbol,
+  ): Code {
     const functions =
       symbol.kind == SymbolKind.Function &&
       previous.kind == SymbolKind.Function;
@@ -159,7 +195,7 @@ partial class ScopeTraversal {
     return Code.DuplicateDeclaration;
   }
 
-  private declareType(symbol: NameSymbol): void {
+  private declareType(program: Read<Program>, symbol: NameSymbol): void {
     const name = symbol.name;
     const previous = this.scopes.declaredType(name)?.symbol;
     if (previous == undefined || previous.kind == SymbolKind.Import) {
@@ -168,12 +204,17 @@ partial class ScopeTraversal {
       return;
     }
 
-    const other = this.lineOf(previous.loc);
+    const other = this.lineOf(program, previous.loc);
 
     this.report(symbol.loc, Code.DuplicateType, { word: name, other });
   }
 
-  private declareTypeParams(params: Read<TypeParamDecl[]>): void {
+  private declareTypeParams(
+    program: Read<Program>,
+    params: Read<TypeParamDecl[]>,
+  ): void {
+    const tree = program.tree;
+
     for (const param of params) {
       const name = param.name;
       const loc = param.loc;
@@ -185,14 +226,18 @@ partial class ScopeTraversal {
           name,
           kind: SymbolKind.TypeParameter,
           loc,
-          constraint: param.constraint,
+          constraint: tree.typeRefAt(param.constraintId),
         });
       }
     }
 
     for (const param of params) {
-      this.traverseOptionalType(param.constraint);
-      this.traverseOptionalType(param.defaultType);
+      const constraintRef = tree.typeRefAt(param.constraintId);
+
+      this.traverseOptionalType(program, constraintRef);
+      const defaultType = tree.typeRefAt(param.defaultTypeId);
+
+      this.traverseOptionalType(program, defaultType);
     }
   }
 }

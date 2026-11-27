@@ -14,7 +14,6 @@ import {
   Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
-import { ExpressionCollector } from "../../../code/expression-collector/expression-collector.tz";
 import {
   TypeRef,
   TypeRefKind,
@@ -27,6 +26,7 @@ import {
   LoopSpan,
   ParamMode,
   ResultMode,
+  Variable,
 } from "../types/ownership-check.types.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import {
@@ -44,12 +44,11 @@ partial class OwnershipCheck {
       this.declareIn(frame, item, derived);
     }
 
-    const collector = new ExpressionCollector();
     const exprs: Expr[] = [];
     const values: Expr[] = [];
 
     for (const item of items) {
-      collector.statementExprs(item, exprs, values, true);
+      this.values.types.statementExprs(item, exprs, values, true);
     }
 
     for (const expr of exprs) {
@@ -60,45 +59,79 @@ partial class OwnershipCheck {
     this.extendInLoops(frame);
   }
 
-  private readonly declareIn(frame: FunctionFrame, stmt: Stmt, derived: Derived[]): void {
+  private readonly declareIn(
+    frame: FunctionFrame,
+    stmt: Stmt,
+    derived: Derived[],
+  ): void {
+    const tree = this.values.types.program.tree;
+
     switch (stmt.kind) {
       case StmtKind.VarDecl:
-        for (const declarator of stmt.decls) {
+        for (const declarator of tree.declaratorsOf(stmt.declsList)) {
           this.declareVariable(frame, declarator, stmt.isConst, stmt.isUsing);
-          this.noteDerived(declarator.loc, declarator.init, derived);
+          this.noteDerived(
+            declarator.loc,
+            tree.exprAt(declarator.initId),
+            derived,
+          );
         }
         return;
       case StmtKind.Block:
-        return this.declareAll(frame, stmt.body, derived);
+        const body = tree.stmtsOf(stmt.bodyList);
+
+        return this.declareAll(frame, body, derived);
       case StmtKind.If:
-        this.declareIn(frame, stmt.thenStmt, derived);
-        return this.declareOptional(frame, stmt.elseStmt, derived);
+        const thenStmt = tree.stmtOf(stmt.thenStmtId);
+
+        this.declareIn(frame, thenStmt, derived);
+        return this.declareOptional(
+          frame,
+          tree.stmtAt(stmt.elseStmtId),
+          derived,
+        );
       case StmtKind.While:
       case StmtKind.DoWhile:
         this.noteLoop(frame, stmt.loc, stmt);
-        return this.declareIn(frame, stmt.body, derived);
+        const bodyStmt = tree.stmtOf(stmt.bodyId);
+
+        return this.declareIn(frame, bodyStmt, derived);
       case StmtKind.For:
         this.noteLoop(frame, stmt.loc, stmt);
-        this.declareOptional(frame, stmt.init, derived);
-        return this.declareOptional(frame, stmt.body, derived);
+        const init = tree.stmtAt(stmt.initId);
+
+        this.declareOptional(frame, init, derived);
+        const stmtBody = tree.stmtAt(stmt.bodyId);
+
+        return this.declareOptional(frame, stmtBody, derived);
       case StmtKind.ForOf:
         this.noteLoop(frame, stmt.loc, stmt);
         this.declareVariable(frame, stmt.binding, stmt.isConst, stmt.isUsing);
-        this.noteDerived(stmt.binding.loc, stmt.iterable, derived);
-        return this.declareIn(frame, stmt.body, derived);
+        this.noteDerived(
+          stmt.binding.loc,
+          tree.exprOf(stmt.iterableId),
+          derived,
+        );
+        return this.declareIn(frame, tree.stmtOf(stmt.bodyId), derived);
       case StmtKind.Switch:
-        for (const option of stmt.cases) {
-          this.declareAll(frame, option.body, derived);
+        for (const option of tree.casesOf(stmt.casesList)) {
+          const bodyItem = tree.stmtsOf(option.bodyList);
+
+          this.declareAll(frame, bodyItem, derived);
         }
         return;
       case StmtKind.Labeled:
-        return this.declareIn(frame, stmt.body, derived);
+        return this.declareIn(frame, tree.stmtOf(stmt.bodyId), derived);
       default:
         return;
     }
   }
 
-  private readonly declareAll(frame: FunctionFrame, items: Read<Stmt[]>, derived: Derived[]): void {
+  private readonly declareAll(
+    frame: FunctionFrame,
+    items: Read<Stmt[]>,
+    derived: Derived[],
+  ): void {
     for (const item of items) {
       this.declareIn(frame, item, derived);
     }
@@ -114,7 +147,11 @@ partial class OwnershipCheck {
     }
   }
 
-  private readonly noteDerived(key: int, init: Expr | undefined, derived: Derived[]): void {
+  private readonly noteDerived(
+    key: int,
+    init: Expr | undefined,
+    derived: Derived[],
+  ): void {
     if (init != undefined) {
       derived.push({ key, source: init });
     }
@@ -133,13 +170,16 @@ partial class OwnershipCheck {
         }
 
         const type = this.values.variableOf(this.module, one.key);
-        if (type != undefined && this.traits.isCopy(type, this.values)) {
+        if (type != undefined && this.values.isCopy(type)) {
           continue;
         }
 
-        const root = this.borrowRootOf(one.source);
-        const key = root == undefined ? undefined : this.keyOfName(root);
-        const source = key == undefined ? undefined : frame.variables.get(key);
+        const key = this.spreadKey(one.source);
+        if (key == undefined) {
+          continue;
+        }
+
+        const source = frame.variables.get(key);
         if (source != undefined && !source.isChanged) {
           source.isChanged = true;
           isSpread = true;
@@ -148,31 +188,60 @@ partial class OwnershipCheck {
     }
   }
 
+  private spreadKey(source: Expr): int | undefined {
+    const root = this.borrowRootOf(source);
+    if (root == undefined) {
+      return undefined;
+    }
+
+    return this.keyOfName(root);
+  }
+
   private borrowRootOf(expr: Expr): NameExpr | undefined {
+    const tree = this.values.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.Name:
         return expr;
       case ExprKind.Member:
       case ExprKind.Index:
-        return this.borrowRootOf(expr.object);
+        const object = tree.exprOf(expr.objectId);
+
+        return this.borrowRootOf(object);
       case ExprKind.Cast:
-        return this.borrowRootOf(expr.operand);
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.borrowRootOf(operand);
       case ExprKind.OptionalChain:
-        return this.borrowRootOf(expr.chain);
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.borrowRootOf(chain);
       case ExprKind.Unary:
-        return this.borrowRootOf(expr.operand);
+        const operandExpr = tree.exprOf(expr.operandId);
+
+        return this.borrowRootOf(operandExpr);
       case ExprKind.Call:
-        return this.callBorrowRoot(expr.callee, expr);
+        const callee = tree.exprOf(expr.calleeId);
+
+        return this.callBorrowRoot(callee, expr);
       case ExprKind.Conditional:
-        return this.borrowRootOf(expr.thenExpr) ?? this.borrowRootOf(expr.elseExpr);
+        return (
+          this.borrowRootOf(tree.exprOf(expr.thenExprId)) ??
+          this.borrowRootOf(tree.exprOf(expr.elseExprId))
+        );
       case ExprKind.Binary:
-        return this.borrowRootOf(expr.lhs) ?? this.borrowRootOf(expr.rhs);
+        return (
+          this.borrowRootOf(tree.exprOf(expr.lhsId)) ??
+          this.borrowRootOf(tree.exprOf(expr.rhsId))
+        );
       default:
         return undefined;
     }
   }
 
   private callBorrowRoot(callee: Expr, call: Expr): NameExpr | undefined {
+    const tree = this.values.types.program.tree;
+
     if (callee.kind != ExprKind.Member) {
       return undefined;
     }
@@ -182,7 +251,9 @@ partial class OwnershipCheck {
       return undefined;
     }
 
-    return this.borrowRootOf(callee.object);
+    const object = tree.exprOf(callee.objectId);
+
+    return this.borrowRootOf(object);
   }
 
   private readonly declareVariable(
@@ -191,7 +262,11 @@ partial class OwnershipCheck {
     isConst: boolean,
     isUsing: boolean,
   ): void {
-    const isBorrowArray = this.isBorrowArrayRef(declarator.typeAnn);
+    const tree = this.values.types.program.tree;
+
+    const isBorrowArray = this.isBorrowArrayRef(
+      tree.typeRefAt(declarator.typeAnnId),
+    );
 
     frame.variables.set(declarator.loc, {
       key: declarator.loc,
@@ -204,7 +279,6 @@ partial class OwnershipCheck {
       declared: declarator.loc,
       lastUse: declarator.loc,
       isChanged: false,
-      isCaptured: false,
       isBorrowArray,
       isPattern:
         declarator.form.kind != BindingKind.Plain &&
@@ -215,12 +289,17 @@ partial class OwnershipCheck {
   private readonly isBorrowArrayRef(ref: TypeRef | undefined): boolean {
     return (
       ref != undefined &&
-      (ref.form.kind == TypeRefKind.Array || ref.form.kind == TypeRefKind.Tuple) &&
+      (ref.form.kind == TypeRefKind.Array ||
+        ref.form.kind == TypeRefKind.Tuple) &&
       this.isBorrowRef(ref)
     );
   }
 
-  private readonly noteLoop(frame: FunctionFrame, start: int, stmt: Stmt): void {
+  private readonly noteLoop(
+    frame: FunctionFrame,
+    start: int,
+    stmt: Stmt,
+  ): void {
     const end = this.lastLocOf(stmt);
     const span: LoopSpan = { start, end };
 
@@ -228,12 +307,11 @@ partial class OwnershipCheck {
   }
 
   private readonly lastLocOf(stmt: Stmt): int {
-    const collector = new ExpressionCollector();
     const exprs: Expr[] = [];
     const values: Expr[] = [];
     let last: int = stmt.loc;
 
-    collector.statementExprs(stmt, exprs, values, true);
+    this.values.types.statementExprs(stmt, exprs, values, true);
 
     for (const expr of exprs) {
       if (expr.loc > last) {
@@ -245,25 +323,36 @@ partial class OwnershipCheck {
   }
 
   private noteUse(frame: FunctionFrame, expr: Expr): void {
+    const tree = this.values.types.program.tree;
+
     if (expr.kind == ExprKind.Name) {
       this.noteName(frame, expr);
 
       return;
     }
     if (expr.kind == ExprKind.Assign || expr.kind == ExprKind.Update) {
-      if (expr.target.kind != ExprKind.Name) {
-        this.noteChange(frame, expr.target);
+      const targetExpr = tree.exprOf(expr.targetId);
+      if (targetExpr.kind != ExprKind.Name) {
+        const target = tree.exprOf(expr.targetId);
+
+        this.noteChange(frame, target);
       }
 
       return;
     }
-    if (expr.kind == ExprKind.Call && expr.callee.kind == ExprKind.Member) {
-      this.noteChangingCall(frame, expr.callee.object, expr.callee.name);
+    const callee = this.calleeMember(expr);
+    if (callee != undefined) {
+      const object = tree.exprOf(callee.objectId);
+
+      this.noteChangingCall(frame, object, callee.name);
     }
     if (expr.kind == ExprKind.Call) {
-      const info = this.calleeForUses(expr.callee, expr);
+      const calleeExpr = tree.exprOf(expr.calleeId);
+      const info = this.calleeForUses(calleeExpr, expr);
 
-      this.noteChangedArguments(frame, expr.args, info);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.noteChangedArguments(frame, args, info);
     }
   }
 
@@ -283,14 +372,19 @@ partial class OwnershipCheck {
     args: Read<CallArgument[]>,
     info: Read<Callee>,
   ): void {
+    const tree = this.values.types.program.tree;
+
     for (let index: int = 0; index < args.length; index++) {
       const arg = args[index];
       const param = this.paramAt(info, index);
       if (arg == undefined || param.mode != ParamMode.Mut) {
         continue;
       }
-      if (!this.isCopyExpr(arg.expr)) {
-        this.noteChange(frame, arg.expr);
+      const exprExpr = tree.exprOf(arg.exprId);
+      if (!this.isCopyExpr(exprExpr)) {
+        const expr = tree.exprOf(arg.exprId);
+
+        this.noteChange(frame, expr);
       }
     }
   }
@@ -352,28 +446,60 @@ partial class OwnershipCheck {
   }
 
   private readonly extendInLoops(frame: FunctionFrame): void {
+    const extended = new Map<int, int>();
+
     for (const variable of frame.variables.values()) {
-      for (const loop of frame.loops) {
-        const isInside = variable.lastUse >= loop.start;
-        const isBefore = variable.declared < loop.start;
-        if (isInside && isBefore && variable.lastUse <= loop.end) {
-          variable.lastUse = loop.end;
-        }
+      const lastUse = this.loopLastUse(frame, variable);
+      if (lastUse != variable.lastUse) {
+        extended.set(variable.key, lastUse);
+      }
+    }
+
+    for (const key of extended.keys()) {
+      const variable = frame.variables.get(key);
+      const lastUse = extended.get(key);
+      if (variable != undefined && lastUse != undefined) {
+        variable.lastUse = lastUse;
       }
     }
   }
 
+  private readonly loopLastUse(
+    frame: Read<FunctionFrame>,
+    variable: Read<Variable>,
+  ): int {
+    let lastUse: int = variable.lastUse;
+
+    for (const loop of frame.loops) {
+      const isInside = lastUse >= loop.start;
+      const isBefore = variable.declared < loop.start;
+      if (isInside && isBefore && lastUse <= loop.end) {
+        lastUse = loop.end;
+      }
+    }
+
+    return lastUse;
+  }
+
   private readonly rootNameOf(expr: Expr): NameExpr | undefined {
+    const tree = this.values.types.program.tree;
+
     switch (expr.kind) {
       case ExprKind.Name:
         return expr;
       case ExprKind.Member:
       case ExprKind.Index:
-        return this.rootNameOf(expr.object);
+        const object = tree.exprOf(expr.objectId);
+
+        return this.rootNameOf(object);
       case ExprKind.Cast:
-        return this.rootNameOf(expr.operand);
+        const operand = tree.exprOf(expr.operandId);
+
+        return this.rootNameOf(operand);
       case ExprKind.OptionalChain:
-        return this.rootNameOf(expr.chain);
+        const chain = tree.exprOf(expr.chainId);
+
+        return this.rootNameOf(chain);
       default:
         return undefined;
     }
@@ -391,8 +517,12 @@ partial class OwnershipCheck {
     if (target.module == this.module) {
       return target.loc;
     }
-    const home = this.program.modules[target.module];
-    if (target.kind != SymbolKind.Variable || home == undefined || home.source.isLibrary) {
+    const home = this.values.types.program.modules[target.module];
+    if (
+      target.kind != SymbolKind.Variable ||
+      home == undefined ||
+      home.source.isLibrary
+    ) {
       return undefined;
     }
 

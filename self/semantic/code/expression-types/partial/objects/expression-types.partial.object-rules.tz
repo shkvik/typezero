@@ -30,17 +30,23 @@ import {
 
 partial class ExpressionTypes {
   private loopCannotCheck(loop: ForOfStmt, base: Type, module: int): void {
-    const loc = loop.iterable.loc;
+    const tree = this.types.program.tree;
+
+    const loc = tree.exprOf(loop.iterableId).loc;
 
     switch (base.kind) {
       case TypeKind.Dict:
         if (base.dict == DictKind.Record) {
-          this.report(module, loc, Code.RecordNotIterable, kNoDetails);
+          this.errors.write(module, loc, Code.RecordNotIterable, kNoDetails);
         }
 
         return;
       case TypeKind.Instance:
-        return this.instanceLoopCheck(loop.iterable, base, module);
+        return this.instanceLoopCheck(
+          tree.exprOf(loop.iterableId),
+          base,
+          module,
+        );
       case TypeKind.Object:
         if (this.types.isIterableTarget(base)) {
           return;
@@ -49,8 +55,8 @@ partial class ExpressionTypes {
           return;
         }
 
-        this.report(module, loc, Code.ForOfCannot, {
-          word: this.text.of(base),
+        this.errors.write(module, loc, Code.ForOfCannot, {
+          word: this.types.typeText(base),
         });
 
         return;
@@ -61,8 +67,8 @@ partial class ExpressionTypes {
       case TypeKind.Function:
       case TypeKind.Result:
       case TypeKind.Promise:
-        this.report(module, loc, Code.ForOfCannot, {
-          word: this.text.of(base),
+        this.errors.write(module, loc, Code.ForOfCannot, {
+          word: this.types.typeText(base),
         });
 
         return;
@@ -77,32 +83,40 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
-    if (name != kArrayClass || expr.args.length != 1) {
+    const tree = this.types.program.tree;
+
+    if (name != kArrayClass || tree.argumentsOf(expr.argsList).length != 1) {
       return undefined;
     }
 
     const target = this.targetOfUse(expr.loc, name, module);
-    if (target != undefined && !this.modules.isLibraryModule(target.module)) {
+    if (target != undefined && !this.types.isLibraryModule(target.module)) {
       return undefined;
     }
 
     const element = this.arrayNewElement(expr, wanted, module);
-    const length = expr.args[0];
+    const length = tree.argumentsOf(expr.argsList)[0];
     if (element == undefined || length == undefined) {
       return undefined;
     }
 
-    this.typed(length.expr, this.store.integer(64, false), module);
+    this.typed(
+      tree.exprOf(length.exprId),
+      this.types.store.integer(64, false),
+      module,
+    );
 
-    return this.store.arrayOf(element);
+    return this.types.store.arrayOf(element);
   }
 
-  private readonly arrayNewElement(
+  private arrayNewElement(
     expr: NewExpr,
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
-    const written = expr.typeArgs[0];
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefsOf(expr.typeArgsList)[0];
     if (written != undefined) {
       const context: TypeContext = {
         module,
@@ -110,7 +124,7 @@ partial class ExpressionTypes {
         place: TypePlace.Plain,
       };
 
-      return this.resolver.value(written, context);
+      return this.types.value(written, context);
     }
 
     const goal = this.types.wantedPart(wanted);
@@ -118,7 +132,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return goal.item;
+    return this.types.store.itemOf(goal);
   }
 
   private newArrayCheck(
@@ -127,20 +141,29 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (name != kArrayClass) {
       return;
     }
     const goal = this.types.wantedPart(wanted);
     const isFromExpected = goal != undefined && goal.kind == TypeKind.Array;
-    if (expr.typeArgs.length == 0 && !isFromExpected) {
-      this.report(module, expr.loc, Code.NewArrayNeedsElement, kNoDetails);
+    if (tree.typeRefsOf(expr.typeArgsList).length == 0 && !isFromExpected) {
+      this.errors.write(
+        module,
+        expr.loc,
+        Code.NewArrayNeedsElement,
+        kNoDetails,
+      );
 
       return;
     }
 
-    const written = expr.typeArgs[0];
-    const length = expr.args[0];
-    const isSized = expr.args.length == 1 && expr.typeArgs.length == 1;
+    const written = tree.typeRefsOf(expr.typeArgsList)[0];
+    const length = tree.argumentsOf(expr.argsList)[0];
+    const isSized =
+      tree.argumentsOf(expr.argsList).length == 1 &&
+      tree.typeRefsOf(expr.typeArgsList).length == 1;
     if (!isSized || written == undefined || length == undefined) {
       return;
     }
@@ -150,21 +173,26 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const element = this.resolver.value(written, context);
-    if (!this.objects.hasZeroValue(element)) {
-      this.report(module, expr.loc, Code.NewArrayNoDefault, {
-        word: this.text.of(element),
+    const element = this.types.value(written, context);
+    if (!this.types.hasZeroValue(element)) {
+      this.errors.write(module, expr.loc, Code.NewArrayNoDefault, {
+        word: this.types.typeText(element),
       });
     }
 
     const range: ProofRange = { what: kArrayLengthWhat, low: 0 };
 
-    const given = this.peekType(length.expr, module);
-    this.requireBetween(length.expr, given, range, module);
+    const exprExpr = tree.exprOf(length.exprId);
+    const given = this.peekType(exprExpr, module);
+    const lengthExpr = tree.exprOf(length.exprId);
+
+    this.requireBetween(lengthExpr, given, range, module);
   }
 
   private undefinedTargetCheck(target: MemberExpr, module: int): boolean {
-    const object = target.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(target.objectId);
     if (object.kind == ExprKind.Name && object.name == kThisName) {
       return false;
     }
@@ -174,11 +202,11 @@ partial class ExpressionTypes {
     if (!this.types.isOptional(type) || target.optional) {
       return false;
     }
-    if (this.library.isJsonHolder(type)) {
+    if (this.types.isJsonHolder(type)) {
       return false;
     }
 
-    this.report(module, object.loc, Code.AssignThroughUndefined, {
+    this.errors.write(module, object.loc, Code.AssignThroughUndefined, {
       word: target.name,
     });
 
@@ -186,27 +214,28 @@ partial class ExpressionTypes {
   }
 
   private openVariable(
-    door: VariableDoor,
+    key: string,
     variable: DeclaredVariable,
     module: int,
   ): void {
-    const init = variable.decl.init;
+    const tree = this.types.program.tree;
+
+    const init = tree.exprAt(variable.decl.initId);
     const isValue =
       init?.kind == ExprKind.ObjectLit || init?.kind == ExprKind.ArrayLit;
-    const key = `${module} ${variable.decl.loc}`;
 
     if (isValue) {
       this.initializing.push({ key, depth: this.openFunctions.length });
     }
 
-    this.open(door, variable, module);
+    this.open(key, variable, module);
 
     if (isValue) {
       this.initializing.pop();
     }
   }
 
-  private readonly ownInitializerCheck(
+  private ownInitializerCheck(
     expr: NameExpr,
     target: ValueTarget,
     module: int,
@@ -222,30 +251,33 @@ partial class ExpressionTypes {
     }
 
     const inner = this.openFunctions.slice(frame.depth);
-    if (!inner.every((fn) => this.shapes.isClosure(fn))) {
+    if (!inner.every((fn) => this.types.isClosure(fn))) {
       return;
     }
 
-    this.report(module, expr.loc, Code.OwnInitializer, { word: expr.name });
+    this.errors.write(module, expr.loc, Code.OwnInitializer, {
+      word: expr.name,
+    });
   }
 
-  private assignedFieldNames(): Set<string> {
-    if (this.writtenFields != undefined) {
-      return new Set<string>(this.writtenFields);
+  private assignedFieldNames(): Read<Set<string>> {
+    if (this.writtenKnown) {
+      return this.writtenFields;
     }
 
     const names = new Set<string>();
 
-    for (let index = 0; index < this.program.modules.length; index++) {
-      const opened = this.program.modules[index];
+    for (let index = 0; index < this.types.program.modules.length; index++) {
+      const opened = this.types.program.modules[index];
       if (opened != undefined && !opened.source.isLibrary) {
         this.collectWrittenFields(index, names);
       }
     }
 
-    this.writtenFields = new Set<string>(names);
+    this.writtenFields = names;
+    this.writtenKnown = true;
 
-    return names;
+    return this.writtenFields;
   }
 
   private readonly collectWrittenFields(module: int, names: Set<string>): void {
@@ -255,7 +287,7 @@ partial class ExpressionTypes {
     }
 
     for (const change of record.changes) {
-      const target = this.bounds.changedTarget(change);
+      const target = this.types.changedTarget(change);
       if (target != undefined && target.kind == ExprKind.Member) {
         names.add(target.name);
       }
@@ -271,7 +303,7 @@ partial class ExpressionTypes {
     const kept = new Map<string, Type>();
 
     for (const [key, type] of this.facts) {
-      if (!this.objects.isCalledPath(key, names)) {
+      if (!this.types.isCalledPath(key, names)) {
         kept.set(key, type);
       }
     }
@@ -284,7 +316,7 @@ partial class ExpressionTypes {
     const kept = new Map<string, Type>();
 
     for (const [key, type] of this.facts) {
-      if (!this.objects.isCalledPath(key, names)) {
+      if (!this.types.isCalledPath(key, names)) {
         kept.set(key, type);
       }
     }
@@ -293,22 +325,25 @@ partial class ExpressionTypes {
   }
 
   private isOwnCall(callee: Expr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (callee.kind == ExprKind.Name) {
       const target = this.targetOfName(callee, module);
 
       return (
-        target != undefined && !this.modules.isLibraryModule(target.module)
+        target != undefined && !this.types.isLibraryModule(target.module)
       );
     }
     if (callee.kind != ExprKind.Member) {
       return false;
     }
 
-    const object = this.peekType(callee.object, module);
+    const objectExpr = tree.exprOf(callee.objectId);
+    const object = this.peekType(objectExpr, module);
 
     return (
       object.kind == TypeKind.Instance &&
-      !this.modules.isLibraryModule(object.module)
+      !this.types.isLibraryModule(object.module)
     );
   }
 }

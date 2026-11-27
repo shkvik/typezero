@@ -26,33 +26,10 @@ partial class ExpressionTypes {
   public variable(module: int, loc: int): Type {
     const door = this.door(module, loc);
     if (door == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return door.type;
   }
 
-  private readonly reportFound(module: int, error: SourceError | undefined): void {
-    if (error != undefined) {
-      this.report(module, error.loc, error.code, error.details);
-    }
-  }
-
-  private readonly reportAll(module: int, errors: Read<SourceError[]>): void {
-    for (const error of errors) {
-      this.report(module, error.loc, error.code, error.details);
-    }
-  }
-
-  private readonly report(module: int, loc: int, code: Code, details: Details): void {
-    const record = this.record(module);
-    const isQuiet =
-      this.modules.isTypedLibrary(module) &&
-      !this.modules.isCheckedLibrary(module);
-    if (record == undefined || isQuiet) {
-      return;
-    }
-
-    this.errors.write(module, loc, code, details);
-  }
 }

@@ -16,17 +16,21 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const fn = this.record(target.module)?.functions.get(target.loc);
     const used = this.functionAt(target.module, target.loc);
-    const isGeneric = fn != undefined && fn.typeParams.length > 0;
+    const isGeneric =
+      fn != undefined && tree.typeParamsOf(fn.typeParamsList).length > 0;
     if (!isGeneric || used.kind != TypeKind.Function) {
       return undefined;
     }
-    if (expr.typeArgs.length > 0) {
+    const typeArgs = tree.typeRefsOf(expr.typeArgsList);
+    if (typeArgs.length > 0) {
       return undefined;
     }
 
-    const goal = this.generics.wantedFunction(wanted);
+    const goal = this.types.wantedFunction(wanted);
     if (goal == undefined) {
       return this.genericValueReport(expr, module);
     }
@@ -35,17 +39,17 @@ partial class ExpressionTypes {
     }
 
     const bound = new Map<int, Type>();
-    const params = used.shape.params;
+    const params = this.types.store.paramsOf(used);
 
     for (let index = 0; index < params.length; index++) {
       const param = params[index]?.type;
-      const given = goal.shape.params[index]?.type;
+      const given = this.types.store.paramsOf(goal)[index]?.type;
       if (param == undefined || given == undefined) {
         continue;
       }
       if (
         param.kind == TypeKind.TypeParameter &&
-        !this.parts.mentionsParameter(given)
+        !this.types.mentionsParameter(given)
       ) {
         bound.set(param.id, given);
       }
@@ -55,29 +59,31 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.resolver.substituteValue(used, bound);
+    return this.types.substituteValue(used, bound);
   }
 
-  private readonly genericValueReport(expr: NameExpr, module: int): Type | undefined {
-    if (this.argumentExprs.has(expr) || this.isConstInit(expr, module)) {
+  private genericValueReport(expr: NameExpr, module: int): Type | undefined {
+    if (this.argumentExprs.has(expr.id) || this.isConstInit(expr, module)) {
       return undefined;
     }
 
-    this.report(module, expr.loc, Code.GenericValueNeedsArgs, {
+    this.errors.write(module, expr.loc, Code.GenericValueNeedsArgs, {
       word: expr.name,
     });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private readonly isConstInit(expr: NameExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
     const variables = this.record(module)?.variables;
     if (variables == undefined) {
       return false;
     }
 
     for (const variable of variables.values()) {
-      if (variable.isConst && variable.decl.init == expr) {
+      if (variable.isConst && variable.decl.initId == expr.id) {
         return true;
       }
     }
@@ -85,22 +91,40 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly genericClosureCheck(expr: FunctionExpr, module: int): void {
-    if (expr.fn.typeParams.length == 0 || this.isTopConstant(expr, module)) {
+  private genericClosureCheck(expr: FunctionExpr, module: int): void {
+    const tree = this.types.program.tree;
+
+    if (
+      tree.typeParamsOf(tree.functionOf(expr.fnId).typeParamsList).length ==
+        0 ||
+      this.isTopConstant(expr, module)
+    ) {
       return;
     }
 
-    this.report(module, expr.loc, Code.GenericClosureNotTopLevel, kNoDetails);
+    this.errors.write(
+      module,
+      expr.loc,
+      Code.GenericClosureNotTopLevel,
+      kNoDetails,
+    );
   }
 
   private readonly isTopConstant(expr: FunctionExpr, module: int): boolean {
-    const items = this.program.modules[module]?.file.items ?? [];
+    const tree = this.types.program.tree;
+
+    const items =
+      tree.stmtsOf(this.types.program.modules[module]?.file.itemsList) ?? [];
 
     for (const item of items) {
       if (item.kind != StmtKind.VarDecl || !item.isConst) {
         continue;
       }
-      if (item.decls.some((decl) => decl.init == expr)) {
+      if (
+        tree
+          .declaratorsOf(item.declsList)
+          .some((decl) => decl.initId == expr.id)
+      ) {
         return true;
       }
     }

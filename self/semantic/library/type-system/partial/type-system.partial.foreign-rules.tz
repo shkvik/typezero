@@ -1,0 +1,142 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kCStringName,
+  kDataViewName,
+  kOutName,
+} from "../../foreign-rules/const/foreign-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly plainError(loc: int): SourceError {
+    return { code: Code.ForeignPlain, loc, details: kNoDetails };
+  }
+
+  public readonly optionalError(loc: int): SourceError {
+    return { code: Code.ForeignOptional, loc, details: kNoDetails };
+  }
+
+  public readonly noReturnError(loc: int): SourceError {
+    return { code: Code.ForeignNoReturn, loc, details: kNoDetails };
+  }
+
+  public takesError(loc: int, type: Type): SourceError | undefined {
+    if (type.kind == TypeKind.Error || this.isForeignArgument(type)) {
+      return undefined;
+    }
+
+    const word = this.typeText(type);
+
+    return { code: Code.ForeignTakes, loc, details: { word } };
+  }
+
+  public givesError(loc: int, type: Type): SourceError | undefined {
+    const isPassing =
+      type.kind == TypeKind.Error ||
+      type.kind == TypeKind.Void ||
+      this.isResult(type);
+    if (isPassing) {
+      return undefined;
+    }
+
+    const word = this.typeText(type);
+
+    return { code: Code.ForeignGives, loc, details: { word } };
+  }
+
+  public readonly handleNewError(loc: int, name: string): SourceError {
+    return { code: Code.ForeignHandleNew, loc, details: { word: name } };
+  }
+
+  private isForeignArgument(type: Type): boolean {
+    return (
+      this.isResult(type) ||
+      this.isArray(type) ||
+      this.isBytes(type) ||
+      this.isOut(type)
+    );
+  }
+
+  private isResult(type: Type): boolean {
+    return (
+      this.isForeignNumber(type) ||
+      type.kind == TypeKind.Boolean ||
+      this.isPointer(type)
+    );
+  }
+
+  private readonly isForeignNumber(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  private isPointer(type: Type): boolean {
+    const pointed = this.definedType(type);
+
+    return this.isForeignHandle(pointed) || this.isCString(pointed);
+  }
+
+  private readonly isArray(type: Type): boolean {
+    if (type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    const item = this.store.itemOf(type);
+
+    return this.isForeignNumber(item) || this.isForeignHandle(item);
+  }
+
+  private isBytes(type: Type): boolean {
+    const name = this.typedName(type);
+
+    return this.isByteView(type) && name != kDataViewName;
+  }
+
+  private readonly isOut(type: Type): boolean {
+    const isOut =
+      type.kind == TypeKind.Instance &&
+      type.name == kOutName &&
+      this.isLibraryModule(type.module);
+    const element =
+      type.kind == TypeKind.Instance ? this.store.argsOf(type)[0] : undefined;
+    if (!isOut || element == undefined) {
+      return false;
+    }
+
+    return (
+      this.isForeignNumber(element) ||
+      element.kind == TypeKind.Boolean ||
+      this.isForeignHandle(element)
+    );
+  }
+
+  private readonly isCString(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kCStringName &&
+      this.isLibraryModule(type.module)
+    );
+  }
+
+  private readonly isForeignHandle(type: Type): boolean {
+    const tree = this.program.tree;
+
+    if (type.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const opened = this.program.modules[type.module];
+    const loc = type.loc;
+
+    return (
+      opened != undefined &&
+      tree.stmtsOf(opened.file.itemsList).some(
+        (item) => item.kind == StmtKind.Handle && item.loc == loc,
+      )
+    );
+  }
+}

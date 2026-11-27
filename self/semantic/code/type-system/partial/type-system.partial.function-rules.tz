@@ -1,0 +1,575 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  ExprKind,
+  MemberExpr,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionParameter,
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  FunctionFrame,
+  GeneratorFrame,
+  ParameterShape,
+  ThisPlace,
+} from "../../expression-types/types/expression-types.types.tz";
+import {
+  kLengthName,
+} from "../../expression-shapes/const/expression-shapes.const.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  kAnonymousFunction,
+  kFunctionWord,
+  kIntName,
+} from "../../function-rules/const/function-rules.const.tz";
+
+partial class TypeSystem {
+  public readonly adaptedParams(
+    params: Own<FunctionParameter[]>,
+    goal: FunctionType | undefined,
+  ): FunctionParameter[] {
+    const given = this.store.paramsOf(goal) ?? [];
+    if (
+      goal == undefined ||
+      this.store.hasRest(goal) ||
+      params.length >= given.length
+    ) {
+      return params;
+    }
+
+    const missing = given.slice(params.length);
+
+    return params.concat(missing);
+  }
+
+  public contextualFunction(
+    wanted: Type | undefined,
+  ): FunctionType | undefined {
+    const goal = this.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return this.spreadListShape(goal);
+  }
+
+  public isParameterClash(
+    shape: Read<ParameterShape>,
+    goal: FunctionType | undefined,
+  ): boolean {
+    if (goal == undefined) {
+      return false;
+    }
+
+    const given = this.store.paramsOf(goal);
+
+    return shape.params.some((param, index) => {
+      const other = given[index];
+
+      return (
+        other != undefined &&
+        param.type.kind != TypeKind.Error &&
+        other.type.kind != TypeKind.Error &&
+        !this.converts(other.type, param.type)
+      );
+    });
+  }
+
+  public readonly rootOf(key: string, dot: int): string {
+    if (dot < 0) {
+      return key;
+    }
+
+    return key.slice(0, dot);
+  }
+
+  public readonly functionPlace(
+    fn: FunctionDecl,
+    self: Type | undefined,
+  ): ThisPlace | undefined {
+    if (self != undefined) {
+      return ThisPlace.Method;
+    }
+    if (fn.isArrow || fn.role != undefined) {
+      return undefined;
+    }
+
+    return ThisPlace.Function;
+  }
+
+  public widenedResult(assumed: Type | undefined, found: Type): Type {
+    if (assumed == undefined || found.kind == TypeKind.Error) {
+      return found;
+    }
+
+    return this.unionUnify(assumed, found) ?? this.store.plain(TypeKind.Error);
+  }
+
+  public signatureOf(shape: Read<ParameterShape>, result: Type): Type {
+    const params = shape.params.slice();
+    const rest = shape.rest;
+    const self = shape.self;
+
+    return this.store.functionOf({ params, rest, self, result });
+  }
+
+  public insideType(type: Type, kind: ParamKind): Type {
+    if (kind != ParamKind.Optional || type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    return this.optional(type);
+  }
+
+  public readonly isAssertion(fn: FunctionDecl): boolean {
+    const tree = this.program.tree;
+
+    const form = tree.typeRefAt(fn.returnTypeId)?.form;
+
+    return (
+      form != undefined && form.kind == TypeRefKind.Predicate && form.asserts
+    );
+  }
+
+  public readonly innerResult(result: Type, fn: FunctionDecl): Type {
+    if (fn.isGenerator) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (fn.isAsync && result.kind == TypeKind.Promise) {
+      return this.store.valueOf(result);
+    }
+
+    return result;
+  }
+
+  public readonly frameOf(
+    fn: FunctionDecl,
+    result: Type | undefined,
+  ): FunctionFrame {
+    return {
+      fn,
+      isAsync: fn.isAsync,
+      result,
+      returns: [],
+      recursive: [],
+      hasEmptyReturn: false,
+      guard: {},
+    };
+  }
+
+  public readonly isVoided(value: Expr): boolean {
+    return value.kind == ExprKind.Unary && value.op == UnaryOp.Void;
+  }
+
+  public isFunctionAdapting(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+  ): boolean {
+    const target = this.definedType(wanted);
+    const isPair =
+      given.kind == TypeKind.Function && target.kind == TypeKind.Function;
+    const isNamed = expr.kind == ExprKind.Name || expr.kind == ExprKind.Member;
+    if (!isNamed || !isPair) {
+      return false;
+    }
+    if (given.kind != TypeKind.Function || target.kind != TypeKind.Function) {
+      return false;
+    }
+
+    const mine = this.store.functionShapeOf(given);
+    const theirs = this.store.functionShapeOf(target);
+    if (mine.rest || theirs.rest) {
+      return false;
+    }
+
+    const isFitting = theirs.params.every((param, index) =>
+      this.isParamFitting(mine.params[index], param),
+    );
+    const needed = mine.params.filter((param) => !param.optional).length;
+    const result = theirs.result;
+    const isPart =
+      result.kind == TypeKind.Union &&
+      this.store.partsOf(result).some((one) => one.id == mine.result.id);
+    const isResult =
+      result.kind == TypeKind.Void || result.id == mine.result.id || isPart;
+
+    return isFitting && theirs.params.length >= needed && isResult;
+  }
+
+  public readonly functionName(fn: FunctionDecl): string {
+    if (fn.name == "") {
+      return kAnonymousFunction;
+    }
+
+    return `'${fn.name}'`;
+  }
+
+  public readonly functionLabel(fn: FunctionDecl): string {
+    if (fn.name == "") {
+      return kAnonymousFunction;
+    }
+
+    return `${kFunctionWord} '${fn.name}'`;
+  }
+
+  public readonly generatorFrameOf(
+    fn: FunctionDecl,
+    result: Type | undefined,
+  ): GeneratorFrame {
+    if (result == undefined || result.kind != TypeKind.Iterator) {
+      return { fn, yields: [], isOpen: result == undefined };
+    }
+
+    const shape = this.store.iteratorShapeOf(result);
+
+    return {
+      fn,
+      yields: [],
+      isOpen: false,
+      yielded: shape.yielded,
+      sent: shape.sent,
+    };
+  }
+
+  public readonly sentType(frame: Read<GeneratorFrame>): Type {
+    const sent = frame.sent;
+    if (sent == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return sent;
+  }
+
+  public readonly widened(type: Type | undefined): Type {
+    if (type == undefined) {
+      return this.store.integer(64, false);
+    }
+
+    return this.baseOf(type) ?? type;
+  }
+
+  public readonly asyncResultCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+    result: Type,
+  ): SourceError | undefined {
+    const isOpen =
+      result.kind == TypeKind.Promise ||
+      result.kind == TypeKind.Error ||
+      result.kind == TypeKind.Void ||
+      result.kind == TypeKind.Iterator;
+    if (!fn.isAsync || isOpen || fn.isGenerator) {
+      return undefined;
+    }
+
+    const first = this.typeText(result);
+
+    return {
+      code: Code.AsyncResultNotPromise,
+      loc: written.loc,
+      details: { first },
+    };
+  }
+
+  public resumedCheck(
+    iterable: Expr,
+    type: Type,
+    code: Code,
+  ): SourceError | undefined {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Iterator) {
+      return undefined;
+    }
+
+    const sent = this.store.iteratorShapeOf(base).sent;
+    const isFree =
+      sent.kind == TypeKind.Void ||
+      sent.kind == TypeKind.Undefined ||
+      sent.kind == TypeKind.Error ||
+      this.isOptional(sent);
+    if (isFree) {
+      return undefined;
+    }
+
+    return {
+      code,
+      loc: iterable.loc,
+      details: {
+        word: this.typeText(base),
+        first: this.typeText(sent),
+      },
+    };
+  }
+
+  public readonly writtenGeneratorCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+    result: Type,
+    generator: Read<GeneratorFrame>,
+  ): SourceError | undefined {
+    if (!fn.isGenerator || result.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (fn.isAsync) {
+      return this.asyncGeneratorError(written, result);
+    }
+    if (result.kind == TypeKind.Iterator) {
+      return undefined;
+    }
+
+    const word = this.typeText(result);
+
+    return {
+      code: Code.GeneratorNotIterator,
+      loc: written.loc,
+      details: { word },
+    };
+  }
+
+  private readonly asyncGeneratorError(
+    written: TypeRef,
+    result: Type,
+  ): SourceError | undefined {
+    if (
+      result.kind == TypeKind.Iterator &&
+      this.store.iteratorShapeOf(result).async
+    ) {
+      return undefined;
+    }
+
+    const yielded = this.yieldedOf(result);
+    const word = this.shownElement(yielded);
+
+    return {
+      code: Code.GeneratorNotAsync,
+      loc: written.loc,
+      details: { word },
+    };
+  }
+
+  private readonly yieldedOf(result: Type): Type {
+    if (result.kind == TypeKind.Iterator) {
+      return this.store.iteratorShapeOf(result).yielded;
+    }
+
+    return result;
+  }
+
+  private readonly shownElement(element: Type): string {
+    if (element.kind == TypeKind.Void) {
+      return kIntName;
+    }
+
+    return this.typeText(element);
+  }
+
+  public checkedParameter(
+    param: Param,
+    type: Type,
+    given: FunctionParameter | undefined,
+  ): Checked<Type> {
+    const isClash =
+      given != undefined &&
+      type.kind != TypeKind.Error &&
+      given.type.kind != TypeKind.Error &&
+      !this.converts(given.type, type);
+    if (!isClash || given == undefined) {
+      return { value: type };
+    }
+
+    const word = param.name;
+    const first = this.typeText(type);
+    const second = this.typeText(given.type);
+
+    return {
+      value: type,
+      error: {
+        code: Code.ClosureParameterDiffers,
+        loc: param.loc,
+        details: {
+          word,
+          first,
+          second,
+        },
+      },
+    };
+  }
+
+  public readonly delegatedItem(value: Expr, type: Type): Checked<Type> {
+    const base = this.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+        return { value: this.store.itemOf(base) };
+      case TypeKind.String:
+      case TypeKind.Template:
+        return { value: this.store.plain(TypeKind.String) };
+      case TypeKind.Iterator:
+        return { value: this.store.iteratorShapeOf(base).yielded };
+      case TypeKind.Error:
+      case TypeKind.Instance:
+      case TypeKind.Dict:
+      case TypeKind.TypeParameter:
+      case TypeKind.Object:
+      case TypeKind.Union:
+        return { value: this.store.plain(TypeKind.Error) };
+      default:
+        return {
+          value: this.store.plain(TypeKind.Error),
+          error: {
+            code: Code.YieldDelegateNotIterable,
+            loc: value.loc,
+            details: {
+              word: this.typeText(type),
+            },
+          },
+        };
+    }
+  }
+
+  public readonly iteratorMissingCheck(
+    member: MemberExpr,
+    object: Type,
+  ): Checked<boolean> {
+    const word = member.name;
+    if (word != kLengthName) {
+      return { value: false };
+    }
+
+    const first = this.typeText(object);
+
+    return {
+      value: true,
+      error: {
+        code: Code.IteratorNoLength,
+        loc: member.loc,
+        details: { word, first },
+      },
+    };
+  }
+
+  public readonly writtenResultCheck(
+    fn: FunctionDecl,
+    result: Type,
+    frame: Read<FunctionFrame>,
+  ): SourceError | undefined {
+    const tree = this.program.tree;
+
+    const written = tree.typeRefAt(fn.returnTypeId);
+    const generator = frame.generator;
+    if (written == undefined || generator == undefined) {
+      return undefined;
+    }
+
+    const writtenGeneratorError = this.writtenGeneratorCheck(
+      fn,
+      written,
+      result,
+      generator,
+    );
+
+    return writtenGeneratorError;
+  }
+
+  public readonly iteratorCallCheck(
+    member: MemberExpr,
+    object: Type,
+  ): Checked<boolean> {
+    if (object.kind != TypeKind.Iterator) {
+      return { value: false };
+    }
+
+    const word = member.name;
+
+    switch (word) {
+      case "throw":
+        return {
+          value: true,
+          error: {
+            code: Code.IteratorNoThrow,
+            loc: member.loc,
+            details: kNoDetails,
+          },
+        };
+      case "return":
+        return {
+          value: true,
+          error: {
+            code: Code.IteratorNoReturn,
+            loc: member.loc,
+            details: kNoDetails,
+          },
+        };
+      default:
+        return this.iteratorMissingCheck(member, object);
+    }
+  }
+
+  private spreadListShape(goal: FunctionType): FunctionType {
+    const shape = this.store.functionShapeOf(goal);
+    const last = shape.params[shape.params.length - 1];
+    const list = last?.type;
+    if (!shape.rest || list == undefined || list.kind != TypeKind.Tuple) {
+      return goal;
+    }
+    if (list.rest >= 0) {
+      return goal;
+    }
+
+    const fixed = shape.params.length - 1;
+    const params: FunctionParameter[] = shape.params.slice(0, fixed);
+
+    for (let index = 0; index < this.store.itemsOf(list).length; index++) {
+      const type = this.store.itemsOf(list)[index];
+      if (type != undefined) {
+        params.push({ type, optional: index >= list.required });
+      }
+    }
+
+    const made = this.store.functionOf({
+      params,
+      rest: false,
+      self: shape.self,
+      result: shape.result,
+    });
+    if (made.kind != TypeKind.Function) {
+      return goal;
+    }
+
+    return made;
+  }
+
+  private readonly isParamFitting(
+    mine: FunctionParameter | undefined,
+    wanted: FunctionParameter,
+  ): boolean {
+    if (mine == undefined) {
+      return true;
+    }
+
+    const isUnknown =
+      mine.type.kind == TypeKind.Unknown && wanted.type.kind != TypeKind.Void;
+
+    return mine.type.id == wanted.type.id || isUnknown;
+  }
+}

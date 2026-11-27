@@ -1,0 +1,16 @@
+import { AstTree } from "../ast-tree.tz";
+import { SyntheticNode } from "../types/ast-tree.types.synthetic.tz";
+
+partial class AstTree {
+  public readonly syntheticId(kind: SyntheticNode, base: int): int {
+    let count: int = this.tables.exprs.length;
+    if (this.tables.stmts.length > count) {
+      count = this.tables.stmts.length;
+    }
+    if (this.tables.typeRefs.length > count) {
+      count = this.tables.typeRefs.length;
+    }
+
+    return (kind + 1) * (count + 1) + base;
+  }
+}

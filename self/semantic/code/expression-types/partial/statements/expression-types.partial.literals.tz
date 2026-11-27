@@ -23,16 +23,16 @@ partial class ExpressionTypes {
           negative: false,
         };
       case ExprKind.FloatLit:
-        return this.literals.plainLiteral(LiteralKind.Double, `${expr.value}`);
+        return this.types.plainLiteral(LiteralKind.Double, `${expr.value}`);
       case ExprKind.BoolLit: {
-        const text = this.sources.truthText(expr.value);
+        const text = this.types.sourceTruthText(expr.value);
 
-        return this.literals.plainLiteral(LiteralKind.Boolean, text);
+        return this.types.plainLiteral(LiteralKind.Boolean, text);
       }
       case ExprKind.StringLit:
-        return this.literals.plainLiteral(LiteralKind.String, expr.value);
+        return this.types.plainLiteral(LiteralKind.String, expr.value);
       case ExprKind.Unary:
-        return this.literals.signedLiteral(expr);
+        return this.types.signedLiteral(expr);
       case ExprKind.Name:
         return this.doorOfName(expr, module)?.literal;
       case ExprKind.Member:
@@ -58,19 +58,19 @@ partial class ExpressionTypes {
 
     switch (literal.kind) {
       case LiteralKind.String:
-        if (parts.some((part) => this.literals.isTextual(part))) {
-          return this.store.literal(LiteralKind.String, literal.text);
+        if (parts.some((part) => this.types.isLiteralTextual(part))) {
+          return this.types.store.literal(LiteralKind.String, literal.text);
         }
 
         return base;
       case LiteralKind.Boolean:
-        if (this.literals.hasLiteral(parts, LiteralKind.Boolean)) {
-          return this.store.literal(LiteralKind.Boolean, literal.text);
+        if (this.types.hasLiteral(parts, LiteralKind.Boolean)) {
+          return this.types.store.literal(LiteralKind.Boolean, literal.text);
         }
 
         return base;
       case LiteralKind.Double: {
-        const fraction = this.literals.fractionTyped(
+        const fraction = this.types.fractionTyped(
           expr,
           literal,
           parts,
@@ -95,34 +95,37 @@ partial class ExpressionTypes {
       return this.enumWhole(expr, module);
     }
 
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
 
     switch (literal.kind) {
       case LiteralKind.String:
-        return this.store.plain(TypeKind.String);
+        return this.types.store.plain(TypeKind.String);
       case LiteralKind.Boolean:
-        return this.store.plain(TypeKind.Boolean);
+        return this.types.store.plain(TypeKind.Boolean);
       case LiteralKind.Double:
-        return this.store.plain(TypeKind.Double);
+        return this.types.store.plain(TypeKind.Double);
       default:
-        if (int.kind == TypeKind.Int && this.literals.fits(literal, int)) {
+        if (
+          int.kind == TypeKind.Int &&
+          this.types.isLiteralInRange(literal, int)
+        ) {
           return int;
         }
 
-        return this.store.plain(TypeKind.Double);
+        return this.types.store.plain(TypeKind.Double);
     }
   }
 
-  private readonly wholeTyped(
+  private wholeTyped(
     expr: Expr,
     literal: LiteralValue,
     parts: Read<Type[]>,
     base: Type,
     module: int,
   ): Type {
-    const checked = this.literals.wholeTyped(expr, literal, parts, base);
+    const checked = this.types.wholeTyped(expr, literal, parts, base);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -133,14 +136,14 @@ partial class ExpressionTypes {
     return expr.name == kNullName && symbol == undefined;
   }
 
-  private readonly nullTyped(
+  private nullTyped(
     expr: NameExpr,
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const checked = this.literals.nullTyped(expr, wanted);
+    const checked = this.types.nullTyped(expr, wanted);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

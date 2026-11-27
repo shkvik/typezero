@@ -29,18 +29,24 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const name = member.name;
     const loc = member.loc;
 
     switch (name) {
       case kCatchName:
-        this.report(module, loc, Code.PromiseNoCatch, kNoDetails);
-        this.looseArguments(expr.args, module);
+        this.errors.write(module, loc, Code.PromiseNoCatch, kNoDetails);
+        const args = tree.argumentsOf(expr.argsList);
+
+        this.looseArguments(args, module);
 
         return true;
       case kFinallyName:
-        this.report(module, loc, Code.PromiseNoFinally, kNoDetails);
-        this.looseArguments(expr.args, module);
+        this.errors.write(module, loc, Code.PromiseNoFinally, kNoDetails);
+        const argsItem = tree.argumentsOf(expr.argsList);
+
+        this.looseArguments(argsItem, module);
 
         return true;
       case kThenName:
@@ -60,36 +66,49 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     if (object.kind != TypeKind.Promise) {
       return false;
     }
 
-    const value = this.types.definedType(object.value);
+    const value = this.types.definedType(this.types.store.valueOf(object));
     const isMethod = kResultMethods.some((one) => one.name == member.name);
     if (value.kind != TypeKind.Result || !isMethod) {
       return false;
     }
 
-    const holder = member.object;
-    const other = this.library.promiseHolderText(holder);
+    const holder = tree.exprOf(member.objectId);
+    const other = this.types.promiseHolderText(holder);
 
-    this.report(module, member.loc, Code.ResultMethodOnPromise, {
+    this.errors.write(module, member.loc, Code.ResultMethodOnPromise, {
       word: member.name,
       other,
     });
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
 
   private thenTwoCheck(expr: CallExpr, module: int): boolean {
-    const second = expr.args[1];
+    const tree = this.types.program.tree;
+
+    const second = tree.argumentsOf(expr.argsList)[1];
     if (second == undefined) {
       return false;
     }
 
-    this.report(module, second.expr.loc, Code.PromiseThenTwo, kNoDetails);
-    this.looseArguments(expr.args, module);
+    this.errors.write(
+      module,
+      tree.exprOf(second.exprId).loc,
+      Code.PromiseThenTwo,
+      kNoDetails,
+    );
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
@@ -100,22 +119,27 @@ partial class ExpressionTypes {
     value: Type,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
-    const next = expr.args[0];
-    const count = expr.args.length;
-    if (count != 1 || next == undefined) {
-      const word = this.calls.argumentCountText(1, 1, false);
+    const tree = this.types.program.tree;
 
-      this.report(module, member.loc, Code.ArgumentCount, {
+    const error = this.types.store.plain(TypeKind.Error);
+    const next = tree.argumentsOf(expr.argsList)[0];
+    const count = tree.argumentsOf(expr.argsList).length;
+    if (count != 1 || next == undefined) {
+      const word = this.types.argumentCountText(1, 1, false);
+
+      this.errors.write(module, member.loc, Code.ArgumentCount, {
         word,
         other: `${count}`,
       });
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return error;
     }
-    if (next.expr.kind == ExprKind.Undefined) {
-      return this.store.promiseOf(value);
+    const nextExpr = tree.exprOf(next.exprId);
+    if (nextExpr.kind == ExprKind.Undefined) {
+      return this.types.store.promiseOf(value);
     }
 
     const params: FunctionParameter[] = [];
@@ -124,44 +148,50 @@ partial class ExpressionTypes {
       params.push({ type: value, optional: false });
     }
 
-    const signature = this.store.functionOf({
+    const signature = this.types.store.functionOf({
       params,
       rest: false,
       result: error,
     });
-    const given = this.typed(next.expr, signature, module);
+    const exprExpr = tree.exprOf(next.exprId);
+    const given = this.typed(exprExpr, signature, module);
     if (given.kind == TypeKind.Error) {
       return error;
     }
     if (given.kind != TypeKind.Function) {
-      this.report(module, next.expr.loc, Code.CallbackNotFunction, {
-        word: member.name,
-        first: this.text.of(given),
-      });
+      this.errors.write(
+        module,
+        tree.exprOf(next.exprId).loc,
+        Code.CallbackNotFunction,
+        {
+          word: member.name,
+          first: this.types.typeText(given),
+        },
+      );
 
       return error;
     }
 
-    const returned = this.thenResult(given.shape.result);
+    const returned = this.thenResult(this.types.store.returnTypeOf(given));
     if (returned.kind == TypeKind.Error) {
       return error;
     }
     if (returned.kind == TypeKind.Never) {
-      return this.store.promiseOf(value);
+      return this.types.store.promiseOf(value);
     }
 
-    return this.store.promiseOf(returned);
+    return this.types.store.promiseOf(returned);
   }
 
   private readonly thenResult(returned: Type): Type {
     if (returned.kind == TypeKind.Promise) {
-      return returned.value;
+      return this.types.store.valueOf(returned);
     }
 
     return returned;
   }
 
-  private readonly promiseMissing(
+  private promiseMissing(
     member: MemberExpr,
     object: Type,
     module: int,
@@ -177,21 +207,26 @@ partial class ExpressionTypes {
     }
 
     const word = member.name;
-    const first = this.text.of(object);
+    const first = this.types.typeText(object);
 
-    this.report(module, member.loc, Code.PromiseNoMethod, { word, first });
+    this.errors.write(module, member.loc, Code.PromiseNoMethod, {
+      word,
+      first,
+    });
 
     return true;
   }
 
-  private readonly promiseStatic(member: MemberExpr, module: int): boolean {
-    const object = member.object;
+  private promiseStatic(member: MemberExpr, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     if (object.kind != ExprKind.Name || object.name != kPromiseClass) {
       return false;
     }
 
     const target = this.targetOfName(object, module);
-    if (target == undefined || !this.modules.isLibraryModule(target.module)) {
+    if (target == undefined || !this.types.isLibraryModule(target.module)) {
       return false;
     }
 
@@ -199,15 +234,15 @@ partial class ExpressionTypes {
 
     switch (member.name) {
       case kRejectName:
-        this.report(module, loc, Code.PromiseRejected, kNoDetails);
+        this.errors.write(module, loc, Code.PromiseRejected, kNoDetails);
 
         return true;
       case kAllSettledName:
-        this.report(module, loc, Code.PromiseAllSettled, kNoDetails);
+        this.errors.write(module, loc, Code.PromiseAllSettled, kNoDetails);
 
         return true;
       case kAnyName:
-        this.report(module, loc, Code.PromiseAny, kNoDetails);
+        this.errors.write(module, loc, Code.PromiseAny, kNoDetails);
 
         return true;
       default:
@@ -215,10 +250,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly promiseMissingCheck(member: MemberExpr, module: int): boolean {
-    const checked = this.library.promiseMissingCheck(member);
+  private promiseMissingCheck(member: MemberExpr, module: int): boolean {
+    const checked = this.types.promiseMissingCheck(member);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

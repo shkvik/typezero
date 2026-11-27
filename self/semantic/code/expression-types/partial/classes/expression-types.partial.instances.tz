@@ -1,4 +1,3 @@
-import { kIntlName } from "../../../../library/intl-rules/const/intl-rules.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
@@ -7,27 +6,27 @@ import {
   ClassField,
   FieldKind,
   FieldPresence,
+  TypeAliasDecl,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
   ExprKind,
   MemberExpr,
-  NewExpr,
-  NewKind,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
-import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
-import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionDecl,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
 import {
   InstanceType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
-  CallTarget,
   ClassLookup,
   ClassMemberEntry,
 } from "../../types/expression-types.types.tz";
-import { kConstructorName } from "../../../object-rules/const/object-rules.const.tz";
-import { InstanceField } from "../../../../../program/expression-answers/types/expression-answers.types.tz";
+import {
+  InstanceField,
+} from "../../../../../program/expression-answers/types/expression-answers.types.tz";
 
 partial class ExpressionTypes {
   private instanceMember(
@@ -71,22 +70,25 @@ partial class ExpressionTypes {
     const entry = lookup.entry;
 
     if (!lookup.isKnown) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (entry == undefined) {
       const word = expr.name;
-      const first = this.text.of(instance);
+      const first = this.types.typeText(instance);
 
-      this.report(module, expr.loc, Code.PropertyMissing, { word, first });
+      this.errors.write(module, expr.loc, Code.PropertyMissing, {
+        word,
+        first,
+      });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (entry.isStatic) {
-      const staticError = this.classValues.staticError(expr, entry);
+      const staticError = this.types.staticError(expr, entry);
 
-      this.reportFound(module, staticError);
+      this.errors.writeFound(module, staticError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const field = entry.field;
@@ -100,18 +102,18 @@ partial class ExpressionTypes {
     if (entry.methods.length > 1) {
       this.variantValueCheck(expr, entry, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (method == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const access = this.classes.accessOf(method);
+    const access = this.types.classAccessOf(method);
 
     this.checkAccess(entry, access, expr, module);
 
     if (this.genericMethodValue(expr, method, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.methodTypeOf(entry, method);
@@ -130,7 +132,7 @@ partial class ExpressionTypes {
     return this.reportAccess(entry.owner, access, expr.name, expr.loc, module);
   }
 
-  private readonly reportAccess(
+  private reportAccess(
     owner: ClassDecl,
     access: Access,
     word: string,
@@ -146,12 +148,12 @@ partial class ExpressionTypes {
       return false;
     }
     if (access == Access.Protected) {
-      this.report(module, loc, Code.ProtectedMember, { word, first });
+      this.errors.write(module, loc, Code.ProtectedMember, { word, first });
 
       return true;
     }
 
-    this.report(module, loc, Code.PrivateMember, { word, first });
+    this.errors.write(module, loc, Code.PrivateMember, { word, first });
 
     return true;
   }
@@ -164,7 +166,24 @@ partial class ExpressionTypes {
     return this.classOf(type);
   }
 
-  public readonly instanceFields(type: Type): InstanceField[] | undefined {
+  public declaredClassType(module: int, decl: ClassDecl): Type {
+    const tree = this.types.program.tree;
+
+    const params = this.types.parameterTypes(
+      module,
+      tree.typeParamsOf(decl.typeParamsList),
+    );
+
+    return this.types.classInstance(module, decl, params);
+  }
+
+  public declaredAliasType(module: int, decl: TypeAliasDecl): Type {
+    return this.types.declaredAlias(module, decl);
+  }
+
+  public instanceFields(type: Type): InstanceField[] | undefined {
+    const tree = this.types.program.tree;
+
     const decl = this.classDeclOf(type);
     if (decl == undefined || type.kind != TypeKind.Instance) {
       return undefined;
@@ -172,12 +191,12 @@ partial class ExpressionTypes {
 
     const fields: InstanceField[] = [];
 
-    for (const field of decl.fields) {
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       if (field.form == FieldKind.Static) {
         continue;
       }
 
-      const entry = this.classes.ownMember(type, decl, field.name);
+      const entry = this.types.ownMember(type, decl, field.name);
       if (entry == undefined) {
         return undefined;
       }
@@ -193,7 +212,10 @@ partial class ExpressionTypes {
     return fields;
   }
 
-  private readonly seenFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type | undefined {
+  private seenFieldType(
+    entry: Read<ClassMemberEntry>,
+    field: ClassField,
+  ): Type | undefined {
     if (this.isArrowFieldOf(field)) {
       return this.arrowFields.get(`${entry.instance.module} ${field.loc}`);
     }
@@ -202,9 +224,14 @@ partial class ExpressionTypes {
   }
 
   private readonly isArrowFieldOf(field: ClassField): boolean {
-    const isArrow = this.classes.isArrowField(field);
+    const tree = this.types.program.tree;
 
-    return field.form == FieldKind.ArrowMethod || (isArrow && field.type == undefined);
+    const isArrow = this.types.isArrowField(field);
+
+    return (
+      field.form == FieldKind.ArrowMethod ||
+      (isArrow && tree.typeRefAt(field.typeId) == undefined)
+    );
   }
 
   private readonly classOf(instance: InstanceType): ClassDecl | undefined {
@@ -215,20 +242,30 @@ partial class ExpressionTypes {
     return this.record(instance.module)?.classes.get(instance.loc);
   }
 
-  private readonly classMember(instance: InstanceType, name: string): ClassLookup {
+  private readonly classMember(
+    instance: InstanceType,
+    name: string,
+  ): ClassLookup {
+    const tree = this.types.program.tree;
+
     const decl = this.classOf(instance);
-    if (decl == undefined || decl.decorators.length > 0) {
+    if (
+      decl == undefined ||
+      tree.decoratorsOf(decl.decoratorsList).length > 0
+    ) {
       return { isKnown: false };
     }
 
-    const own = this.classes.ownMember(instance, decl, name);
+    const own = this.types.ownMember(instance, decl, name);
     if (own != undefined) {
       return { isKnown: true, entry: own };
     }
 
-    const parent = this.classes.parentOf(instance, decl);
+    const parent = this.types.parentOf(instance, decl);
     if (parent == undefined) {
-      const isKnown = decl.base == undefined && decl.baseExpr == undefined;
+      const isKnown =
+        tree.typeRefAt(decl.baseId) == undefined &&
+        tree.exprAt(decl.baseExprId) == undefined;
 
       return { isKnown };
     }
@@ -236,17 +273,27 @@ partial class ExpressionTypes {
     return this.classMember(parent, name);
   }
 
-  private arrowFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type {
-    const init = field.init;
+  private arrowFieldType(
+    entry: Read<ClassMemberEntry>,
+    field: ClassField,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const init = tree.exprAt(field.initId);
     const owner = entry.owner;
     if (init == undefined || init.kind != ExprKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (owner.typeParams.length > 0) {
-      return this.store.plain(TypeKind.Error);
+    const typeParams = tree.typeParamsOf(owner.typeParamsList);
+    if (typeParams.length > 0) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.methodFunction(owner, init.fn, entry.instance.module);
+    return this.methodFunction(
+      owner,
+      tree.functionOf(init.fnId),
+      entry.instance.module,
+    );
   }
 
   private fieldTypeOf(entry: Read<ClassMemberEntry>, field: ClassField): Type {
@@ -261,20 +308,25 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly writtenFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type {
-    const written = field.type;
+  private writtenFieldType(
+    entry: Read<ClassMemberEntry>,
+    field: ClassField,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(field.typeId);
     if (written == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const owner = entry.owner;
     const instance = entry.instance;
-    const context = this.resolver.classContext(
+    const context = this.types.classContext(
       instance,
-      owner.typeParams,
+      tree.typeParamsOf(owner.typeParamsList),
       instance.module,
     );
-    const type = this.resolver.resolve(written, context);
+    const type = this.types.resolve(written, context);
 
     if (field.presence == FieldPresence.Optional) {
       return this.types.optional(type);
@@ -283,64 +335,76 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private methodTypeOf(entry: Read<ClassMemberEntry>, method: FunctionDecl): Type {
-    const written = method.returnType;
+  private methodTypeOf(
+    entry: Read<ClassMemberEntry>,
+    method: FunctionDecl,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(method.returnTypeId);
     const owner = entry.owner;
 
-    if (method.typeParams.length > 0) {
-      return this.store.plain(TypeKind.Error);
+    const typeParams = tree.typeParamsOf(method.typeParamsList);
+    if (typeParams.length > 0) {
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (owner.typeParams.length == 0) {
+    const typeParamsItem = tree.typeParamsOf(owner.typeParamsList);
+    if (typeParamsItem.length == 0) {
       return this.methodFunction(owner, method, entry.instance.module);
     }
     if (written == undefined) {
       return this.inferredGenericMethod(entry, method);
     }
 
-    const sites = this.classes.parameterSites(method);
+    const sites = this.types.parameterSites(method);
     if (sites == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const instance = entry.instance;
     const part = this.partOf(entry.owner, method);
-    const context = this.resolver.classContext(
+    const context = this.types.classContext(
       instance,
-      part.typeParams,
+      tree.typeParamsOf(part.typeParamsList),
       this.partModule(part, instance.module),
     );
 
-    return this.resolver.signature(sites, written, context);
+    return this.types.signature(sites, written, context);
   }
 
   private inferredGenericMethod(
     entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
   ): Type {
+    const tree = this.types.program.tree;
+
     const instance = entry.instance;
     const part = this.partOf(entry.owner, method);
     const home = this.partModule(part, instance.module);
-    const opened = this.resolver.parameterTypes(home, part.typeParams);
+    const opened = this.types.parameterTypes(
+      home,
+      tree.typeParamsOf(part.typeParamsList),
+    );
     const generic = this.methodFunction(entry.owner, method, instance.module);
     if (generic.kind != TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const bound = new Map<int, Type>();
 
     for (let index = 0; index < opened.length; index++) {
       const param = opened[index];
-      const arg = instance.args[index];
+      const arg = this.types.store.argsOf(instance)[index];
       if (param != undefined && arg != undefined) {
         bound.set(param.id, arg);
       }
     }
 
-    return this.resolver.substitute(generic, bound);
+    return this.types.substitute(generic, bound);
   }
 
   private readonly partOf(owner: ClassDecl, method: FunctionDecl): ClassDecl {
-    const part = this.methodParts.get(method);
+    const part = this.methodParts.get(method.id);
     if (part == undefined || part.name != owner.name) {
       return owner;
     }
@@ -349,381 +413,6 @@ partial class ExpressionTypes {
   }
 
   private readonly partModule(part: ClassDecl, module: int): int {
-    return this.partHomes.get(part) ?? module;
-  }
-
-  private newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
-    const form = expr.form;
-    if (form.kind == NewKind.Callee) {
-      const callee = this.typed(form.callee, undefined, module);
-
-      return this.valueNew(expr, callee, form.callee.loc, module);
-    }
-    const owned = form.member;
-    if (owned != undefined) {
-      return this.memberNew(expr, form.name, owned, module);
-    }
-
-    this.newArrayCheck(expr, form.name, wanted, module);
-    this.madeSizeCheck(expr, form.name, module);
-
-    const arrayMade = this.arrayNew(expr, form.name, wanted, module);
-    if (arrayMade != undefined) {
-      return arrayMade;
-    }
-
-    const executorErrors = this.library.executorCheck(expr, form.name);
-
-    this.reportAll(module, executorErrors);
-
-    const target = this.targetOfUse(expr.loc, form.name, module);
-    if (target == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-    const handleMade = this.handleNew(expr, form.name, target, module);
-    if (handleMade != undefined) {
-      return handleMade;
-    }
-    if (target.kind != SymbolKind.Class) {
-      const made = this.namedValueNew(expr, target, module);
-
-      return made ?? this.store.plain(TypeKind.Error);
-    }
-    if (this.modules.isLibraryModule(target.module)) {
-      const fileMade = this.fileClassNew(
-        expr,
-        form.name,
-        target.module,
-        module,
-      );
-      if (fileMade != undefined) {
-        return fileMade;
-      }
-
-      const cryptoMade = this.cryptoNew(expr, form.name, target.module, module);
-      if (cryptoMade != undefined) {
-        return cryptoMade;
-      }
-
-      const regExpMade = this.regExpNew(expr, module);
-      if (regExpMade != undefined) {
-        return regExpMade;
-      }
-
-      const weakMade = this.weakRefNew(expr, form.name, target, wanted, module);
-      if (weakMade != undefined) {
-        return weakMade;
-      }
-
-      if (this.isDeclaredLibrary(target.module, target.loc)) {
-        const made = this.libraryNew(expr, form.name, target, wanted, module);
-
-        this.newSourceCheck(expr, made, module);
-
-        return this.codedNew(expr, made, module);
-      }
-    }
-
-    const decl = this.record(target.module)?.classes.get(target.loc);
-    if (decl == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const isEarly =
-      this.openFunctions.length == 0 &&
-      target.module == module &&
-      !this.walkedClasses.has(decl);
-    if (isEarly) {
-      this.report(module, expr.loc, Code.ClassUsedEarly, {
-        word: decl.name ?? form.name,
-      });
-      this.looseArguments(expr.args, module);
-
-      return this.store.plain(TypeKind.Error);
-    }
-    const emitterMade = this.emitterNew(expr, decl, target.module, module);
-    if (emitterMade != undefined) {
-      return emitterMade;
-    }
-
-    const streamMade = this.streamNew(
-      expr,
-      decl,
-      target.module,
-      wanted,
-      module,
-    );
-    if (streamMade != undefined) {
-      return streamMade;
-    }
-    if (decl.typeParams.length > 0 && expr.typeArgs.length == 0) {
-      const inferred = this.genericNew(
-        expr,
-        decl,
-        target.module,
-        wanted,
-        module,
-      );
-
-      this.copyVariantsCheck(expr, inferred, decl, module);
-
-      return inferred;
-    }
-
-    const written = this.newArguments(expr, decl, module);
-    if (written == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const instance = this.resolver.classInstance(target.module, decl, written);
-    if (instance.kind != TypeKind.Instance) {
-      return this.store.plain(TypeKind.Error);
-    }
-    if (decl.isAbstract) {
-      this.report(module, expr.loc, Code.AbstractNew, {
-        word: decl.name ?? "",
-      });
-
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const made = this.constructed(expr, instance, decl, module);
-
-    this.copyVariantsCheck(expr, made, decl, module);
-    this.fetchNewCheck(expr, decl, target.module, made, module);
-    this.emitterMapCheck(expr, made, module);
-
-    return made;
-  }
-
-  private readonly newArguments(
-    expr: NewExpr,
-    decl: ClassDecl,
-    module: int,
-  ): Type[] | undefined {
-    const count = expr.typeArgs.length;
-    const params = decl.typeParams.length;
-    const word = decl.name ?? "";
-    if (params == 0 && count > 0) {
-      this.report(module, expr.loc, Code.ClassNotGeneric, { word });
-
-      return undefined;
-    }
-    if (count > params) {
-      this.report(module, expr.loc, Code.TypeArgumentsMany, {
-        word,
-        other: `${params}`,
-        place: this.classes.pluralMark(params),
-        first: `${count}`,
-      });
-
-      return undefined;
-    }
-    const missing = decl.typeParams.slice(count);
-    const isDefaulted = missing.every(
-      (param) => param.defaultType != undefined,
-    );
-    if (count != params && !isDefaulted) {
-      return undefined;
-    }
-
-    return this.writtenArguments(expr.typeArgs, module);
-  }
-
-  private constructed(
-    expr: NewExpr,
-    instance: InstanceType,
-    decl: ClassDecl,
-    module: int,
-  ): Type {
-    const maker = this.makerOf(instance, decl);
-    if (maker == undefined) {
-      return instance;
-    }
-
-    const constructors = this.visibleConstructors(maker.owner);
-    const isLibraryEmpty =
-      maker.owner != decl &&
-      this.modules.isLibraryModule(instance.module) &&
-      constructors.every((fn) => fn.params.length == 0);
-    if ((constructors.length == 0 || isLibraryEmpty) && expr.args.length > 0) {
-      this.report(module, expr.loc, Code.NoConstructor, {
-        word: decl.name ?? "",
-      });
-      this.looseArguments(expr.args, module);
-
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const chosen = constructors[0];
-    if (constructors.length > 1) {
-      return this.variantNew(expr, instance, maker, constructors, decl, module);
-    }
-    if (chosen == undefined) {
-      return instance;
-    }
-
-    const word = kConstructorName;
-    const access = this.classes.accessOf(chosen);
-
-    this.reportAccess(maker.owner, access, word, expr.loc, module);
-
-    const target = this.constructorTarget(maker, chosen, expr.loc);
-    if (target == undefined) {
-      return instance;
-    }
-
-    const isPassed = this.argumentsCheck(expr.args, target, module);
-    if (!isPassed) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return instance;
-  }
-
-  private readonly visibleConstructors(owner: ClassDecl): FunctionDecl[] {
-    const all = owner.constructors;
-    const visible = all.filter((fn) => this.isVisibleConstructor(owner, fn));
-    if (visible.length == 0) {
-      return all;
-    }
-
-    return visible;
-  }
-
-  private readonly isVisibleConstructor(owner: ClassDecl, fn: FunctionDecl): boolean {
-    const access = this.classes.accessOf(fn);
-    if (access == Access.Public || this.isInsideClass(owner)) {
-      return true;
-    }
-
-    return access == Access.Protected && this.isDerivedInside(owner);
-  }
-
-  private variantNew(
-    expr: NewExpr,
-    instance: InstanceType,
-    maker: Read<ClassMemberEntry>,
-    constructors: Read<FunctionDecl[]>,
-    decl: ClassDecl,
-    module: int,
-  ): Type {
-    const targets: CallTarget[] = [];
-
-    for (const fn of constructors) {
-      const target = this.constructorTarget(maker, fn, expr.loc);
-      if (target == undefined) {
-        return instance;
-      }
-
-      targets.push(target);
-    }
-
-    const name = maker.owner.name ?? decl.name ?? "";
-    const chosen = this.constructorChoice(
-      expr,
-      expr.args,
-      targets,
-      constructors,
-      name,
-      module,
-    );
-    if (chosen == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const isPassed = this.argumentsCheck(expr.args, chosen, module);
-    if (!isPassed) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return instance;
-  }
-
-  private readonly makerOf(
-    instance: InstanceType,
-    decl: ClassDecl,
-  ): ClassMemberEntry | undefined {
-    const entry: ClassMemberEntry = {
-      owner: decl,
-      instance,
-      methods: [],
-      isStatic: false,
-    };
-
-    if (decl.constructors.length > 0) {
-      return entry;
-    }
-
-    const parent = this.classes.parentOf(instance, decl);
-    if (parent == undefined) {
-      const isRoot = decl.base == undefined && decl.baseExpr == undefined;
-      if (!isRoot) {
-        return undefined;
-      }
-
-      return entry;
-    }
-
-    const parentDecl = this.classOf(parent);
-    if (parentDecl == undefined) {
-      return undefined;
-    }
-
-    return this.makerOf(parent, parentDecl);
-  }
-
-  private readonly constructorTarget(
-    maker: Read<ClassMemberEntry>,
-    chosen: FunctionDecl,
-    loc: int,
-  ): CallTarget | undefined {
-    const sites = this.classes.parameterSites(chosen);
-    if (sites == undefined) {
-      return undefined;
-    }
-
-    const owner = maker.owner;
-    const instance = maker.instance;
-    const context = this.resolver.classContext(
-      instance,
-      owner.typeParams,
-      instance.module,
-    );
-    const signature = this.resolver.signature(sites, undefined, context);
-    if (signature.kind != TypeKind.Function) {
-      return undefined;
-    }
-
-    const shape = signature.shape;
-
-    const params = shape.params;
-    const rest = shape.rest;
-
-    return { params, rest, loc, isLenient: false };
-  }
-
-  private memberNew(
-    expr: NewExpr,
-    owner: string,
-    name: string,
-    module: int,
-  ): Type {
-    if (owner != kIntlName) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return this.intlNew(expr, name, module);
-  }
-
-  private readonly isDeclaredLibrary(module: int, loc: int): boolean {
-    if (!this.modules.isLibraryModule(module)) {
-      return false;
-    }
-    if (!this.modules.isTypedLibrary(module)) {
-      return true;
-    }
-
-    return this.record(module)?.classes.get(loc) == undefined;
+    return this.partHomes.get(part.id) ?? module;
   }
 }

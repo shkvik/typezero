@@ -17,7 +17,9 @@ import {
 
 partial class ExpressionTypes {
   private legacyCallCheck(expr: CallExpr, module: int): boolean {
-    const callee = expr.callee;
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Name || !this.isGlobalUse(callee, module)) {
       return false;
     }
@@ -27,10 +29,12 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, callee.loc, code, kNoDetails);
+    this.errors.write(module, callee.loc, code, kNoDetails);
 
     if (code == Code.EscapeLegacy || code == Code.UnescapeLegacy) {
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
     }
 
     return true;
@@ -60,15 +64,17 @@ partial class ExpressionTypes {
   }
 
   private readonly soleCallName(expr: CallExpr, module: int): string {
-    const arg = expr.args[0]?.expr;
-    if (expr.args.length != 1 || arg == undefined) {
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (tree.argumentsOf(expr.argsList).length != 1 || arg == undefined) {
       return "";
     }
     if (arg.kind != ExprKind.Call) {
       return "";
     }
 
-    const callee = arg.callee;
+    const callee = tree.exprOf(arg.calleeId);
     if (callee.kind != ExprKind.Name || !this.isGlobalUse(callee, module)) {
       return "";
     }
@@ -76,7 +82,7 @@ partial class ExpressionTypes {
     return callee.name;
   }
 
-  private readonly legacyValueCheck(expr: NameExpr, module: int): boolean {
+  private legacyValueCheck(expr: NameExpr, module: int): boolean {
     const isEscape = expr.name == kEscapeName;
     const isUnescape = expr.name == kUnescapeName;
     if (!isEscape && !isUnescape) {
@@ -88,7 +94,7 @@ partial class ExpressionTypes {
 
     const code = this.legacyValueCode(isEscape);
 
-    this.report(module, expr.loc, code, kNoDetails);
+    this.errors.write(module, expr.loc, code, kNoDetails);
 
     return true;
   }
@@ -106,10 +112,12 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     const isParse =
       member.name == "parse" &&
-      member.typeArgs.length > 0 &&
+      tree.typeRefsOf(member.typeArgsList).length > 0 &&
       object.kind == ExprKind.Name &&
       object.name == kJsonGlobalName &&
       this.isGlobalUse(object, module);
@@ -117,8 +125,10 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, member.loc, Code.JsonParseTypes, kNoDetails);
-    this.looseArguments(expr.args, module);
+    this.errors.write(module, member.loc, Code.JsonParseTypes, kNoDetails);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }

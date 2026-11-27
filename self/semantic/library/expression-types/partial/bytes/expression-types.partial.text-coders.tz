@@ -17,57 +17,71 @@ import { kFatalDecoderClass } from "../../../text-coder-rules/const/text-coder-r
 
 partial class ExpressionTypes {
   private codedNew(expr: NewExpr, made: Type, module: int): Type {
-    if (this.modules.isLibraryModule(module)) {
+    const tree = this.types.program.tree;
+
+    if (this.types.isLibraryModule(module)) {
       return made;
     }
-    if (this.textCoders.isFatalNew(made)) {
-      const fatalNewError = this.textCoders.fatalNewError(expr.loc);
+    if (this.types.isFatalNew(made)) {
+      const fatalNewError = this.types.fatalNewError(expr.loc);
 
-      this.reportFound(module, fatalNewError);
+      this.errors.writeFound(module, fatalNewError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.byteSources.isArrayBuffer(made)) {
+    if (this.types.isArrayBuffer(made)) {
       return this.resizableCheck(expr, made, module);
     }
-    if (!this.textCoders.isDecoderNew(made)) {
+    if (!this.types.isDecoderNew(made)) {
       return made;
     }
 
-    const label = expr.args[0];
-    if (label != undefined && label.expr.kind != ExprKind.Undefined) {
-      this.decoderLabelCheck(label.expr, module);
+    const label = tree.argumentsOf(expr.argsList)[0];
+    if (
+      label != undefined &&
+      tree.exprOf(label.exprId).kind != ExprKind.Undefined
+    ) {
+      const exprExpr = tree.exprOf(label.exprId);
+
+      this.decoderLabelCheck(exprExpr, module);
     }
 
-    const options = expr.args[1];
-    if (options == undefined || !this.canBeFatal(options.expr, module, 0)) {
+    const options = tree.argumentsOf(expr.argsList)[1];
+    if (
+      options == undefined ||
+      !this.canBeFatal(tree.exprOf(options.exprId), module, 0)
+    ) {
       return made;
     }
 
-    const fatal = this.resolver.libraryInstance(kFatalDecoderClass, []);
+    const fatal = this.types.libraryInstance(kFatalDecoderClass, []);
 
     return fatal ?? made;
   }
 
-  private readonly resizableCheck(expr: NewExpr, made: Type, module: int): Type {
-    const options = expr.args[1];
+  private resizableCheck(expr: NewExpr, made: Type, module: int): Type {
+    const tree = this.types.program.tree;
+
+    const options = tree.argumentsOf(expr.argsList)[1];
     if (options == undefined) {
       return made;
     }
 
-    const resizableError = this.textCoders.resizableError(options.expr.loc);
+    const resizableError = this.types.resizableError(
+      tree.exprOf(options.exprId).loc,
+    );
 
-    this.reportFound(module, resizableError);
+    this.errors.writeFound(module, resizableError);
 
     return made;
   }
 
   private decoderLabelCheck(label: Expr, module: int): void {
-    const written = this.textCoders.literalLabel(label);
+    const written = this.types.literalLabel(label);
     if (written != undefined) {
-      const labelError = this.textCoders.labelError(label.loc, [written]);
+      const labelError = this.types.labelError(label.loc, [written]);
 
-      return this.reportFound(module, labelError);
+      return this.errors.writeFound(module, labelError);
     }
 
     const given = this.peekType(label, module);
@@ -77,17 +91,19 @@ partial class ExpressionTypes {
 
     const texts = this.encodingTexts(label, given, module, 0);
     if (texts == undefined) {
-      const unknownLabelError = this.textCoders.unknownLabelError(label.loc);
+      const unknownLabelError = this.types.unknownLabelError(label.loc);
 
-      return this.reportFound(module, unknownLabelError);
+      return this.errors.writeFound(module, unknownLabelError);
     }
 
-    const labelError = this.textCoders.labelError(label.loc, texts);
+    const labelError = this.types.labelError(label.loc, texts);
 
-    this.reportFound(module, labelError);
+    this.errors.writeFound(module, labelError);
   }
 
   private canBeFatal(options: Expr, module: int, depth: int): boolean {
+    const tree = this.types.program.tree;
+
     if (options.kind != ExprKind.ObjectLit) {
       return this.isFatalShape(options, module);
     }
@@ -97,13 +113,15 @@ partial class ExpressionTypes {
 
     let isFatal = false;
 
-    for (const property of options.props) {
+    for (const property of tree.propertiesOf(options.propsList)) {
       const isSpread = property.form.kind == PropertyKind.Spread;
       if (isSpread) {
-        isFatal = isFatal || this.canBeFatal(property.value, module, depth + 1);
+        isFatal =
+          isFatal ||
+          this.canBeFatal(tree.exprOf(property.valueId), module, depth + 1);
       }
-      if (!isSpread && this.textCoders.isFatalName(property.name)) {
-        isFatal = this.textCoders.isFatalFlag(property.value);
+      if (!isSpread && this.types.isFatalName(property.name)) {
+        isFatal = this.types.isFatalFlag(tree.exprOf(property.valueId));
       }
     }
 
@@ -117,8 +135,8 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const field = base.fields.find((one) =>
-      this.textCoders.isFatalName(one.name),
+    const field = this.types.store.fieldsOf(base).find((one) =>
+      this.types.isFatalName(one.name),
     );
 
     return field != undefined && field.type.kind != TypeKind.Undefined;
@@ -130,66 +148,79 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const method = this.receiverMember(instance, member.name, true);
     const isPlain =
-      expr.args.length <= 2 && expr.args.every((arg) => !arg.spread);
-    if (!this.textCoders.isDecodeCall(instance, member.name) || !isPlain) {
+      tree.argumentsOf(expr.argsList).length <= 2 &&
+      tree.argumentsOf(expr.argsList).every((arg) => !arg.spread);
+    if (!this.types.isDecodeCall(instance, member.name) || !isPlain) {
       return undefined;
     }
     if (method == undefined || method.kind != TypeKind.Function) {
       return undefined;
     }
 
-    const result = method.shape.result;
-    const input = expr.args[0];
+    const result = this.types.store.returnTypeOf(method);
+    const input = tree.argumentsOf(expr.argsList)[0];
     if (input == undefined) {
       return result;
     }
 
-    const found = this.typed(input.expr, undefined, module);
-    const decodeInputError = this.textCoders.decodeInputError(
-      input.expr.loc,
+    const exprExpr = tree.exprOf(input.exprId);
+    const found = this.typed(exprExpr, undefined, module);
+    const decodeInputError = this.types.decodeInputError(
+      tree.exprOf(input.exprId).loc,
       found,
     );
-    const options = expr.args[1];
+    const options = tree.argumentsOf(expr.argsList)[1];
     if (decodeInputError != undefined) {
-      this.reportFound(module, decodeInputError);
-      this.looseArguments(expr.args.slice(1), module);
+      this.errors.writeFound(module, decodeInputError);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args.slice(1), module);
 
       return result;
     }
 
-    const wanted = method.shape.params[1]?.type;
+    const wanted = this.types.store.paramsOf(method)[1]?.type;
     if (options != undefined && wanted != undefined) {
-      this.checked(options.expr, wanted, module, kNoPlace);
+      const optionsExpr = tree.exprOf(options.exprId);
+
+      this.checked(optionsExpr, wanted, module, kNoPlace);
     }
 
     return result;
   }
 
-  private readonly decoderParseCheck(
+  private decoderParseCheck(
     expr: CallExpr,
     instance: InstanceType,
     member: MemberExpr,
     module: int,
   ): void {
-    const label = expr.args[0];
-    const isParse = this.textCoders.isParseName(member.name);
+    const tree = this.types.program.tree;
+
+    const label = tree.argumentsOf(expr.argsList)[0];
+    const isParse = this.types.isParseName(member.name);
     if (
       !isParse ||
-      !this.textCoders.isDecoderNew(instance) ||
+      !this.types.isDecoderNew(instance) ||
       label == undefined
     ) {
       return;
     }
 
-    const written = this.textCoders.literalLabel(label.expr);
-    if (written == undefined || this.modules.isLibraryModule(module)) {
+    const exprExpr = tree.exprOf(label.exprId);
+    const written = this.types.literalLabel(exprExpr);
+    if (written == undefined || this.types.isLibraryModule(module)) {
       return;
     }
 
-    const labelError = this.textCoders.labelError(label.expr.loc, [written]);
+    const labelError = this.types.labelError(tree.exprOf(label.exprId).loc, [
+      written,
+    ]);
 
-    this.reportFound(module, labelError);
+    this.errors.writeFound(module, labelError);
   }
 }

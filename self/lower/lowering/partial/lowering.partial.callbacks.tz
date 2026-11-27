@@ -20,40 +20,58 @@ import {
 
 partial class Lowering {
   private readonly isInlineable(expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
     if (expr.kind != ExprKind.Function) {
       return false;
     }
 
-    const fn = expr.fn;
+    const fn = tree.functionOf(expr.fnId);
 
     return (
-      fn.typeParams.length == 0 &&
+      tree.typeParamsOf(fn.typeParamsList).length == 0 &&
       !fn.isAsync &&
       !fn.isGenerator &&
-      fn.body != undefined &&
-      fn.params.every((param) => param.pattern == undefined)
+      tree.blockAt(fn.bodyId) != undefined &&
+      tree.paramsOf(fn.paramsList).every((param) => param.pattern == undefined)
     );
   }
 
-  private readonly callbackShape(frame: Read<Frame>, expr: Expr): FunctionShape | undefined {
+  private callbackShape(
+    frame: Read<Frame>,
+    expr: Expr,
+  ): FunctionShape | undefined {
+    const tree = this.values.types.program.tree;
+
     if (expr.kind != ExprKind.Function) {
       return undefined;
     }
 
     const answered = this.typeOf(expr);
     if (answered != undefined && answered.kind == TypeKind.Function) {
-      return answered.shape;
+      return this.values.types.store.functionShapeOf(answered);
     }
 
-    const type = this.values.functionOf(frame.module, expr.fn.loc);
+    const type = this.values.functionOf(
+      frame.module,
+      tree.functionOf(expr.fnId).loc,
+    );
     if (type.kind != TypeKind.Function) {
       return undefined;
     }
     if (this.binding.size == 0) {
-      return type.shape;
+      return this.values.types.store.functionShapeOf(type);
     }
 
-    return this.shapeWith(type.shape, this.binding);
+    const binding = replace(this.binding, new Map<int, Type>());
+    const shape = this.shapeWith(
+      this.values.types.store.functionShapeOf(type),
+      binding,
+    );
+
+    this.binding = binding;
+
+    return shape;
   }
 
   private inlineCall(
@@ -62,6 +80,8 @@ partial class Lowering {
     args: Read<IrValue[]>,
     wanted?: Type,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const shape = this.callbackShape(frame, callee);
     if (callee.kind != ExprKind.Function || !this.isInlineable(callee)) {
       this.notLowered(frame.module, callee.loc, "this callback");
@@ -69,7 +89,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const body = callee.fn.body;
+    const fn = tree.functionOf(callee.fnId);
+    const body = tree.blockAt(fn.bodyId);
     const returns = this.callbackResult(shape, wanted);
     const resultIr = this.typeOrUndefined(returns);
     if (shape == undefined || body == undefined || resultIr == undefined) {
@@ -103,7 +124,7 @@ partial class Lowering {
       scopes: replace(frame.scopes, []),
       self: frame.self,
       inline: target,
-      place: "",
+      place: frame.place,
     };
     const isBound = this.callbackParameters(inner, callee, shape, args);
     if (!isBound) {
@@ -112,7 +133,9 @@ partial class Lowering {
       return undefined;
     }
 
-    this.statements(inner, body.body);
+    const bodyItem = tree.stmtsOf(body.bodyList);
+
+    this.statements(inner, bodyItem);
     frame.scopes = inner.scopes;
     frame.made.open(end);
     this.closeScope(frame);
@@ -141,7 +164,7 @@ partial class Lowering {
     return shape?.result;
   }
 
-  private readonly inlineResult(
+  private inlineResult(
     frame: Read<Frame>,
     type: string,
     returns: Type,
@@ -163,11 +186,14 @@ partial class Lowering {
     shape: Read<FunctionShape>,
     args: Read<IrValue[]>,
   ): boolean {
+    const tree = this.values.types.program.tree;
+
     if (callee.kind != ExprKind.Function) {
       return false;
     }
 
-    const params = callee.fn.params;
+    const fn = tree.functionOf(callee.fnId);
+    const params = tree.paramsOf(fn.paramsList);
 
     for (let index = 0; index < params.length; index++) {
       const param = params[index];
@@ -212,7 +238,9 @@ partial class Lowering {
     statement: ReturnStmt,
     inline: InlineTarget,
   ): void {
-    const given = statement.value;
+    const tree = this.values.types.program.tree;
+
+    const given = tree.exprAt(statement.valueId);
     const result = frame.result;
     const place = inline.result;
     if (given != undefined && place == undefined) {

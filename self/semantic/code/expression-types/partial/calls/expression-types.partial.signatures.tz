@@ -25,23 +25,31 @@ partial class ExpressionTypes {
     fields: Read<ObjectField[]>,
     module: int,
   ): Type {
-    const ranked = this.calls.signatureVariants(member.name, fields);
+    const tree = this.types.program.tree;
+
+    const ranked = this.types.signatureVariants(member.name, fields);
     const what = `'${member.name}'`;
     const loc = member.loc;
-    const chosen = this.chosenVariant(expr.args, ranked, what, loc, module);
+    const chosen = this.chosenVariant(
+      tree.argumentsOf(expr.argsList),
+      ranked,
+      what,
+      loc,
+      module,
+    );
     if (chosen == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.calledWith(expr, chosen.type, loc, CallKind.Own, module);
   }
 
-  private readonly signatureValueCheck(
+  private signatureValueCheck(
     expr: MemberExpr,
     fields: Read<ObjectField[]>,
     module: int,
   ): void {
-    const ranked = this.calls.signatureVariants(expr.name, fields);
+    const ranked = this.types.signatureVariants(expr.name, fields);
 
     this.rankedValueCheck(expr, ranked, module);
   }
@@ -70,11 +78,11 @@ partial class ExpressionTypes {
       const entry = lookup.entry;
       const found = this.methodTaking(entry, wanted);
       if (found == undefined || entry == undefined) {
-        this.report(module, decl.loc, Code.ImplementsNoVariant, {
+        this.errors.write(module, decl.loc, Code.ImplementsNoVariant, {
           word,
           first,
           second: iface,
-          other: this.text.of(wanted),
+          other: this.types.typeText(wanted),
         });
 
         continue;
@@ -82,7 +90,7 @@ partial class ExpressionTypes {
 
       const type = this.methodTypeOf(entry, found);
       if (type.kind == TypeKind.Function) {
-        const contractResultError = this.overrides.contractResultError(
+        const contractResultError = this.types.contractResultError(
           found,
           type,
           wanted,
@@ -90,7 +98,7 @@ partial class ExpressionTypes {
           first,
         );
 
-        this.reportFound(module, contractResultError);
+        this.errors.writeFound(module, contractResultError);
       }
     }
   }
@@ -107,7 +115,7 @@ partial class ExpressionTypes {
       const type = this.methodTypeOf(entry, fn);
       if (
         type.kind == TypeKind.Function &&
-        this.classes.isSameParameters(type, wanted)
+        this.types.isSameParameters(type, wanted)
       ) {
         return fn;
       }
@@ -139,7 +147,7 @@ partial class ExpressionTypes {
         return;
       }
 
-      const contractResultError = this.overrides.contractResultError(
+      const contractResultError = this.types.contractResultError(
         found,
         type,
         wanted,
@@ -147,26 +155,29 @@ partial class ExpressionTypes {
         first,
       );
 
-      return this.reportFound(module, contractResultError);
+      return this.errors.writeFound(module, contractResultError);
     }
 
     const texts = entry.methods.map((fn) => this.methodVariantText(entry, fn));
 
-    this.report(module, method.loc, Code.ImplementsParameters, {
+    this.errors.write(module, method.loc, Code.ImplementsParameters, {
       word: field.name,
       first,
       second: iface,
-      other: this.text.of(wanted),
-      place: this.overloads.variantList(texts),
+      other: this.types.typeText(wanted),
+      place: this.types.variantList(texts),
     });
   }
 
-  private methodVariantText(entry: Read<ClassMemberEntry>, fn: FunctionDecl): string {
+  private methodVariantText(
+    entry: Read<ClassMemberEntry>,
+    fn: FunctionDecl,
+  ): string {
     const type = this.methodTypeOf(entry, fn);
     if (type.kind != TypeKind.Function) {
       return fn.name;
     }
 
-    return this.classes.variantText(fn, type);
+    return this.types.variantText(fn, type);
   }
 }

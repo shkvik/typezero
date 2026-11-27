@@ -1,0 +1,200 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  ArgumentUse,
+  MethodHome,
+  OperandKind,
+  ParamMode,
+} from "../types/ownership-check.types.tz";
+
+partial class OwnershipCheck {
+  private readonly calleeTypeOf(call: CallExpr): Type | undefined {
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(call.calleeId);
+    if (callee.kind == ExprKind.Member) {
+      return this.methodTypeOf(callee);
+    }
+    if (callee.kind != ExprKind.Name) {
+      return this.values.answers.typeOf(callee);
+    }
+
+    const target = this.values.valueTargetOf(callee, this.module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return this.values.answers.typeOf(callee);
+    }
+
+    return this.values.functionOf(target.module, target.loc);
+  }
+
+  private readonly methodTypeOf(callee: MemberExpr): Type | undefined {
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(callee.objectId);
+    const object = this.values.answers.typeOf(objectExpr);
+    if (object == undefined || object.kind != TypeKind.Instance) {
+      return this.values.answers.typeOf(callee);
+    }
+
+    const home = this.methodHome(object, callee.name, 0);
+    if (home == undefined) {
+      return this.values.answers.typeOf(callee);
+    }
+
+    return this.values.functionOf(home.module, home.loc);
+  }
+
+  private readonly methodHome(
+    type: Type,
+    name: string,
+    depth: int,
+  ): MethodHome | undefined {
+    const decl = this.values.classDeclOf(type);
+    if (depth > 20 || decl == undefined || type.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const own = this.values.types.classMethodNamed(decl, name);
+    if (own != undefined) {
+      const module = this.partHomes.get(own.id) ?? type.module;
+
+      return { module, loc: own.loc };
+    }
+
+    for (const parent of this.values.types.store.parentsOf(type)) {
+      const found = this.methodHome(parent, name, depth + 1);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private checkVariance(call: CallExpr, uses: Read<ArgumentUse[]>): void {
+    const callee = this.calleeTypeOf(call);
+    if (callee == undefined || callee.kind != TypeKind.Function) {
+      return;
+    }
+
+    for (let index: int = 0; index < uses.length; index++) {
+      const use = uses[index];
+      const param = this.values.types.store.paramsOf(callee)[index];
+      if (use == undefined || param == undefined || use.mode != ParamMode.Mut) {
+        continue;
+      }
+
+      const given = this.ownTypeOf(use.expr);
+      if (given != undefined && this.isWiderPlace(given, param.type)) {
+        const word = this.exprText(use.expr);
+
+        this.errors.write(this.home, use.expr.loc, Code.OwnMutVariance, {
+          word,
+        });
+      }
+    }
+  }
+
+  private readonly ownTypeOf(expr: Expr): Type | undefined {
+    if (expr.kind != ExprKind.Name) {
+      return this.values.answers.typeOf(expr);
+    }
+
+    const target = this.values.valueTargetOf(expr, this.module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return this.values.answers.typeOf(expr);
+    }
+
+    return (
+      this.values.variableOf(target.module, target.loc) ??
+      this.values.answers.typeOf(expr)
+    );
+  }
+
+  private readonly isWiderPlace(given: Type, wanted: Type): boolean {
+    if (given.id == wanted.id) {
+      return false;
+    }
+    if (given.kind == TypeKind.Array && wanted.kind == TypeKind.Array) {
+      return (
+        wanted.readonly != true &&
+        this.values.types.store.itemOf(given).id !=
+          this.values.types.store.itemOf(wanted).id &&
+        this.values.types.store.itemOf(wanted).kind != TypeKind.TypeParameter
+      );
+    }
+    if (given.kind != TypeKind.Object || wanted.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const givenFields = this.values.types.store.fieldsOf(given).slice();
+
+    return this.values.types.store.fieldsOf(wanted).some((field) => {
+      const own = givenFields.find((one) => one.name == field.name);
+
+      return (
+        !field.readonly &&
+        own != undefined &&
+        own.type.id != field.type.id &&
+        field.type.kind != TypeKind.TypeParameter
+      );
+    });
+  }
+
+  private checkCopyShares(call: CallExpr, uses: Read<ArgumentUse[]>): void {
+    const callee = this.calleeTypeOf(call);
+    if (callee == undefined || callee.kind != TypeKind.Function) {
+      return;
+    }
+
+    for (let index: int = 0; index < uses.length; index++) {
+      const use = uses[index];
+      const param = this.values.types.store.paramsOf(callee)[index];
+      if (use != undefined && param != undefined) {
+        this.checkCopyShare(use, param.type);
+      }
+    }
+  }
+
+  private readonly isRecordLike(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Object ||
+      type.kind == TypeKind.Tuple ||
+      type.kind == TypeKind.Instance
+    );
+  }
+
+  private checkCopyShare(use: Read<ArgumentUse>, wanted: Type): void {
+    const isPlace = use.operand.kind == OperandKind.Place;
+    if (!isPlace || !this.isRecordLike(wanted) || !this.values.isCopy(wanted)) {
+      return;
+    }
+
+    const given = this.ownTypeOf(use.expr);
+    if (given == undefined || !this.isRecordLike(given)) {
+      return;
+    }
+    if (this.values.isCopy(given)) {
+      return;
+    }
+
+    const word = this.exprText(use.expr);
+    const first = this.values.types.typeText(wanted);
+
+    this.errors.write(this.home, use.expr.loc, Code.OwnCopyShared, {
+      word,
+      first,
+    });
+  }
+}

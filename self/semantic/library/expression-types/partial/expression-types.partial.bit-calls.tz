@@ -20,7 +20,9 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     if (object.kind == ExprKind.Member) {
       return this.wrapFromCall(expr, member, object, module);
     }
@@ -33,19 +35,21 @@ partial class ExpressionTypes {
       return this.bitHalvesCall(expr, halves, module);
     }
 
-    const first = expr.args[0]?.expr;
+    const first = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (first == undefined) {
       return undefined;
     }
 
     const given = this.typed(first, undefined, module);
 
-    for (const arg of expr.args.slice(1)) {
-      this.typed(arg.expr, undefined, module);
+    for (const arg of tree.argumentsOf(expr.argsList).slice(1)) {
+      const exprExpr = tree.exprOf(arg.exprId);
+
+      this.typed(exprExpr, undefined, module);
     }
 
     if (kBitCounts.includes(member.name)) {
-      return this.store.integer(64, false);
+      return this.types.store.integer(64, false);
     }
 
     return given;
@@ -65,19 +69,26 @@ partial class ExpressionTypes {
     object: MemberExpr,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const bits = kBitWraps.get(object.name);
-    if (!this.isBitName(object.object, module) || bits == undefined) {
+    if (
+      !this.isBitName(tree.exprOf(object.objectId), module) ||
+      bits == undefined
+    ) {
       return undefined;
     }
     if (member.name != "from") {
       return undefined;
     }
 
-    for (const arg of expr.args) {
-      this.typed(arg.expr, undefined, module);
+    for (const arg of tree.argumentsOf(expr.argsList)) {
+      const exprExpr = tree.exprOf(arg.exprId);
+
+      this.typed(exprExpr, undefined, module);
     }
 
-    return this.store.wrapping(bits);
+    return this.types.store.wrapping(bits);
   }
 
   private bitHalvesCall(
@@ -85,20 +96,25 @@ partial class ExpressionTypes {
     halves: Read<string[]>,
     module: int,
   ): Type {
-    const uint64 = this.store.integer(64, true);
+    const tree = this.types.program.tree;
 
-    for (const arg of expr.args) {
-      const given = this.typed(arg.expr, uint64, module);
+    const uint64 = this.types.store.integer(64, true);
+
+    for (const arg of tree.argumentsOf(expr.argsList)) {
+      const exprExpr = tree.exprOf(arg.exprId);
+      const given = this.typed(exprExpr, uint64, module);
       const isWrapping = given.kind == TypeKind.Int && given.wraps;
       if (!isWrapping) {
-        this.coerce(arg.expr, given, uint64, module, kNoPlace);
+        const argExpr = tree.exprOf(arg.exprId);
+
+        this.coerce(argExpr, given, uint64, module, kNoPlace);
       }
     }
 
     const first = halves[0] ?? "";
     const second = halves[1] ?? "";
 
-    return this.store.objectOf([
+    return this.types.store.objectOf([
       { name: first, type: uint64, optional: false, readonly: false },
       { name: second, type: uint64, optional: false, readonly: false },
     ]);

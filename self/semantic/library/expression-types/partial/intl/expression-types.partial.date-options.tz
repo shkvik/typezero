@@ -24,15 +24,25 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    if (expr.args.length > 2 || expr.args.some((one) => one.spread)) {
+    const tree = this.types.program.tree;
+
+    if (
+      tree.argumentsOf(expr.argsList).length > 2 ||
+      tree.argumentsOf(expr.argsList).some((one) => one.spread)
+    ) {
       return undefined;
     }
 
     const kind = this.dateLocaleKind(member.name);
 
-    this.dateArguments(expr.args, member.name, kind, module);
+    this.dateArguments(
+      tree.argumentsOf(expr.argsList),
+      member.name,
+      kind,
+      module,
+    );
 
-    return this.store.plain(TypeKind.String);
+    return this.types.store.plain(TypeKind.String);
   }
 
   private readonly dateLocaleKind(name: string): DateLocaleKind {
@@ -47,12 +57,19 @@ partial class ExpressionTypes {
   }
 
   private dateFormatNew(expr: NewExpr, module: int): void {
-    if (expr.args.length > 2 || expr.args.some((one) => one.spread)) {
-      return this.looseArguments(expr.args, module);
+    const tree = this.types.program.tree;
+
+    if (
+      tree.argumentsOf(expr.argsList).length > 2 ||
+      tree.argumentsOf(expr.argsList).some((one) => one.spread)
+    ) {
+      const args = tree.argumentsOf(expr.argsList);
+
+      return this.looseArguments(args, module);
     }
 
     this.dateArguments(
-      expr.args,
+      tree.argumentsOf(expr.argsList),
       "Intl.DateTimeFormat",
       DateLocaleKind.Any,
       module,
@@ -65,16 +82,23 @@ partial class ExpressionTypes {
     kind: DateLocaleKind,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const locale = args[0];
     const options = args[1];
 
     if (locale != undefined) {
-      const given = this.typed(locale.expr, undefined, module);
+      const expr = tree.exprOf(locale.exprId);
+      const given = this.typed(expr, undefined, module);
 
-      this.localeArgumentCheck(locale.expr, given, what, module);
+      const exprExpr = tree.exprOf(locale.exprId);
+
+      this.localeArgumentCheck(exprExpr, given, what, module);
     }
     if (options != undefined) {
-      this.dateOptionsCheck(options.expr, what, kind, module);
+      const optionsExpr = tree.exprOf(options.exprId);
+
+      this.dateOptionsCheck(optionsExpr, what, kind, module);
     }
   }
 
@@ -89,24 +113,30 @@ partial class ExpressionTypes {
     if (given.kind == TypeKind.Error || given.kind == TypeKind.Undefined) {
       return;
     }
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return;
     }
     if (base.kind != TypeKind.Object) {
-      const objectError = this.intlDates.dateObjectError(
+      const objectError = this.types.dateObjectError(
         options.loc,
         what,
         given,
       );
 
-      return this.reportFound(module, objectError);
+      return this.errors.writeFound(module, objectError);
     }
 
-    this.dateKindsCheck(options, base.fields, what, kind, module);
-    this.dateValuesCheck(options, base.fields, module);
+    this.dateKindsCheck(
+      options,
+      this.types.store.fieldsOf(base),
+      what,
+      kind,
+      module,
+    );
+    this.dateValuesCheck(options, this.types.store.fieldsOf(base), module);
   }
 
-  private readonly dateKindsCheck(
+  private dateKindsCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     what: string,
@@ -117,15 +147,15 @@ partial class ExpressionTypes {
     let hasComponent = false;
 
     for (const field of fields) {
-      const option = this.intlDates.dateOption(field.name);
+      const option = this.tables.dateOption(field.name);
       if (option == undefined) {
-        const unknownError = this.intlDates.dateUnknownError(
+        const unknownError = this.types.dateUnknownError(
           options.loc,
           field.name,
           what,
         );
 
-        this.reportFound(module, unknownError);
+        this.errors.writeFound(module, unknownError);
 
         continue;
       }
@@ -141,24 +171,24 @@ partial class ExpressionTypes {
         hasStyle = hasStyle || isPresent;
       }
 
-      const isForeign = this.intlDates.isForeignStyle(field.name, kind);
+      const isForeign = this.types.isForeignStyle(field.name, kind);
       if (option.role == DateOptionRole.Style && isPresent && isForeign) {
-        const styleError = this.intlDates.styleOnlyError(
+        const styleError = this.types.styleOnlyError(
           options.loc,
           field.name,
           what,
         );
 
-        this.reportFound(module, styleError);
+        this.errors.writeFound(module, styleError);
       }
     }
 
     if (hasStyle && hasComponent) {
-      this.reportFound(module, this.intlDates.stylePartsError(options.loc));
+      this.errors.writeFound(module, this.types.stylePartsError(options.loc));
     }
   }
 
-  private readonly dateKindFits(
+  private dateKindFits(
     options: Expr,
     field: ObjectField,
     module: int,
@@ -168,32 +198,32 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const kindError = this.intlDates.dateKindError(
+    const kindError = this.types.dateKindError(
       options.loc,
       field.name,
       wanted,
       field.type,
     );
 
-    this.reportFound(module, kindError);
+    this.errors.writeFound(module, kindError);
 
     return false;
   }
 
-  private readonly dateWanted(field: ObjectField): string {
+  private dateWanted(field: ObjectField): string {
     const value = this.types.definedType(field.type);
-    if (this.intlDates.isHour12(field.name)) {
-      return this.wantedIf(!this.intl.isFlagType(value), "a boolean");
+    if (this.types.isHour12(field.name)) {
+      return this.wantedIf(!this.types.isFlagType(value), "a boolean");
     }
-    if (this.intlDates.isDigitsName(field.name)) {
+    if (this.types.isDigitsName(field.name)) {
       const isNumber =
-        this.intl.isNumberLike(value) ||
-        this.intl.numberLiterals(value) != undefined;
+        this.types.isIntlNumberLike(value) ||
+        this.types.numberLiterals(value) != undefined;
 
       return this.wantedIf(!isNumber, "a number");
     }
 
-    return this.wantedIf(!this.intl.isTextUnion(value), "a string");
+    return this.wantedIf(!this.types.isTextUnion(value), "a string");
   }
 
   private readonly wantedIf(isWrong: boolean, wanted: string): string {
@@ -210,13 +240,13 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     for (const field of fields) {
-      const option = this.intlDates.dateOption(field.name);
+      const option = this.tables.dateOption(field.name);
       const given = this.optionValue(options, field.name);
       const loc = this.optionLoc(options, field.name);
       if (option == undefined) {
         continue;
       }
-      if (this.intlDates.isDigitsName(field.name)) {
+      if (this.types.isDigitsName(field.name)) {
         this.dateDigitsCheck(field, given, loc, module);
 
         continue;
@@ -245,11 +275,11 @@ partial class ExpressionTypes {
       return;
     }
 
-    const digits = this.intl.numberLiterals(field.type);
+    const digits = this.types.numberLiterals(field.type);
     const isInside =
       digits != undefined && digits.every((one) => one >= 1 && one <= 3);
     if (!isInside) {
-      this.reportFound(module, this.intlDates.digitsOpenError(loc));
+      this.errors.writeFound(module, this.types.digitsOpenError(loc));
     }
   }
 
@@ -267,16 +297,16 @@ partial class ExpressionTypes {
     const texts = this.dateTexts(field, given, module);
     if (texts == undefined) {
       const written = this.writtenOption(given, module);
-      const openError = this.intlDates.dateValueOpenError(loc, option, written);
+      const openError = this.types.dateValueOpenError(loc, option, written);
 
-      return this.reportFound(module, openError);
+      return this.errors.writeFound(module, openError);
     }
 
     const wrong = texts.find((one) => !option.values.includes(one));
     if (wrong != undefined) {
-      this.reportFound(
+      this.errors.writeFound(
         module,
-        this.intlDates.dateValueError(loc, option, wrong),
+        this.types.dateValueError(loc, option, wrong),
       );
     }
   }
@@ -295,8 +325,8 @@ partial class ExpressionTypes {
     }
 
     const base = this.types.definedType(field.type);
-    const texts = this.intl.literalTexts(base);
-    const isText = this.intl.isTextUnion(base) && base.kind != TypeKind.String;
+    const texts = this.types.literalTexts(base);
+    const isText = this.types.isTextUnion(base) && base.kind != TypeKind.String;
     if (!isText) {
       return undefined;
     }
@@ -309,7 +339,7 @@ partial class ExpressionTypes {
       return "value";
     }
 
-    return this.sources.valueText(given, module);
+    return this.types.valueText(given, module);
   }
 
   private dateFormatRange(
@@ -317,11 +347,15 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type {
-    const rangeError = this.intlDates.dateRangeError(member.loc, member.name);
+    const tree = this.types.program.tree;
 
-    this.reportFound(module, rangeError);
-    this.looseArguments(expr.args, module);
+    const rangeError = this.types.dateRangeError(member.loc, member.name);
 
-    return this.store.plain(TypeKind.Error);
+    this.errors.writeFound(module, rangeError);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 }

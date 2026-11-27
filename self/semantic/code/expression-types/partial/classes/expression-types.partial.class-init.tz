@@ -1,5 +1,6 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
+import { SourceError } from "../../../../../diagnostic/types/message.types.tz";
 import {
   ClassDecl,
   ClassField,
@@ -30,7 +31,7 @@ import { kFieldSetKey } from "../../const/expression-types.const.tz";
 import { InitFrame } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly constructorFrame(): InitFrame | undefined {
+  private readonly constructorFrame(): Read<InitFrame> | undefined {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor) {
       return undefined;
@@ -45,11 +46,13 @@ partial class ExpressionTypes {
   }
 
   private readonly isInInit(frame: Read<InitFrame>): boolean {
-    return this.openFunctions[this.openFunctions.length - 1] == frame.fn;
+    return this.openFunctions[this.openFunctions.length - 1]?.id == frame.fn.id;
   }
 
   private readonly isInsideInitClosure(frame: Read<InitFrame>): boolean {
-    const start = this.openFunctions.lastIndexOf(frame.fn);
+    const id = frame.fn.id;
+    const ids = this.openFunctions.map((one) => one.id);
+    const start = ids.lastIndexOf(id);
     const last = this.openFunctions.length - 1;
     if (start < 0 || start == last) {
       return false;
@@ -61,9 +64,11 @@ partial class ExpressionTypes {
   }
 
   private readonly firstUnset(frame: Read<InitFrame>): string | undefined {
-    for (const field of frame.decl.fields) {
+    const tree = this.types.program.tree;
+
+    for (const field of tree.fieldsOf(frame.decl.fieldsList)) {
       const key = `${kFieldSetKey}${field.name}`;
-      if (this.classes.isRequiredField(field) && !this.facts.has(key)) {
+      if (this.types.isRequiredField(field) && !this.facts.has(key)) {
         return field.name;
       }
     }
@@ -73,64 +78,82 @@ partial class ExpressionTypes {
 
   private markFieldSet(name: string): void {
     const key = `${kFieldSetKey}${name}`;
-    const mark = this.store.plain(TypeKind.Void);
+    const mark = this.types.store.plain(TypeKind.Void);
 
-    this.facts = this.flows.withFact(this.facts, key, mark);
+    this.facts = this.types.withFact(this.facts, key, mark);
   }
 
   private initStart(fn: FunctionDecl): void {
+    const tree = this.types.program.tree;
+
     const frame = this.initFrames[this.initFrames.length - 1];
-    if (frame == undefined || !frame.isConstructor || frame.fn != fn) {
+    if (frame == undefined || !frame.isConstructor || frame.fn.id != fn.id) {
       return;
     }
 
-    for (const field of frame.decl.fields) {
+    const decl = frame.decl;
+    const isDerived = frame.isDerived;
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       const isOptional = field.presence == FieldPresence.Optional;
       const isValued =
-        !frame.isDerived &&
+        !isDerived &&
         field.form == FieldKind.Instance &&
-        field.init != undefined;
-      const isParameter = !frame.isDerived && field.form == FieldKind.Parameter;
+        tree.exprAt(field.initId) != undefined;
+      const isParameter = !isDerived && field.form == FieldKind.Parameter;
       if (isOptional || isValued || isParameter) {
         this.markFieldSet(field.name);
       }
     }
   }
 
-  private readonly initEnd(fn: FunctionDecl, body: BlockStmt, module: int): void {
+  private initEnd(fn: FunctionDecl, body: BlockStmt, module: int): void {
     const frame = this.constructorFrame();
-    if (frame == undefined || frame.fn != fn) {
+    if (frame == undefined || frame.fn.id != fn.id) {
       return;
     }
     if (this.isAlwaysReturning(body, module)) {
       return;
     }
 
-    this.unsetPathCheck(frame, fn.loc, module);
+    const problem = this.unsetPathProblem(frame, fn.loc);
+
+    this.errors.writeFound(module, problem);
   }
 
-  private readonly returnFieldsCheck(
+  private returnFieldsCheck(
     statement: ReturnStmt,
     fn: FunctionDecl | undefined,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const frame = this.constructorFrame();
-    if (frame == undefined || frame.fn != fn || statement.value != undefined) {
+    if (
+      frame == undefined ||
+      frame.fn.id != fn?.id ||
+      tree.exprAt(statement.valueId) != undefined
+    ) {
       return;
     }
 
-    this.unsetPathCheck(frame, statement.loc, module);
+    const problem = this.unsetPathProblem(frame, statement.loc);
+
+    this.errors.writeFound(module, problem);
   }
 
-  private readonly unsetPathCheck(frame: Read<InitFrame>, loc: int, module: int): void {
+  private readonly unsetPathProblem(
+    frame: Read<InitFrame>,
+    loc: int,
+  ): SourceError | undefined {
     const word = this.firstUnset(frame);
     if (word == undefined) {
-      return;
+      return undefined;
     }
 
     const first = frame.decl.name ?? "";
 
-    this.report(module, loc, Code.FieldsNotSet, { word, first });
+    return { code: Code.FieldsNotSet, loc, details: { word, first } };
   }
 
   private fieldSetMark(target: Expr, module: int): void {
@@ -145,33 +168,44 @@ partial class ExpressionTypes {
   }
 
   private superFieldsSet(): void {
+    const tree = this.types.program.tree;
+
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor) {
       return;
     }
 
-    for (const field of frame.decl.fields) {
+    const decl = frame.decl;
+
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       const isValued =
-        field.form == FieldKind.Instance && field.init != undefined;
+        field.form == FieldKind.Instance &&
+        tree.exprAt(field.initId) != undefined;
       if (isValued || field.form == FieldKind.Parameter) {
         this.markFieldSet(field.name);
       }
     }
   }
 
-  private readonly initThisMember(expr: MemberExpr, module: int): InitFrame | undefined {
+  private readonly initThisMember(
+    expr: MemberExpr,
+    module: int,
+  ): Read<InitFrame> | undefined {
+    const tree = this.types.program.tree;
+
     const frame = this.constructorFrame();
     if (frame == undefined || !this.isInInit(frame)) {
       return undefined;
     }
-    if (!this.isThisName(expr.object, module)) {
+    const object = tree.exprOf(expr.objectId);
+    if (!this.isThisName(object, module)) {
       return undefined;
     }
 
     return frame;
   }
 
-  private readonly fieldReadEarly(target: Expr, module: int): boolean {
+  private fieldReadEarly(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member) {
       return false;
     }
@@ -181,24 +215,24 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const field = this.classes.ownValueField(frame, target.name);
+    const field = this.types.ownValueField(frame, target.name);
     const key = `${kFieldSetKey}${target.name}`;
     if (field == undefined || this.facts.has(key)) {
       return false;
     }
-    if (!this.classes.isRequiredField(field)) {
+    if (!this.types.isRequiredField(field)) {
       return false;
     }
 
     const word = target.name;
 
-    this.report(module, target.loc, Code.FieldReadEarly, { word });
+    this.errors.write(module, target.loc, Code.FieldReadEarly, { word });
 
     return true;
   }
 
-  private readonly memberReadEarly(expr: MemberExpr, module: int): boolean {
-    if (this.writtenTargets.has(expr)) {
+  private memberReadEarly(expr: MemberExpr, module: int): boolean {
+    if (this.writtenTargets.has(expr.id)) {
       return false;
     }
     if (this.fieldReadEarly(expr, module)) {
@@ -210,7 +244,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly callReadEarly(member: MemberExpr, module: int): boolean {
+  private callReadEarly(member: MemberExpr, module: int): boolean {
     if (this.fieldReadEarly(member, module)) {
       return true;
     }
@@ -220,12 +254,12 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly methodEarly(member: MemberExpr, code: Code, module: int): void {
+  private methodEarly(member: MemberExpr, code: Code, module: int): void {
     const frame = this.initThisMember(member, module);
     if (frame == undefined) {
       return;
     }
-    if (this.classes.ownValueField(frame, member.name) != undefined) {
+    if (this.types.ownValueField(frame, member.name) != undefined) {
       return;
     }
     if (!this.isInitMethod(frame, member.name)) {
@@ -239,78 +273,92 @@ partial class ExpressionTypes {
 
     const word = member.name;
 
-    this.report(module, member.loc, code, { word, first });
+    this.errors.write(module, member.loc, code, { word, first });
   }
 
   private readonly isInitMethod(frame: Read<InitFrame>, name: string): boolean {
+    const tree = this.types.program.tree;
+
     const self = this.selves[this.selves.length - 1];
     if (self == undefined || self.kind != TypeKind.Instance) {
-      return frame.decl.methods.some(
-        (method) => method.name == name && !this.classes.isStaticMethod(method),
-      );
+      return this.types
+        .classMethodsNamed(frame.decl, name)
+        .some((method) => !this.types.isStaticMethod(method));
     }
 
-    const entry = this.classMember(self, name).entry;
+    const entryLookup = this.classMember(self, name);
+
+    const entry = entryLookup.entry;
     if (entry == undefined || entry.isStatic) {
       return false;
     }
 
     const field = entry.field;
-    if (field != undefined && this.classes.isArrowField(field)) {
+    if (field != undefined && this.types.isArrowField(field)) {
       return true;
     }
 
     return entry.methods.length > 0;
   }
 
-  private readonly thisReadyCheck(expr: NameExpr, module: int): void {
+  private thisReadyCheck(expr: NameExpr, module: int): void {
+    const problem = this.thisReadyProblem(expr);
+
+    this.errors.writeFound(module, problem);
+  }
+
+  private readonly thisReadyProblem(expr: NameExpr): SourceError | undefined {
     const frame = this.constructorFrame();
     if (frame == undefined) {
-      return;
+      return undefined;
     }
     if (this.isInsideInitClosure(frame)) {
-      const closureThisError = this.classes.closureThisCheck(frame, expr);
-
-      return this.reportFound(module, closureThisError);
+      return this.types.closureThisCheck(frame, expr);
     }
-    if (!this.isInInit(frame) || this.thisObjects.has(expr)) {
-      return;
+    if (!this.isInInit(frame) || this.thisObjects.has(expr.id)) {
+      return undefined;
     }
 
     const word = this.firstUnset(frame);
     if (word == undefined) {
-      return;
+      return undefined;
     }
 
-    this.report(module, expr.loc, Code.ThisUsedEarly, { word });
+    return { code: Code.ThisUsedEarly, loc: expr.loc, details: { word } };
   }
 
   private markThisObject(object: Expr, module: int): void {
     if (this.isThisName(object, module)) {
-      this.thisObjects.add(object);
+      this.thisObjects.add(object.id);
     }
   }
 
-  private readonly initClosureFrame(): InitFrame | undefined {
+  private readonly isInitClosure(): boolean {
     const frame = this.initFrames[this.initFrames.length - 1];
-    if (frame == undefined || !frame.isConstructor || !this.isInInit(frame)) {
-      return undefined;
-    }
 
-    return frame;
+    return frame != undefined && frame.isConstructor && this.isInInit(frame);
   }
 
-  private readonly enterInitClosure(frame: InitFrame | undefined): void {
-    if (frame == undefined) {
+  private enterInitClosure(isInit: boolean): void {
+    const top = this.initFrames[this.initFrames.length - 1];
+    if (!isInit || top == undefined) {
       return;
     }
 
     const parent = this.superFrames[this.superFrames.length - 1];
     const isBefore =
       parent != undefined && parent.isConstructor && parent.isBefore;
-    const isSet = this.firstUnset(frame) == undefined;
+    const isSet = this.firstUnset(top) == undefined;
+    const frame = this.initFrames[this.initFrames.length - 1];
 
-    frame.closures.push(isSet && !isBefore);
+    frame?.closures.push(isSet && !isBefore);
+  }
+
+  private leaveInitClosure(isInit: boolean): void {
+    const frame = this.initFrames[this.initFrames.length - 1];
+    if (isInit && frame != undefined) {
+      frame.closures.pop();
+    }
   }
 
   private readonly isSwitchExit(
@@ -318,12 +366,16 @@ partial class ExpressionTypes {
     isLast: boolean,
     module: int,
   ): boolean {
-    const last = option.body[option.body.length - 1];
+    const tree = this.types.program.tree;
+
+    const last = tree.stmtsOf(option.bodyList)[
+      tree.stmtsOf(option.bodyList).length - 1
+    ];
     if (last == undefined) {
       return false;
     }
 
-    const isReturning = option.body.some((statement) =>
+    const isReturning = tree.stmtsOf(option.bodyList).some((statement) =>
       this.isAlwaysReturning(statement, module),
     );
     if (isReturning) {
@@ -340,7 +392,11 @@ partial class ExpressionTypes {
     statement: SwitchStmt,
     exits: Read<Map<string, Type>[]>,
   ): void {
-    const hasDefault = statement.cases.some((one) => one.test == undefined);
+    const tree = this.types.program.tree;
+
+    const hasDefault = tree
+      .casesOf(statement.casesList)
+      .some((one) => tree.exprAt(one.testId) == undefined);
     const first = exits[0];
     if (!hasDefault || first == undefined) {
       return;
@@ -354,36 +410,48 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly fieldStartChecks(decl: ClassDecl, module: int): void {
-    if (decl.constructors.length > 0) {
+  private fieldStartChecks(decl: ClassDecl, module: int): void {
+    const tree = this.types.program.tree;
+
+    const constructors = tree.countOf(decl.constructorsList);
+    if (constructors > 0) {
       return;
     }
 
-    const params = this.resolver.parameterTypes(module, decl.typeParams);
-    const instance = this.resolver.classInstance(module, decl, params);
+    const params = this.types.parameterTypes(
+      module,
+      tree.typeParamsOf(decl.typeParamsList),
+    );
+    const instance = this.types.classInstance(module, decl, params);
     if (instance.kind != TypeKind.Instance) {
       return;
     }
 
     const isMade = this.hasMakerChain(instance);
 
-    for (const field of decl.fields) {
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       this.fieldStartCheck(instance, decl, field, isMade, module);
     }
   }
 
-  private readonly fieldStartCheck(
+  private fieldStartCheck(
     instance: InstanceType,
     decl: ClassDecl,
     field: ClassField,
     isMade: boolean,
     module: int,
   ): void {
-    const written = field.type;
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(field.typeId);
     const isRequired =
       field.form == FieldKind.Instance &&
       field.presence == FieldPresence.Required;
-    if (!isRequired || field.init != undefined || written == undefined) {
+    if (
+      !isRequired ||
+      tree.exprAt(field.initId) != undefined ||
+      written == undefined
+    ) {
       return;
     }
 
@@ -393,63 +461,68 @@ partial class ExpressionTypes {
     }
 
     const word = field.name;
-    const first = this.text.of(type);
+    const first = this.types.typeText(type);
 
     if (isMade) {
-      this.report(module, field.loc, Code.FieldNeverSet, { word, first });
+      this.errors.write(module, field.loc, Code.FieldNeverSet, { word, first });
 
       return;
     }
 
-    const visiting = new Set<ClassDecl>([decl]);
+    const visiting = new Set<int>([decl.id]);
     if (this.hasEmptyValue(type, written, visiting)) {
       return;
     }
 
-    this.report(module, field.loc, Code.FieldNoStart, { word, first });
+    this.errors.write(module, field.loc, Code.FieldNoStart, { word, first });
   }
 
-  private readonly declaredFieldType(
+  private declaredFieldType(
     instance: InstanceType,
     decl: ClassDecl,
     written: TypeRef,
   ): Type {
-    const context = this.resolver.classContext(
+    const tree = this.types.program.tree;
+
+    const context = this.types.classContext(
       instance,
-      decl.typeParams,
+      tree.typeParamsOf(decl.typeParamsList),
       instance.module,
     );
 
-    return this.resolver.resolve(written, context);
+    return this.types.resolve(written, context);
   }
 
   private readonly hasMakerChain(instance: InstanceType): boolean {
-    const seen = new Set<ClassDecl>();
+    const tree = this.types.program.tree;
+
+    const seen = new Set<int>();
     let current: InstanceType | undefined = instance;
 
     while (
       current != undefined &&
-      !this.modules.isLibraryModule(current.module)
+      !this.types.isLibraryModule(current.module)
     ) {
       const decl = this.classOf(current);
-      if (decl == undefined || seen.has(decl)) {
+      if (decl == undefined || seen.has(decl.id)) {
         return false;
       }
-      if (decl.constructors.length > 0) {
+      const constructors = tree.countOf(decl.constructorsList);
+      if (constructors > 0) {
         return true;
       }
 
-      seen.add(decl);
-      current = this.classes.parentOf(current, decl);
+      seen.add(decl.id);
+      current = this.types.parentOf(current, decl);
     }
 
     return false;
   }
 
-  private readonly hasEmptyValue(
+  private hasEmptyValue(
     type: Type,
     written: TypeRef | undefined,
-    visiting: Set<ClassDecl>,
+    visiting: Set<int>,
   ): boolean {
     switch (type.kind) {
       case TypeKind.String:
@@ -462,13 +535,15 @@ partial class ExpressionTypes {
       case TypeKind.Array:
         return true;
       case TypeKind.Dict:
-        return this.classValues.hasEmptyCollection(type.dict, written);
+        return this.types.hasEmptyCollection(type.dict, written);
       case TypeKind.Union:
-        return type.parts.every((part) => part.kind == TypeKind.Literal);
+        return this.types.store
+          .partsOf(type)
+          .every((part) => part.kind == TypeKind.Literal);
       case TypeKind.Instance:
         return this.hasEmptyInstance(type, visiting);
       case TypeKind.Object:
-        return type.fields.every(
+        return this.types.store.fieldsOf(type).every(
           (field) =>
             field.optional ||
             this.hasEmptyValue(field.type, undefined, visiting),
@@ -478,10 +553,12 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly hasEmptyInstance(
+  private hasEmptyInstance(
     instance: InstanceType,
-    visiting: Set<ClassDecl>,
+    visiting: Set<int>,
   ): boolean {
+    const tree = this.types.program.tree;
+
     if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return false;
     }
@@ -490,37 +567,42 @@ partial class ExpressionTypes {
     if (decl == undefined || decl.name == undefined || decl.isAbstract) {
       return false;
     }
-    if (decl.typeParams.length > 0 || this.hasMakerChain(instance)) {
+    if (
+      tree.typeParamsOf(decl.typeParamsList).length > 0 ||
+      this.hasMakerChain(instance)
+    ) {
       return false;
     }
-    if (visiting.has(decl)) {
+    if (visiting.has(decl.id)) {
       return false;
     }
 
-    visiting.add(decl);
+    visiting.add(decl.id);
 
     const isEmpty = this.hasEmptyFamily(instance, visiting);
 
-    visiting.delete(decl);
+    visiting.delete(decl.id);
 
     return isEmpty;
   }
 
-  private readonly hasEmptyFamily(
+  private hasEmptyFamily(
     instance: InstanceType,
-    visiting: Set<ClassDecl>,
+    visiting: Set<int>,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const decl = this.classOf(instance);
     if (decl == undefined) {
       return true;
     }
 
-    const parent = this.classes.parentOf(instance, decl);
+    const parent = this.types.parentOf(instance, decl);
     if (parent != undefined && !this.hasEmptyFamily(parent, visiting)) {
       return false;
     }
 
-    for (const field of decl.fields) {
+    for (const field of tree.fieldsOf(decl.fieldsList)) {
       const held = this.heldInstance(instance, decl, field);
       if (held != undefined && !this.hasEmptyInstance(held, visiting)) {
         return false;
@@ -530,16 +612,18 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly heldInstance(
+  private heldInstance(
     instance: InstanceType,
     decl: ClassDecl,
     field: ClassField,
   ): InstanceType | undefined {
-    const written = field.type;
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(field.typeId);
     const isDefaulted =
       field.form == FieldKind.Instance &&
       field.presence != FieldPresence.Optional &&
-      field.init == undefined;
+      tree.exprAt(field.initId) == undefined;
     if (!isDefaulted || written == undefined) {
       return undefined;
     }

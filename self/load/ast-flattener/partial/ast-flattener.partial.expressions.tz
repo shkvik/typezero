@@ -1,0 +1,625 @@
+import { AstFlattener } from "../ast-flattener.tz";
+import {
+  ArrayElement,
+  ArrayLitExpr,
+  AssignExpr,
+  AwaitExpr,
+  BinaryExpr,
+  BoolLitExpr,
+  CallArgument,
+  CallExpr,
+  CalleeNew,
+  CastExpr,
+  ClassExpr,
+  ComputedProperty,
+  ConditionalExpr,
+  ExprKind,
+  FloatLitExpr,
+  FunctionExpr,
+  IndexExpr,
+  IntLitExpr,
+  MemberExpr,
+  NameExpr,
+  NewExpr,
+  NewForm,
+  NewKind,
+  ObjectLitExpr,
+  OptionalChainExpr,
+  Property,
+  PropertyForm,
+  PropertyKind,
+  RegexLitExpr,
+  SequenceExpr,
+  SpreadProperty,
+  StringLitExpr,
+  TemplateExpr,
+  UnaryExpr,
+  UndefinedExpr,
+  UpdateExpr,
+  YieldExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ArrayElement as SyntaxArrayElement,
+  ArrayLitExpr as SyntaxArrayLitExpr,
+  AssignExpr as SyntaxAssignExpr,
+  AwaitExpr as SyntaxAwaitExpr,
+  BinaryExpr as SyntaxBinaryExpr,
+  BoolLitExpr as SyntaxBoolLitExpr,
+  CallArgument as SyntaxCallArgument,
+  CallExpr as SyntaxCallExpr,
+  CalleeNew as SyntaxCalleeNew,
+  CastExpr as SyntaxCastExpr,
+  ClassExpr as SyntaxClassExpr,
+  ComputedProperty as SyntaxComputedProperty,
+  ConditionalExpr as SyntaxConditionalExpr,
+  Expr as SyntaxExpr,
+  FloatLitExpr as SyntaxFloatLitExpr,
+  FunctionExpr as SyntaxFunctionExpr,
+  IndexExpr as SyntaxIndexExpr,
+  IntLitExpr as SyntaxIntLitExpr,
+  MemberExpr as SyntaxMemberExpr,
+  NameExpr as SyntaxNameExpr,
+  NewExpr as SyntaxNewExpr,
+  NewForm as SyntaxNewForm,
+  ObjectLitExpr as SyntaxObjectLitExpr,
+  OptionalChainExpr as SyntaxOptionalChainExpr,
+  Property as SyntaxProperty,
+  PropertyForm as SyntaxPropertyForm,
+  RegexLitExpr as SyntaxRegexLitExpr,
+  SequenceExpr as SyntaxSequenceExpr,
+  SpreadProperty as SyntaxSpreadProperty,
+  StringLitExpr as SyntaxStringLitExpr,
+  TemplateExpr as SyntaxTemplateExpr,
+  UnaryExpr as SyntaxUnaryExpr,
+  UndefinedExpr as SyntaxUndefinedExpr,
+  UpdateExpr as SyntaxUpdateExpr,
+  YieldExpr as SyntaxYieldExpr,
+} from "../../../program/syntax/types/syntax.types.expressions.tz";
+
+partial class AstFlattener {
+  private intLitExpr(node: Read<SyntaxIntLitExpr>): int {
+    const id = this.exprs.length;
+    const record: IntLitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      value: node.value,
+      text: node.text,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private floatLitExpr(node: Read<SyntaxFloatLitExpr>): int {
+    const id = this.exprs.length;
+    const record: FloatLitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      value: node.value,
+      beyondDouble: node.beyondDouble,
+      text: node.text,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private boolLitExpr(node: Read<SyntaxBoolLitExpr>): int {
+    const id = this.exprs.length;
+    const record: BoolLitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      value: node.value,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private stringLitExpr(node: Read<SyntaxStringLitExpr>): int {
+    const id = this.exprs.length;
+    const record: StringLitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      value: node.value,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private undefinedExpr(node: Read<SyntaxUndefinedExpr>): int {
+    const id = this.exprs.length;
+    const record: UndefinedExpr = { kind: node.kind, id, loc: node.loc };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private templateExpr(node: Read<SyntaxTemplateExpr>): int {
+    const quasisList = this.textList(node.quasis);
+    const exprsList = this.exprList(node.exprs);
+    const id = this.exprs.length;
+    const record: TemplateExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      quasisList,
+      exprsList,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private arrayElement(node: Read<SyntaxArrayElement>): ArrayElement {
+    const exprId = this.expr(node.expr);
+
+    return {
+      exprId,
+      spread: node.spread,
+      hole: node.hole,
+    };
+  }
+
+  private arrayLitExpr(node: Read<SyntaxArrayLitExpr>): int {
+    const elementsList = this.arrayElementList(node.elements);
+    const id = this.exprs.length;
+    const record: ArrayLitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      elementsList,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private computedProperty(
+    node: Read<SyntaxComputedProperty>,
+  ): ComputedProperty {
+    const keyId = this.expr(node.key);
+
+    return { kind: node.kind, keyId };
+  }
+
+  private spreadProperty(node: Read<SyntaxSpreadProperty>): SpreadProperty {
+    const omitList = this.textList(node.omit);
+    const omitKeysList = this.indexExprList(node.omitKeys);
+
+    return { kind: node.kind, omitList, omitKeysList };
+  }
+
+  private propertyForm(node: Read<SyntaxPropertyForm>): PropertyForm {
+    switch (node.kind) {
+      case PropertyKind.Value:
+      case PropertyKind.Method:
+      case PropertyKind.Defaulted:
+        return node;
+      case PropertyKind.Computed:
+        return this.computedProperty(node);
+      case PropertyKind.Spread:
+        return this.spreadProperty(node);
+    }
+
+    return { kind: PropertyKind.Value };
+  }
+
+  private property(node: Read<SyntaxProperty>): Property {
+    const valueId = this.expr(node.value);
+    const formFlat = this.propertyForm(node.form);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      valueId,
+      form: formFlat,
+    };
+  }
+
+  private objectLitExpr(node: Read<SyntaxObjectLitExpr>): int {
+    const propsList = this.propertyList(node.props);
+    const id = this.exprs.length;
+    const record: ObjectLitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      propsList,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private nameExpr(node: Read<SyntaxNameExpr>): int {
+    const typeArgsList = this.typeRefList(node.typeArgs);
+    const id = this.exprs.length;
+    const record: NameExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      name: node.name,
+      known: node.known,
+      typeArgsList,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private memberExpr(node: Read<SyntaxMemberExpr>): int {
+    const objectId = this.expr(node.object);
+    const typeArgsList = this.typeRefList(node.typeArgs);
+    const id = this.exprs.length;
+    const record: MemberExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      objectId,
+      name: node.name,
+      known: node.known,
+      optional: node.optional,
+      typeArgsList,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private indexExpr(node: Read<SyntaxIndexExpr>): int {
+    const objectId = this.expr(node.object);
+    const indexId = this.expr(node.index);
+    const id = this.exprs.length;
+    const record: IndexExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      objectId,
+      indexId,
+      optional: node.optional,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private unaryExpr(node: Read<SyntaxUnaryExpr>): int {
+    const operandId = this.expr(node.operand);
+    const id = this.exprs.length;
+    const record: UnaryExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      op: node.op,
+      operandId,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private binaryExpr(node: Read<SyntaxBinaryExpr>): int {
+    const lhsId = this.expr(node.lhs);
+    const rhsId = this.expr(node.rhs);
+    const id = this.exprs.length;
+    const record: BinaryExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      op: node.op,
+      lhsId,
+      rhsId,
+      source: node.source,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private assignExpr(node: Read<SyntaxAssignExpr>): int {
+    const targetId = this.expr(node.target);
+    const valueId = this.expr(node.value);
+    const id = this.exprs.length;
+    const record: AssignExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      op: node.op,
+      targetId,
+      valueId,
+      source: node.source,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private updateExpr(node: Read<SyntaxUpdateExpr>): int {
+    const targetId = this.expr(node.target);
+    const id = this.exprs.length;
+    const record: UpdateExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      increment: node.increment,
+      prefix: node.prefix,
+      targetId,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private callArgument(node: Read<SyntaxCallArgument>): CallArgument {
+    const exprId = this.expr(node.expr);
+
+    return { exprId, spread: node.spread, hole: false };
+  }
+
+  private callExpr(node: Read<SyntaxCallExpr>): int {
+    const calleeId = this.expr(node.callee);
+    const argsList = this.callArgumentList(node.args);
+    const id = this.exprs.length;
+    const record: CallExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      calleeId,
+      argsList,
+      optional: node.optional,
+      tagged: node.tagged,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private calleeNew(node: Read<SyntaxCalleeNew>): CalleeNew {
+    const calleeId = this.expr(node.callee);
+
+    return { kind: node.kind, calleeId };
+  }
+
+  private newForm(node: Read<SyntaxNewForm>): NewForm {
+    switch (node.kind) {
+      case NewKind.Named:
+        return node;
+      case NewKind.Callee:
+        return this.calleeNew(node);
+    }
+
+    return { kind: NewKind.Named, name: "" };
+  }
+
+  private newExpr(node: Read<SyntaxNewExpr>): int {
+    const formFlat = this.newForm(node.form);
+    const typeArgsList = this.typeRefList(node.typeArgs);
+    const argsList = this.callArgumentList(node.args);
+    const id = this.exprs.length;
+    const record: NewExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      form: formFlat,
+      typeArgsList,
+      argsList,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private conditionalExpr(node: Read<SyntaxConditionalExpr>): int {
+    const condId = this.expr(node.cond);
+    const thenExprId = this.expr(node.thenExpr);
+    const elseExprId = this.expr(node.elseExpr);
+    const id = this.exprs.length;
+    const record: ConditionalExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      condId,
+      thenExprId,
+      elseExprId,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private castExpr(node: Read<SyntaxCastExpr>): int {
+    const operandId = this.expr(node.operand);
+    const targetId = this.typeRef(node.target);
+    const id = this.exprs.length;
+    const record: CastExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      operandId,
+      targetId,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private sequenceExpr(node: Read<SyntaxSequenceExpr>): int {
+    const exprsList = this.exprList(node.exprs);
+    const id = this.exprs.length;
+    const record: SequenceExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      exprsList,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private optionalChainExpr(node: Read<SyntaxOptionalChainExpr>): int {
+    const chainId = this.expr(node.chain);
+    const id = this.exprs.length;
+    const record: OptionalChainExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      chainId,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private functionExpr(node: Read<SyntaxFunctionExpr>): int {
+    const fnId = this.functionDecl(node.fn);
+    const id = this.exprs.length;
+    const record: FunctionExpr = { kind: node.kind, id, loc: node.loc, fnId };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private yieldExpr(node: Read<SyntaxYieldExpr>): int {
+    const valueId = this.exprAt(node.value);
+    const id = this.exprs.length;
+    const record: YieldExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      valueId,
+      delegate: node.delegate,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private regexLitExpr(node: Read<SyntaxRegexLitExpr>): int {
+    const id = this.exprs.length;
+    const record: RegexLitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      pattern: node.pattern,
+      flags: node.flags,
+      written: node.written,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private awaitExpr(node: Read<SyntaxAwaitExpr>): int {
+    const valueId = this.expr(node.value);
+    const id = this.exprs.length;
+    const record: AwaitExpr = {
+      kind: node.kind,
+      id,
+      loc: node.loc,
+      valueId,
+    };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private classExpr(node: Read<SyntaxClassExpr>): int {
+    const declId = this.classDecl(node.decl);
+    const id = this.exprs.length;
+    const record: ClassExpr = { kind: node.kind, id, loc: node.loc, declId };
+
+    this.exprs.push(record);
+
+    return id;
+  }
+
+  private expr(node: Read<SyntaxExpr>): int {
+    switch (node.kind) {
+      case ExprKind.IntLit:
+        return this.intLitExpr(node);
+      case ExprKind.FloatLit:
+        return this.floatLitExpr(node);
+      case ExprKind.BoolLit:
+        return this.boolLitExpr(node);
+      case ExprKind.StringLit:
+        return this.stringLitExpr(node);
+      case ExprKind.Undefined:
+        return this.undefinedExpr(node);
+      case ExprKind.Template:
+        return this.templateExpr(node);
+      case ExprKind.ArrayLit:
+        return this.arrayLitExpr(node);
+      case ExprKind.ObjectLit:
+        return this.objectLitExpr(node);
+      case ExprKind.Name:
+        return this.nameExpr(node);
+      case ExprKind.Member:
+        return this.memberExpr(node);
+      case ExprKind.Index:
+        return this.indexExpr(node);
+      case ExprKind.Unary:
+        return this.unaryExpr(node);
+      case ExprKind.Binary:
+        return this.binaryExpr(node);
+      case ExprKind.Assign:
+        return this.assignExpr(node);
+      case ExprKind.Update:
+        return this.updateExpr(node);
+      case ExprKind.Call:
+        return this.callExpr(node);
+      case ExprKind.New:
+        return this.newExpr(node);
+      case ExprKind.Conditional:
+        return this.conditionalExpr(node);
+      case ExprKind.Cast:
+        return this.castExpr(node);
+      case ExprKind.Sequence:
+        return this.sequenceExpr(node);
+      case ExprKind.OptionalChain:
+        return this.optionalChainExpr(node);
+      case ExprKind.Function:
+        return this.functionExpr(node);
+      case ExprKind.Yield:
+        return this.yieldExpr(node);
+      case ExprKind.RegexLit:
+        return this.regexLitExpr(node);
+      case ExprKind.Await:
+        return this.awaitExpr(node);
+      case ExprKind.Class:
+        return this.classExpr(node);
+    }
+
+    return -1;
+  }
+}

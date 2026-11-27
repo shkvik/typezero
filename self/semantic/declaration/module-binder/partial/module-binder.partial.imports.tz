@@ -4,52 +4,57 @@ import {
   ImportDecl,
   ModuleName,
 } from "../../../../program/ast/types/ast.types.modules.tz";
-import { ModuleExport } from "../../../../program/module-names/types/module-names.types.tz";
-import { BoundModule } from "../types/module-binder.types.tz";
+import { Program } from "../../../../program/module/types/module.types.tz";
 
 partial class ModuleBinder {
-  private readonly bindImports(bound: BoundModule): void {
-    const module = bound.names.module;
+  private bindImports(program: Read<Program>, at: int): void {
+    const tree = program.tree;
 
-    for (const decl of module.file.imports) {
-      this.bindImport(bound, decl);
+    const module = this.moduleAt(program, at);
+    if (module == undefined) {
+      return;
     }
 
-    for (const decl of module.implicit) {
-      this.bindImport(bound, decl);
+    for (const decl of tree.importsOf(module.file.importsList)) {
+      this.bindImport(program, at, decl);
+    }
+
+    for (const decl of tree.importsOf(module.implicitList)) {
+      this.bindImport(program, at, decl);
     }
   }
 
-  private readonly bindImport(bound: BoundModule, decl: ImportDecl): void {
+  private bindImport(program: Read<Program>, at: int, decl: ImportDecl): void {
+    const tree = program.tree;
+
     const from = decl.from;
-    const source = this.linkedModule(bound, from);
+    const source = this.linkedIndex(program, at, from);
     if (source == undefined) {
       return;
     }
 
-    const theirs = this.exportsOf(source);
+    this.exportsOf(program, source);
 
-    for (const name of decl.names) {
-      this.importName(bound, source, from.path, name, theirs);
+    for (const name of tree.namesOf(decl.namesList)) {
+      this.importName(program, at, source, from.path, name);
     }
   }
 
-  private readonly importName(
-    bound: BoundModule,
-    source: Read<BoundModule>,
+  private importName(
+    program: Read<Program>,
+    at: int,
+    source: int,
     path: string,
     name: ModuleName,
-    theirs: Read<Map<string, ModuleExport>>,
   ): void {
-    const target = this.exportedBy(bound, source, path, name, theirs);
+    const target = this.exportedBy(program, at, source, path, name);
     if (target == undefined) {
       return;
     }
 
-    const names = bound.names;
     const word = name.as;
-    if (names.declared.has(word)) {
-      this.report(bound, name.asLoc, Code.ImportConflictsWithDeclaration, {
+    if (this.isDeclaredAt(at, word)) {
+      this.report(at, name.asLoc, Code.ImportConflictsWithDeclaration, {
         word,
         other: name.name,
         path,
@@ -58,15 +63,18 @@ partial class ModuleBinder {
       return;
     }
 
-    const previous = names.imports.get(word);
+    const previous = this.importAt(at, word);
     if (previous != undefined) {
-      const other = this.lineOf(bound, previous.loc);
+      const other = this.lineOf(program, at, previous.loc);
 
-      this.report(bound, name.asLoc, Code.DuplicateImport, { word, other });
+      this.report(at, name.asLoc, Code.DuplicateImport, { word, other });
 
       return;
     }
 
-    names.imports.set(word, { target, loc: name.asLoc });
+    const bound = this.ordered[at];
+    if (bound != undefined) {
+      bound.imports.set(word, { target, loc: name.asLoc });
+    }
   }
 }

@@ -1,0 +1,10 @@
+export enum SyntheticNode {
+  CaseTest,
+  FilterMember,
+  ReplaceAssign,
+  SwapAssign,
+  RestArguments,
+  ThisCallRest,
+  KeyedMember,
+  NamedType,
+}

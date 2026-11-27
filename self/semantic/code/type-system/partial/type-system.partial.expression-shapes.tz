@@ -1,0 +1,635 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  ViewShape,
+} from "../../expression-shapes/types/expression-shapes.types.tz";
+import {
+  kAllocNames,
+  kArrayBufferName,
+  kBufferName,
+  kByteViewClasses,
+  kContextFunctions,
+  kCopyNames,
+  kUtf8Names,
+  kContextObjects,
+  kEmbedBytesName,
+  kLengthName,
+  kSizedClasses,
+} from "../../expression-shapes/const/expression-shapes.const.tz";
+import {
+  ArrayLitExpr,
+  BinaryOp,
+  CallExpr,
+  Expr,
+  ExprKind,
+  NewKind,
+  ObjectLitExpr,
+  PropertyKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  FunctionPlace,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+
+partial class TypeSystem {
+  public readonly isNumberLiteral(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    if (expr.kind == ExprKind.FloatLit || expr.kind == ExprKind.IntLit) {
+      return true;
+    }
+
+    return (
+      expr.kind == ExprKind.Unary &&
+      expr.op == UnaryOp.Neg &&
+      this.isNumberLiteral(tree.exprOf(expr.operandId))
+    );
+  }
+
+  public readonly isFieldLiteral(init: Expr): boolean {
+    const tree = this.program.tree;
+
+    if (init.kind == ExprKind.Unary && init.op == UnaryOp.Neg) {
+      const operand = tree.exprOf(init.operandId);
+
+      return this.isFieldLiteral(operand);
+    }
+
+    switch (init.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.Template:
+      case ExprKind.BoolLit:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly isPlainLiteral(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.BoolLit:
+        return true;
+      case ExprKind.Unary: {
+        const operand = tree.exprOf(expr.operandId);
+        const isNumber =
+          operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
+
+        return this.isSign(expr.op) && isNumber;
+      }
+      default:
+        return false;
+    }
+  }
+
+  public readonly isLiteralShaped(expr: Expr): boolean {
+    return expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
+  }
+
+  public readonly isNumberTree(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+        return true;
+      case ExprKind.Unary:
+        return (
+          this.isSign(expr.op) && this.isNumberTree(tree.exprOf(expr.operandId))
+        );
+      case ExprKind.Binary:
+        return (
+          this.isArithmeticOperator(expr.op) &&
+          this.isNumberTree(tree.exprOf(expr.lhsId)) &&
+          this.isNumberTree(tree.exprOf(expr.rhsId))
+        );
+      default:
+        return false;
+    }
+  }
+
+  public readonly isIntTree(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return true;
+      case ExprKind.Unary:
+        return (
+          this.isSign(expr.op) && this.isIntTree(tree.exprOf(expr.operandId))
+        );
+      case ExprKind.Binary:
+        return (
+          this.isWholeArithmetic(expr.op) &&
+          this.isIntTree(tree.exprOf(expr.lhsId)) &&
+          this.isIntTree(tree.exprOf(expr.rhsId))
+        );
+      default:
+        return false;
+    }
+  }
+
+  public readonly isSign(op: UnaryOp): boolean {
+    return op == UnaryOp.Neg || op == UnaryOp.Plus;
+  }
+
+  public readonly isWholeArithmetic(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.Add:
+      case BinaryOp.Sub:
+      case BinaryOp.Mul:
+      case BinaryOp.Rem:
+      case BinaryOp.Pow:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public readonly isSpreadOnly(expr: ObjectLitExpr): boolean {
+    const tree = this.program.tree;
+
+    const hasSpread = tree
+      .propertiesOf(expr.propsList)
+      .some((property) => property.form.kind == PropertyKind.Spread);
+    const hasOther = tree
+      .propertiesOf(expr.propsList)
+      .some(
+        (property) =>
+          property.form.kind == PropertyKind.Method ||
+          property.form.kind == PropertyKind.Computed,
+      );
+
+    return hasSpread && !hasOther;
+  }
+
+  public readonly isNeedingContext(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Function:
+        return tree
+          .paramsOf(tree.functionOf(expr.fnId).paramsList)
+          .some((param) => tree.typeRefAt(param.typeId) == undefined);
+      case ExprKind.ArrayLit:
+        return tree
+          .elementsOf(expr.elementsList)
+          .some(
+            (element) =>
+              !element.hole &&
+              this.isNeedingContext(tree.exprOf(element.exprId)),
+          );
+      case ExprKind.ObjectLit:
+        return tree
+          .propertiesOf(expr.propsList)
+          .some((prop) => this.isNeedingContext(tree.exprOf(prop.valueId)));
+      case ExprKind.Name:
+        return (
+          tree.typeRefsOf(expr.typeArgsList).length == 0 &&
+          kContextFunctions.includes(expr.name)
+        );
+      case ExprKind.Member: {
+        const object = tree.exprOf(expr.objectId);
+
+        return (
+          object.kind == ExprKind.Name && kContextObjects.includes(object.name)
+        );
+      }
+      default:
+        return false;
+    }
+  }
+
+  public readonly isWrittenLiteral(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.BoolLit:
+      case ExprKind.Undefined:
+        return true;
+      case ExprKind.Unary:
+        return (
+          expr.op == UnaryOp.Neg &&
+          this.isWrittenLiteral(tree.exprOf(expr.operandId))
+        );
+      default:
+        return false;
+    }
+  }
+
+  public readonly isLogical(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Binary) {
+      return false;
+    }
+
+    return expr.op == BinaryOp.LogAnd || expr.op == BinaryOp.LogOr;
+  }
+
+  public readonly isWaiting(branch: Expr): boolean {
+    return this.isShapedBranch(branch) || this.isNumberTree(branch);
+  }
+
+  public readonly isClosure(fn: FunctionDecl): boolean {
+    return fn.isArrow || fn.place == FunctionPlace.Expression;
+  }
+
+  public readonly childrenOf(expr: Expr): Expr[] {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Index:
+        return [tree.exprOf(expr.objectId), tree.exprOf(expr.indexId)];
+      case ExprKind.Binary:
+        return [tree.exprOf(expr.lhsId), tree.exprOf(expr.rhsId)];
+      case ExprKind.Await:
+        return [tree.exprOf(expr.valueId)];
+      case ExprKind.Cast:
+        return [tree.exprOf(expr.operandId)];
+      case ExprKind.Sequence:
+        return tree.exprsOf(expr.exprsList);
+      case ExprKind.Yield: {
+        const value = tree.exprAt(expr.valueId);
+        if (value == undefined) {
+          return [];
+        }
+
+        return [value];
+      }
+      default:
+        return [];
+    }
+  }
+
+  public readonly isLogicOp(op: BinaryOp): boolean {
+    return (
+      op == BinaryOp.Nullish || op == BinaryOp.LogOr || op == BinaryOp.LogAnd
+    );
+  }
+
+  public readonly isSimpleTarget(target: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (target.kind) {
+      case ExprKind.Name:
+        return true;
+      case ExprKind.Member:
+        return (
+          !target.optional && this.isSimpleChain(tree.exprOf(target.objectId))
+        );
+      case ExprKind.Index:
+        return (
+          !target.optional &&
+          this.isSimpleChain(tree.exprOf(target.objectId)) &&
+          this.isSimpleChain(tree.exprOf(target.indexId))
+        );
+      default:
+        return false;
+    }
+  }
+
+  public readonly isLiteralTruth(value: Expr, truth: boolean): boolean {
+    return value.kind == ExprKind.BoolLit && value.value == truth;
+  }
+
+  public readonly literalCondition(cond: Expr): boolean | undefined {
+    if (cond.kind != ExprKind.BoolLit) {
+      return undefined;
+    }
+
+    return cond.value;
+  }
+
+  public readonly isTrueLiteral(cond: Expr): boolean {
+    return this.literalCondition(cond) == true;
+  }
+
+  public readonly isForever(cond: Expr | undefined): boolean {
+    return cond == undefined || this.isTrueLiteral(cond);
+  }
+
+  public readonly hasBreak(statement: Stmt | undefined): boolean {
+    return this.breaksOut(statement, false);
+  }
+
+  public readonly isLength(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    if (expr.kind == ExprKind.OptionalChain) {
+      const chain = tree.exprOf(expr.chainId);
+
+      return this.isLength(chain);
+    }
+
+    return expr.kind == ExprKind.Member && expr.name == kLengthName;
+  }
+
+  public readonly isZeroLiteral(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return expr.value == 0;
+      case ExprKind.FloatLit:
+        return expr.value == 0.0;
+      case ExprKind.Unary:
+        return (
+          expr.op == UnaryOp.Neg &&
+          this.isZeroLiteral(tree.exprOf(expr.operandId))
+        );
+      default:
+        return false;
+    }
+  }
+
+  public readonly isPlainList(literal: ArrayLitExpr): boolean {
+    const tree = this.program.tree;
+
+    const elements = tree.elementsOf(literal.elementsList);
+    if (elements.length == 0) {
+      return false;
+    }
+
+    return tree
+      .elementsOf(literal.elementsList)
+      .every((element) => !element.spread && !element.hole);
+  }
+
+  public readonly isFresh(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.ArrayLit:
+      case ExprKind.ObjectLit:
+        return true;
+      case ExprKind.Conditional:
+        return (
+          this.isFresh(tree.exprOf(expr.thenExprId)) &&
+          this.isFresh(tree.exprOf(expr.elseExprId))
+        );
+      default:
+        return false;
+    }
+  }
+
+  public readonly madeSize(value: Expr): Expr | undefined {
+    const tree = this.program.tree;
+
+    if (value.kind != ExprKind.New) {
+      return undefined;
+    }
+
+    const form = value.form;
+    if (form.kind != NewKind.Named) {
+      return undefined;
+    }
+
+    const size = tree.argumentsOf(value.argsList)[0];
+    const isSized =
+      kSizedClasses.includes(form.name) &&
+      form.member == undefined &&
+      tree.argumentsOf(value.argsList).length == 1;
+    if (!isSized || size == undefined || size.spread) {
+      return undefined;
+    }
+
+    return tree.exprOf(size.exprId);
+  }
+
+  public readonly madeCount(value: Expr): int | undefined {
+    const tree = this.program.tree;
+
+    const size = this.madeSize(value);
+    if (size == undefined || size.kind != ExprKind.ArrayLit) {
+      return undefined;
+    }
+
+    const isPlain = tree
+      .elementsOf(size.elementsList)
+      .every((one) => !one.spread && !one.hole);
+    if (!isPlain) {
+      return undefined;
+    }
+
+    return tree.elementsOf(size.elementsList).length;
+  }
+
+  public readonly embeddedPath(value: Expr): string | undefined {
+    const tree = this.program.tree;
+
+    if (value.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = tree.exprOf(value.calleeId);
+    const path = tree.exprAt(tree.argumentsOf(value.argsList)[0]?.exprId);
+    const isEmbed =
+      callee.kind == ExprKind.Name &&
+      callee.name == kEmbedBytesName &&
+      tree.argumentsOf(value.argsList).length == 1;
+    if (!isEmbed || path == undefined || path.kind != ExprKind.StringLit) {
+      return undefined;
+    }
+
+    return path.value;
+  }
+
+  public readonly allocatedSize(value: Expr): Expr | undefined {
+    const tree = this.program.tree;
+
+    const call = this.bufferCall(value, kAllocNames);
+    const size = tree.argumentsOf(call?.argsList)[0];
+    if (size == undefined || size.spread) {
+      return undefined;
+    }
+
+    return tree.exprOf(size.exprId);
+  }
+
+  public readonly copiedSource(value: Expr): Expr | undefined {
+    const tree = this.program.tree;
+
+    const call = this.bufferCall(value, kCopyNames);
+    const source = tree.argumentsOf(call?.argsList)[0];
+    if (call == undefined || source == undefined || source.spread) {
+      return undefined;
+    }
+
+    const encoding = tree.exprAt(tree.argumentsOf(call.argsList)[1]?.exprId);
+    const isPlain =
+      encoding == undefined ||
+      (encoding.kind == ExprKind.StringLit &&
+        kUtf8Names.includes(encoding.value));
+    if (!isPlain || tree.argumentsOf(call.argsList).length > 2) {
+      return undefined;
+    }
+
+    return tree.exprOf(source.exprId);
+  }
+
+  public readonly viewOf(value: Expr): ViewShape | undefined {
+    const tree = this.program.tree;
+
+    if (value.kind != ExprKind.New) {
+      return undefined;
+    }
+
+    const form = value.form;
+    if (form.kind != NewKind.Named) {
+      return undefined;
+    }
+
+    const buffer = tree.argumentsOf(value.argsList)[0];
+    const isView =
+      kByteViewClasses.includes(form.name) &&
+      form.member == undefined &&
+      tree.argumentsOf(value.argsList).length <= 3 &&
+      tree.argumentsOf(value.argsList).every((arg) => !arg.spread);
+    if (!isView || buffer == undefined) {
+      return undefined;
+    }
+
+    return {
+      name: form.name,
+      buffer: tree.exprOf(buffer.exprId),
+      offset: tree.exprAt(tree.argumentsOf(value.argsList)[1]?.exprId),
+      length: tree.exprAt(tree.argumentsOf(value.argsList)[2]?.exprId),
+    };
+  }
+
+  public readonly madeBuffer(value: Expr): Expr | undefined {
+    if (value.kind != ExprKind.New) {
+      return undefined;
+    }
+
+    const form = value.form;
+    if (form.kind != NewKind.Named || form.name != kArrayBufferName) {
+      return undefined;
+    }
+
+    return this.madeSize(value);
+  }
+
+  private readonly isArithmeticOperator(op: BinaryOp): boolean {
+    return op == BinaryOp.Div || this.isWholeArithmetic(op);
+  }
+
+  private readonly isShapedBranch(branch: Expr): boolean {
+    const tree = this.program.tree;
+
+    if (this.isLiteralShaped(branch)) {
+      return true;
+    }
+    if (branch.kind != ExprKind.Conditional) {
+      return false;
+    }
+
+    return (
+      this.isShapedBranch(tree.exprOf(branch.thenExprId)) ||
+      this.isShapedBranch(tree.exprOf(branch.elseExprId))
+    );
+  }
+
+  private readonly isSimpleChain(expr: Expr): boolean {
+    const tree = this.program.tree;
+
+    switch (expr.kind) {
+      case ExprKind.Name:
+      case ExprKind.IntLit:
+      case ExprKind.StringLit:
+        return true;
+      case ExprKind.Member:
+        return !expr.optional && this.isSimpleChain(tree.exprOf(expr.objectId));
+      default:
+        return false;
+    }
+  }
+
+  private readonly breaksOut(
+    statement: Stmt | undefined,
+    isNested: boolean,
+  ): boolean {
+    const tree = this.program.tree;
+
+    if (statement == undefined) {
+      return false;
+    }
+
+    switch (statement.kind) {
+      case StmtKind.Break:
+        return !isNested || statement.label != "";
+      case StmtKind.Block:
+        return tree
+          .stmtsOf(statement.bodyList)
+          .some((one) => this.breaksOut(one, isNested));
+      case StmtKind.If:
+        return (
+          this.breaksOut(tree.stmtOf(statement.thenStmtId), isNested) ||
+          this.breaksOut(tree.stmtAt(statement.elseStmtId), isNested)
+        );
+      case StmtKind.Labeled:
+        const body = tree.stmtOf(statement.bodyId);
+
+        return this.breaksOut(body, isNested);
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+      case StmtKind.ForOf:
+        const bodyStmt = tree.stmtOf(statement.bodyId);
+
+        return this.breaksOut(bodyStmt, true);
+      case StmtKind.For:
+        const statementBody = tree.stmtAt(statement.bodyId);
+
+        return this.breaksOut(statementBody, true);
+      case StmtKind.Switch:
+        return tree
+          .casesOf(statement.casesList)
+          .some((option) =>
+            tree
+              .stmtsOf(option.bodyList)
+              .some((one) => this.breaksOut(one, true)),
+          );
+      default:
+        return false;
+    }
+  }
+
+  private readonly bufferCall(
+    value: Expr,
+    names: Read<string[]>,
+  ): CallExpr | undefined {
+    const tree = this.program.tree;
+
+    if (value.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = tree.exprOf(value.calleeId);
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const owner = tree.exprOf(callee.objectId);
+    const isMaker =
+      owner.kind == ExprKind.Name &&
+      owner.name == kBufferName &&
+      names.includes(callee.name);
+    if (!isMaker) {
+      return undefined;
+    }
+
+    return value;
+  }
+}

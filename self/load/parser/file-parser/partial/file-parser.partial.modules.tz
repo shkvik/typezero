@@ -3,11 +3,9 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
-  ImportDecl,
   ModuleName,
   ModulePath,
   WholeImport,
@@ -27,6 +25,12 @@ import {
 } from "../const/file-parser.const.modules.tz";
 import { kBuiltinModules } from "../../../../program/library/builtin-modules/const/builtin-modules.const.tz";
 import { kJsonExtension } from "../../../../program/module/const/module.const.tz";
+import {
+  ImportDecl,
+} from "../../../../program/syntax/types/syntax.types.modules.tz";
+import {
+  Stmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
 
 partial class FileParser {
   private importDecl(topLevel: boolean): Stmt {

@@ -30,22 +30,22 @@ partial class ExpressionTypes {
     module: int,
     shown: string = "",
   ): boolean {
-    if (this.truth.problemOf(type) == TruthProblem.None) {
+    if (this.types.problemOf(type) == TruthProblem.None) {
       return true;
     }
 
     const texts: TruthTexts = {
       word: this.shownWord(expr, shown),
       other: this.otherHint(other),
-      isLength: this.shapes.isLength(expr),
+      isLength: this.types.isLength(expr),
     };
-    const answer = this.truth.answerOf(type, use, texts);
+    const answer = this.types.truthAnswerOf(type, use, texts);
     const narrowed = this.narrowedCode(expr, answer.code, module);
     if (narrowed != undefined) {
       const word = texts.word;
-      const first = this.truth.holderNoun(answer.base);
+      const first = this.types.holderNoun(answer.base);
 
-      this.report(module, expr.loc, narrowed, { word, first });
+      this.errors.write(module, expr.loc, narrowed, { word, first });
 
       return false;
     }
@@ -53,7 +53,7 @@ partial class ExpressionTypes {
     const base = answer.base;
     const code = this.classNameCode(expr, answer.code, base, module);
 
-    this.report(module, expr.loc, code, answer.details);
+    this.errors.write(module, expr.loc, code, answer.details);
 
     return false;
   }
@@ -63,40 +63,62 @@ partial class ExpressionTypes {
       return shown;
     }
 
-    return this.sources.hintText(expr, kUnnamedOperand);
+    return this.types.hintText(expr, kUnnamedOperand);
   }
 
   private booleanCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    const arg = expr.args[0];
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    const arg = tree.argumentsOf(expr.argsList)[0];
     const isBoolean =
       callee.kind == ExprKind.Name &&
       callee.name == kBooleanName &&
       this.isGlobalUse(callee, module);
-    if (!isBoolean || arg == undefined || expr.args.length != 1) {
+    if (
+      !isBoolean ||
+      arg == undefined ||
+      tree.argumentsOf(expr.argsList).length != 1
+    ) {
       return;
     }
 
-    const type = this.peekType(arg.expr, module);
-    this.checkTruthy(arg.expr, type, TruthUse.Condition, undefined, module);
+    const exprExpr = tree.exprOf(arg.exprId);
+    const type = this.peekType(exprExpr, module);
+    this.checkTruthy(
+      tree.exprOf(arg.exprId),
+      type,
+      TruthUse.Condition,
+      undefined,
+      module,
+    );
   }
 
   private numberCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    const arg = expr.args[0];
+    const tree = this.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    const arg = tree.argumentsOf(expr.argsList)[0];
     const isNumber =
       callee.kind == ExprKind.Name &&
       callee.name == kNumberName &&
       this.isGlobalUse(callee, module);
-    if (!isNumber || arg == undefined || expr.args.length != 1) {
+    if (
+      !isNumber ||
+      arg == undefined ||
+      tree.argumentsOf(expr.argsList).length != 1
+    ) {
       return;
     }
 
-    const type = this.peekType(arg.expr, module);
+    const exprExpr = tree.exprOf(arg.exprId);
+    const type = this.peekType(exprExpr, module);
 
     const code = this.numberSourceCode(type);
     if (code != undefined) {
-      this.report(module, arg.expr.loc, code, { word: this.text.of(type) });
+      this.errors.write(module, tree.exprOf(arg.exprId).loc, code, {
+        word: this.types.typeText(type),
+      });
     }
   }
 
@@ -178,6 +200,6 @@ partial class ExpressionTypes {
       return kOtherPlaceholder;
     }
 
-    return this.sources.hintText(other, kOtherPlaceholder);
+    return this.types.hintText(other, kOtherPlaceholder);
   }
 }

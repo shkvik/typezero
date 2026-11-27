@@ -66,9 +66,9 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): Type {
-    const checked = this.operators.parameterArithmetic(expr, pair);
+    const checked = this.types.parameterArithmetic(expr, pair);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
     this.requireJoin(expr, pair);
 
     return checked.value;
@@ -108,32 +108,36 @@ partial class ExpressionTypes {
     module: int,
     links: ConcatLink[],
   ): OperandPair {
+    const tree = this.types.program.tree;
+
     const expected = this.types.wantedPart(wanted);
-    const hints = this.operators.operandHints(expr.op, expected);
+    const hints = this.types.operandHints(expr.op, expected);
     const isLiteralLeft =
-      this.shapes.isNumberTree(expr.lhs) &&
-      !this.shapes.isNumberTree(expr.rhs) &&
-      (hints.canHint || this.shapes.isIntTree(expr.lhs));
+      this.types.isNumberTree(tree.exprOf(expr.lhsId)) &&
+      !this.types.isNumberTree(tree.exprOf(expr.rhsId)) &&
+      (hints.canHint || this.types.isIntTree(tree.exprOf(expr.lhsId)));
     if (isLiteralLeft) {
       return this.literalLeftOperands(expr, hints, module, links);
     }
 
     const left = this.leftTyped(expr, hints.left, module, links);
-    const isLiteralRight = hints.canHint && this.shapes.isNumberTree(expr.rhs);
-    const literalHint = this.operators.literalSideHint(
+    const isLiteralRight =
+      hints.canHint && this.types.isNumberTree(tree.exprOf(expr.rhsId));
+    const literalHint = this.types.literalSideHint(
       isLiteralRight,
       left,
       hints.right,
     );
     const rightHint = this.integerHint(
-      expr.rhs,
-      expr.lhs,
+      tree.exprOf(expr.rhsId),
+      tree.exprOf(expr.lhsId),
       left,
       literalHint,
       hints.isBitwise,
       module,
     );
-    const right = this.operandTyped(expr.rhs, rightHint, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.operandTyped(rhs, rightHint, module);
 
     return this.adapted(expr, { left, right }, module);
   }
@@ -144,15 +148,21 @@ partial class ExpressionTypes {
     module: int,
     links: ConcatLink[],
   ): OperandPair {
-    const right = this.operandTyped(expr.rhs, hints.right, module);
-    const literalHint = this.operators.literalSideHint(
+    const tree = this.types.program.tree;
+
+    const right = this.operandTyped(
+      tree.exprOf(expr.rhsId),
+      hints.right,
+      module,
+    );
+    const literalHint = this.types.literalSideHint(
       hints.canHint,
       right,
       hints.left,
     );
     const leftHint = this.integerHint(
-      expr.lhs,
-      expr.rhs,
+      tree.exprOf(expr.lhsId),
+      tree.exprOf(expr.rhsId),
       right,
       literalHint,
       hints.isBitwise,
@@ -169,7 +179,9 @@ partial class ExpressionTypes {
     module: int,
     links: ConcatLink[],
   ): Type {
-    const left = expr.lhs;
+    const tree = this.types.program.tree;
+
+    const left = tree.exprOf(expr.lhsId);
     if (expr.op != BinaryOp.Add || left.kind != ExprKind.Binary) {
       return this.operandTyped(left, hint, module);
     }
@@ -207,7 +219,7 @@ partial class ExpressionTypes {
     const type = this.types.definedType(otherType);
     const isFraction = type.kind == TypeKind.Double && !isBitwise;
     const isOtherNumber = type.kind == TypeKind.Int || isFraction;
-    if (!isOtherNumber || !this.shapes.isIntTree(literal)) {
+    if (!isOtherNumber || !this.types.isIntTree(literal)) {
       return hint;
     }
     if (this.isWholeTree(other, module)) {
@@ -222,16 +234,19 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): OperandPair {
+    const tree = this.types.program.tree;
+
     const left = pair.left;
     const right = pair.right;
     const isBroken =
       left.kind == TypeKind.Error || right.kind == TypeKind.Error;
-    if (left == right || isBroken) {
+    if (left.id == right.id || isBroken) {
       return pair;
     }
 
     const isBitwise =
-      this.operators.isBitwise(expr.op) || this.operators.isShift(expr.op);
+      this.types.isOperatorBitwise(expr.op) ||
+      this.types.isOperatorShift(expr.op);
     const hasNumbers =
       this.types.isNumberLike(left) && this.types.isNumberLike(right);
     const hasIntegers = left.kind == TypeKind.Int && right.kind == TypeKind.Int;
@@ -240,13 +255,23 @@ partial class ExpressionTypes {
     }
 
     const isPower = expr.op == BinaryOp.Pow;
-    const toRight = this.literalTarget(expr.lhs, left, right, module);
+    const toRight = this.literalTarget(
+      tree.exprOf(expr.lhsId),
+      left,
+      right,
+      module,
+    );
     const isRightDecimal = right.kind == TypeKind.Decimal;
     if (toRight != undefined && !(isPower && isRightDecimal)) {
       return { left: toRight, right };
     }
 
-    const toLeft = this.literalTarget(expr.rhs, right, left, module);
+    const toLeft = this.literalTarget(
+      tree.exprOf(expr.rhsId),
+      right,
+      left,
+      module,
+    );
     const isLeftFraction =
       left.kind == TypeKind.Decimal || left.kind == TypeKind.Double;
     if (toLeft != undefined && !(isPower && isLeftFraction)) {
@@ -261,7 +286,7 @@ partial class ExpressionTypes {
     given: OperandPair,
     module: int,
   ): Type {
-    const pair = this.operators.withoutNever(given);
+    const pair = this.types.withoutNever(given);
     const left = pair.left;
     const right = pair.right;
     const isBroken =
@@ -281,7 +306,7 @@ partial class ExpressionTypes {
     if (this.types.isDate(left) || this.types.isDate(right)) {
       return this.dateArithmetic(expr, pair, module);
     }
-    if (this.operators.isBitwise(expr.op)) {
+    if (this.types.isOperatorBitwise(expr.op)) {
       return this.bitsResult(expr, pair, module);
     }
     if (left.kind == TypeKind.Decimal || right.kind == TypeKind.Decimal) {
@@ -289,7 +314,8 @@ partial class ExpressionTypes {
     }
 
     const isWrapping =
-      this.operators.isWrapping(left) || this.operators.isWrapping(right);
+      this.types.isOperatorWrapping(left) ||
+      this.types.isOperatorWrapping(right);
     const hasIntegers = left.kind == TypeKind.Int && right.kind == TypeKind.Int;
     if (isWrapping && hasIntegers) {
       return this.wrappingResult(expr, pair, module);
@@ -305,23 +331,23 @@ partial class ExpressionTypes {
       expr.op == BinaryOp.Pow &&
       left.kind == TypeKind.Double &&
       written.kind == TypeKind.Int;
-    const right = this.operators.powerSide(isFloatPower, left, written);
+    const right = this.types.powerSide(isFloatPower, left, written);
     const hasNumbers =
       this.types.isNumeric(left) && this.types.isNumeric(right);
-    const common = this.operators.commonNumber(hasNumbers, left, right);
+    const common = this.types.commonNumber(hasNumbers, left, right);
     if (hasNumbers && common == undefined) {
-      const mixedError = this.operators.mixedError(expr, pair, module);
+      const mixedError = this.types.mixedError(expr, pair, module);
 
-      this.reportFound(module, mixedError);
+      this.errors.writeFound(module, mixedError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (common == undefined) {
-      const operandsError = this.operators.operandsError(expr, pair);
+      const operandsError = this.types.operandsError(expr, pair);
 
-      this.reportFound(module, operandsError);
+      this.errors.writeFound(module, operandsError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (common.kind == TypeKind.Int) {
       this.integerChecks(expr, common, written, module);
@@ -340,13 +366,21 @@ partial class ExpressionTypes {
     right: Type,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     if (expr.op == BinaryOp.Pow) {
-      const exponent = this.intConstant(expr.rhs, right, module);
+      const rhs = tree.exprOf(expr.rhsId);
+      const exponent = this.intConstant(rhs, right, module);
       const isNegative = exponent != undefined && exponent < 0;
       if (isNegative) {
-        const first = this.text.of(common);
+        const first = this.types.typeText(common);
 
-        this.report(module, expr.rhs.loc, Code.NegativePower, { first });
+        this.errors.write(
+          module,
+          tree.exprOf(expr.rhsId).loc,
+          Code.NegativePower,
+          { first },
+        );
       }
 
       return;
@@ -355,31 +389,41 @@ partial class ExpressionTypes {
     this.divisorCheck(expr, right, module);
   }
 
-  private readonly doubleDivisorCheck(expr: BinaryExpr, module: int): void {
+  private doubleDivisorCheck(expr: BinaryExpr, module: int): void {
+    const tree = this.types.program.tree;
+
     const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
-    const divisor = expr.rhs;
+    const divisor = tree.exprOf(expr.rhsId);
     if (!isDividing || divisor.kind != ExprKind.IntLit) {
       return;
     }
     const value = divisor.value;
     const loc = divisor.loc;
     if (value == 0) {
-      this.report(module, loc, Code.DivisionByZero, kNoDetails);
+      this.errors.write(module, loc, Code.DivisionByZero, kNoDetails);
     }
   }
 
   private divisorCheck(expr: BinaryExpr, right: Type, module: int): void {
+    const tree = this.types.program.tree;
+
     const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
     if (!isDividing) {
       return;
     }
 
-    const divisor = this.intConstant(expr.rhs, right, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const divisor = this.intConstant(rhs, right, module);
     if (divisor == undefined || divisor != 0) {
       return;
     }
 
-    this.report(module, expr.rhs.loc, Code.DivisionByZero, kNoDetails);
+    this.errors.write(
+      module,
+      tree.exprOf(expr.rhsId).loc,
+      Code.DivisionByZero,
+      kNoDetails,
+    );
   }
 
   private wrappingResult(
@@ -390,18 +434,19 @@ partial class ExpressionTypes {
     const left = pair.left;
     const right = pair.right;
     const isBoth =
-      this.operators.isWrapping(left) && this.operators.isWrapping(right);
-    if (isBoth && left != right) {
-      const mixedError = this.operators.mixedError(expr, pair, module);
+      this.types.isOperatorWrapping(left) &&
+      this.types.isOperatorWrapping(right);
+    if (isBoth && left.id != right.id) {
+      const mixedError = this.types.mixedError(expr, pair, module);
 
-      this.reportFound(module, mixedError);
+      this.errors.writeFound(module, mixedError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.divisorCheck(expr, right, module);
 
-    if (this.operators.isWrapping(left)) {
+    if (this.types.isOperatorWrapping(left)) {
       return left;
     }
 
@@ -413,16 +458,20 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const expected = this.types.wantedPart(wanted);
     const isInteger = expected != undefined && expected.kind == TypeKind.Int;
-    const hint = this.operators.shiftHint(expr, isInteger, expected);
-    const left = this.operandTyped(expr.lhs, hint, module);
-    const right = this.operandTyped(expr.rhs, undefined, module);
+    const hint = this.types.shiftHint(expr, isInteger, expected);
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.operandTyped(lhs, hint, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.operandTyped(rhs, undefined, module);
     const pair = this.adapted(expr, { left, right }, module);
     const isBroken =
       pair.left.kind == TypeKind.Error || pair.right.kind == TypeKind.Error;
     if (isBroken) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.bitsResult(expr, pair, module);
@@ -433,22 +482,25 @@ partial class ExpressionTypes {
     const right = pair.right;
 
     if (this.reportsBits(expr, pair, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.operators.isShift(expr.op)) {
+    if (this.types.isOperatorShift(expr.op)) {
       this.shiftConstants(expr, pair, module);
 
       return left;
     }
-    if (this.operators.isWrapping(left) || this.operators.isWrapping(right)) {
+    if (
+      this.types.isOperatorWrapping(left) ||
+      this.types.isOperatorWrapping(right)
+    ) {
       return this.wrappingResult(expr, pair, module);
     }
-    if (left != right) {
-      const mixedError = this.operators.mixedError(expr, pair, module);
+    if (left.id != right.id) {
+      const mixedError = this.types.mixedError(expr, pair, module);
 
-      this.reportFound(module, mixedError);
+      this.errors.writeFound(module, mixedError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     this.foldBinary(expr, left, module);
@@ -456,14 +508,14 @@ partial class ExpressionTypes {
     return left;
   }
 
-  private readonly reportsBits(
+  private reportsBits(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
   ): boolean {
-    const checked = this.operators.reportsBits(expr, pair, module);
+    const checked = this.types.reportsBits(expr, pair, module);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -473,13 +525,17 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const shifted = pair.left;
     if (shifted.kind != TypeKind.Int || shifted.wraps) {
       return;
     }
 
-    const value = this.intConstant(expr.lhs, shifted, module);
-    const count = this.intConstant(expr.rhs, shifted, module);
+    const lhs = tree.exprOf(expr.lhsId);
+    const value = this.intConstant(lhs, shifted, module);
+    const rhs = tree.exprOf(expr.rhsId);
+    const count = this.intConstant(rhs, shifted, module);
     const isWide = shifted.unsigned && shifted.bits == 64;
     if (value == undefined || count == undefined || isWide) {
       return;
@@ -491,10 +547,10 @@ partial class ExpressionTypes {
       return this.foldShift(expr, shifted, value, count, module);
     }
 
-    const first = this.text.of(shifted);
+    const first = this.types.typeText(shifted);
     const last = width - 1;
 
-    this.report(module, expr.rhs.loc, Code.ShiftCount, {
+    this.errors.write(module, tree.exprOf(expr.rhsId).loc, Code.ShiftCount, {
       word: `${count}`,
       other: `${last}`,
       first,

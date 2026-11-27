@@ -10,6 +10,7 @@ import {
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
 import {
+  IteratorShape,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
@@ -27,96 +28,129 @@ import {
 import { kNextName } from "../../../index-rules/const/index-rules.const.tz";
 
 partial class ExpressionTypes {
-  private enterGenerator(frame: FunctionFrame, result: Type | undefined): void {
+  private enterGenerator(
+    frame: Read<FunctionFrame>,
+    result: Type | undefined,
+  ): void {
     const fn = frame.fn;
     if (fn == undefined || !fn.isGenerator) {
       return;
     }
 
-    const generator = this.functions.generatorFrameOf(fn, result);
+    const generator = this.types.generatorFrameOf(fn, result);
 
-    frame.generator = generator;
     this.generatorFrames.push(generator);
   }
 
-  private leaveGenerator(frame: Read<FunctionFrame>): void {
-    if (frame.generator != undefined) {
-      this.generatorFrames.pop();
+  private leaveGenerator(frame: FunctionFrame): void {
+    const fn = frame.fn;
+    if (fn == undefined || !fn.isGenerator) {
+      return;
+    }
+
+    frame.generator = this.generatorFrames.pop();
+  }
+
+  private addYield(value: Expr, type: Type): void {
+    const frame = this.generatorFrames[this.generatorFrames.length - 1];
+    if (frame != undefined) {
+      frame.yields.push({ value, type });
     }
   }
 
-  private readonly iteratorCallCheck(
+  private readonly sentOf(sent: Type | undefined): Type {
+    if (sent == undefined) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    return sent;
+  }
+
+  private iteratorCallCheck(
     member: MemberExpr,
     object: Type,
     module: int,
   ): boolean {
-    const checked = this.functions.iteratorCallCheck(member, object);
+    const checked = this.types.iteratorCallCheck(member, object);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly iteratorMissingCheck(
+  private iteratorMissingCheck(
     member: MemberExpr,
     object: Type,
     module: int,
   ): boolean {
-    const checked = this.functions.iteratorMissingCheck(member, object);
+    const checked = this.types.iteratorMissingCheck(member, object);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
+  }
+
+  private readonly isOwnYield(): boolean {
+    const frame = this.generatorFrames[this.generatorFrames.length - 1];
+    const open = this.openFunctions[this.openFunctions.length - 1];
+
+    return frame != undefined && open?.id == frame.fn.id;
   }
 
   private yieldTyped(expr: YieldExpr, module: int): Type {
-    const frame = this.generatorFrames[this.generatorFrames.length - 1];
-    const value = expr.value;
+    const tree = this.types.program.tree;
 
-    if (
-      frame == undefined ||
-      this.openFunctions[this.openFunctions.length - 1] != frame.fn
-    ) {
+    const value = tree.exprAt(expr.valueId);
+    if (!this.isOwnYield()) {
       return this.childrenTyped(expr, module);
     }
-    if (expr.delegate) {
-      return this.delegateTyped(frame, value, module);
+
+    const frame = this.generatorFrames[this.generatorFrames.length - 1];
+    if (frame == undefined) {
+      return this.childrenTyped(expr, module);
     }
 
-    const given = this.yieldValue(frame, value, module);
+    const fn = frame.fn;
+    const yielded = frame.yielded;
+    const sent = frame.sent;
+
+    if (expr.delegate) {
+      return this.delegateTyped(value, module);
+    }
+
+    const given = this.yieldValue(fn, yielded, value, module);
 
     if (value != undefined) {
-      this.yieldOf.set(value, expr.loc);
+      this.yieldOf.set(value.id, expr.loc);
     }
 
-    if (!this.unusedYields.has(expr) && frame.sent == undefined) {
-      this.report(module, expr.loc, Code.YieldSentUnknown, {
-        word: this.text.of(this.functions.widened(given)),
+    if (!this.unusedYields.has(expr.id) && sent == undefined) {
+      this.errors.write(module, expr.loc, Code.YieldSentUnknown, {
+        word: this.types.typeText(this.types.widened(given)),
       });
     }
 
     if (value != undefined) {
-      frame.yields.push({ value, type: given });
+      this.addYield(value, given);
     }
 
-    return this.functions.sentType(frame);
+    return this.sentOf(sent);
   }
 
   private yieldValue(
-    frame: Read<GeneratorFrame>,
+    fn: FunctionDecl,
+    yielded: Type | undefined,
     value: Expr | undefined,
     module: int,
   ): Type {
     if (value == undefined) {
-      return this.store.plain(TypeKind.Undefined);
+      return this.types.store.plain(TypeKind.Undefined);
     }
 
-    const promised = this.asyncYieldValue(frame, value, module);
+    const promised = this.asyncYieldValue(fn, yielded, value, module);
     if (promised != undefined) {
       return promised;
     }
-
-    const yielded = frame.yielded;
     if (yielded == undefined) {
       return this.typed(value, undefined, module);
     }
@@ -125,17 +159,17 @@ partial class ExpressionTypes {
   }
 
   private asyncYieldValue(
-    frame: Read<GeneratorFrame>,
+    fn: FunctionDecl,
+    yielded: Type | undefined,
     value: Expr,
     module: int,
   ): Type | undefined {
-    const fn = frame.fn;
-    if (fn == undefined || !fn.isAsync) {
+    if (!fn.isAsync) {
       return undefined;
     }
 
     const peeked = this.peekType(value, module);
-    const parts = this.generics.partsOfType(peeked);
+    const parts = this.types.partsOfType(peeked);
     if (!parts.some((part) => part.kind == TypeKind.Promise)) {
       return undefined;
     }
@@ -143,19 +177,19 @@ partial class ExpressionTypes {
     const given = this.typed(value, undefined, module);
     const awaited = this.awaitedType(given);
     if (awaited == undefined) {
-      const word = this.text.of(given);
+      const word = this.types.typeText(given);
 
-      this.report(module, value.loc, Code.YieldPromiseMixed, { word });
+      this.errors.write(module, value.loc, Code.YieldPromiseMixed, { word });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    this.yieldPromiseCheck(fn, value, awaited, frame.yielded, module);
+    this.yieldPromiseCheck(fn, value, awaited, yielded, module);
 
     return awaited;
   }
 
-  private readonly yieldPromiseCheck(
+  private yieldPromiseCheck(
     fn: FunctionDecl,
     value: Expr,
     awaited: Type,
@@ -165,23 +199,19 @@ partial class ExpressionTypes {
     if (yielded == undefined || awaited.kind == TypeKind.Error) {
       return;
     }
-    if (this.relation.converts(awaited, yielded)) {
+    if (this.types.converts(awaited, yielded)) {
       return;
     }
 
-    this.report(module, value.loc, Code.YieldPromiseOther, {
-      word: this.text.of(awaited),
-      first: this.functions.functionName(fn),
-      other: this.text.of(yielded),
+    this.errors.write(module, value.loc, Code.YieldPromiseOther, {
+      word: this.types.typeText(awaited),
+      first: this.types.functionName(fn),
+      other: this.types.typeText(yielded),
     });
   }
 
-  private delegateTyped(
-    frame: GeneratorFrame,
-    value: Expr | undefined,
-    module: int,
-  ): Type {
-    const error = this.store.plain(TypeKind.Error);
+  private delegateTyped(value: Expr | undefined, module: int): Type {
+    const error = this.types.store.plain(TypeKind.Error);
 
     if (value == undefined) {
       return error;
@@ -190,15 +220,15 @@ partial class ExpressionTypes {
     const type = this.typed(value, undefined, module);
     const item = this.delegatedItem(value, type, module);
 
-    frame.yields.push({ value, type: item });
+    this.addYield(value, item);
 
     return error;
   }
 
-  private readonly delegatedItem(value: Expr, type: Type, module: int): Type {
-    const checked = this.functions.delegatedItem(value, type);
+  private delegatedItem(value: Expr, type: Type, module: int): Type {
+    const checked = this.types.delegatedItem(value, type);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -212,31 +242,31 @@ partial class ExpressionTypes {
     const written = generator.yields.slice();
     const yields = written.filter((one) => one.type.kind != TypeKind.Error);
     if (written.length > 0 && yields.length == 0) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (yields.length == 0) {
-      const word = this.functions.functionName(fn);
+      const word = this.types.functionName(fn);
 
-      this.report(module, fn.loc, Code.GeneratorNoYield, { word });
+      this.errors.write(module, fn.loc, Code.GeneratorNoYield, { word });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const yielded = this.joinedReturns(fn, yields, module, Code.YieldsDiffer);
     if (yielded == undefined || yielded.kind == TypeKind.Error) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const returned = this.generatorReturned(fn, frame, module);
-    const nothing = this.store.plain(TypeKind.Void);
-    const shape = {
-      yielded: this.functions.widened(yielded),
+    const nothing = this.types.store.plain(TypeKind.Void);
+    const shape: IteratorShape = {
+      yielded: this.types.widened(yielded),
       returned,
       sent: nothing,
       async: fn.isAsync,
     };
 
-    return this.store.iteratorOf(shape);
+    return this.types.store.iteratorOf(shape);
   }
 
   private generatorReturned(
@@ -245,23 +275,23 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const valued = frame.returns.filter(
-      (one) => !this.functions.isVoided(one.value),
+      (one) => !this.types.isVoided(one.value),
     );
     if (valued.length == 0) {
-      return this.store.plain(TypeKind.Void);
+      return this.types.store.plain(TypeKind.Void);
     }
 
     const joined = this.joinedReturns(fn, valued, module, Code.ReturnsDiffer);
 
-    return this.functions.widened(joined);
+    return this.types.widened(joined);
   }
 
-  private readonly nextUnionCheck(member: MemberExpr, object: Type, module: int): void {
+  private nextUnionCheck(member: MemberExpr, object: Type, module: int): void {
     if (object.kind != TypeKind.Iterator || member.name != kNextName) {
       return;
     }
 
-    const shape = object.shape;
+    const shape = this.types.store.iteratorShapeOf(object);
     const returned = shape.returned;
     const isPlain =
       returned.kind == TypeKind.Void ||
@@ -271,8 +301,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const joined = this.store.unionOf([shape.yielded, returned]);
-    const problem = this.resolver.unionProblem(joined);
+    const joined = this.types.store.unionOf([shape.yielded, returned]);
+    const problem = this.types.unionProblem(joined);
     if (problem == undefined) {
       return;
     }
@@ -281,10 +311,10 @@ partial class ExpressionTypes {
     const mark = full.indexOf(kUnsupportedMark);
     const other = full.slice(mark + kUnsupportedMark.length);
 
-    this.report(module, member.loc, Code.NextNoUnion, {
-      word: this.text.of(object),
-      first: this.text.of(shape.yielded),
-      second: this.text.of(returned),
+    this.errors.write(module, member.loc, Code.NextNoUnion, {
+      word: this.types.typeText(object),
+      first: this.types.typeText(shape.yielded),
+      second: this.types.typeText(returned),
       other,
     });
   }
@@ -295,7 +325,9 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): void {
-    const callback = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const callback = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     const isFlat =
       object.kind == TypeKind.Iterator && member.name == kFlatMapName;
     if (
@@ -309,9 +341,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    const params = [{ type: object.shape.yielded, optional: false }];
-    const result = this.store.plain(TypeKind.Error);
-    const wanted = this.store.functionOf({ params, rest: false, result });
+    const params = [
+      {
+        type: this.types.store.iteratorShapeOf(object).yielded,
+        optional: false,
+      },
+    ];
+    const result = this.types.store.plain(TypeKind.Error);
+    const wanted = this.types.store.functionOf({ params, rest: false, result });
 
     this.errors.beginTrial();
 
@@ -323,7 +360,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const given = this.types.apparent(typed.shape.result);
+    const given = this.types.apparent(this.types.store.returnTypeOf(typed));
     const isFlattened =
       given.kind == TypeKind.Array ||
       given.kind == TypeKind.Iterator ||
@@ -332,8 +369,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, callback.loc, Code.FlatMapResult, {
-      word: this.text.of(given),
+    this.errors.write(module, callback.loc, Code.FlatMapResult, {
+      word: this.types.typeText(given),
     });
   }
 
@@ -342,15 +379,19 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
       return false;
     }
     if (object.name == kArrayClass && member.name == "of") {
-      this.report(module, member.loc, Code.ArrayStaticRefused, {
+      this.errors.write(module, member.loc, Code.ArrayStaticRefused, {
         word: member.name,
       });
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return true;
     }
@@ -362,7 +403,9 @@ partial class ExpressionTypes {
   }
 
   private iteratorSourceCheck(expr: CallExpr, module: int): boolean {
-    const arg = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const arg = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (arg == undefined) {
       return false;
     }
@@ -383,8 +426,8 @@ partial class ExpressionTypes {
       case TypeKind.TypeParameter:
         return false;
       default:
-        this.report(module, arg.loc, Code.IteratorFromSource, {
-          word: this.text.of(type),
+        this.errors.write(module, arg.loc, Code.IteratorFromSource, {
+          word: this.types.typeText(type),
         });
 
         return true;

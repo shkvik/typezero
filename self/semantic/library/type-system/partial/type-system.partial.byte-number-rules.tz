@@ -1,0 +1,316 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  ProofRange,
+} from "../../../flow/proof-rules/types/proof-rules.types.tz";
+import {
+  kBigEndianSuffix,
+  kBigIntPrefixes,
+  kBitsInByte,
+  kBufferClass,
+  kBufferFloatNames,
+  kBufferOnlyPrefix,
+  kByteMask,
+  kDataViewClass,
+  kFloatPrefix,
+  kGetPrefix,
+  kIntKinds,
+  kKindInfos,
+  kKindNames,
+  kLeastByteCount,
+  kLittleEndianSuffix,
+  kMostByteCount,
+  kReadPrefix,
+  kSetPrefix,
+  kSignedVariable,
+  kSingleByteSuffix,
+  kVariableNames,
+  kWritePrefix,
+} from "../../byte-number-rules/const/byte-number-rules.const.tz";
+import {
+  ByteKind,
+  ByteKindInfo,
+  ByteOwner,
+  NumberAccess,
+  NumberMethod,
+  NumberPlaces,
+} from "../../byte-number-rules/types/byte-number-rules.types.tz";
+
+partial class TypeSystem {
+  public ownerOf(type: Type): ByteOwner | undefined {
+    const base = this.definedType(type);
+    const isLibrary =
+      base.kind == TypeKind.Instance && this.isLibraryModule(base.module);
+    if (!isLibrary || base.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    switch (base.name) {
+      case kBufferClass:
+        return ByteOwner.Buffer;
+      case kDataViewClass:
+        return ByteOwner.DataView;
+      default:
+        return undefined;
+    }
+  }
+
+  public readonly methodOf(
+    name: string,
+    owner: ByteOwner,
+  ): NumberMethod | undefined {
+    const access = this.accessOf(name, owner);
+    if (access == undefined) {
+      return undefined;
+    }
+
+    return this.kindOf(access, owner);
+  }
+
+  public readonly infoOf(method: NumberMethod): ByteKindInfo | undefined {
+    return kKindInfos.find((one) => one.kind == method.kind);
+  }
+
+  public readonly infoOfElement(element: Type): ByteKindInfo | undefined {
+    if (element.kind == TypeKind.Double) {
+      return kKindInfos.find((one) => one.kind == ByteKind.Float64);
+    }
+    if (element.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    const bits = element.bits;
+    const unsigned = element.unsigned;
+    const row = kIntKinds.find(
+      (one) => one.bits == bits && one.unsigned == unsigned,
+    );
+
+    return kKindInfos.find((one) => one.kind == row?.kind);
+  }
+
+  public readonly byteInfo(): ByteKindInfo | undefined {
+    return kKindInfos.find((one) => one.kind == ByteKind.Uint8);
+  }
+
+  public readonly placesOf(
+    method: NumberMethod,
+    owner: ByteOwner,
+    size: decimal,
+  ): NumberPlaces {
+    if (owner == ByteOwner.DataView) {
+      return this.viewPlaces(method, size);
+    }
+    if (method.isVariable && method.isWrite) {
+      return { value: 0, offset: 1, count: 2, least: 3, most: 3 };
+    }
+    if (method.isVariable) {
+      return { offset: 0, count: 1, least: 2, most: 2 };
+    }
+    if (method.isWrite) {
+      return { value: 0, offset: 1, least: 1, most: 2 };
+    }
+
+    return { offset: 0, least: 0, most: 1 };
+  }
+
+  public readonly countOf(constant: decimal | undefined): decimal | undefined {
+    const isWritten =
+      constant != undefined &&
+      constant >= kLeastByteCount &&
+      constant <= kMostByteCount;
+    if (!isWritten) {
+      return undefined;
+    }
+
+    return constant;
+  }
+
+  public readonly countError(loc: int, word: string): SourceError {
+    return { code: Code.ByteCountNotWritten, loc, details: { word } };
+  }
+
+  public readonly variableRange(count: decimal, isSigned: boolean): ProofRange {
+    const what = `${count} bytes`;
+    const bits = count * kBitsInByte;
+    if (!isSigned) {
+      return { what, low: 0, high: this.integers.twoPower(bits) - 1 };
+    }
+
+    const half = this.integers.twoPower(bits - 1);
+
+    return { what, low: -half, high: half - 1 };
+  }
+
+  public readonly variableError(loc: int, range: ProofRange): SourceError {
+    const word = range.what;
+    const place = this.rangeText(range);
+
+    return { code: Code.ByteValueUnproven, loc, details: { word, place } };
+  }
+
+  public readonly fitError(
+    loc: int,
+    info: ByteKindInfo,
+    range: ProofRange,
+    constant: decimal | undefined,
+    shown: string,
+  ): SourceError {
+    const first = range.what;
+    const place = this.rangeText(range);
+
+    if (constant != undefined) {
+      const word = `${constant}`;
+      const second = `${this.storedValue(info, constant)}`;
+      const other = this.wrapHint(info, word);
+      const details: Details = { word, first, place, second, other };
+
+      return { code: Code.ByteFitConstant, loc, details };
+    }
+
+    const high = range.high ?? 0;
+    const second = `${shown} >= ${range.low} && ${shown} <= ${high}`;
+    const other = this.wrapHint(info, shown);
+    const details: Details = { first, place, second, other };
+
+    return { code: Code.ByteFitUnproven, loc, details };
+  }
+
+  public readonly wrapHint(info: ByteKindInfo, value: string): string {
+    const mask = info.mask ?? kByteMask;
+    const top = info.top;
+    if (top == undefined) {
+      return `${value} & ${mask}`;
+    }
+
+    return `((${value} & ${mask}) ^ ${top}) - ${top}`;
+  }
+
+  private readonly viewPlaces(
+    method: NumberMethod,
+    size: decimal,
+  ): NumberPlaces {
+    const extra = this.endianRoom(size);
+    if (method.isWrite) {
+      return { value: 1, offset: 0, least: 2, most: 2 + extra };
+    }
+
+    return { offset: 0, least: 1, most: 1 + extra };
+  }
+
+  private readonly endianRoom(size: decimal): int {
+    if (size == 1) {
+      return 0;
+    }
+
+    return 1;
+  }
+
+  private readonly accessOf(
+    name: string,
+    owner: ByteOwner,
+  ): NumberAccess | undefined {
+    if (owner == ByteOwner.DataView) {
+      return this.prefixed(name, kGetPrefix, kSetPrefix);
+    }
+
+    const access = this.prefixed(name, kReadPrefix, kWritePrefix);
+    if (access == undefined) {
+      return undefined;
+    }
+
+    const rest = access.rest;
+    const isEnded =
+      rest.endsWith(kLittleEndianSuffix) || rest.endsWith(kBigEndianSuffix);
+    if (isEnded) {
+      const cut = rest.slice(0, rest.length - kLittleEndianSuffix.length);
+
+      return { rest: cut, isWrite: access.isWrite };
+    }
+    if (!rest.endsWith(kSingleByteSuffix)) {
+      return undefined;
+    }
+
+    return access;
+  }
+
+  private readonly prefixed(
+    name: string,
+    reading: string,
+    writing: string,
+  ): NumberAccess | undefined {
+    if (name.startsWith(reading)) {
+      return { rest: name.slice(reading.length), isWrite: false };
+    }
+    if (name.startsWith(writing)) {
+      return { rest: name.slice(writing.length), isWrite: true };
+    }
+
+    return undefined;
+  }
+
+  private readonly kindOf(
+    access: NumberAccess,
+    owner: ByteOwner,
+  ): NumberMethod | undefined {
+    const rest = access.rest;
+    const isWrite = access.isWrite;
+    const isDataView = owner == ByteOwner.DataView;
+    const row = kKindNames.find((one) => one.name == rest);
+
+    if (row != undefined && this.isForeignName(rest, isDataView)) {
+      return undefined;
+    }
+    if (row != undefined) {
+      return {
+        isWrite,
+        isBigInt: false,
+        isVariable: false,
+        isSigned: false,
+        kind: row.kind,
+      };
+    }
+    if (kBigIntPrefixes.some((prefix) => rest.startsWith(prefix))) {
+      return { isWrite, isBigInt: true, isVariable: false, isSigned: false };
+    }
+    if (!isDataView && kVariableNames.includes(rest)) {
+      const isSigned = rest == kSignedVariable;
+
+      return { isWrite, isBigInt: false, isVariable: true, isSigned };
+    }
+
+    return undefined;
+  }
+
+  private readonly isForeignName(rest: string, isDataView: boolean): boolean {
+    const isFloatName = kBufferFloatNames.includes(rest);
+    const isViewName = rest.startsWith(kFloatPrefix) && !isFloatName;
+    const isBufferOnly = isFloatName || rest.startsWith(kBufferOnlyPrefix);
+    if (isDataView) {
+      return isBufferOnly;
+    }
+
+    return isViewName;
+  }
+
+  private readonly rangeText(range: ProofRange): string {
+    const high = range.high ?? 0;
+
+    return `${range.low} to ${high}`;
+  }
+
+  private readonly storedValue(info: ByteKindInfo, constant: decimal): decimal {
+    const span = this.integers.twoPower(info.size * kBitsInByte);
+    const pattern = this.integers.patternOf(constant, span);
+    const isSigned = info.top != undefined;
+    if (!isSigned || pattern < span / 2) {
+      return pattern;
+    }
+
+    return pattern - span;
+  }
+}

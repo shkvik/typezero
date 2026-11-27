@@ -37,19 +37,26 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
-    const owner = member.object;
+    const tree = this.types.program.tree;
+
+    const owner = tree.exprOf(member.objectId);
     const isPromise =
       owner.kind == ExprKind.Name &&
       owner.name == kPromiseClass &&
       this.isGlobalUse(owner, module);
-    const hasSpread = expr.args.some((arg) => arg.spread);
-    if (!isPromise || hasSpread || this.modules.isLibraryModule(module)) {
+    const hasSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
+    if (!isPromise || hasSpread || this.types.isLibraryModule(module)) {
       return undefined;
     }
 
     const isTyped = kTypedStatics.includes(member.name);
-    if (isTyped && member.typeArgs.length > 0) {
-      this.report(module, member.loc, Code.PromiseStaticTypeArgs, kNoDetails);
+    if (isTyped && tree.typeRefsOf(member.typeArgsList).length > 0) {
+      this.errors.write(
+        module,
+        member.loc,
+        Code.PromiseStaticTypeArgs,
+        kNoDetails,
+      );
     }
 
     switch (member.name) {
@@ -71,25 +78,37 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const known = this.calls.promiseNew(written, wanted);
-    const executor = expr.args[0]?.expr;
-    if (known.kind != TypeKind.Error || expr.typeArgs.length > 0) {
+    const tree = this.types.program.tree;
+
+    const known = this.types.promiseNew(written, wanted);
+    const executor = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    if (
+      known.kind != TypeKind.Error ||
+      tree.typeRefsOf(expr.typeArgsList).length > 0
+    ) {
       return known;
     }
-    if (expr.args.length != 1 || executor == undefined) {
+    if (tree.argumentsOf(expr.argsList).length != 1 || executor == undefined) {
       return known;
     }
     if (executor.kind != ExprKind.Function) {
-      this.report(module, expr.loc, Code.PromiseValueNotInferred, kNoDetails);
+      this.errors.write(
+        module,
+        expr.loc,
+        Code.PromiseValueNotInferred,
+        kNoDetails,
+      );
 
       return known;
     }
 
-    const nothing = this.store.plain(TypeKind.Void);
-    const resolve = executor.fn.params[0]?.name;
-    const values = this.resolvedExprs(executor.fn, resolve);
+    const nothing = this.types.store.plain(TypeKind.Void);
+    const resolve = tree.paramsOf(tree.functionOf(executor.fnId).paramsList)[0]
+      ?.name;
+    const fn = tree.functionOf(executor.fnId);
+    const values = this.resolvedExprs(fn, resolve);
     if (values.length == 0) {
-      return this.store.promiseOf(nothing);
+      return this.types.store.promiseOf(nothing);
     }
 
     const types = values.map((value) => this.peekType(value, module));
@@ -99,18 +118,26 @@ partial class ExpressionTypes {
 
     const value = this.joinedResolved(types);
     if (value == undefined) {
-      this.report(module, expr.loc, Code.PromiseValueNotInferred, kNoDetails);
+      this.errors.write(
+        module,
+        expr.loc,
+        Code.PromiseValueNotInferred,
+        kNoDetails,
+      );
 
       return known;
     }
 
-    return this.store.promiseOf(value);
+    return this.types.store.promiseOf(value);
   }
 
-  private readonly resolvedExprs(fn: FunctionDecl, resolve: string | undefined): Expr[] {
+  private readonly resolvedExprs(
+    fn: FunctionDecl,
+    resolve: string | undefined,
+  ): Expr[] {
     const values: Expr[] = [];
 
-    for (const expr of this.collector.functionExprs(fn, true)) {
+    for (const expr of this.types.functionExprs(fn, true)) {
       const value = this.resolvedExpr(expr, resolve);
       if (value != undefined) {
         values.push(value);
@@ -124,19 +151,21 @@ partial class ExpressionTypes {
     expr: Expr,
     resolve: string | undefined,
   ): Expr | undefined {
+    const tree = this.types.program.tree;
+
     if (expr.kind != ExprKind.Call) {
       return undefined;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Name || callee.name != resolve) {
       return undefined;
     }
 
-    return expr.args[0]?.expr;
+    return tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
   }
 
-  private readonly joinedResolved(types: Read<Type[]>): Type | undefined {
+  private joinedResolved(types: Read<Type[]>): Type | undefined {
     let found: Type | undefined = undefined;
 
     for (const type of types) {
@@ -155,17 +184,20 @@ partial class ExpressionTypes {
     return found;
   }
 
-  private readonly promisedWanted(wanted: Type | undefined): Type | undefined {
+  private promisedWanted(wanted: Type | undefined): Type | undefined {
     if (wanted == undefined) {
       return undefined;
     }
 
     const base = this.types.definedType(wanted);
-    if (base.kind != TypeKind.Promise || base.value.kind == TypeKind.Never) {
+    if (
+      base.kind != TypeKind.Promise ||
+      this.types.store.valueOf(base).kind == TypeKind.Never
+    ) {
       return undefined;
     }
 
-    return base.value;
+    return this.types.store.valueOf(base);
   }
 
   private staticCountCheck(
@@ -175,18 +207,22 @@ partial class ExpressionTypes {
     most: int,
     module: int,
   ): boolean {
-    const count = expr.args.length;
+    const tree = this.types.program.tree;
+
+    const count = tree.argumentsOf(expr.argsList).length;
     if (count >= least && count <= most) {
       return false;
     }
 
-    const word = this.calls.argumentCountText(least, most, false);
+    const word = this.types.argumentCountText(least, most, false);
 
-    this.report(module, member.loc, Code.ArgumentCount, {
+    this.errors.write(module, member.loc, Code.ArgumentCount, {
       word,
       other: `${count}`,
     });
-    this.looseArguments(expr.args, module);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
@@ -197,15 +233,17 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
-    const nothing = this.store.plain(TypeKind.Void);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    const nothing = this.types.store.plain(TypeKind.Void);
     if (this.staticCountCheck(expr, member, 0, 1, module)) {
       return error;
     }
 
-    const value = expr.args[0]?.expr;
+    const value = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (value == undefined) {
-      return this.store.promiseOf(nothing);
+      return this.types.store.promiseOf(nothing);
     }
 
     const hint = this.resolveHint(value, wanted);
@@ -217,19 +255,19 @@ partial class ExpressionTypes {
       case TypeKind.Promise:
         return given;
       case TypeKind.Undefined:
-        return this.store.promiseOf(nothing);
+        return this.types.store.promiseOf(nothing);
       case TypeKind.Void:
-        this.report(module, value.loc, Code.PromiseVoidGiven, {
+        this.errors.write(module, value.loc, Code.PromiseVoidGiven, {
           word: `${kPromiseClass}.${member.name}`,
         });
 
         return error;
       default:
-        return this.store.promiseOf(this.resolvedValue(given, hint));
+        return this.types.store.promiseOf(this.resolvedValue(given, hint));
     }
   }
 
-  private readonly resolveHint(value: Expr, wanted: Type | undefined): Type | undefined {
+  private resolveHint(value: Expr, wanted: Type | undefined): Type | undefined {
     if (value.kind == ExprKind.Undefined) {
       return undefined;
     }
@@ -237,8 +275,8 @@ partial class ExpressionTypes {
     return this.promisedWanted(wanted);
   }
 
-  private readonly resolvedValue(given: Type, hint: Type | undefined): Type {
-    if (hint != undefined && this.relation.converts(given, hint)) {
+  private resolvedValue(given: Type, hint: Type | undefined): Type {
+    if (hint != undefined && this.types.converts(given, hint)) {
       return hint;
     }
 
@@ -251,21 +289,29 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
     if (this.staticCountCheck(expr, member, 0, 0, module)) {
       return error;
     }
-    if (member.typeArgs.length > 1) {
+    const typeArgs = tree.typeRefsOf(member.typeArgsList);
+    if (typeArgs.length > 1) {
       const code = Code.PromiseResolversTypeArgs;
 
-      this.report(module, member.loc, code, kNoDetails);
+      this.errors.write(module, member.loc, code, kNoDetails);
 
       return error;
     }
 
     const value = this.resolversValue(member, wanted, module);
     if (value == undefined) {
-      this.report(module, member.loc, Code.PromiseResolversUnknown, kNoDetails);
+      this.errors.write(
+        module,
+        member.loc,
+        Code.PromiseResolversUnknown,
+        kNoDetails,
+      );
 
       return error;
     }
@@ -279,26 +325,28 @@ partial class ExpressionTypes {
       params.push({ type: value, optional: false });
     }
 
-    const nothing = this.store.plain(TypeKind.Void);
-    const resolver = this.store.functionOf({
+    const nothing = this.types.store.plain(TypeKind.Void);
+    const resolver = this.types.store.functionOf({
       params,
       rest: false,
       result: nothing,
     });
-    const promise = this.store.promiseOf(value);
+    const promise = this.types.store.promiseOf(value);
 
-    return this.store.objectOf([
+    return this.types.store.objectOf([
       { name: kPromiseField, type: promise, optional: false, readonly: false },
       { name: kResolveName, type: resolver, optional: false, readonly: false },
     ]);
   }
 
-  private readonly resolversValue(
+  private resolversValue(
     member: MemberExpr,
     wanted: Type | undefined,
     module: int,
   ): Type | undefined {
-    const written = member.typeArgs[0];
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefsOf(member.typeArgsList)[0];
     if (written == undefined) {
       return this.expectedResolversValue(wanted);
     }
@@ -308,28 +356,32 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const type = this.resolver.returnType(written, context);
+    const type = this.types.returnType(written, context);
 
     return this.awaitedValue(type);
   }
 
-  private readonly expectedResolversValue(wanted: Type | undefined): Type | undefined {
+  private readonly expectedResolversValue(
+    wanted: Type | undefined,
+  ): Type | undefined {
     if (wanted == undefined || wanted.kind != TypeKind.Object) {
       return undefined;
     }
 
-    const field = wanted.fields.find((one) => one.name == kPromiseField);
+    const field = this.types.store
+      .fieldsOf(wanted)
+      .find((one) => one.name == kPromiseField);
     const promise = field?.type;
     if (promise == undefined || promise.kind != TypeKind.Promise) {
       return undefined;
     }
 
-    return promise.value;
+    return this.types.store.valueOf(promise);
   }
 
   private readonly awaitedValue(type: Type): Type {
     if (type.kind == TypeKind.Promise) {
-      return type.value;
+      return this.types.store.valueOf(type);
     }
 
     return type;
@@ -341,8 +393,10 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
-    const list = expr.args[0]?.expr;
+    const tree = this.types.program.tree;
+
+    const error = this.types.store.plain(TypeKind.Error);
+    const list = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
     if (this.staticCountCheck(expr, member, 1, 1, module)) {
       return error;
     }
@@ -364,7 +418,7 @@ partial class ExpressionTypes {
     return this.allResult(values, element, list, module);
   }
 
-  private readonly combinatorWanted(
+  private combinatorWanted(
     wanted: Type | undefined,
     isRace: boolean,
   ): Type | undefined {
@@ -376,7 +430,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return value.item;
+    return this.types.store.itemOf(value);
   }
 
   private promiseValues(
@@ -385,30 +439,50 @@ partial class ExpressionTypes {
     word: string,
     module: int,
   ): PromiseValues | undefined {
+    const tree = this.types.program.tree;
+
     const isPlain =
       list.kind == ExprKind.ArrayLit &&
-      list.elements.every((element) => !element.spread && !element.hole);
+      tree
+        .elementsOf(list.elementsList)
+        .every((element) => !element.spread && !element.hole);
     if (list.kind == ExprKind.ArrayLit && isPlain) {
       return this.literalPromiseValues(list, wanted, word, module);
     }
 
     const given = this.typed(list, undefined, module);
     const base = this.types.definedType(given);
-    if (base.kind == TypeKind.Array && this.isPlainPromised(base.item)) {
-      return { element: this.awaitedValue(base.item), tuple: [] };
+    if (
+      base.kind == TypeKind.Array &&
+      this.isPlainPromised(this.types.store.itemOf(base))
+    ) {
+      return {
+        element: this.awaitedValue(this.types.store.itemOf(base)),
+        tuple: [],
+      };
     }
     if (base.kind != TypeKind.Tuple) {
       return undefined;
     }
-    if (!base.items.every((item) => this.isPlainPromised(item))) {
+    if (
+      !this.types.store
+        .itemsOf(base)
+        .every((item) => this.isPlainPromised(item))
+    ) {
       return undefined;
     }
 
-    return { tuple: base.items.map((item) => this.awaitedValue(item)) };
+    return {
+      tuple: this.types.store
+        .itemsOf(base)
+        .map((item) => this.awaitedValue(item)),
+    };
   }
 
-  private readonly isPlainPromised(type: Type): boolean {
-    return type.kind == TypeKind.Promise || this.awaitedType(type) == type;
+  private isPlainPromised(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Promise || this.awaitedType(type)?.id == type.id
+    );
   }
 
   private literalPromiseValues(
@@ -417,9 +491,12 @@ partial class ExpressionTypes {
     word: string,
     module: int,
   ): PromiseValues | undefined {
-    if (list.elements.length == 0) {
+    const tree = this.types.program.tree;
+
+    const elements = tree.elementsOf(list.elementsList);
+    if (elements.length == 0) {
       if (wanted == undefined) {
-        this.report(module, list.loc, Code.PromiseListNoType, { word });
+        this.errors.write(module, list.loc, Code.PromiseListNoType, { word });
 
         return undefined;
       }
@@ -429,13 +506,21 @@ partial class ExpressionTypes {
 
     const types: Type[] = [];
 
-    for (const element of list.elements) {
-      const type = this.typed(element.expr, undefined, module);
+    for (const element of tree.elementsOf(list.elementsList)) {
+      const expr = tree.exprOf(element.exprId);
+      const type = this.typed(expr, undefined, module);
       if (type.kind == TypeKind.Error || !this.isPlainPromised(type)) {
         return undefined;
       }
       if (type.kind == TypeKind.Void) {
-        this.report(module, element.expr.loc, Code.PromiseVoidGiven, { word });
+        this.errors.write(
+          module,
+          tree.exprOf(element.exprId).loc,
+          Code.PromiseVoidGiven,
+          {
+            word,
+          },
+        );
 
         return undefined;
       }
@@ -451,12 +536,12 @@ partial class ExpressionTypes {
     return { tuple: types.map((type) => this.awaitedValue(type)) };
   }
 
-  private readonly commonPromised(types: Read<Type[]>): Type | undefined {
+  private commonPromised(types: Read<Type[]>): Type | undefined {
     let common: Type | undefined = types[0];
 
     for (const type of types) {
-      if (common != undefined && common != type) {
-        common = this.unifier.unify(common, type);
+      if (common != undefined && common.id != type.id) {
+        common = this.types.unify(common, type);
       }
     }
 
@@ -471,7 +556,7 @@ partial class ExpressionTypes {
     element: Type | undefined,
     wanted: Type | undefined,
   ): Type {
-    const nothing = this.store.plain(TypeKind.Void);
+    const nothing = this.types.store.plain(TypeKind.Void);
     if (element == undefined) {
       return nothing;
     }
@@ -482,7 +567,7 @@ partial class ExpressionTypes {
     return wanted ?? nothing;
   }
 
-  private readonly allResult(
+  private allResult(
     values: Read<PromiseValues>,
     wanted: Type | undefined,
     list: Expr,
@@ -490,23 +575,25 @@ partial class ExpressionTypes {
   ): Type {
     if (values.tuple.length > 0) {
       if (values.tuple.some((type) => type.kind == TypeKind.Void)) {
-        this.report(module, list.loc, Code.PromiseAllVoid, kNoDetails);
+        this.errors.write(module, list.loc, Code.PromiseAllVoid, kNoDetails);
 
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
 
-      return this.store.promiseOf(this.store.plainTuple(values.tuple.slice()));
+      return this.types.store.promiseOf(
+        this.types.store.plainTuple(values.tuple.slice()),
+      );
     }
 
     const element = this.settledElement(values.element, wanted);
     if (element.kind == TypeKind.Void) {
-      return this.store.promiseOf(element);
+      return this.types.store.promiseOf(element);
     }
 
-    return this.store.promiseOf(this.store.arrayOf(element));
+    return this.types.store.promiseOf(this.types.store.arrayOf(element));
   }
 
-  private readonly raceResult(
+  private raceResult(
     values: Read<PromiseValues>,
     wanted: Type | undefined,
     list: Expr,
@@ -518,23 +605,23 @@ partial class ExpressionTypes {
     for (const part of values.tuple) {
       const next = this.raceJoin(joined, part);
       if (joined != undefined && next == undefined) {
-        this.report(module, list.loc, Code.PromiseRaceDiffer, {
+        this.errors.write(module, list.loc, Code.PromiseRaceDiffer, {
           word,
-          first: this.text.of(joined),
-          second: this.text.of(part),
+          first: this.types.typeText(joined),
+          second: this.types.typeText(part),
         });
 
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
       }
 
       joined = next;
     }
 
-    return this.store.promiseOf(this.settledElement(joined, wanted));
+    return this.types.store.promiseOf(this.settledElement(joined, wanted));
   }
 
-  private readonly raceJoin(joined: Type | undefined, part: Type): Type | undefined {
-    if (joined == undefined || joined == part) {
+  private raceJoin(joined: Type | undefined, part: Type): Type | undefined {
+    if (joined == undefined || joined.id == part.id) {
       return part;
     }
 
@@ -543,7 +630,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const common = this.unifier.unionUnify(joined, part);
+    const common = this.types.unionUnify(joined, part);
     if (common == undefined || common.kind == TypeKind.Error) {
       return undefined;
     }

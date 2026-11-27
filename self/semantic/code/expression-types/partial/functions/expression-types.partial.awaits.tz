@@ -15,17 +15,20 @@ import {
 
 partial class ExpressionTypes {
   private awaitTyped(expr: AwaitExpr, module: int): Type {
+    const tree = this.types.program.tree;
+
     this.awaitPlaceCheck(expr, module);
 
-    const value = this.typed(expr.value, undefined, module);
+    const valueExpr = tree.exprOf(expr.valueId);
+    const value = this.typed(valueExpr, undefined, module);
 
     this.forgetCallChanged(module);
 
     if (value.kind == TypeKind.Promise) {
-      return value.value;
+      return this.types.store.valueOf(value);
     }
 
-    const parts = this.generics.partsOfType(value);
+    const parts = this.types.partsOfType(value);
     const hasPromise = parts.some((part) => part.kind == TypeKind.Promise);
     if (!hasPromise) {
       return value;
@@ -33,17 +36,22 @@ partial class ExpressionTypes {
 
     const awaited = this.awaitedType(value);
     if (awaited == undefined) {
-      const word = this.text.of(value);
+      const word = this.types.typeText(value);
 
-      this.report(module, expr.value.loc, Code.AwaitMixed, { word });
+      this.errors.write(
+        module,
+        tree.exprOf(expr.valueId).loc,
+        Code.AwaitMixed,
+        { word },
+      );
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return awaited;
   }
 
-  private readonly awaitedType(type: Type): Type | undefined {
+  private awaitedType(type: Type): Type | undefined {
     const defined = this.types.definedType(type);
     const awaited = this.awaitedPlain(defined);
     if (awaited == undefined || !this.types.isOptional(type)) {
@@ -56,22 +64,24 @@ partial class ExpressionTypes {
     return this.types.optional(awaited);
   }
 
-  private readonly awaitedPlain(type: Type): Type | undefined {
+  private awaitedPlain(type: Type): Type | undefined {
     if (type.kind == TypeKind.Promise) {
-      return type.value;
+      return this.types.store.valueOf(type);
     }
     if (type.kind != TypeKind.Union) {
       return type;
     }
 
-    const hasPromise = type.parts.some((part) => part.kind == TypeKind.Promise);
+    const hasPromise = this.types.store
+      .partsOf(type)
+      .some((part) => part.kind == TypeKind.Promise);
     if (!hasPromise) {
       return type;
     }
 
     let result: Type | undefined = undefined;
 
-    for (const part of type.parts) {
+    for (const part of this.types.store.partsOf(type)) {
       const candidate = this.promisedOrSelf(part);
       const joined = this.joinedAwaited(result, candidate);
       if (joined == undefined || joined.kind == TypeKind.Error) {
@@ -86,13 +96,13 @@ partial class ExpressionTypes {
 
   private readonly promisedOrSelf(type: Type): Type {
     if (type.kind == TypeKind.Promise) {
-      return type.value;
+      return this.types.store.valueOf(type);
     }
 
     return type;
   }
 
-  private readonly joinedAwaited(
+  private joinedAwaited(
     result: Type | undefined,
     candidate: Type,
   ): Type | undefined {
@@ -102,14 +112,14 @@ partial class ExpressionTypes {
 
     const isVoid =
       result.kind == TypeKind.Void || candidate.kind == TypeKind.Void;
-    if (isVoid && result != candidate) {
+    if (isVoid && result.id != candidate.id) {
       return undefined;
     }
 
-    return this.unifier.unionUnify(result, candidate);
+    return this.types.unionUnify(result, candidate);
   }
 
-  private readonly awaitPlaceCheck(expr: AwaitExpr, module: int): void {
+  private awaitPlaceCheck(expr: AwaitExpr, module: int): void {
     const fn = this.openFunctions[this.openFunctions.length - 1];
     if (fn == undefined || fn.isAsync) {
       return;
@@ -117,7 +127,7 @@ partial class ExpressionTypes {
 
     const word = this.asyncHint(fn);
 
-    this.report(module, expr.loc, Code.AwaitOutsideAsync, { word });
+    this.errors.write(module, expr.loc, Code.AwaitOutsideAsync, { word });
   }
 
   private readonly asyncHint(fn: FunctionDecl): string {

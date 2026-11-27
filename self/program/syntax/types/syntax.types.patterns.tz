@@ -1,0 +1,12 @@
+import { BindingForm, NameOrigin } from "../../ast/types/ast.types.patterns.tz";
+import { Expr } from "./syntax.types.expressions.tz";
+import { TypeRef } from "./syntax.types.types.tz";
+
+export type VarDeclarator = {
+  readonly name: string;
+  readonly origin: NameOrigin;
+  readonly loc: int;
+  readonly typeAnn?: TypeRef;
+  readonly init?: Expr;
+  readonly form: BindingForm;
+};

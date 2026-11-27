@@ -1,0 +1,458 @@
+import {
+  kIntlName,
+} from "../../../../library/intl-rules/const/intl-rules.const.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  Access,
+  ClassDecl,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  NewExpr,
+  NewKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  SymbolKind,
+} from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  CallTarget,
+  ClassMemberEntry,
+} from "../../types/expression-types.types.tz";
+import {
+  kConstructorName,
+} from "../../../object-rules/const/object-rules.const.tz";
+
+partial class ExpressionTypes {
+  private newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
+    const tree = this.types.program.tree;
+
+    const form = expr.form;
+    if (form.kind == NewKind.Callee) {
+      const calleeExpr = tree.exprOf(form.calleeId);
+      const callee = this.typed(calleeExpr, undefined, module);
+
+      return this.valueNew(
+        expr,
+        callee,
+        tree.exprOf(form.calleeId).loc,
+        module,
+      );
+    }
+    const owned = form.member;
+    if (owned != undefined) {
+      return this.memberNew(expr, form.name, owned, module);
+    }
+
+    this.newArrayCheck(expr, form.name, wanted, module);
+    this.madeSizeCheck(expr, form.name, module);
+
+    const arrayMade = this.arrayNew(expr, form.name, wanted, module);
+    if (arrayMade != undefined) {
+      return arrayMade;
+    }
+
+    const executorErrors = this.types.executorCheck(expr, form.name);
+
+    this.errors.writeAll(module, executorErrors);
+
+    const target = this.targetOfUse(expr.loc, form.name, module);
+    if (target == undefined) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+    const handleMade = this.handleNew(expr, form.name, target, module);
+    if (handleMade != undefined) {
+      return handleMade;
+    }
+    if (target.kind != SymbolKind.Class) {
+      const made = this.namedValueNew(expr, target, module);
+
+      return made ?? this.types.store.plain(TypeKind.Error);
+    }
+    if (this.types.isLibraryModule(target.module)) {
+      const fileMade = this.fileClassNew(
+        expr,
+        form.name,
+        target.module,
+        module,
+      );
+      if (fileMade != undefined) {
+        return fileMade;
+      }
+
+      const cryptoMade = this.cryptoNew(expr, form.name, target.module, module);
+      if (cryptoMade != undefined) {
+        return cryptoMade;
+      }
+
+      const regExpMade = this.regExpNew(expr, module);
+      if (regExpMade != undefined) {
+        return regExpMade;
+      }
+
+      const weakMade = this.weakRefNew(expr, form.name, target, wanted, module);
+      if (weakMade != undefined) {
+        return weakMade;
+      }
+
+      if (this.isDeclaredLibrary(target.module, target.loc)) {
+        const made = this.libraryNew(expr, form.name, target, wanted, module);
+
+        this.newSourceCheck(expr, made, module);
+
+        return this.codedNew(expr, made, module);
+      }
+    }
+
+    const decl = this.record(target.module)?.classes.get(target.loc);
+    if (decl == undefined) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const isEarly =
+      this.openFunctions.length == 0 &&
+      target.module == module &&
+      !this.walkedClasses.has(decl.id);
+    if (isEarly) {
+      this.errors.write(module, expr.loc, Code.ClassUsedEarly, {
+        word: decl.name ?? form.name,
+      });
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
+    }
+    const emitterMade = this.emitterNew(expr, decl, target.module, module);
+    if (emitterMade != undefined) {
+      return emitterMade;
+    }
+
+    const streamMade = this.streamNew(
+      expr,
+      decl,
+      target.module,
+      wanted,
+      module,
+    );
+    if (streamMade != undefined) {
+      return streamMade;
+    }
+    if (
+      tree.typeParamsOf(decl.typeParamsList).length > 0 &&
+      tree.typeRefsOf(expr.typeArgsList).length == 0
+    ) {
+      const inferred = this.genericNew(
+        expr,
+        decl,
+        target.module,
+        wanted,
+        module,
+      );
+
+      this.copyVariantsCheck(expr, inferred, decl, module);
+
+      return inferred;
+    }
+
+    const written = this.newArguments(expr, decl, module);
+    if (written == undefined) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const instance = this.types.classInstance(target.module, decl, written);
+    if (instance.kind != TypeKind.Instance) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+    if (decl.isAbstract) {
+      this.errors.write(module, expr.loc, Code.AbstractNew, {
+        word: decl.name ?? "",
+      });
+
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const made = this.constructed(expr, instance, decl, module);
+
+    this.copyVariantsCheck(expr, made, decl, module);
+    this.fetchNewCheck(expr, decl, target.module, made, module);
+    this.emitterMapCheck(expr, made, module);
+
+    return made;
+  }
+
+  private newArguments(
+    expr: NewExpr,
+    decl: ClassDecl,
+    module: int,
+  ): Type[] | undefined {
+    const tree = this.types.program.tree;
+
+    const count = tree.typeRefsOf(expr.typeArgsList).length;
+    const params = tree.typeParamsOf(decl.typeParamsList).length;
+    const word = decl.name ?? "";
+    if (params == 0 && count > 0) {
+      this.errors.write(module, expr.loc, Code.ClassNotGeneric, { word });
+
+      return undefined;
+    }
+    if (count > params) {
+      this.errors.write(module, expr.loc, Code.TypeArgumentsMany, {
+        word,
+        other: `${params}`,
+        place: this.types.classPluralMark(params),
+        first: `${count}`,
+      });
+
+      return undefined;
+    }
+    const missing = tree.typeParamsOf(decl.typeParamsList).slice(count);
+    const isDefaulted = missing.every(
+      (param) => tree.typeRefAt(param.defaultTypeId) != undefined,
+    );
+    if (count != params && !isDefaulted) {
+      return undefined;
+    }
+
+    const typeArgs = tree.typeRefsOf(expr.typeArgsList);
+
+    return this.writtenArguments(typeArgs, module);
+  }
+
+  private constructed(
+    expr: NewExpr,
+    instance: InstanceType,
+    decl: ClassDecl,
+    module: int,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const maker = this.makerOf(instance, decl);
+    if (maker == undefined) {
+      return instance;
+    }
+
+    const constructors = this.visibleConstructors(maker.owner);
+    const isLibraryEmpty =
+      maker.owner.id != decl.id &&
+      this.types.isLibraryModule(instance.module) &&
+      constructors.every((fn) => tree.paramsOf(fn.paramsList).length == 0);
+    if (
+      (constructors.length == 0 || isLibraryEmpty) &&
+      tree.argumentsOf(expr.argsList).length > 0
+    ) {
+      this.errors.write(module, expr.loc, Code.NoConstructor, {
+        word: decl.name ?? "",
+      });
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const chosen = constructors[0];
+    if (constructors.length > 1) {
+      return this.variantNew(expr, instance, maker, constructors, decl, module);
+    }
+    if (chosen == undefined) {
+      return instance;
+    }
+
+    const word = kConstructorName;
+    const access = this.types.classAccessOf(chosen);
+
+    this.reportAccess(maker.owner, access, word, expr.loc, module);
+
+    const target = this.constructorTarget(maker, chosen, expr.loc);
+    if (target == undefined) {
+      return instance;
+    }
+
+    const isPassed = this.argumentsCheck(
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      target,
+      module,
+    );
+    if (!isPassed) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    return instance;
+  }
+
+  private visibleConstructors(owner: ClassDecl): FunctionDecl[] {
+    const tree = this.types.program.tree;
+
+    const all = tree.functionsOf(owner.constructorsList);
+    const visible = all.filter((fn) => this.isVisibleConstructor(owner, fn));
+    if (visible.length == 0) {
+      return all;
+    }
+
+    return visible;
+  }
+
+  private isVisibleConstructor(owner: ClassDecl, fn: FunctionDecl): boolean {
+    const access = this.types.classAccessOf(fn);
+    if (access == Access.Public || this.isInsideClass(owner)) {
+      return true;
+    }
+
+    return access == Access.Protected && this.isDerivedInside(owner);
+  }
+
+  private variantNew(
+    expr: NewExpr,
+    instance: InstanceType,
+    maker: Read<ClassMemberEntry>,
+    constructors: Read<FunctionDecl[]>,
+    decl: ClassDecl,
+    module: int,
+  ): Type {
+    const tree = this.types.program.tree;
+
+    const targets: CallTarget[] = [];
+
+    for (const fn of constructors) {
+      const target = this.constructorTarget(maker, fn, expr.loc);
+      if (target == undefined) {
+        return instance;
+      }
+
+      targets.push(target);
+    }
+
+    const name = maker.owner.name ?? decl.name ?? "";
+    const at = this.constructorChoice(
+      expr,
+      tree.argumentsOf(expr.argsList),
+      targets,
+      constructors,
+      name,
+      module,
+    );
+    if (at == undefined) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const chosen = targets[at];
+    if (chosen == undefined) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    const isPassed = this.argumentsCheck(
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      chosen,
+      module,
+    );
+    if (!isPassed) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    return instance;
+  }
+
+  private readonly makerOf(
+    instance: InstanceType,
+    decl: ClassDecl,
+  ): ClassMemberEntry | undefined {
+    const tree = this.types.program.tree;
+
+    const entry: ClassMemberEntry = {
+      owner: decl,
+      instance,
+      methods: [],
+      isStatic: false,
+    };
+
+    const constructors = tree.countOf(decl.constructorsList);
+    if (constructors > 0) {
+      return entry;
+    }
+
+    const parent = this.types.parentOf(instance, decl);
+    if (parent == undefined) {
+      const isRoot =
+        tree.typeRefAt(decl.baseId) == undefined &&
+        tree.exprAt(decl.baseExprId) == undefined;
+      if (!isRoot) {
+        return undefined;
+      }
+
+      return entry;
+    }
+
+    const parentDecl = this.classOf(parent);
+    if (parentDecl == undefined) {
+      return undefined;
+    }
+
+    return this.makerOf(parent, parentDecl);
+  }
+
+  private constructorTarget(
+    maker: Read<ClassMemberEntry>,
+    chosen: FunctionDecl,
+    loc: int,
+  ): CallTarget | undefined {
+    const tree = this.types.program.tree;
+
+    const sites = this.types.parameterSites(chosen);
+    if (sites == undefined) {
+      return undefined;
+    }
+
+    const owner = maker.owner;
+    const instance = maker.instance;
+    const context = this.types.classContext(
+      instance,
+      tree.typeParamsOf(owner.typeParamsList),
+      instance.module,
+    );
+    const signature = this.types.signature(sites, undefined, context);
+    if (signature.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const shape = this.types.store.functionShapeOf(signature);
+
+    const params = shape.params.slice();
+    const rest = shape.rest;
+
+    return { params, rest, loc, isLenient: false };
+  }
+
+  private memberNew(
+    expr: NewExpr,
+    owner: string,
+    name: string,
+    module: int,
+  ): Type {
+    if (owner != kIntlName) {
+      return this.types.store.plain(TypeKind.Error);
+    }
+
+    return this.intlNew(expr, name, module);
+  }
+
+  private readonly isDeclaredLibrary(module: int, loc: int): boolean {
+    if (!this.types.isLibraryModule(module)) {
+      return false;
+    }
+    if (!this.types.isTypedLibrary(module)) {
+      return true;
+    }
+
+    return this.record(module)?.classes.get(loc) == undefined;
+  }
+}

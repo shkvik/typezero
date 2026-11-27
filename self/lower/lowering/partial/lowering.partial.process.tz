@@ -8,6 +8,7 @@ import { TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kFlagType,
+  kArrayCopy,
   kIntType,
   kPointerType,
   kProcessArgv,
@@ -26,7 +27,7 @@ partial class Lowering {
     }
 
     const target = this.values.valueTargetOf(expr, frame.module);
-    const opened = this.program.modules[target?.module ?? -1];
+    const opened = this.values.types.program.modules[target?.module ?? -1];
     if (opened == undefined) {
       return false;
     }
@@ -34,7 +35,10 @@ partial class Lowering {
     return opened.source.isLibrary;
   }
 
-  private processMember(frame: Read<Frame>, expr: MemberExpr): IrValue | undefined {
+  private processMember(
+    frame: Read<Frame>,
+    expr: MemberExpr,
+  ): IrValue | undefined {
     switch (expr.name) {
       case "argv":
         return this.processArgv(frame);
@@ -50,15 +54,25 @@ partial class Lowering {
   }
 
   private processArgv(frame: Read<Frame>): IrValue | undefined {
-    const string = this.store.plain(TypeKind.String);
+    const string = this.values.types.store.plain(TypeKind.String);
     const descriptor = this.descriptor(string);
     if (descriptor == undefined) {
       return undefined;
     }
 
     const callee = this.ir.declare(kProcessArgv, kPointerType, [kPointerType]);
-    const value = frame.made.call(callee, [descriptor]);
-    const tz = this.store.arrayOf(string);
+    const cached = frame.made.call(callee, [descriptor]);
+    const tz = this.values.types.store.arrayOf(string);
+    const copying = this.ir.declare(kArrayCopy, kPointerType, [kPointerType]);
+    const value = frame.made.call(copying, [cached]);
+    const shared: IrValue = {
+      type: kPointerType,
+      value: cached,
+      tz,
+      owned: true,
+    };
+
+    this.countCall(frame, false, shared);
 
     return { type: kPointerType, value, tz, owned: true };
   }
@@ -68,19 +82,27 @@ partial class Lowering {
     expr: AssignExpr,
     target: MemberExpr,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     if (target.name != "exitCode" || expr.op != undefined) {
       this.notLowered(frame.module, expr.loc, "an assignment to process");
 
       return undefined;
     }
 
-    const given = this.value(frame, expr.value);
+    const valueExpr = tree.exprOf(expr.valueId);
+    const given = this.value(frame, valueExpr);
     if (given == undefined) {
       return undefined;
     }
 
-    const int = this.store.integer(64, false);
-    const code = this.converted(frame, given, int, expr.value.loc);
+    const int = this.values.types.store.integer(64, false);
+    const code = this.converted(
+      frame,
+      given,
+      int,
+      tree.exprOf(expr.valueId).loc,
+    );
     if (code == undefined) {
       return undefined;
     }

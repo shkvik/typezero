@@ -1,0 +1,242 @@
+import { replace } from "tz:mem";
+import {
+  ExpressionTypes,
+} from "../../../code/expression-types/expression-types.tz";
+import {
+  CallArgument,
+  Expr,
+  ExprKind,
+  FunctionExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionParameter,
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kNoPlace,
+} from "../../../code/expression-types/const/expression-types.const.tz";
+import {
+  GenericDraft,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private contextualArguments(draft: GenericDraft, module: int): void {
+    const contextual = replace(draft.contextual, []);
+
+    for (const index of contextual) {
+      const arg = draft.args[index];
+      if (arg != undefined) {
+        this.contextualArgument(draft, index, arg, module);
+      }
+    }
+  }
+
+  private contextualArgument(
+    draft: GenericDraft,
+    index: int,
+    arg: CallArgument,
+    module: int,
+  ): void {
+    const tree = this.types.program.tree;
+
+    const expr = tree.exprOf(arg.exprId);
+    const pattern = this.types.patternAt(draft.target.shape, index, arg.spread);
+    const bound = this.types.boundById(draft);
+    const partial = this.types.substitute(pattern, bound);
+    const callback = this.types.definedType(partial);
+
+    if (callback.kind == TypeKind.Function) {
+      this.callbackArgument(draft, index, expr, callback, module);
+    } else {
+      this.literalArgument(draft, index, expr, pattern, module);
+    }
+
+    this.moreCandidates(draft, index, pattern, module);
+  }
+
+  private callbackArgument(
+    draft: GenericDraft,
+    index: int,
+    expr: Expr,
+    callback: FunctionType,
+    module: int,
+  ): void {
+    const signature = this.callbackSignature(draft, callback);
+
+    if (expr.kind == ExprKind.Function) {
+      this.callbackParameters(draft, expr, callback, module);
+    }
+
+    const given = this.typed(expr, signature, module);
+
+    draft.given.set(index, given);
+  }
+
+  private callbackSignature(
+    draft: Read<GenericDraft>,
+    callback: FunctionType,
+  ): Type {
+    const open = this.types.openParameters(draft);
+    const error = this.types.store.plain(TypeKind.Error);
+    const shape = this.types.store.functionShapeOf(callback);
+    const params: FunctionParameter[] = shape.params.map((param) => ({
+      type: this.closedOr(param.type, open, error),
+      optional: param.optional,
+    }));
+    const rest = shape.rest;
+    const result = this.closedOr(shape.result, open, error);
+    const self = shape.self;
+
+    if (self == undefined) {
+      return this.types.store.functionOf({ params, rest, result });
+    }
+
+    return this.types.store.functionOf({ params, rest, self, result });
+  }
+
+  private readonly closedOr(
+    type: Type,
+    open: Read<Type[]>,
+    fallback: Type,
+  ): Type {
+    if (this.isMentioning(type, open)) {
+      return fallback;
+    }
+
+    return type;
+  }
+
+  private callbackParameters(
+    draft: GenericDraft,
+    closure: FunctionExpr,
+    callback: FunctionType,
+    module: int,
+  ): void {
+    const tree = this.types.program.tree;
+
+    const fn = tree.functionOf(closure.fnId);
+    const written = tree.paramsOf(fn.paramsList);
+    const params = this.types.store.paramsOf(callback);
+
+    for (let position = 0; position < params.length; position++) {
+      const own = written[position];
+      const param = params[position];
+      const isWritten =
+        own != undefined && tree.typeRefAt(own.typeId) != undefined;
+      if (!isWritten && param != undefined) {
+        this.callbackParameter(draft, closure, param.type, position, module);
+      }
+    }
+  }
+
+  private callbackParameter(
+    draft: GenericDraft,
+    closure: FunctionExpr,
+    type: Type,
+    position: int,
+    module: int,
+  ): void {
+    const target = draft.target;
+
+    for (let index = 0; index < target.params.length; index++) {
+      const param = target.params[index];
+      const isOpen = param != undefined && !draft.bound.has(index);
+      if (isOpen && param != undefined && this.isMentioning(type, [param])) {
+        const callbackError = this.types.callbackError(
+          draft,
+          closure,
+          param,
+          position,
+        );
+
+        this.errors.writeFound(module, callbackError);
+        this.types.failParameter(draft, index);
+      }
+    }
+  }
+
+  private literalArgument(
+    draft: GenericDraft,
+    index: int,
+    expr: Expr,
+    pattern: Type,
+    module: int,
+  ): void {
+    const params = draft.target.params;
+    const bound = this.types.boundById(draft);
+    const partial = this.types.substitute(pattern, bound);
+    const isOpen = this.isMentioning(partial, params);
+    const isDefaulted = isOpen && this.fillDefaults(draft);
+    const hint = this.hintAfterDefaults(draft, pattern, partial, isDefaulted);
+    const isStillOpen = this.isMentioning(hint, params);
+
+    if (isDefaulted && draft.target.isLenient) {
+      return;
+    }
+    if (isStillOpen) {
+      const given = this.typed(expr, undefined, module);
+
+      draft.given.set(index, given);
+
+      return;
+    }
+    if (draft.target.isLenient) {
+      const given = this.typed(expr, hint, module);
+
+      draft.given.set(index, given);
+
+      return;
+    }
+
+    const given = this.checked(expr, hint, module, kNoPlace);
+
+    draft.given.set(index, given);
+    draft.settled.add(index);
+  }
+
+  private hintAfterDefaults(
+    draft: Read<GenericDraft>,
+    pattern: Type,
+    partial: Type,
+    isDefaulted: boolean,
+  ): Type {
+    if (!isDefaulted) {
+      return partial;
+    }
+
+    const bound = this.types.boundById(draft);
+
+    return this.types.substitute(pattern, bound);
+  }
+
+  private moreCandidates(
+    draft: GenericDraft,
+    index: int,
+    pattern: Type,
+    module: int,
+  ): void {
+    const given = draft.given.get(index);
+    if (given == undefined) {
+      return;
+    }
+
+    const count = draft.target.params.length;
+    const params = draft.target.params.slice();
+    const more = this.types.inferenceSet(params);
+
+    this.inferPair(more, pattern, given);
+
+    if (more.isUnmatched) {
+      draft.inference.isUnmatched = true;
+    }
+
+    for (let typeIndex = 0; typeIndex < count; typeIndex++) {
+      if (!draft.bound.has(typeIndex)) {
+        this.types.adoptCandidates(draft.inference, typeIndex, more);
+        this.settleParameter(draft, typeIndex, module);
+      }
+    }
+  }
+}

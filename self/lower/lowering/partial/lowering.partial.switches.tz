@@ -9,23 +9,39 @@ import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import { kSubjectName } from "../const/lowering.const.tz";
 import { Frame, LoopTarget, Place } from "../types/lowering.types.tz";
+import {
+  SyntheticNode,
+} from "../../../program/ast/ast-tree/types/ast-tree.types.synthetic.tz";
 
 partial class Lowering {
   private switchStatement(frame: Frame, statement: SwitchStmt): void {
+    const tree = this.values.types.program.tree;
+
     const end = frame.made.block("switch.end");
-    const bodies = statement.cases.map(() => frame.made.block("switch.case"));
+    const bodies = tree
+      .casesOf(statement.casesList)
+      .map(() => frame.made.block("switch.case"));
 
     this.openScope(frame);
 
-    const subject = this.switchSubject(frame, statement.discriminant);
+    const subject = this.switchSubject(
+      frame,
+      tree.exprOf(statement.discriminantId),
+    );
     if (subject == undefined) {
       return;
     }
 
     let missed: LLVMBlock = end;
 
-    for (let index = 0; index < statement.cases.length; index++) {
-      const test = statement.cases[index]?.test;
+    for (
+      let index = 0;
+      index < tree.casesOf(statement.casesList).length;
+      index++
+    ) {
+      const test = tree.exprAt(
+        tree.casesOf(statement.casesList)[index]?.testId,
+      );
       const body = bodies[index];
       if (body == undefined) {
         continue;
@@ -80,18 +96,22 @@ partial class Lowering {
     subject: Place,
     test: Expr,
   ): LLVMValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const left = this.loaded(frame, subject);
     const right = this.value(frame, test);
     if (right == undefined) {
       return undefined;
     }
 
+    const id = tree.syntheticId(SyntheticNode.CaseTest, test.id);
     const expr: BinaryExpr = {
       kind: ExprKind.Binary,
+      id,
       loc: test.loc,
       op: BinaryOp.Eq,
-      lhs: statement.discriminant,
-      rhs: test,
+      lhsId: statement.discriminantId,
+      rhsId: test.id,
     };
     const isMatch = this.compared(frame, expr, left, right);
 
@@ -106,6 +126,8 @@ partial class Lowering {
     bodies: Read<LLVMBlock[]>,
     end: LLVMBlock,
   ): void {
+    const tree = this.values.types.program.tree;
+
     const target: LoopTarget = {
       breakBlock: end,
       label: "",
@@ -114,15 +136,21 @@ partial class Lowering {
 
     frame.loops.push(target);
 
-    for (let index = 0; index < statement.cases.length; index++) {
+    for (
+      let index = 0;
+      index < tree.casesOf(statement.casesList).length;
+      index++
+    ) {
       const body = bodies[index];
-      const item = statement.cases[index];
+      const item = tree.casesOf(statement.casesList)[index];
       if (body == undefined || item == undefined) {
         continue;
       }
 
       frame.made.open(body);
-      this.statements(frame, item.body);
+      const bodyItem = tree.stmtsOf(item.bodyList);
+
+      this.statements(frame, bodyItem);
     }
 
     frame.loops.pop();

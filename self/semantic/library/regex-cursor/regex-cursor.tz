@@ -20,11 +20,11 @@ export class RegexCursor {
   public readonly text: string;
   public readonly isSets: boolean;
   public readonly isUnicode: boolean;
-  public index: Cell<int>;
-  public depth: Cell<int>;
-  public hasNames: Cell<boolean>;
-  public error: Cell<string>;
-  public errorAt: Cell<int>;
+  public index: int;
+  public depth: int;
+  public hasNames: boolean;
+  public error: string;
+  public errorAt: int;
 
   public constructor(text: string, flags: string) {
     this.text = text;
@@ -41,7 +41,7 @@ export class RegexCursor {
     return this.error != "";
   }
 
-  public readonly fail(message: string): boolean {
+  public fail(message: string): boolean {
     if (this.error == "") {
       this.error = message;
       this.errorAt = this.index;
@@ -50,7 +50,7 @@ export class RegexCursor {
     return false;
   }
 
-  public readonly renameError(message: string): void {
+  public renameError(message: string): void {
     this.error = message;
   }
 
@@ -78,7 +78,7 @@ export class RegexCursor {
     return this.isAt(char) && this.isNextAt(char);
   }
 
-  public readonly accept(char: string): boolean {
+  public accept(char: string): boolean {
     if (!this.isAt(char)) {
       return false;
     }
@@ -128,7 +128,7 @@ export class RegexCursor {
     return this.joined(lead, trail);
   }
 
-  public readonly nextChar(): int {
+  public nextChar(): int {
     const pair = this.pairAt(this.index);
     if (this.isUnicode && pair != kNoUnit) {
       this.index += 2;
@@ -143,7 +143,7 @@ export class RegexCursor {
     return unit;
   }
 
-  public readonly readHex(count: int): int {
+  public readHex(count: int): int {
     let value = 0;
 
     for (let offset = 0; offset < count; offset++) {
@@ -160,7 +160,7 @@ export class RegexCursor {
     return value;
   }
 
-  public readonly unicodeEscape(isUnicode: boolean): int {
+  public unicodeEscape(isUnicode: boolean): int {
     if (isUnicode && this.isAt("{")) {
       return this.bracedCodePoint();
     }
@@ -173,7 +173,7 @@ export class RegexCursor {
     return this.trailedEscape(value);
   }
 
-  private readonly bracedCodePoint(): int {
+  private bracedCodePoint(): int {
     const start = this.index;
     let value = 0;
     let digits = 0;
@@ -205,7 +205,7 @@ export class RegexCursor {
     return value;
   }
 
-  private readonly trailedEscape(lead: int): int {
+  private trailedEscape(lead: int): int {
     const before = this.index;
     if (!this.isAt("\\") || !this.isNextAt("u")) {
       return lead;
@@ -230,4 +230,3 @@ export class RegexCursor {
   }
 }
 
-export type InternedRegexCursor = Interned<RegexCursor>;

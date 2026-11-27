@@ -53,21 +53,25 @@ partial class Lowering {
   }
 
   private joinedTypeIn(frame: Frame, expr: BinaryExpr): Type | undefined {
-    const left = this.definedIn(frame, expr.lhs);
-    const right = this.definedIn(frame, expr.rhs);
+    const tree = this.values.types.program.tree;
+
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.definedIn(frame, lhs);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.definedIn(frame, rhs);
     if (left == undefined || right == undefined) {
       return undefined;
     }
 
     const isText = this.isString(left) || this.isString(right);
     if (expr.op == BinaryOp.Add && isText) {
-      return this.store.plain(TypeKind.String);
+      return this.values.types.store.plain(TypeKind.String);
     }
     if (this.isDecimal(left) || this.isDecimal(right)) {
-      return this.store.plain(TypeKind.Decimal);
+      return this.values.types.store.plain(TypeKind.Decimal);
     }
     if (this.isDouble(left) || this.isDouble(right)) {
-      return this.store.plain(TypeKind.Double);
+      return this.values.types.store.plain(TypeKind.Double);
     }
     if (this.isInteger(left) && this.isInteger(right)) {
       return this.widened(left);
@@ -86,12 +90,17 @@ partial class Lowering {
   }
 
   private readonly isUndefinedTest(expr: BinaryExpr): boolean {
+    const tree = this.values.types.program.tree;
+
     return (
-      expr.lhs.kind == ExprKind.Undefined || expr.rhs.kind == ExprKind.Undefined
+      tree.exprOf(expr.lhsId).kind == ExprKind.Undefined ||
+      tree.exprOf(expr.rhsId).kind == ExprKind.Undefined
     );
   }
 
   private arithmeticExpr(frame: Frame, expr: BinaryExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const type = this.typeOf(expr) ?? this.joinedTypeIn(frame, expr);
     if (type == undefined) {
       this.notLowered(frame.module, expr.loc, "this operator");
@@ -114,8 +123,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const left = this.operand(frame, expr.lhs, type);
-    const right = this.operand(frame, expr.rhs, type);
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.operand(frame, lhs, type);
+    const rhs = tree.exprOf(expr.rhsId);
+    const right = this.operand(frame, rhs, type);
     if (left == undefined || right == undefined) {
       return undefined;
     }
@@ -163,7 +174,10 @@ partial class Lowering {
     }
   }
 
-  private readonly simpleOpcode(op: BinaryOp, isDouble: boolean): IrOpcode | undefined {
+  private readonly simpleOpcode(
+    op: BinaryOp,
+    isDouble: boolean,
+  ): IrOpcode | undefined {
     switch (op) {
       case BinaryOp.Add:
         return this.opcodeFor(isDouble, IrOpcode.FAdd, IrOpcode.Add);
@@ -182,7 +196,10 @@ partial class Lowering {
     }
   }
 
-  private readonly doubleOpcode(op: BinaryOp, isDouble: boolean): IrOpcode | undefined {
+  private readonly doubleOpcode(
+    op: BinaryOp,
+    isDouble: boolean,
+  ): IrOpcode | undefined {
     if (!isDouble) {
       return undefined;
     }
@@ -208,7 +225,11 @@ partial class Lowering {
     return second;
   }
 
-  private readonly pick(isFirst: boolean, first: string, second: string): string {
+  private readonly pick(
+    isFirst: boolean,
+    first: string,
+    second: string,
+  ): string {
     if (isFirst) {
       return first;
     }
@@ -227,7 +248,7 @@ partial class Lowering {
     return { type: left.type, value, tz: left.tz };
   }
 
-  private readonly integerDivision(
+  private integerDivision(
     frame: Read<Frame>,
     left: IrValue,
     right: IrValue,
@@ -235,7 +256,11 @@ partial class Lowering {
   ): IrValue {
     const type = left.type;
     const zero = this.ir.zero(type);
-    const isZero = frame.made.integerCompare(IrIntPredicate.Equal, right.value, zero);
+    const isZero = frame.made.integerCompare(
+      IrIntPredicate.Equal,
+      right.value,
+      zero,
+    );
     const fails = frame.made.block("div.zero");
     const goes = frame.made.block("div.ok");
 
@@ -271,7 +296,7 @@ partial class Lowering {
     return { type, value, tz: left.tz };
   }
 
-  private readonly power(frame: Read<Frame>, left: IrValue, right: IrValue): IrValue {
+  private power(frame: Read<Frame>, left: IrValue, right: IrValue): IrValue {
     if (left.type == kDoubleType) {
       const value = this.runtimeValue(frame, kPowDouble, kDoubleType, [
         left,
@@ -297,7 +322,7 @@ partial class Lowering {
   }
 
   private readonly toLong(frame: Read<Frame>, value: IrValue): IrValue {
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
     if (value.type == kIntType) {
       return { type: kIntType, value: value.value, tz };
     }
@@ -339,6 +364,8 @@ partial class Lowering {
   }
 
   private logical(frame: Frame, expr: BinaryExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const result = this.typeOf(expr);
     if (result != undefined && !this.isBoolean(result)) {
       const kind = this.kindName(result);
@@ -348,7 +375,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const left = this.truth(frame, expr.lhs);
+    const lhs = tree.exprOf(expr.lhsId);
+    const left = this.truth(frame, lhs);
     if (left == undefined) {
       return undefined;
     }
@@ -366,7 +394,8 @@ partial class Lowering {
 
     frame.made.open(rest);
 
-    const right = this.truth(frame, expr.rhs);
+    const rhsExpr = tree.exprOf(expr.rhsId);
+    const right = this.truth(frame, rhsExpr);
     const restEnd = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
@@ -378,15 +407,19 @@ partial class Lowering {
 
     const early = this.pick(isAnd, "0", "1");
     const first = this.ir.integer(kBooleanType, early);
-    const value = frame.made.phi(kBooleanType, [first, right], [start, restEnd]);
-    const tz = this.store.plain(TypeKind.Boolean);
+    const value = frame.made.phi(
+      kBooleanType,
+      [first, right],
+      [start, restEnd],
+    );
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     return { type: kBooleanType, value, tz };
   }
 
-  private readonly panic(frame: Read<Frame>, message: string): void {
+  private panic(frame: Read<Frame>, message: string): void {
     const text = this.byteText(message);
-    const tz = this.store.integer(64, false);
+    const tz = this.values.types.store.integer(64, false);
     const length = this.ir.integer(kIntType, `${text.length}`);
     const pointer: IrValue = { type: kPointerType, value: text.pointer, tz };
     const size: IrValue = { type: kIntType, value: length, tz };

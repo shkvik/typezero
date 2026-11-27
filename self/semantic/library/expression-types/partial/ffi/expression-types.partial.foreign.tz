@@ -26,49 +26,51 @@ import {
 } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly foreignCheck(
+  private foreignCheck(
     fn: FunctionDecl,
     shape: Read<ParameterShape>,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const isForeign = fn.bodySource == BodySource.Foreign;
-    if (!isForeign || this.modules.isLibraryModule(module)) {
+    if (!isForeign || this.types.isLibraryModule(module)) {
       return;
     }
-    if (fn.typeParams.length > 0 || shape.rest) {
-      return this.reportFound(module, this.foreign.plainError(fn.loc));
+    if (tree.typeParamsOf(fn.typeParamsList).length > 0 || shape.rest) {
+      return this.errors.writeFound(module, this.types.plainError(fn.loc));
     }
 
-    for (let index = 0; index < fn.params.length; index++) {
-      const param = fn.params[index];
+    for (let index = 0; index < tree.paramsOf(fn.paramsList).length; index++) {
+      const param = tree.paramsOf(fn.paramsList)[index];
       const type = shape.params[index]?.type;
       if (param != undefined && type != undefined) {
         this.foreignParamCheck(param.loc, param.form.kind, type, module);
       }
     }
 
-    const written = fn.returnType;
+    const written = tree.typeRefAt(fn.returnTypeId);
     if (written == undefined) {
-      return this.reportFound(module, this.foreign.noReturnError(fn.loc));
+      return this.errors.writeFound(module, this.types.noReturnError(fn.loc));
     }
 
-    const result = this.resolver.returnType(written, context);
+    const result = this.types.returnType(written, context);
 
-    this.reportFound(module, this.foreign.givesError(fn.loc, result));
+    this.errors.writeFound(module, this.types.givesError(fn.loc, result));
   }
 
-  private readonly foreignParamCheck(
+  private foreignParamCheck(
     loc: int,
     kind: ParamKind,
     type: Type,
     module: int,
   ): void {
     if (kind == ParamKind.Optional || kind == ParamKind.Defaulted) {
-      return this.reportFound(module, this.foreign.optionalError(loc));
+      return this.errors.writeFound(module, this.types.optionalError(loc));
     }
 
-    this.reportFound(module, this.foreign.takesError(loc, type));
+    this.errors.writeFound(module, this.types.takesError(loc, type));
   }
 
   private handleNew(
@@ -77,26 +79,30 @@ partial class ExpressionTypes {
     target: ValueTarget,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     if (target.kind != SymbolKind.Handle) {
       return undefined;
     }
 
-    this.reportFound(module, this.foreign.handleNewError(expr.loc, name));
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, this.types.handleNewError(expr.loc, name));
+    const args = tree.argumentsOf(expr.argsList);
 
-    return this.store.plain(TypeKind.Error);
+    this.looseArguments(args, module);
+
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly isCStringType(type: Type): boolean {
+  private isCStringType(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance || base.name != kCStringName) {
       return false;
     }
 
-    return this.modules.isLibraryModule(base.module);
+    return this.types.isLibraryModule(base.module);
   }
 
-  private readonly cstringLiteral(expr: Expr, to: Type): Type | undefined {
+  private cstringLiteral(expr: Expr, to: Type): Type | undefined {
     if (!this.isCStringType(to)) {
       return undefined;
     }
@@ -109,7 +115,7 @@ partial class ExpressionTypes {
     return to;
   }
 
-  private readonly cstringMismatch(
+  private cstringMismatch(
     expr: Expr,
     given: Type,
     wanted: Type,
@@ -122,19 +128,22 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const first = this.text.of(given);
-    const second = this.text.of(wanted);
+    const first = this.types.typeText(given);
+    const second = this.types.typeText(wanted);
     const text = this.constantText(expr);
     if (text != undefined && text.includes(kNulText)) {
-      const literal = this.store.literal(LiteralKind.String, text);
-      const shown = this.text.of(literal);
+      const literal = this.types.store.literal(LiteralKind.String, text);
+      const shown = this.types.typeText(literal);
 
-      this.report(module, expr.loc, Code.CStringNul, { first: shown, second });
+      this.errors.write(module, expr.loc, Code.CStringNul, {
+        first: shown,
+        second,
+      });
 
       return true;
     }
 
-    this.report(module, expr.loc, Code.CStringText, { first, second });
+    this.errors.write(module, expr.loc, Code.CStringText, { first, second });
 
     return true;
   }

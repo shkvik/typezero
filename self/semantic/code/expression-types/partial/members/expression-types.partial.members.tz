@@ -25,33 +25,38 @@ import {
 
 partial class ExpressionTypes {
   private memberTyped(expr: MemberExpr, module: int): Type {
+    const tree = this.types.program.tree;
+
     const isRefused =
       this.thisPlaceCheck(expr, module) || this.superReadCheck(expr, module);
     if (isRefused || this.memberReadEarly(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.nodeMemberReadCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const fact = this.pathFact(expr, module);
     if (fact != undefined) {
-      this.objectAnswered(expr.object, module);
+      const objectExpr = tree.exprOf(expr.objectId);
+
+      this.objectAnswered(objectExpr, module);
 
       return fact;
     }
 
-    const home = this.enumHomeOf(expr.object, module);
+    const exprObject = tree.exprOf(expr.objectId);
+    const home = this.enumHomeOf(exprObject, module);
     if (home != undefined) {
       return this.enumMemberTyped(expr, home, module);
     }
-    if (this.isDateName(expr.object, module)) {
+    if (this.isDateName(tree.exprOf(expr.objectId), module)) {
       return this.dateStaticRead(expr, module);
     }
-    if (this.isDecimalName(expr.object, module)) {
+    if (this.isDecimalName(tree.exprOf(expr.objectId), module)) {
       return this.decimalStaticRead(expr, module);
     }
-    if (this.isRegExpName(expr.object, module)) {
+    if (this.isRegExpName(tree.exprOf(expr.objectId), module)) {
       return this.regExpStaticRead(expr, module);
     }
 
@@ -70,17 +75,21 @@ partial class ExpressionTypes {
       return performanceValue;
     }
 
-    const owner = this.staticOwner(expr.object, module);
+    const owner = this.staticOwner(tree.exprOf(expr.objectId), module);
     if (owner != undefined) {
       return this.staticMemberTyped(expr, owner, module);
     }
 
-    const object = this.receiverOf(expr.object, expr.optional, module);
+    const object = this.receiverOf(
+      tree.exprOf(expr.objectId),
+      expr.optional,
+      module,
+    );
     if (this.dictMemberCheck(expr, object, false, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.rawTextsCheck(expr, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.memberOf(expr, object, module);
@@ -91,8 +100,11 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const before = this.shortCircuits;
-    const inner = this.typed(expr.chain, wanted, module);
+    const chain = tree.exprOf(expr.chainId);
+    const inner = this.typed(chain, wanted, module);
     const isShort = this.shortCircuits > before;
 
     this.shortCircuits = before;
@@ -105,7 +117,7 @@ partial class ExpressionTypes {
   }
 
   private receiverOf(object: Expr, optional: boolean, module: int): Type {
-    this.memberObjects.add(object);
+    this.memberObjects.add(object.id);
     this.markThisObject(object, module);
 
     const type = this.typed(object, undefined, module);
@@ -125,26 +137,26 @@ partial class ExpressionTypes {
 
   private memberOf(expr: MemberExpr, object: Type, module: int): Type {
     if (this.unknownMemberCheck(expr, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.readlineMemberRead(expr, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.fsConstantCheck(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     const processStream = this.processStreamTyped(expr, module);
     if (processStream != undefined) {
       return processStream;
     }
     if (this.processMemberRead(expr, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (this.emitterMethodValueCheck(expr, object, module)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const keyed = this.dictionaries.recordMemberTyped(expr, object);
+    const keyed = this.types.recordMemberTyped(expr, object);
     if (keyed != undefined) {
       return keyed;
     }
@@ -190,7 +202,7 @@ partial class ExpressionTypes {
       case TypeKind.Function:
         return this.valueMember(expr, object, module);
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.types.store.plain(TypeKind.Error);
     }
   }
 
@@ -199,6 +211,8 @@ partial class ExpressionTypes {
     object: UnionType,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     if (!this.types.isOptional(object)) {
       return this.variantMember(expr, object, module);
     }
@@ -208,83 +222,94 @@ partial class ExpressionTypes {
       return this.types.optional(defined);
     }
     if (defined.kind != TypeKind.Error) {
-      this.report(module, expr.object.loc, Code.ReadOfUndefined, {
-        word: expr.name,
-      });
+      this.errors.write(
+        module,
+        tree.exprOf(expr.objectId).loc,
+        Code.ReadOfUndefined,
+        {
+          word: expr.name,
+        },
+      );
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private parameterMemberOf(expr: MemberExpr, object: Type, module: int): Type {
-    const constraint = this.store.constraintOf(object);
+    const constraint = this.types.store.constraintOf(object);
     if (constraint == undefined) {
       const word = expr.name;
-      const first = this.text.of(object);
+      const first = this.types.typeText(object);
 
-      this.report(module, expr.loc, Code.PropertyMissing, { word, first });
+      this.errors.write(module, expr.loc, Code.PropertyMissing, {
+        word,
+        first,
+      });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return this.memberOf(expr, constraint, module);
   }
 
-  private readonly objectField(expr: MemberExpr, object: ObjectType, module: int): Type {
-    const fields = object.fields.filter((one) => one.name == expr.name);
+  private objectField(expr: MemberExpr, object: ObjectType, module: int): Type {
+    const fields = this.types.store
+      .fieldsOf(object)
+      .filter((one) => one.name == expr.name);
     const field = fields[0];
-    const isLibrary = this.resolver.isLibraryShape(object);
-    const isData = object.fields.every(
-      (one) => one.type.kind != TypeKind.Function,
-    );
+    const isLibrary = this.types.isLibraryShape(object);
+    const isData = this.types.store
+      .fieldsOf(object)
+      .every((one) => one.type.kind != TypeKind.Function);
     if (field == undefined && isLibrary && !isData) {
       this.namespaceReadCheck(expr, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (field == undefined) {
-      const missingFieldError = this.objectMembers.missingFieldError(
-        expr,
-        object,
-      );
+      const missingFieldError = this.types.missingFieldError(expr, object);
 
-      this.reportFound(module, missingFieldError);
+      this.errors.writeFound(module, missingFieldError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const type = this.objects.fieldWanted(field);
+    const type = this.types.fieldWanted(field);
     const isMethod =
-      type.kind == TypeKind.Function && type.shape.self == undefined;
+      type.kind == TypeKind.Function &&
+      this.types.store.selfTypeOf(type) == undefined;
     if (isLibrary && isMethod) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
     if (fields.length > 1) {
       this.signatureValueCheck(expr, fields, module);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return type;
   }
 
-  private readonly tupleMember(expr: MemberExpr, tuple: TupleType, module: int): Type {
-    const checked = this.objectMembers.tupleMember(expr, tuple);
+  private tupleMember(expr: MemberExpr, tuple: TupleType, module: int): Type {
+    const checked = this.types.objectMemberTupleMember(expr, tuple);
 
-    this.reportFound(module, checked.error);
-
-    return checked.value;
-  }
-
-  private readonly valueMember(expr: MemberExpr, object: Type, module: int): Type {
-    const checked = this.objectMembers.valueMember(expr, object);
-
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
 
-  private readonly enumOfObject(object: Expr, module: int): EnumDecl | undefined {
+  private valueMember(expr: MemberExpr, object: Type, module: int): Type {
+    const checked = this.types.valueMember(expr, object);
+
+    this.errors.writeFound(module, checked.error);
+
+    return checked.value;
+  }
+
+  private readonly enumOfObject(
+    object: Expr,
+    module: int,
+  ): EnumDecl | undefined {
     return this.enumHomeOf(object, module)?.decl;
   }
 
@@ -316,25 +341,28 @@ partial class ExpressionTypes {
     this.errors.endTrial();
   }
 
-  private readonly enumMemberTyped(expr: MemberExpr, home: EnumHome, module: int): Type {
-    const step = this.resolver.enumMember(home.module, home.decl, expr.name);
+  private enumMemberTyped(expr: MemberExpr, home: EnumHome, module: int): Type {
+    const step = this.types.enumMember(home.module, home.decl, expr.name);
     if (step == undefined) {
-      this.report(module, expr.loc, Code.EnumMemberMissing, {
+      this.errors.write(module, expr.loc, Code.EnumMemberMissing, {
         word: expr.name,
         other: home.decl.name,
       });
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly enumLiteral(expr: MemberExpr, module: int): LiteralValue | undefined {
-    const home = this.enumHomeOf(expr.object, module);
+  private enumLiteral(expr: MemberExpr, module: int): LiteralValue | undefined {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const home = this.enumHomeOf(object, module);
     if (home == undefined) {
       return undefined;
     }
 
-    const step = this.resolver.enumMember(home.module, home.decl, expr.name);
+    const step = this.types.enumMember(home.module, home.decl, expr.name);
     if (step == undefined) {
       return undefined;
     }
@@ -344,7 +372,7 @@ partial class ExpressionTypes {
       return undefined;
     }
     if (type.literal == LiteralKind.String) {
-      return this.literals.plainLiteral(LiteralKind.String, type.text);
+      return this.types.plainLiteral(LiteralKind.String, type.text);
     }
 
     const number = step.number;
@@ -352,10 +380,10 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.objects.wholeLiteral(number);
+    return this.types.wholeLiteral(number);
   }
 
-  private readonly enumConstant(expr: MemberExpr, module: int): decimal | undefined {
+  private enumConstant(expr: MemberExpr, module: int): decimal | undefined {
     const literal = this.enumLiteral(expr, module);
     if (literal == undefined || literal.kind != LiteralKind.Int) {
       return undefined;
@@ -369,17 +397,22 @@ partial class ExpressionTypes {
     return value.value;
   }
 
-  private readonly enumWhole(expr: MemberExpr, module: int): Type {
-    const home = this.enumHomeOf(expr.object, module);
+  private enumWhole(expr: MemberExpr, module: int): Type {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
+    const home = this.enumHomeOf(object, module);
     if (home == undefined) {
-      return this.store.plain(TypeKind.String);
+      return this.types.store.plain(TypeKind.String);
     }
 
-    return this.resolver.declaredEnum(home.module, home.decl);
+    return this.types.declaredEnum(home.module, home.decl);
   }
 
-  private readonly globalThisRead(expr: MemberExpr, module: int): Type | undefined {
-    const object = expr.object;
+  private globalThisRead(expr: MemberExpr, module: int): Type | undefined {
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(expr.objectId);
     const isGlobal =
       object.kind == ExprKind.Name &&
       object.name == kGlobalThisName &&
@@ -388,8 +421,10 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    this.report(module, expr.loc, Code.GlobalThisMember, { word: expr.name });
+    this.errors.write(module, expr.loc, Code.GlobalThisMember, {
+      word: expr.name,
+    });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 }

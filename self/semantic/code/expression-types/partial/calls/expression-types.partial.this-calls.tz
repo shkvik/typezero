@@ -10,6 +10,10 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import { CallKind } from "../../types/expression-types.types.tz";
+import {
+  SyntheticNode,
+} from "../../../../../program/ast/ast-tree/types/ast-tree.types.synthetic.tz";
+import { AstList } from "../../../../../program/ast/types/ast.types.span.tz";
 
 partial class ExpressionTypes {
   private thisMethodCall(
@@ -18,39 +22,52 @@ partial class ExpressionTypes {
     type: FunctionType,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const word = member.name;
-    const error = this.store.plain(TypeKind.Error);
-    const code = this.calls.thisCallProblem(expr, word);
+    const error = this.types.store.plain(TypeKind.Error);
+    const code = this.types.thisCallProblem(expr, word);
     if (code != undefined) {
-      this.report(module, member.loc, code, {
+      this.errors.write(module, member.loc, code, {
         word,
-        other: this.calls.thisCallTail(word),
+        other: this.types.thisCallTail(word),
       });
-      this.looseArguments(expr.args, module);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return error;
     }
     if (word == "apply") {
-      this.looseArguments(expr.args, module);
+      const argsItem = tree.argumentsOf(expr.argsList);
 
-      return type.shape.result;
+      this.looseArguments(argsItem, module);
+
+      return this.types.store.returnTypeOf(type);
     }
 
-    const first = expr.args[0];
+    const first = tree.argumentsOf(expr.argsList)[0];
     if (first != undefined) {
-      this.typed(first.expr, type.shape.self, module);
+      this.typed(
+        tree.exprOf(first.exprId),
+        this.types.store.selfTypeOf(type),
+        module,
+      );
     }
 
+    const id = tree.syntheticId(SyntheticNode.ThisCallRest, expr.id);
+    const argsList = this.listAfterFirst(expr.argsList);
     const rest: CallExpr = {
       kind: ExprKind.Call,
+      id,
       loc: expr.loc,
-      callee: expr.callee,
-      args: expr.args.slice(1),
+      calleeId: expr.calleeId,
+      argsList,
       optional: expr.optional,
       tagged: false,
     };
-    const shape = type.shape;
-    const plain = this.store.functionOf({
+    const shape = this.types.store.functionShapeOf(type);
+    const plain = this.types.store.functionOf({
       params: shape.params,
       rest: shape.rest,
       result: shape.result,
@@ -60,5 +77,13 @@ partial class ExpressionTypes {
     }
 
     return this.calledWith(rest, plain, member.loc, CallKind.Own, module);
+  }
+
+  private readonly listAfterFirst(list: AstList): AstList {
+    if (list.start >= list.end) {
+      return list;
+    }
+
+    return { start: list.start + 1, end: list.end };
   }
 }

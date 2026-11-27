@@ -1,0 +1,135 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  IndexExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kAllocMethods,
+  kArrayBufferLength,
+  kArrayBufferName,
+  kBufferName,
+  kBufferSize,
+  kBitsInByte,
+  kClampedArrayName,
+  kRawNames,
+  kTypedArrayName,
+  kTypedArrayNames,
+} from "../../bytes-rules/const/bytes-rules.const.tz";
+import {
+  ProofRange,
+} from "../../../flow/proof-rules/types/proof-rules.types.tz";
+
+partial class TypeSystem {
+  public elementOf(type: Type): Type | undefined {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const chain = this.ancestorsOf(base);
+    const root = chain.find((one) => this.isTypedRoot(one));
+    if (root == undefined || root.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return this.store.argsOf(root)[0];
+  }
+
+  public readonly storeError(
+    target: IndexExpr,
+    object: Type,
+    constant: decimal | undefined,
+    shownObject: string,
+    shownIndex: string,
+  ): SourceError {
+    const first = this.typeText(object);
+    const other = this.storeTest(constant, shownObject, shownIndex);
+
+    return {
+      code: Code.BytesStoreUnproven,
+      loc: target.loc,
+      details: { first, other },
+    };
+  }
+
+  public readonly isClamped(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kClampedArrayName &&
+      this.isLibraryModule(type.module)
+    );
+  }
+
+  public readonly sizeWhat(name: string): string | undefined {
+    if (name == kArrayBufferName) {
+      return kArrayBufferLength;
+    }
+    if (!kTypedArrayNames.includes(name)) {
+      return undefined;
+    }
+
+    return `the length of a ${name}`;
+  }
+
+  public readonly isTypedName(name: string): boolean {
+    return kTypedArrayNames.includes(name);
+  }
+
+  public readonly staticRange(
+    owner: string,
+    name: string,
+  ): ProofRange | undefined {
+    const isAlloc = owner == kBufferName && kAllocMethods.includes(name);
+    if (!isAlloc) {
+      return undefined;
+    }
+
+    return { what: kBufferSize, low: 0 };
+  }
+
+  public isRaw(type: Type): boolean {
+    const base = this.definedType(type);
+
+    return (
+      base.kind == TypeKind.Instance &&
+      kRawNames.includes(base.name) &&
+      this.isLibraryModule(base.module)
+    );
+  }
+
+  public isByteSized(type: Type): boolean {
+    if (this.isRaw(type)) {
+      return true;
+    }
+
+    const element = this.elementOf(type);
+
+    return (
+      element != undefined &&
+      element.kind == TypeKind.Int &&
+      element.bits == kBitsInByte
+    );
+  }
+
+  private readonly storeTest(
+    constant: decimal | undefined,
+    shownObject: string,
+    shownIndex: string,
+  ): string {
+    if (constant != undefined) {
+      return `${shownObject}.length > ${constant}`;
+    }
+
+    return `${shownIndex} >= 0 && ${shownIndex} < ${shownObject}.length`;
+  }
+
+  private readonly isTypedRoot(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kTypedArrayName &&
+      this.isLibraryModule(type.module)
+    );
+  }
+}

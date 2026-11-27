@@ -22,15 +22,15 @@ import {
 } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private readonly bound(type: Type): Type {
+  private bound(type: Type): Type {
     if (this.binding.size == 0) {
       return type;
     }
 
-    return this.resolver.substitute(type, this.binding);
+    return this.values.types.substitute(type, this.binding);
   }
 
-  private readonly boundOrNone(type: Type | undefined): Type | undefined {
+  private boundOrNone(type: Type | undefined): Type | undefined {
     if (type == undefined) {
       return undefined;
     }
@@ -38,25 +38,25 @@ partial class Lowering {
     return this.bound(type);
   }
 
-  private readonly shapeWith(
+  private shapeWith(
     shape: Read<FunctionShape>,
     binding: Read<Map<int, Type>>,
   ): FunctionShape {
     const params: FunctionParameter[] = [];
 
     for (const param of shape.params) {
-      const type = this.resolver.substitute(param.type, binding);
+      const type = this.values.types.substitute(param.type, binding);
 
       params.push({ type, optional: param.optional });
     }
 
-    const result = this.resolver.substitute(shape.result, binding);
+    const result = this.values.types.substitute(shape.result, binding);
     const self = this.selfWith(shape.self, binding);
 
     return { params, rest: shape.rest, self, result };
   }
 
-  private readonly selfWith(
+  private selfWith(
     self: Type | undefined,
     binding: Read<Map<int, Type>>,
   ): Type | undefined {
@@ -64,7 +64,7 @@ partial class Lowering {
       return undefined;
     }
 
-    return this.resolver.substitute(self, binding);
+    return this.values.types.substitute(self, binding);
   }
 
   private readonly bindingOf(
@@ -91,24 +91,45 @@ partial class Lowering {
     fn: FunctionDecl,
     home: int,
   ): IrValue | undefined {
-    const written = this.values.typeArgumentsOf(frame.module, callee.loc);
+    const tree = this.values.types.program.tree;
+
+    const written = this.values
+      .typeArgumentsOf(frame.module, callee.loc)
+      ?.slice();
     const declared = this.values.functionOf(home, fn.loc);
     if (written == undefined || declared.kind != TypeKind.Function) {
-      this.notLowered(frame.module, call.loc, "a call of this generic function");
+      this.notLowered(
+        frame.module,
+        call.loc,
+        "a call of this generic function",
+      );
 
       return undefined;
     }
 
-    const params = this.resolver.parameterTypes(home, fn.typeParams);
+    const params = this.values.types.parameterTypes(
+      home,
+      tree.typeParamsOf(fn.typeParamsList),
+    );
     const args = written.map((type) => this.bound(type));
     const binding = this.bindingOf(params, args);
-    const shape = this.shapeWith(declared.shape, binding);
+    const shape = this.shapeWith(
+      this.values.types.store.functionShapeOf(declared),
+      binding,
+    );
     const name = this.instanceName(home, fn, args);
 
     this.instanceWanted({ module: home, fn, name, params, args });
 
     const kept: IrValue[] = [];
-    const given = this.callArguments(frame, call.args, shape, call.loc, fn, kept);
+    const given = this.callArguments(
+      frame,
+      tree.argumentsOf(call.argsList),
+      shape,
+      call.loc,
+      fn,
+      kept,
+    );
     const result = this.irType(shape.result);
     const types = this.shapeTypes(shape);
     if (given == undefined || result == undefined || types == undefined) {
@@ -132,27 +153,35 @@ partial class Lowering {
     given: Read<IrValue[]>,
     loc: int,
   ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
     const { module, name } = target;
-    const home = this.program.modules.find((one) => one.name == module);
-    const fn = this.functionNamed(home, name);
-    if (home == undefined || fn == undefined) {
+    const homeId = this.moduleIdNamed(module);
+    const fn = this.functionNamed(homeId, name);
+    if (homeId == undefined || fn == undefined) {
       this.notLowered(frame.module, loc, `${module} ${name}`);
 
       return undefined;
     }
 
-    const declared = this.values.functionOf(home.id, fn.loc);
+    const declared = this.values.functionOf(homeId, fn.loc);
     if (declared.kind != TypeKind.Function) {
       this.notLowered(frame.module, loc, `${module} ${name}`);
 
       return undefined;
     }
 
-    const params = this.resolver.parameterTypes(home.id, fn.typeParams);
+    const params = this.values.types.parameterTypes(
+      homeId,
+      tree.typeParamsOf(fn.typeParamsList),
+    );
     const args = items.slice();
     const binding = this.bindingOf(params, args);
-    const shape = this.shapeWith(declared.shape, binding);
-    const instance = this.instanceName(home.id, fn, args);
+    const shape = this.shapeWith(
+      this.values.types.store.functionShapeOf(declared),
+      binding,
+    );
+    const instance = this.instanceName(homeId, fn, args);
     const result = this.irType(shape.result);
     const types = this.shapeTypes(shape);
     if (result == undefined || types == undefined) {
@@ -161,13 +190,14 @@ partial class Lowering {
       return undefined;
     }
 
-    this.instanceWanted({ module: home.id, fn, name: instance, params, args });
+    this.instanceWanted({ module: homeId, fn, name: instance, params, args });
 
     for (let index = 0; index < given.length; index++) {
       const one = given[index];
-      const param = fn.params[index];
+      const param = tree.paramsOf(fn.paramsList)[index];
       const isLent = param != undefined && this.isBorrowedParam(param);
-      if (one != undefined && !isLent && this.isManaged(one.tz)) {
+      const isMoved = one != undefined && one.owned == true;
+      if (one != undefined && !isLent && !isMoved && this.isManaged(one.tz)) {
         this.countCall(frame, true, one);
       }
     }
@@ -180,15 +210,26 @@ partial class Lowering {
     return this.callResult(frame, answer, fn, given);
   }
 
+  private readonly moduleIdNamed(name: string): int | undefined {
+    const module = this.values.types.program.modules.find(
+      (one) => one.name == name,
+    );
+
+    return module?.id;
+  }
+
   private readonly functionNamed(
-    module: Module | undefined,
+    module: int | undefined,
     name: string,
   ): FunctionDecl | undefined {
+    const tree = this.values.types.program.tree;
     if (module == undefined) {
       return undefined;
     }
 
-    for (const item of module.file.items) {
+    const items = this.values.types.program.modules[module]?.file.itemsList;
+
+    for (const item of tree.stmtsOf(items)) {
       if (item.kind == StmtKind.Function && item.name == name) {
         return item;
       }
@@ -208,7 +249,7 @@ partial class Lowering {
     return `${base}.i${ids.join("_")}`;
   }
 
-  private instanceWanted(instance: PendingInstance): void {
+  private instanceWanted(instance: Own<PendingInstance>): void {
     if (this.wantedInstances.has(instance.name)) {
       return;
     }
@@ -227,8 +268,10 @@ partial class Lowering {
   }
 
   private instanceLowered(instance: PendingInstance): void {
+    const tree = this.values.types.program.tree;
+
     const fn = instance.fn;
-    const body = fn.body;
+    const body = tree.blockAt(fn.bodyId);
 
     const suffixAt = instance.name.lastIndexOf(".") + 1;
 
@@ -259,8 +302,8 @@ partial class Lowering {
   }
 
   private forgetExpressions(): void {
-    replace(this.knownTypes, new Map<Expr, Type>());
-    replace(this.evaluated, new Map<Expr, IrValue>());
+    replace(this.knownTypes, new Map<int, Type>());
+    replace(this.evaluated, new Map<int, IrValue>());
   }
 
   private readonly isInsideInstance(module: int, loc: int): boolean {

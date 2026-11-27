@@ -1,4 +1,6 @@
-import { FunctionTypeParam } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  FunctionTypeParam,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
 
 export type Signature = {
   readonly loc: int;

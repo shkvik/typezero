@@ -1,0 +1,224 @@
+import { FileParser } from "../file-parser.tz";
+import {
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/syntax/types/syntax.types.patterns.tz";
+import {
+  BlockStmt,
+  DoWhileStmt,
+  ExprStmt,
+  ForOfStmt,
+  ForStmt,
+  IfStmt,
+  JumpStmt,
+  LabeledStmt,
+  MarkerStmt,
+  ReturnStmt,
+  Stmt,
+  SwitchCase,
+  SwitchStmt,
+  VarDeclStmt,
+  WhileStmt,
+} from "../../../../program/syntax/types/syntax.types.statements.tz";
+
+partial class FileParser {
+  private readonly copyVarDeclarator(node: Read<VarDeclarator>): VarDeclarator {
+    const typeAnn = this.copyTypeRefAt(node.typeAnn);
+    const init = this.copyExprAt(node.init);
+
+    return {
+      name: node.name,
+      origin: node.origin,
+      loc: node.loc,
+      typeAnn,
+      init,
+      form: node.form,
+    };
+  }
+
+  private readonly copyBlockStmt(node: Read<BlockStmt>): BlockStmt {
+    const body = node.body.map((one) => this.copyStmt(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      body,
+      end: node.end,
+    };
+  }
+
+  private readonly copyVarDeclStmt(node: Read<VarDeclStmt>): VarDeclStmt {
+    const decls = node.decls.map((one) => this.copyVarDeclarator(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      isConst: node.isConst,
+      isUsing: node.isUsing,
+      decls,
+    };
+  }
+
+  private readonly copyExprStmt(node: Read<ExprStmt>): ExprStmt {
+    const expr = this.copyExpr(node.expr);
+
+    return { kind: node.kind, loc: node.loc, expr };
+  }
+
+  private readonly copyIfStmt(node: Read<IfStmt>): IfStmt {
+    const cond = this.copyExpr(node.cond);
+    const thenStmt = this.copyStmt(node.thenStmt);
+    const elseStmt = this.copyStmtAt(node.elseStmt);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      cond,
+      thenStmt,
+      elseStmt,
+    };
+  }
+
+  private readonly copyWhileStmt(node: Read<WhileStmt>): WhileStmt {
+    const cond = this.copyExpr(node.cond);
+    const body = this.copyStmt(node.body);
+
+    return { kind: node.kind, loc: node.loc, cond, body };
+  }
+
+  private readonly copyDoWhileStmt(node: Read<DoWhileStmt>): DoWhileStmt {
+    const body = this.copyStmt(node.body);
+    const cond = this.copyExpr(node.cond);
+
+    return { kind: node.kind, loc: node.loc, body, cond };
+  }
+
+  private readonly copyForStmt(node: Read<ForStmt>): ForStmt {
+    const init = this.copyStmtAt(node.init);
+    const cond = this.copyExprAt(node.cond);
+    const step = this.copyExprAt(node.step);
+    const body = this.copyStmtAt(node.body);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      init,
+      cond,
+      step,
+      body,
+    };
+  }
+
+  private readonly copyForOfStmt(node: Read<ForOfStmt>): ForOfStmt {
+    const binding = this.copyVarDeclarator(node.binding);
+    const iterable = this.copyExpr(node.iterable);
+    const body = this.copyStmt(node.body);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      isConst: node.isConst,
+      isUsing: node.isUsing,
+      keys: node.keys,
+      isAwait: node.isAwait,
+      binding,
+      iterable,
+      body,
+    };
+  }
+
+  private readonly copySwitchCase(node: Read<SwitchCase>): SwitchCase {
+    const test = this.copyExprAt(node.test);
+    const body = node.body.map((one) => this.copyStmt(one));
+
+    return { loc: node.loc, test, body };
+  }
+
+  private readonly copySwitchStmt(node: Read<SwitchStmt>): SwitchStmt {
+    const discriminant = this.copyExpr(node.discriminant);
+    const cases = node.cases.map((one) => this.copySwitchCase(one));
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      discriminant,
+      cases,
+    };
+  }
+
+  private readonly copyLabeledStmt(node: Read<LabeledStmt>): LabeledStmt {
+    const body = this.copyStmt(node.body);
+
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      label: node.label,
+      body,
+    };
+  }
+
+  private readonly copyReturnStmt(node: Read<ReturnStmt>): ReturnStmt {
+    const value = this.copyExprAt(node.value);
+
+    return { kind: node.kind, loc: node.loc, value };
+  }
+
+  private readonly copyJumpStmt(node: Read<JumpStmt>): JumpStmt {
+    return {
+      kind: node.kind,
+      loc: node.loc,
+      label: node.label,
+    };
+  }
+
+  private readonly copyMarkerStmt(node: Read<MarkerStmt>): MarkerStmt {
+    return { kind: node.kind, loc: node.loc };
+  }
+
+  private readonly copyStmt(node: Read<Stmt>): Stmt {
+    switch (node.kind) {
+      case StmtKind.Block:
+        return this.copyBlockStmt(node);
+      case StmtKind.VarDecl:
+        return this.copyVarDeclStmt(node);
+      case StmtKind.Function:
+        return this.copyFunctionDecl(node);
+      case StmtKind.Expr:
+        return this.copyExprStmt(node);
+      case StmtKind.If:
+        return this.copyIfStmt(node);
+      case StmtKind.While:
+        return this.copyWhileStmt(node);
+      case StmtKind.DoWhile:
+        return this.copyDoWhileStmt(node);
+      case StmtKind.For:
+        return this.copyForStmt(node);
+      case StmtKind.ForOf:
+        return this.copyForOfStmt(node);
+      case StmtKind.Switch:
+        return this.copySwitchStmt(node);
+      case StmtKind.Labeled:
+        return this.copyLabeledStmt(node);
+      case StmtKind.Return:
+        return this.copyReturnStmt(node);
+      case StmtKind.Break:
+      case StmtKind.Continue:
+        return this.copyJumpStmt(node);
+      case StmtKind.Empty:
+      case StmtKind.Debugger:
+        return this.copyMarkerStmt(node);
+      case StmtKind.TypeAlias:
+        return this.copyTypeAliasDecl(node);
+      case StmtKind.Enum:
+        return this.copyEnumDecl(node);
+      case StmtKind.Class:
+        return this.copyClassDecl(node);
+      case StmtKind.Handle:
+        return this.copyHandleDecl(node);
+    }
+
+    return { kind: StmtKind.Empty, loc: node.loc };
+  }
+}

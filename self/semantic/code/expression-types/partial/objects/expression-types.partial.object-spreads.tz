@@ -18,17 +18,19 @@ partial class ExpressionTypes {
     target: Type | undefined,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const slots: SpreadSlot[] = [];
     let isTyped = true;
 
-    for (const property of expr.props) {
+    for (const property of tree.propertiesOf(expr.propsList)) {
       const isTaken = this.spreadProperty(property, target, slots, module);
 
       isTyped = isTyped && isTaken;
     }
 
     if (!isTyped) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const fields: ObjectField[] = slots.map((slot) => ({
@@ -37,11 +39,11 @@ partial class ExpressionTypes {
       optional: false,
       readonly: false,
     }));
-    const result = this.store.objectOf(fields);
+    const result = this.types.store.objectOf(fields);
     if (target == undefined || target.kind != TypeKind.Object) {
       return result;
     }
-    if (this.objects.isSpreadFitting(slots, target)) {
+    if (this.types.isSpreadFitting(slots, target)) {
       return target;
     }
 
@@ -54,12 +56,15 @@ partial class ExpressionTypes {
     slots: SpreadSlot[],
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     if (property.form.kind == PropertyKind.Spread) {
       return this.spreadMerged(property, slots, module);
     }
 
-    const hint = this.objects.spreadFieldHint(target, property.name);
-    const type = this.typed(property.value, hint, module);
+    const hint = this.types.spreadFieldHint(target, property.name);
+    const value = tree.exprOf(property.valueId);
+    const type = this.typed(value, hint, module);
     if (type.kind == TypeKind.Error) {
       return false;
     }
@@ -90,12 +95,15 @@ partial class ExpressionTypes {
     slots: SpreadSlot[],
     module: int,
   ): boolean {
-    const type = this.peekType(property.value, module);
+    const tree = this.types.program.tree;
+
+    const value = tree.exprOf(property.valueId);
+    const type = this.peekType(value, module);
 
     const base = this.types.apparent(type);
     if (
       base.kind != TypeKind.Object ||
-      this.dictionaries.spreadCode(type) != undefined
+      this.types.spreadCode(type) != undefined
     ) {
       return false;
     }
@@ -105,8 +113,9 @@ partial class ExpressionTypes {
       return false;
     }
 
-    for (const field of base.fields) {
-      if (form.omit.includes(field.name)) {
+    for (const field of this.types.store.fieldsOf(base)) {
+      const omit = tree.textsOf(form.omitList);
+      if (omit.includes(field.name)) {
         continue;
       }
 
@@ -125,21 +134,21 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly mergeSpreadField(
+  private mergeSpreadField(
     property: Property,
     field: ObjectField,
     spread: ObjectType,
     slots: SpreadSlot[],
     module: int,
   ): boolean {
-    const checked = this.objects.mergeSpreadField(
+    const checked = this.types.mergeSpreadField(
       property,
       field,
       spread,
       slots,
     );
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }

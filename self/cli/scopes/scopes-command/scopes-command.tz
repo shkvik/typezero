@@ -43,23 +43,26 @@ export class ScopesCommand {
       return;
     }
 
-    const binder = new ModuleBinder(program);
-    const names = binder.run();
-    const resolver = new NameResolver(program, names.slice());
-    const resolved = resolver.run();
+    const binder = new ModuleBinder();
+    const names = binder.run(program);
+    const resolver = new NameResolver(names);
+    const resolved = resolver.run(program);
 
     for (const scopes of resolved) {
       this.printUses(program, scopes);
     }
 
-    for (let index = 0; index < resolved.length; index++) {
-      this.printErrors(names[index], resolved[index]);
+    for (const scopes of resolved) {
+      this.printErrors(program, scopes);
     }
   }
 
-  private readonly printUses(program: Program, scopes: Read<ModuleScopes>): void {
-    const module = scopes.module;
-    if (module.source.isLibrary) {
+  private readonly printUses(
+    program: Read<Program>,
+    scopes: Read<ModuleScopes>,
+  ): void {
+    const module = program.modules[scopes.module];
+    if (module == undefined || module.source.isLibrary) {
       return;
     }
 
@@ -76,7 +79,7 @@ export class ScopesCommand {
   }
 
   private readonly targetText(
-    program: Program,
+    program: Read<Program>,
     lines: Read<SourceLines>,
     use: NameUse,
   ): string {
@@ -94,7 +97,10 @@ export class ScopesCommand {
     return `${kind} ${where}`;
   }
 
-  private readonly importText(program: Program, symbol: NameSymbol): string {
+  private readonly importText(
+    program: Read<Program>,
+    symbol: NameSymbol,
+  ): string {
     const target = symbol.target;
     if (target == undefined) {
       return "import";
@@ -106,7 +112,7 @@ export class ScopesCommand {
     return `import ${name}:${target.name}`;
   }
 
-  private readonly moduleName(module: Module | undefined): string {
+  private readonly moduleName(module: Read<Module | undefined>): string {
     if (module == undefined) {
       return "";
     }
@@ -146,16 +152,16 @@ export class ScopesCommand {
   }
 
   private printErrors(
-    names: Read<ModuleNames | undefined>,
-    scopes: Read<ModuleScopes | undefined>,
+    program: Read<Program>,
+    scopes: Read<ModuleScopes>,
   ): void {
-    if (names == undefined || scopes == undefined) {
+    const errors: SourceError[] = scopes.errors.slice();
+    const module = program.modules[scopes.module];
+    if (module == undefined) {
       return;
     }
 
-    const errors: SourceError[] = names.errors.concat(scopes.errors);
-
     errors.sort((first, second) => first.loc - second.loc);
-    this.report.sourceErrors(scopes.module.source, errors);
+    this.report.sourceErrors(module.source, errors);
   }
 }

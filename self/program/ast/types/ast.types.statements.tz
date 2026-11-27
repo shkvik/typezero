@@ -1,48 +1,12 @@
 import {
-  ClassField,
-  ClassMember,
-  Decorator,
-  EnumMember,
-} from "./ast.types.classes.tz";
-import {
-  DeclaredClass,
-  DeclaredMember,
-} from "./ast.types.declarations.tz";
-import {
-  ArrayElement,
-  CallArgument,
-  NewForm,
-  Property,
-  PropertyForm,
-} from "./ast.types.expressions.tz";
-import { Param, ParamForm } from "./ast.types.functions.tz";
-import {
-  ExportDecl,
-  ImportDecl,
-  ModuleName,
-  ModulePath,
-  WholeImport,
-} from "./ast.types.modules.tz";
-import { BindingForm } from "./ast.types.patterns.tz";
-import { Span } from "./ast.types.span.tz";
-import {
-  FunctionTypeParam,
-  ObjectTypeField,
-  TupleElement,
-  TypeForm,
-  TypeParamDecl,
-  TypeRef,
-} from "./ast.types.types.tz";
-
-import { Expr } from "./ast.types.expressions.tz";
-import { VarDeclarator } from "./ast.types.patterns.tz";
-import { FunctionDecl } from "./ast.types.functions.tz";
-import {
   ClassDecl,
   EnumDecl,
   HandleDecl,
   TypeAliasDecl,
 } from "./ast.types.classes.tz";
+import { FunctionDecl } from "./ast.types.functions.tz";
+import { VarDeclarator } from "./ast.types.patterns.tz";
+import { AstList } from "./ast.types.span.tz";
 
 export enum StmtKind {
   Block,
@@ -69,102 +33,115 @@ export enum StmtKind {
 
 export type BlockStmt = {
   readonly kind: StmtKind.Block;
+  readonly id: int;
   readonly loc: int;
-  readonly body: readonly Stmt[];
+  readonly bodyList: AstList;
   readonly end?: int;
 };
 
 export type VarDeclStmt = {
   readonly kind: StmtKind.VarDecl;
+  readonly id: int;
   readonly loc: int;
   readonly isConst: boolean;
   readonly isUsing: boolean;
-  readonly decls: readonly VarDeclarator[];
+  readonly declsList: AstList;
 };
 
 export type ExprStmt = {
   readonly kind: StmtKind.Expr;
+  readonly id: int;
   readonly loc: int;
-  readonly expr: Expr;
+  readonly exprId: int;
 };
 
 export type IfStmt = {
   readonly kind: StmtKind.If;
+  readonly id: int;
   readonly loc: int;
-  readonly cond: Expr;
-  readonly thenStmt: Stmt;
-  readonly elseStmt?: Stmt;
+  readonly condId: int;
+  readonly thenStmtId: int;
+  readonly elseStmtId?: int;
 };
 
 export type WhileStmt = {
   readonly kind: StmtKind.While;
+  readonly id: int;
   readonly loc: int;
-  readonly cond: Expr;
-  readonly body: Stmt;
+  readonly condId: int;
+  readonly bodyId: int;
 };
 
 export type DoWhileStmt = {
   readonly kind: StmtKind.DoWhile;
+  readonly id: int;
   readonly loc: int;
-  readonly body: Stmt;
-  readonly cond: Expr;
+  readonly bodyId: int;
+  readonly condId: int;
 };
 
 export type ForStmt = {
   readonly kind: StmtKind.For;
+  readonly id: int;
   readonly loc: int;
-  readonly init?: Stmt;
-  readonly cond?: Expr;
-  readonly step?: Expr;
-  readonly body?: Stmt;
+  readonly initId?: int;
+  readonly condId?: int;
+  readonly stepId?: int;
+  readonly bodyId?: int;
 };
 
 export type ForOfStmt = {
   readonly kind: StmtKind.ForOf;
+  readonly id: int;
   readonly loc: int;
   readonly isConst: boolean;
   readonly isUsing: boolean;
   readonly keys: boolean;
   readonly isAwait: boolean;
   readonly binding: VarDeclarator;
-  readonly iterable: Expr;
-  readonly body: Stmt;
+  readonly iterableId: int;
+  readonly bodyId: int;
 };
 
 export type SwitchCase = {
   readonly loc: int;
-  readonly test?: Expr;
-  readonly body: readonly Stmt[];
+  readonly testId?: int;
+  readonly bodyList: AstList;
 };
 
 export type SwitchStmt = {
   readonly kind: StmtKind.Switch;
+  readonly id: int;
   readonly loc: int;
-  readonly discriminant: Expr;
-  readonly cases: readonly SwitchCase[];
+  readonly discriminantId: int;
+  readonly casesList: AstList;
 };
 
 export type LabeledStmt = {
   readonly kind: StmtKind.Labeled;
+  readonly id: int;
   readonly loc: int;
   readonly label: string;
-  readonly body: Stmt;
+  readonly bodyId: int;
 };
 
 export type ReturnStmt = {
   readonly kind: StmtKind.Return;
+  readonly id: int;
   readonly loc: int;
-  readonly value?: Expr;
+  readonly valueId?: int;
 };
 
 export type JumpStmt = {
   readonly kind: StmtKind.Break | StmtKind.Continue;
+  readonly id: int;
   readonly loc: int;
   readonly label: string;
 };
 
 export type MarkerStmt = {
   readonly kind: StmtKind.Empty | StmtKind.Debugger;
+  readonly id: int;
   readonly loc: int;
 };
 
@@ -187,36 +164,3 @@ export type Stmt =
   | EnumDecl
   | ClassDecl
   | HandleDecl;
-
-export type AstNode = Interned<
-  | Stmt
-  | Expr
-  | SwitchCase
-  | VarDeclarator
-  | BindingForm
-  | Param
-  | ParamForm
-  | Property
-  | PropertyForm
-  | ArrayElement
-  | CallArgument
-  | NewForm
-  | ClassField
-  | ClassMember
-  | Decorator
-  | EnumMember
-  | DeclaredClass
-  | DeclaredMember
-  | ImportDecl
-  | ExportDecl
-  | ModuleName
-  | ModulePath
-  | WholeImport
-  | Span
-  | TypeRef
-  | TypeForm
-  | TypeParamDecl
-  | FunctionTypeParam
-  | ObjectTypeField
-  | TupleElement
->;

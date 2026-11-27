@@ -1,5 +1,7 @@
+import { replace } from "tz:mem";
 import { ModuleBinder } from "../module-binder.tz";
 import { Code } from "../../../../diagnostic/code.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
   ExportDecl,
   ExportForm,
@@ -12,79 +14,96 @@ import {
   NameTarget,
 } from "../../../../program/module-names/types/module-names.types.tz";
 import {
-  BindState,
-  BoundModule,
-  ImportedName,
-} from "../types/module-binder.types.tz";
+  Module,
+  Program,
+} from "../../../../program/module/types/module.types.tz";
+import { BindState, ImportedName } from "../types/module-binder.types.tz";
 import { kSubmodules } from "../const/module-binder.const.tz";
 
 partial class ModuleBinder {
-  private readonly exportsOf(bound: BoundModule): Map<string, ModuleExport> {
-    if (bound.state != BindState.New) {
-      return new Map<string, ModuleExport>(bound.names.exports);
-    }
+  private exportsOf(program: Read<Program>, at: int): void {
+    const tree = program.tree;
 
-    bound.state = BindState.Exporting;
-    this.exportDeclared(bound);
-
-    const exports = bound.names.module.file.exports;
-
-    for (const decl of exports) {
-      this.exportNames(bound, decl);
-    }
-
-    for (const decl of exports) {
-      this.exportAll(bound, decl);
-    }
-
-    bound.state = BindState.Exported;
-
-    return new Map<string, ModuleExport>(bound.names.exports);
-  }
-
-  private readonly exportDeclared(bound: Read<BoundModule>): void {
-    const names = bound.names;
-    const module = names.module;
-    if (!module.isDeclarationOnly) {
+    const bound = this.ordered[at];
+    if (bound == undefined || bound.state != BindState.New) {
       return;
     }
 
-    for (const [name, loc] of names.declared) {
-      names.exports.set(name, { target: { module: module.id, name }, loc });
+    bound.state = BindState.Exporting;
+
+    const exports = tree.exportsOf(
+      this.moduleAt(program, at)?.file.exportsList,
+    );
+
+    this.exportDeclared(program, at);
+
+    for (const decl of exports) {
+      this.exportNames(program, at, decl);
+    }
+
+    for (const decl of exports) {
+      this.exportAll(program, at, decl);
+    }
+
+    this.markExported(at);
+  }
+
+  private markExported(at: int): void {
+    const bound = this.ordered[at];
+    if (bound != undefined) {
+      bound.state = BindState.Exported;
     }
   }
 
-  private readonly exportNames(bound: BoundModule, decl: ExportDecl): void {
+  private exportDeclared(program: Read<Program>, at: int): void {
+    const isDeclarationOnly = this.moduleAt(program, at)?.isDeclarationOnly;
+    const bound = this.ordered[at];
+    if (bound == undefined || isDeclarationOnly != true) {
+      return;
+    }
+
+    const id = bound.module;
+
+    for (const [name, loc] of bound.declared) {
+      bound.exports.set(name, { target: { module: id, name }, loc });
+    }
+  }
+
+  private exportNames(program: Read<Program>, at: int, decl: ExportDecl): void {
+    const tree = program.tree;
+
     const from = decl.from;
-    const isLibrary = bound.names.module.source.isLibrary;
+    const module = this.moduleAt(program, at);
+    const isLibrary = module != undefined && module.source.isLibrary;
     if (from != undefined && !isLibrary && kBuiltinModules.has(from.path)) {
-      this.report(bound, from.loc, Code.ExportFromBuiltin, {
+      this.report(at, from.loc, Code.ExportFromBuiltin, {
         path: from.path,
       });
 
       return;
     }
 
-    for (const name of decl.names) {
-      this.exportName(bound, decl, name);
+    for (const name of tree.namesOf(decl.namesList)) {
+      this.exportName(program, at, decl, name);
     }
   }
 
-  private readonly exportName(
-    bound: BoundModule,
+  private exportName(
+    program: Read<Program>,
+    at: int,
     decl: ExportDecl,
     name: ModuleName,
   ): void {
-    const target = this.exportTarget(bound, decl, name);
+    const target = this.exportTarget(program, at, decl, name);
     if (target == undefined) {
       return;
     }
 
-    const previous = bound.names.exports.get(name.as);
+    const previous = this.exportAt(at, name.as);
     if (previous != undefined) {
-      const other = this.lineOf(bound, previous.loc);
+      const other = this.lineOf(program, at, previous.loc);
 
-      this.report(bound, name.asLoc, Code.DuplicateExport, {
+      this.report(at, name.asLoc, Code.DuplicateExport, {
         word: name.as,
         other,
       });
@@ -92,43 +111,50 @@ partial class ModuleBinder {
       return;
     }
 
-    bound.names.exports.set(name.as, { target, loc: name.asLoc });
+    const bound = this.ordered[at];
+    if (bound != undefined) {
+      bound.exports.set(name.as, { target, loc: name.asLoc });
+    }
   }
 
-  private readonly exportTarget(
-    bound: BoundModule,
+  private exportTarget(
+    program: Read<Program>,
+    at: int,
     decl: ExportDecl,
     name: ModuleName,
   ): NameTarget | undefined {
     const from = decl.from;
     if (from == undefined) {
-      return this.localTarget(bound, name);
+      return this.localTarget(program, at, name);
     }
 
-    const source = this.linkedModule(bound, from);
+    const source = this.linkedIndex(program, at, from);
     if (source == undefined) {
       return undefined;
     }
 
-    const theirs = this.exportsOf(source);
+    this.exportsOf(program, source);
 
-    return this.exportedBy(bound, source, from.path, name, theirs);
+    return this.exportedBy(program, at, source, from.path, name);
   }
 
-  private readonly exportedBy(
-    bound: BoundModule,
-    source: Read<BoundModule>,
+  private exportedBy(
+    program: Read<Program>,
+    at: int,
+    source: int,
     path: string,
     name: ModuleName,
-    theirs: Read<Map<string, ModuleExport>>,
   ): NameTarget | undefined {
     const word = name.name;
-    const found = theirs.get(word);
+    const found = this.exportAt(source, word);
     if (found != undefined) {
       return found.target;
     }
 
-    const theirModule = source.names.module;
+    const theirModule = this.moduleAt(program, source);
+    if (theirModule == undefined) {
+      return undefined;
+    }
     if (this.isSubmodule(theirModule.name, word)) {
       return { module: theirModule.id, name: word };
     }
@@ -137,11 +163,11 @@ partial class ModuleBinder {
     }
 
     const unmarked =
-      source.names.declared.has(word) && !theirModule.source.isLibrary;
+      this.isDeclaredAt(source, word) && !theirModule.source.isLibrary;
     if (unmarked) {
       const other = theirModule.name;
 
-      this.report(bound, name.loc, Code.NoExportNamedUnmarked, {
+      this.report(at, name.loc, Code.NoExportNamedUnmarked, {
         path,
         word,
         other,
@@ -153,12 +179,12 @@ partial class ModuleBinder {
     if (theirModule.source.isLibrary) {
       const missing = this.exports.missing(theirModule.name, path, word);
 
-      this.report(bound, name.loc, missing.code, missing.details);
+      this.report(at, name.loc, missing.code, missing.details);
 
       return undefined;
     }
 
-    this.report(bound, name.loc, Code.NoExportNamed, { path, word });
+    this.report(at, name.loc, Code.NoExportNamed, { path, word });
 
     return undefined;
   }
@@ -167,40 +193,44 @@ partial class ModuleBinder {
     return kSubmodules.some((one) => one.parent == module && one.name == word);
   }
 
-  private readonly localTarget(
-    bound: BoundModule,
+  private localTarget(
+    program: Read<Program>,
+    at: int,
     name: ModuleName,
   ): NameTarget | undefined {
-    const names = bound.names;
+    const module = this.moduleAt(program, at);
     const word = name.name;
-    if (names.declared.has(word)) {
-      return { module: names.module.id, name: word };
+    if (module == undefined) {
+      return undefined;
+    }
+    if (this.isDeclaredAt(at, word)) {
+      return { module: module.id, name: word };
     }
 
-    const imported = this.importedAs(bound, word);
+    const imported = this.importedAs(program, module, word);
     if (imported == undefined) {
-      const code = this.unknownExportCode(bound, word);
+      const code = this.unknownExportCode(program, module, word);
 
-      this.report(bound, name.loc, code, { word });
+      this.report(at, name.loc, code, { word });
 
       return undefined;
     }
 
     const from = imported.decl.from;
-    const isLibrary = names.module.source.isLibrary;
-    if (!isLibrary && kBuiltinModules.has(from.path)) {
-      this.report(bound, name.loc, Code.ExportOfBuiltinName, { word });
+    if (!module.source.isLibrary && kBuiltinModules.has(from.path)) {
+      this.report(at, name.loc, Code.ExportOfBuiltinName, { word });
 
       return undefined;
     }
 
-    const source = this.linkedModule(bound, from);
+    const source = this.linkedIndex(program, at, from);
     if (source == undefined) {
       return undefined;
     }
 
-    const theirs = this.exportsOf(source);
-    const found = theirs.get(imported.name.name);
+    this.exportsOf(program, source);
+
+    const found = this.exportAt(source, imported.name.name);
     if (found == undefined) {
       return undefined;
     }
@@ -209,11 +239,14 @@ partial class ModuleBinder {
   }
 
   private readonly importedAs(
-    bound: Read<BoundModule>,
+    program: Read<Program>,
+    module: Read<Module>,
     word: string,
   ): ImportedName | undefined {
-    for (const decl of bound.names.module.file.imports) {
-      const name = decl.names.find((one) => one.as == word);
+    const tree = program.tree;
+
+    for (const decl of tree.importsOf(module.file.importsList)) {
+      const name = tree.namesOf(decl.namesList).find((one) => one.as == word);
       if (name != undefined) {
         return { decl, name };
       }
@@ -222,8 +255,14 @@ partial class ModuleBinder {
     return undefined;
   }
 
-  private readonly unknownExportCode(bound: Read<BoundModule>, word: string): Code {
-    const imports = bound.names.module.file.imports;
+  private readonly unknownExportCode(
+    program: Read<Program>,
+    module: Read<Module>,
+    word: string,
+  ): Code {
+    const tree = program.tree;
+
+    const imports = tree.importsOf(module.file.importsList);
     const whole = imports.some((decl) => decl.whole?.name == word);
     if (whole) {
       return Code.ExportOfBuiltinName;
@@ -232,47 +271,77 @@ partial class ModuleBinder {
     return Code.ExportNotFound;
   }
 
-  private readonly exportAll(bound: BoundModule, decl: ExportDecl): void {
+  private exportAll(program: Read<Program>, at: int, decl: ExportDecl): void {
     const from = decl.from;
     if (decl.form != ExportForm.All || from == undefined) {
       return;
     }
 
-    const source = this.linkedModule(bound, from);
-    if (source == undefined || source == bound) {
+    const source = this.linkedIndex(program, at, from);
+    if (source == undefined || source == at) {
       return;
     }
 
-    const theirs = this.exportsOf(source);
+    this.exportsOf(program, source);
 
-    for (const [name, exported] of theirs) {
-      this.exportThroughStar(bound, decl, from, name, exported);
+    const ours = this.takeExports(at);
+    const problems: SourceError[] = [];
+    const theirs = this.exportsAt(source);
+
+    if (theirs != undefined) {
+      for (const [name, exported] of theirs) {
+        this.exportThroughStar(ours, problems, decl, from, name, exported);
+      }
+    }
+
+    this.putExports(at, ours);
+    this.addErrors(at, problems);
+  }
+
+  private takeExports(at: int): Map<string, ModuleExport> {
+    const bound = this.ordered[at];
+    if (bound == undefined) {
+      return new Map<string, ModuleExport>();
+    }
+
+    return replace(bound.exports, new Map<string, ModuleExport>());
+  }
+
+  private putExports(at: int, exports: Own<Map<string, ModuleExport>>): void {
+    const bound = this.ordered[at];
+    if (bound != undefined) {
+      bound.exports = exports;
     }
   }
 
   private readonly exportThroughStar(
-    bound: BoundModule,
+    ours: Map<string, ModuleExport>,
+    problems: SourceError[],
     decl: ExportDecl,
     from: ModulePath,
     name: string,
     exported: ModuleExport,
   ): void {
-    const ours = bound.names.exports.get(name);
-    if (ours == undefined) {
-      bound.names.exports.set(name, { target: exported.target, loc: decl.loc, star: from });
+    const known = ours.get(name);
+    if (known == undefined) {
+      ours.set(name, { target: exported.target, loc: decl.loc, star: from });
 
       return;
     }
 
-    const first = ours.star;
-    if (first == undefined || this.sameTarget(ours.target, exported.target)) {
+    const first = known.star;
+    if (first == undefined || this.sameTarget(known.target, exported.target)) {
       return;
     }
 
-    this.report(bound, decl.loc, Code.StarExportTwice, {
-      word: name,
-      path: first.path,
-      other: from.path,
+    problems.push({
+      code: Code.StarExportTwice,
+      loc: decl.loc,
+      details: {
+        word: name,
+        path: first.path,
+        other: from.path,
+      },
     });
   }
 

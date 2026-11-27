@@ -1,3 +1,4 @@
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import {
   LiteralKind,
   Type,
@@ -12,14 +13,18 @@ import {
 import { Bound, Interval } from "./types/literal-ranges.types.tz";
 
 export class LiteralRanges {
-  public readonly rangeIntervals(given: Type, target: Type): Interval[] {
+  public readonly rangeIntervals(
+    store: Read<TypeStore>,
+    given: Type,
+    target: Type,
+  ): Interval[] {
     const isWhole =
       given.kind == TypeKind.Literal && given.literal == LiteralKind.Int;
     if (!isWhole && !this.isWordInt(given)) {
       return [];
     }
 
-    return this.wholeIntervals(target);
+    return this.wholeIntervals(store, target);
   }
 
   public readonly isWordInt(type: Type): boolean {
@@ -30,14 +35,18 @@ export class LiteralRanges {
     return type.bits == 64 && !type.unsigned && !type.wraps;
   }
 
-  public readonly wholeIntervals(target: Type): Interval[] {
+  public readonly wholeIntervals(
+    store: Read<TypeStore>,
+    target: Type,
+  ): Interval[] {
     if (target.kind != TypeKind.Union) {
       return [];
     }
 
     const values: Bound[] = [];
+    const parts = store.partsOf(target);
 
-    for (const part of target.parts) {
+    for (const part of parts) {
       const value = this.wholeValue(part);
       if (value == undefined) {
         return [];
@@ -80,7 +89,9 @@ export class LiteralRanges {
     return `${name} >= ${low} && ${name} <= ${high}`;
   }
 
-  private readonly widestInterval(intervals: Lent<Interval[]>): Read<Interval> | undefined {
+  private readonly widestInterval(
+    intervals: Lent<Interval[]>,
+  ): Read<Interval> | undefined {
     let widest: Interval | undefined = undefined;
 
     for (const interval of intervals) {

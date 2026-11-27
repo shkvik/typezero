@@ -23,14 +23,19 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): void {
-    const range = this.library.argumentRange(object, member.name);
-    const arg = expr.args[0];
+    const tree = this.types.program.tree;
+
+    const range = this.types.argumentRange(object, member.name);
+    const arg = tree.argumentsOf(expr.argsList)[0];
     if (range == undefined || arg == undefined || arg.spread) {
       return;
     }
 
-    const given = this.peekType(arg.expr, module);
-    this.requireBetween(arg.expr, given, range, module);
+    const exprExpr = tree.exprOf(arg.exprId);
+    const given = this.peekType(exprExpr, module);
+    const argExpr = tree.exprOf(arg.exprId);
+
+    this.requireBetween(argExpr, given, range, module);
   }
 
   private codePointCall(
@@ -38,49 +43,71 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): boolean {
-    const owner = member.object;
+    const tree = this.types.program.tree;
+
+    const owner = tree.exprOf(member.objectId);
     const isMaker =
       member.name == kFromCodePointName &&
       owner.kind == ExprKind.Name &&
       owner.name == kStringClassName &&
       this.isGlobalUse(owner, module);
-    const hasSpread = expr.args.some((arg) => arg.spread);
+    const hasSpread = tree.argumentsOf(expr.argsList).some((arg) => arg.spread);
     if (!isMaker || hasSpread) {
       return false;
     }
 
-    const int = this.store.integer(64, false);
+    const int = this.types.store.integer(64, false);
 
-    for (const arg of expr.args) {
-      const given = this.typed(arg.expr, int, module);
+    for (const arg of tree.argumentsOf(expr.argsList)) {
+      const exprExpr = tree.exprOf(arg.exprId);
+      const given = this.typed(exprExpr, int, module);
 
-      this.requireBetween(arg.expr, given, kCodePointRange, module);
+      this.requireBetween(
+        tree.exprOf(arg.exprId),
+        given,
+        kCodePointRange,
+        module,
+      );
     }
 
     return true;
   }
 
   private madeSizeCheck(expr: NewExpr, name: string, module: int): void {
-    const what = this.bytes.sizeWhat(name);
-    const size = expr.args[0];
-    const isSized = expr.args.length == 1 && size != undefined;
+    const tree = this.types.program.tree;
+
+    const what = this.types.sizeWhat(name);
+    const size = tree.argumentsOf(expr.argsList)[0];
+    const isSized =
+      tree.argumentsOf(expr.argsList).length == 1 && size != undefined;
     if (what == undefined || !isSized || size == undefined || size.spread) {
       return;
     }
 
-    const given = this.peekType(size.expr, module);
+    const exprExpr = tree.exprOf(size.exprId);
+    const given = this.peekType(exprExpr, module);
 
     const base = this.types.definedType(given);
-    if (base.kind == TypeKind.Double && this.bytes.isTypedName(name)) {
+    if (base.kind == TypeKind.Double && this.types.isTypedName(name)) {
       const code = Code.BytesLengthFraction;
 
-      return this.report(module, size.expr.loc, code, kNoDetails);
+      return this.errors.write(
+        module,
+        tree.exprOf(size.exprId).loc,
+        code,
+        kNoDetails,
+      );
     }
     if (base.kind != TypeKind.Int) {
       return;
     }
 
-    this.requireBetween(size.expr, given, { what, low: 0 }, module);
+    this.requireBetween(
+      tree.exprOf(size.exprId),
+      given,
+      { what, low: 0 },
+      module,
+    );
   }
 
   private libraryStaticCall(
@@ -88,7 +115,9 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const owner = member.object;
+    const tree = this.types.program.tree;
+
+    const owner = tree.exprOf(member.objectId);
     if (owner.kind != ExprKind.Name) {
       return undefined;
     }
@@ -97,18 +126,20 @@ partial class ExpressionTypes {
     const isLibraryClass =
       target != undefined &&
       target.kind == SymbolKind.Class &&
-      this.modules.isLibraryModule(target.module);
+      this.types.isLibraryModule(target.module);
     if (!isLibraryClass || target == undefined) {
       return undefined;
     }
 
-    const opened = this.program.modules[target.module];
-    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    const opened = this.types.program.modules[target.module];
+    const declared = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == target.loc);
     if (declared == undefined) {
       return undefined;
     }
 
-    const instance = this.resolver.declaredInstance(
+    const instance = this.types.declaredInstance(
       target.module,
       declared,
       [],
@@ -134,7 +165,7 @@ partial class ExpressionTypes {
     const isPlain =
       found != undefined &&
       found.kind == TypeKind.Function &&
-      !this.parts.mentionsParameter(found);
+      !this.types.mentionsParameter(found);
     if (!isPlain || found == undefined || found.kind != TypeKind.Function) {
       return undefined;
     }
@@ -150,13 +181,18 @@ partial class ExpressionTypes {
     name: string,
     module: int,
   ): void {
-    const range = this.bytes.staticRange(owner, name);
-    const arg = expr.args[0];
+    const tree = this.types.program.tree;
+
+    const range = this.types.staticRange(owner, name);
+    const arg = tree.argumentsOf(expr.argsList)[0];
     if (range == undefined || arg == undefined || arg.spread) {
       return;
     }
 
-    const given = this.peekType(arg.expr, module);
-    this.requireBetween(arg.expr, given, range, module);
+    const exprExpr = tree.exprOf(arg.exprId);
+    const given = this.peekType(exprExpr, module);
+    const argExpr = tree.exprOf(arg.exprId);
+
+    this.requireBetween(argExpr, given, range, module);
   }
 }

@@ -1,0 +1,433 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  FunctionShape,
+  OperationKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  CallTarget,
+  Candidate,
+  CandidateStrength,
+  GenericDraft,
+  GenericTarget,
+  InferenceSet,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  CallArgument,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { AstList } from "../../../../program/ast/types/ast.types.span.tz";
+
+partial class TypeSystem {
+  public readonly inferenceSet(params: Own<Type[]>): InferenceSet {
+    return {
+      params,
+      candidates: [],
+      undefinedSeen: new Set<int>(),
+      visited: new Set<string>(),
+      isWeak: false,
+      isIntLiteral: false,
+      isUnmatched: false,
+    };
+  }
+
+  public readonly addVoid(
+    set: InferenceSet,
+    index: int,
+    strength: CandidateStrength,
+  ): void {
+    if (index < 0) {
+      return;
+    }
+
+    const type = this.store.plain(TypeKind.Void);
+
+    set.candidates.push({ index, type, strength });
+  }
+
+  public readonly inferParameter(
+    set: InferenceSet,
+    index: int,
+    actual: Type,
+  ): void {
+    if (actual.kind == TypeKind.Undefined) {
+      set.undefinedSeen.add(index);
+
+      return;
+    }
+    if (this.hasUnknownInside(actual)) {
+      return;
+    }
+
+    const strength = this.currentStrength(set);
+
+    set.candidates.push({ index, type: actual, strength });
+  }
+
+  public readonly heldStrength(set: Read<InferenceSet>): CandidateStrength {
+    if (set.isWeak) {
+      return CandidateStrength.Weak;
+    }
+
+    return CandidateStrength.Strong;
+  }
+
+  public readonly isSameShape(pattern: Type, actual: Type): boolean {
+    switch (pattern.kind) {
+      case TypeKind.Union:
+        return true;
+      case TypeKind.Instance:
+        return this.sameClassIn(actual, pattern) != undefined;
+      case TypeKind.Dict:
+        return actual.kind == TypeKind.Dict || actual.kind == TypeKind.Object;
+      default:
+        return pattern.kind == actual.kind;
+    }
+  }
+
+  public readonly partsOfType(type: Type): Type[] {
+    if (type.kind == TypeKind.Union) {
+      return this.store.partsOf(type);
+    }
+
+    return [type];
+  }
+
+  public readonly isInstanceOfMember(value: Type, member: Type): boolean {
+    if (
+      member.kind != TypeKind.Instance ||
+      this.store.argsOf(member).length == 0
+    ) {
+      return false;
+    }
+
+    return this.sameClassIn(value, member) != undefined;
+  }
+
+  public readonly sameClassIn(value: Type, member: Type): Type | undefined {
+    if (member.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const home = member.module;
+    const loc = member.loc;
+    const chain = this.ancestorsOf(value);
+
+    return chain.find(
+      (one) =>
+        one.kind == TypeKind.Instance && one.module == home && one.loc == loc,
+    );
+  }
+
+  public readonly candidatesOf(
+    set: Read<InferenceSet>,
+    index: int,
+    strength: CandidateStrength,
+  ): Type[] {
+    const found = set.candidates.filter(
+      (one) => one.index == index && one.strength == strength,
+    );
+
+    return found.map((one) => one.type);
+  }
+
+  public readonly adoptCandidates(
+    set: InferenceSet,
+    index: int,
+    other: Read<InferenceSet>,
+  ): void {
+    const kept = set.candidates.filter((one) => one.index != index);
+    const taken = other.candidates.filter(
+      (one) => one.index == index && one.strength == CandidateStrength.Strong,
+    );
+    const next: Candidate[] = kept.concat(taken);
+
+    set.candidates.splice(0, set.candidates.length);
+
+    for (const one of next) {
+      set.candidates.push(one);
+    }
+
+    set.undefinedSeen.delete(index);
+
+    if (other.undefinedSeen.has(index)) {
+      set.undefinedSeen.add(index);
+    }
+  }
+
+  public joinedWith(type: Type | undefined, candidate: Type): Type | undefined {
+    if (type == undefined) {
+      return candidate;
+    }
+
+    return this.unify(type, candidate);
+  }
+
+  public readonly failParameter(draft: GenericDraft, index: int): void {
+    const error = this.store.plain(TypeKind.Error);
+
+    draft.bound.set(index, error);
+    draft.isInferred = false;
+  }
+
+  public readonly isOtherNumber(
+    type: Type | undefined,
+    candidate: Type,
+  ): boolean {
+    if (type == undefined || type.id == candidate.id) {
+      return false;
+    }
+
+    return this.isNumber(type);
+  }
+
+  public readonly widenedToConstraint(
+    draft: Read<GenericDraft>,
+    index: int,
+    type: Type | undefined,
+  ): Type | undefined {
+    const param = draft.target.params[index];
+    if (type == undefined || param == undefined) {
+      return type;
+    }
+
+    const constraint = this.widenTarget(param);
+    const set = draft.inference;
+    const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
+    const weak = this.candidatesOf(set, index, CandidateStrength.Weak);
+    const isOnlyLiterals = strong.length == 0 && weak.length == 0;
+    const isFractional =
+      constraint != undefined &&
+      (constraint.kind == TypeKind.Double ||
+        constraint.kind == TypeKind.Decimal);
+    const isWidening = type.kind == TypeKind.Int && isOnlyLiterals;
+    if (isWidening && isFractional && constraint != undefined) {
+      return constraint;
+    }
+
+    return type;
+  }
+
+  public withUndefined(
+    draft: Read<GenericDraft>,
+    index: int,
+    type: Type | undefined,
+  ): Type | undefined {
+    if (!draft.inference.undefinedSeen.has(index)) {
+      return type;
+    }
+    if (type == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    return this.optional(type);
+  }
+
+  public wantedCandidate(candidates: Read<Type[]>): Type | undefined {
+    let type: Type | undefined = undefined;
+
+    for (const candidate of candidates) {
+      type = this.joinedWith(type, candidate);
+    }
+
+    return type;
+  }
+
+  public readonly boundByLoc(draft: Read<GenericDraft>): Map<int, Type> {
+    const bindings = new Map<int, Type>();
+    const decls = draft.target.decls;
+
+    for (const [index, type] of draft.bound) {
+      const decl = decls[index];
+      if (decl != undefined) {
+        bindings.set(decl.loc, type);
+      }
+    }
+
+    return bindings;
+  }
+
+  public readonly isInstanceOfClass(part: Type, name: string): boolean {
+    if (part.kind != TypeKind.Instance) {
+      return false;
+    }
+    if (part.name == name) {
+      return true;
+    }
+
+    return this.ancestorsOf(part).some(
+      (one) => one.kind == TypeKind.Instance && one.name == name,
+    );
+  }
+
+  public wantedFunction(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const goal = this.definedType(wanted);
+    if (goal.kind == TypeKind.Error) {
+      return goal;
+    }
+    if (goal.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return goal;
+  }
+
+  public readonly isListRest(shape: Read<FunctionShape>): boolean {
+    const last = shape.params[shape.params.length - 1];
+
+    return shape.rest && last != undefined && last.type.kind != TypeKind.Array;
+  }
+
+  public readonly genericCallTarget(target: Read<GenericTarget>): CallTarget {
+    const shape = target.shape;
+
+    return {
+      params: shape.params.slice(),
+      rest: shape.rest,
+      loc: target.loc,
+      isLenient: target.isLenient,
+    };
+  }
+
+  public readonly genericDraft(
+    target: Own<GenericTarget>,
+    list: AstList | undefined,
+    args: Own<CallArgument[]>,
+    wanted: Type | undefined,
+  ): GenericDraft {
+    const inference = this.inferenceSet(target.params.slice());
+
+    return {
+      target,
+      argsList: list,
+      args,
+      wanted,
+      bound: new Map<int, Type>(),
+      given: new Map<int, Type>(),
+      settled: new Set<int>(),
+      literals: [],
+      contextual: [],
+      inference,
+      isInferred: true,
+    };
+  }
+
+  public readonly patternAt(
+    shape: Read<FunctionShape>,
+    index: int,
+    spread: boolean,
+  ): Type {
+    const fixed = this.shapeFixed(shape);
+    const error = this.store.plain(TypeKind.Error);
+
+    if (!shape.rest || index < fixed) {
+      return shape.params[index]?.type ?? error;
+    }
+
+    const rest = shape.params[fixed]?.type ?? error;
+    if (spread || rest.kind != TypeKind.Array) {
+      return rest;
+    }
+
+    return this.store.itemOf(rest);
+  }
+
+  public slotAt(shape: Read<FunctionShape>, index: int, spread: boolean): Type {
+    const fixed = this.shapeFixed(shape);
+    const param = shape.params[index];
+    if (index < fixed && param != undefined) {
+      return this.parameterWanted(param);
+    }
+
+    return this.patternAt(shape, index, spread);
+  }
+
+  public readonly isLiteralText(
+    expr: Expr,
+    pattern: Type,
+    params: Read<Type[]>,
+  ): boolean {
+    const isText =
+      expr.kind == ExprKind.StringLit &&
+      params.some((one) => one.id == pattern.id);
+
+    return isText && this.isExpectingLiteral(pattern);
+  }
+
+  public readonly openParameters(draft: Read<GenericDraft>): Type[] {
+    const params = draft.target.params;
+
+    return params.filter((param, index) => !draft.bound.has(index));
+  }
+
+  public readonly boundById(draft: Read<GenericDraft>): Map<int, Type> {
+    const bound = new Map<int, Type>();
+    const params = draft.target.params;
+
+    for (const [index, type] of draft.bound) {
+      const param = params[index];
+      if (param != undefined) {
+        bound.set(param.id, type);
+      }
+    }
+
+    return bound;
+  }
+
+  private readonly currentStrength(set: Read<InferenceSet>): CandidateStrength {
+    if (set.isIntLiteral) {
+      return CandidateStrength.Literal;
+    }
+    if (set.isWeak) {
+      return CandidateStrength.Weak;
+    }
+
+    return CandidateStrength.Strong;
+  }
+
+  private readonly widenTarget(param: Type): Type | undefined {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined || constraint.kind != TypeKind.Union) {
+      return constraint;
+    }
+
+    const parts = this.store.partsOf(constraint);
+    const whole = parts.find((part) => part.kind == TypeKind.Int);
+    const fraction = parts.find((part) => part.kind == TypeKind.Double);
+    const exact = parts.find((part) => part.kind == TypeKind.Decimal);
+
+    return whole ?? fraction ?? exact;
+  }
+
+  private readonly isExpectingLiteral(param: Type): boolean {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined) {
+      return false;
+    }
+
+    const isKeys =
+      constraint.kind == TypeKind.Operation &&
+      this.store.operationShapeOf(constraint).op == OperationKind.KeyOf;
+    if (isKeys) {
+      return true;
+    }
+
+    const parts = this.partsOfType(constraint);
+
+    return parts.every((part) => this.isLiteralTextual(part));
+  }
+
+  private readonly shapeFixed(shape: Read<FunctionShape>): int {
+    if (shape.rest) {
+      return shape.params.length - 1;
+    }
+
+    return shape.params.length;
+  }
+}

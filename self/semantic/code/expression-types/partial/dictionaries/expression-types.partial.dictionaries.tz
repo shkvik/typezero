@@ -15,20 +15,22 @@ import { kKeyPlace, kValuePlace } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private recordObject(expr: ObjectLitExpr, record: Type, module: int): Type {
+    const tree = this.types.program.tree;
+
     if (record.kind != TypeKind.Dict) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     let failed = false;
 
-    for (const property of expr.props) {
+    for (const property of tree.propertiesOf(expr.propsList)) {
       const isFailed = this.recordProperty(property, record, module);
 
       failed = failed || isFailed;
     }
 
     if (failed) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     return record;
@@ -39,19 +41,25 @@ partial class ExpressionTypes {
     record: Type,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     if (record.kind != TypeKind.Dict) {
       return true;
     }
 
     const name = property.name;
-    const value = record.value;
+    const value = this.types.store.valueOf(record);
     const form = property.form;
-    const place = this.dictionaries.keyPlace(name);
+    const place = this.types.keyPlace(name);
 
     switch (form.kind) {
       case PropertyKind.Method:
-        this.report(module, property.loc, Code.RecordMethod, { word: name });
-        this.typed(property.value, undefined, module);
+        this.errors.write(module, property.loc, Code.RecordMethod, {
+          word: name,
+        });
+        const valueExpr = tree.exprOf(property.valueId);
+
+        this.typed(valueExpr, undefined, module);
 
         return true;
       case PropertyKind.Spread: {
@@ -59,45 +67,58 @@ partial class ExpressionTypes {
           return true;
         }
 
-        const spread = this.typed(property.value, record, module);
+        const spread = this.typed(
+          tree.exprOf(property.valueId),
+          record,
+          module,
+        );
 
         return spread.kind == TypeKind.Error;
       }
       case PropertyKind.Defaulted: {
-        const fallback = this.objects.fallbackOf(property.value);
+        const propertyValue = tree.exprOf(property.valueId);
+        const fallback = this.types.fallbackOf(propertyValue);
 
-        this.report(module, property.loc, Code.RecordDefaulted, { word: name });
+        this.errors.write(module, property.loc, Code.RecordDefaulted, {
+          word: name,
+        });
         this.checked(fallback, value, module, place);
 
         return true;
       }
       case PropertyKind.Computed:
-        this.recordKey(form.key, module);
-        this.checked(property.value, value, module, kValuePlace);
+        const key = tree.exprOf(form.keyId);
+
+        this.recordKey(key, module);
+        this.checked(tree.exprOf(property.valueId), value, module, kValuePlace);
 
         return false;
       default:
-        this.checked(property.value, value, module, place);
+        this.checked(tree.exprOf(property.valueId), value, module, place);
 
         return false;
     }
   }
 
   private recordKey(key: Expr, module: int): void {
-    const text = this.store.plain(TypeKind.String);
+    const text = this.types.store.plain(TypeKind.String);
     const keyType = this.typed(key, text, module);
     const plain = this.types.definedType(keyType);
     if (this.types.isNumeric(plain)) {
-      const first = this.text.of(keyType);
+      const first = this.types.typeText(keyType);
 
-      return this.report(module, key.loc, Code.RecordNumberKey, { first });
+      return this.errors.write(module, key.loc, Code.RecordNumberKey, {
+        first,
+      });
     }
 
     this.coerce(key, keyType, text, module, kKeyPlace);
   }
 
   private jsonObject(expr: ObjectLitExpr, json: Type, module: int): Type {
-    for (const property of expr.props) {
+    const tree = this.types.program.tree;
+
+    for (const property of tree.propertiesOf(expr.propsList)) {
       this.jsonProperty(property, json, module);
     }
 
@@ -105,39 +126,48 @@ partial class ExpressionTypes {
   }
 
   private jsonProperty(property: Property, json: Type, module: int): void {
+    const tree = this.types.program.tree;
+
     const form = property.form;
     const loc = property.loc;
     const word = property.name;
 
     if (form.kind == PropertyKind.Spread) {
-      this.report(module, loc, Code.JsonSpread, kNoDetails);
-      this.typed(property.value, undefined, module);
+      this.errors.write(module, loc, Code.JsonSpread, kNoDetails);
+      const value = tree.exprOf(property.valueId);
+
+      this.typed(value, undefined, module);
 
       return;
     }
     if (form.kind == PropertyKind.Method) {
-      this.report(module, loc, Code.JsonFunction, kNoDetails);
-      this.typed(property.value, undefined, module);
+      this.errors.write(module, loc, Code.JsonFunction, kNoDetails);
+      const valueExpr = tree.exprOf(property.valueId);
+
+      this.typed(valueExpr, undefined, module);
 
       return;
     }
     if (form.kind == PropertyKind.Defaulted) {
-      const fallback = this.objects.fallbackOf(property.value);
+      const propertyValue = tree.exprOf(property.valueId);
+      const fallback = this.types.fallbackOf(propertyValue);
 
-      this.report(module, loc, Code.JsonDefaulted, { word });
+      this.errors.write(module, loc, Code.JsonDefaulted, { word });
       this.typed(fallback, undefined, module);
 
       return;
     }
     if (form.kind == PropertyKind.Computed) {
-      this.jsonKey(form.key, module);
+      const key = tree.exprOf(form.keyId);
+
+      this.jsonKey(key, module);
     }
 
-    const given = this.typed(property.value, json, module);
-    const target = this.dictionaries.jsonTarget(json, given);
-    const place = this.dictionaries.keyPlace(word);
+    const given = this.typed(tree.exprOf(property.valueId), json, module);
+    const target = this.types.jsonTarget(json, given);
+    const place = this.types.keyPlace(word);
 
-    this.coerce(property.value, given, target, module, place);
+    this.coerce(tree.exprOf(property.valueId), given, target, module, place);
   }
 
   private jsonKey(key: Expr, module: int): void {
@@ -147,8 +177,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const first = this.text.of(keyType);
+    const first = this.types.typeText(keyType);
 
-    this.report(module, key.loc, Code.JsonKey, { first });
+    this.errors.write(module, key.loc, Code.JsonKey, { first });
   }
 }

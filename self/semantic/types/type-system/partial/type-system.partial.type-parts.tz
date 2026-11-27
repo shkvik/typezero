@@ -1,0 +1,196 @@
+import { TypeSystem } from "../type-system.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+
+partial class TypeSystem {
+  public readonly genericParameters(type: Type): Type[] | undefined {
+    const found: Type[] = [];
+    const seen = new Set<int>();
+
+    if (!this.collectParameters(type, found, seen)) {
+      return undefined;
+    }
+
+    return found;
+  }
+
+  public readonly hasUnknownInside(type: Type): boolean {
+    const seen = new Set<int>();
+
+    return this.isUnknownInside(type, seen);
+  }
+
+  public readonly isOpaqueResult(type: Type): boolean {
+    const seen = new Set<int>();
+
+    return type.kind == TypeKind.Unknown || this.isVoidChoice(type, seen);
+  }
+
+  public readonly isListParameter(param: Type): boolean {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined) {
+      return false;
+    }
+
+    return (
+      constraint.kind == TypeKind.Array || constraint.kind == TypeKind.Tuple
+    );
+  }
+
+  public readonly typeParts(type: Type): Type[] {
+    switch (type.kind) {
+      case TypeKind.Array:
+        return [this.store.itemOf(type)];
+      case TypeKind.Tuple:
+        return this.store.itemsOf(type);
+      case TypeKind.Object:
+        return this.store.fieldsOf(type).map((field) => field.type);
+      case TypeKind.Function: {
+        const shape = this.store.functionShapeOf(type);
+        const params = shape.params.map((param) => param.type);
+
+        return params.concat([shape.result]);
+      }
+      case TypeKind.Union:
+        return this.store.partsOf(type);
+      case TypeKind.Result:
+        return [this.store.valueOf(type), this.store.errorOf(type)];
+      case TypeKind.Promise:
+        return [this.store.valueOf(type)];
+      case TypeKind.Class:
+        return [this.store.classInstanceOf(type)];
+      case TypeKind.Iterator: {
+        const shape = this.store.iteratorShapeOf(type);
+
+        return [shape.yielded, shape.returned, shape.sent];
+      }
+      case TypeKind.Dict:
+        return [this.store.keyOf(type), this.store.valueOf(type)];
+      case TypeKind.Instance:
+        return this.store.argsOf(type);
+      default:
+        return [];
+    }
+  }
+
+  public readonly mentionsParameter(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+      case TypeKind.Error:
+        return true;
+      case TypeKind.Array:
+        return this.mentionsParameter(this.store.itemOf(type));
+      case TypeKind.Tuple:
+        return this.store
+          .itemsOf(type)
+          .some((item) => this.mentionsParameter(item));
+      case TypeKind.Union:
+        return this.store
+          .partsOf(type)
+          .some((part) => this.mentionsParameter(part));
+      case TypeKind.Function: {
+        const shape = this.store.functionShapeOf(type);
+        const params = shape.params.map((param) => param.type);
+
+        return (
+          this.mentionsParameter(shape.result) ||
+          params.some((param) => this.mentionsParameter(param))
+        );
+      }
+      case TypeKind.Result:
+        return (
+          this.mentionsParameter(this.store.valueOf(type)) ||
+          this.mentionsParameter(this.store.errorOf(type))
+        );
+      case TypeKind.Promise:
+        return this.mentionsParameter(this.store.valueOf(type));
+      case TypeKind.Dict:
+        return (
+          this.mentionsParameter(this.store.keyOf(type)) ||
+          this.mentionsParameter(this.store.valueOf(type))
+        );
+      case TypeKind.Instance:
+        return this.store
+          .argsOf(type)
+          .some((arg) => this.mentionsParameter(arg));
+      default:
+        return false;
+    }
+  }
+
+  private readonly collectParameters(
+    type: Type,
+    found: Type[],
+    seen: Set<int>,
+  ): boolean {
+    if (seen.has(type.id)) {
+      return true;
+    }
+
+    seen.add(type.id);
+
+    switch (type.kind) {
+      case TypeKind.TypeParameter:
+        found.push(type);
+
+        return true;
+      case TypeKind.Operation:
+      case TypeKind.Error:
+      case TypeKind.Template:
+        return false;
+      default: {
+        const parts = this.typeParts(type);
+
+        return parts.every((part) => this.collectParameters(part, found, seen));
+      }
+    }
+  }
+
+  private readonly isUnknownInside(type: Type, seen: Set<int>): boolean {
+    if (seen.has(type.id)) {
+      return false;
+    }
+
+    seen.add(type.id);
+
+    if (type.kind == TypeKind.Error) {
+      return true;
+    }
+
+    const parts = this.typeParts(type);
+
+    return parts.some((part) => this.isUnknownInside(part, seen));
+  }
+
+  private readonly isVoidChoice(type: Type, seen: Set<int>): boolean {
+    if (seen.has(type.id) || type.kind == TypeKind.Function) {
+      return false;
+    }
+
+    seen.add(type.id);
+
+    if (type.kind == TypeKind.Union) {
+      const hasVoid = this.store
+        .partsOf(type)
+        .some((part) => part.kind == TypeKind.Void);
+      if (hasVoid) {
+        return true;
+      }
+    }
+    if (type.kind == TypeKind.Object) {
+      const hasVoid = this.store.fieldsOf(type).some(
+        (field) => field.type.kind == TypeKind.Void,
+      );
+      if (hasVoid) {
+        return true;
+      }
+    }
+    if (type.kind == TypeKind.Promise || type.kind == TypeKind.Result) {
+      return false;
+    }
+
+    const parts = this.typeParts(type);
+
+    return parts.some((part) => this.isVoidChoice(part, seen));
+  }
+}

@@ -23,30 +23,35 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type | undefined {
-    const object = member.object;
+    const tree = this.types.program.tree;
+
+    const object = tree.exprOf(member.objectId);
     const isJson =
       object.kind == ExprKind.Name &&
       object.name == kJsonGlobalName &&
       this.isGlobalUse(object, module);
-    const hasSpread = expr.args.some((one) => one.spread);
-    const value = expr.args[0]?.expr;
-    const count = expr.args.length;
+    const hasSpread = tree.argumentsOf(expr.argsList).some((one) => one.spread);
+    const value = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const count = tree.argumentsOf(expr.argsList).length;
     if (!isJson || member.name != kStringifyName || hasSpread) {
       return undefined;
     }
     if (
       value == undefined ||
       count > 3 ||
-      this.modules.isLibraryModule(module)
+      this.types.isLibraryModule(module)
     ) {
       return undefined;
     }
 
     const given = this.typed(value, undefined, module);
 
-    for (const arg of expr.args.slice(1)) {
-      if (this.isGivenOption(arg.expr, module)) {
-        this.typed(arg.expr, undefined, module);
+    for (const arg of tree.argumentsOf(expr.argsList).slice(1)) {
+      const argExpr = tree.exprOf(arg.exprId);
+      if (this.isGivenOption(argExpr, module)) {
+        const exprExpr = tree.exprOf(arg.exprId);
+
+        this.typed(exprExpr, undefined, module);
       }
     }
 
@@ -64,11 +69,11 @@ partial class ExpressionTypes {
       return fails;
     }
 
-    return this.store.resultOf(text, fails);
+    return this.types.store.resultOf(text, fails);
   }
 
-  private readonly stringifiedText(given: Type): Type {
-    const text = this.store.plain(TypeKind.String);
+  private stringifiedText(given: Type): Type {
+    const text = this.types.store.plain(TypeKind.String);
     const isMaybe =
       this.types.isOptional(given) ||
       given.kind == TypeKind.Undefined ||
@@ -107,7 +112,7 @@ partial class ExpressionTypes {
       const isUnbounded =
         plain.kind == TypeKind.Json ||
         plain.kind == TypeKind.Unknown ||
-        open.includes(plain);
+        open.some((one) => one.id == plain.id);
       if (isUnbounded) {
         return true;
       }
@@ -133,21 +138,25 @@ partial class ExpressionTypes {
       case TypeKind.Instance:
         return this.heldFields(type);
       case TypeKind.Array:
-        return [type.item];
+        return [this.types.store.itemOf(type)];
       case TypeKind.Result:
-        return [type.value, type.error];
+        return [this.types.store.valueOf(type), this.types.store.errorOf(type)];
       case TypeKind.Dict:
-        return [type.value];
+        return [this.types.store.valueOf(type)];
       case TypeKind.Object:
-        return type.fields.map((field) => this.objects.fieldWanted(field));
+        return this.types.store
+          .fieldsOf(type)
+          .map((field) => this.types.fieldWanted(field));
       case TypeKind.Union:
-        return type.parts;
+        return this.types.store.partsOf(type);
       default:
         return [];
     }
   }
 
   private heldFields(instance: InstanceType): Type[] {
+    const tree = this.types.program.tree;
+
     const types: Type[] = [];
     let current: Type | undefined = instance;
 
@@ -161,10 +170,11 @@ partial class ExpressionTypes {
         return types;
       }
 
-      for (const field of decl.fields) {
+      for (const field of tree.fieldsOf(decl.fieldsList)) {
         const isValue =
           field.form != FieldKind.Static && field.form != FieldKind.ArrowMethod;
-        const entry = this.classMember(instance, field.name).entry;
+        const entryLookup = this.classMember(instance, field.name);
+        const entry = entryLookup.entry;
         if (isValue && entry != undefined) {
           types.push(this.fieldTypeOf(entry, field));
         }

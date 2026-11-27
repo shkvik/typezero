@@ -26,45 +26,57 @@ import { kIterableName } from "../../../index-rules/const/index-rules.const.tz";
 import { kConcurrentMapName } from "../../../../library/fetch-rules/const/fetch-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly iterablePlaceCheck(fn: FunctionDecl, module: int): void {
-    for (const param of fn.params) {
-      const ref = this.iterableRef(param.type);
+  private iterablePlaceCheck(fn: FunctionDecl, module: int): void {
+    const tree = this.types.program.tree;
+
+    for (const param of tree.paramsOf(fn.paramsList)) {
+      const typeRef = tree.typeRefAt(param.typeId);
+      const ref = this.iterableRef(typeRef);
       if (ref != undefined) {
         this.iterableParamCheck(fn, ref, module);
       }
     }
 
-    const result = this.iterableRef(fn.returnType);
+    const returnType = tree.typeRefAt(fn.returnTypeId);
+    const result = this.iterableRef(returnType);
     if (result != undefined) {
-      this.report(module, result.loc, Code.IterableNotParameter, kNoDetails);
+      this.errors.write(
+        module,
+        result.loc,
+        Code.IterableNotParameter,
+        kNoDetails,
+      );
     }
   }
 
-  private readonly iterableParamCheck(
+  private iterableParamCheck(
     fn: FunctionDecl,
     ref: TypeRef,
     module: int,
   ): void {
     const word = this.iterableElementText(ref, module);
     if (fn.place == FunctionPlace.Expression || fn.isArrow) {
-      this.report(module, ref.loc, Code.IterableNotParameter, kNoDetails);
+      this.errors.write(module, ref.loc, Code.IterableNotParameter, kNoDetails);
 
       return;
     }
     if (fn.role?.method == MethodKind.Constructor) {
-      this.report(module, ref.loc, Code.IterableConstructor, { word });
+      this.errors.write(module, ref.loc, Code.IterableConstructor, { word });
 
       return;
     }
     if (fn.role == undefined && !this.isTopFunction(fn, module)) {
-      this.report(module, ref.loc, Code.IterableNested, { word });
+      this.errors.write(module, ref.loc, Code.IterableNested, { word });
     }
   }
 
   private readonly isTopFunction(fn: FunctionDecl, module: int): boolean {
-    const items = this.program.modules[module]?.file.items ?? [];
+    const tree = this.types.program.tree;
 
-    return items.includes(fn);
+    const items =
+      tree.stmtsOf(this.types.program.modules[module]?.file.itemsList) ?? [];
+
+    return items.some((one) => one.id == fn.id);
   }
 
   private readonly iterableRef(root: TypeRef | undefined): TypeRef | undefined {
@@ -72,11 +84,13 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.resolver.namedRefs(root, kIterableName)[0];
+    return this.types.namedRefs(root, kIterableName)[0];
   }
 
-  private readonly iterableElementText(ref: TypeRef, module: int): string {
-    const arg = ref.args[0];
+  private iterableElementText(ref: TypeRef, module: int): string {
+    const tree = this.types.program.tree;
+
+    const arg = tree.typeRefsOf(ref.argsList)[0];
     if (arg == undefined) {
       return "T";
     }
@@ -86,15 +100,20 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const type = this.resolver.resolve(arg, context);
+    const type = this.types.resolve(arg, context);
 
-    return this.text.of(type);
+    return this.types.typeText(type);
   }
 
-  private readonly iterableAnnotationCheck(ref: TypeRef | undefined, module: int): void {
+  private iterableAnnotationCheck(ref: TypeRef | undefined, module: int): void {
     const found = this.iterableRef(ref);
     if (found != undefined) {
-      this.report(module, found.loc, Code.IterableNotParameter, kNoDetails);
+      this.errors.write(
+        module,
+        found.loc,
+        Code.IterableNotParameter,
+        kNoDetails,
+      );
     }
   }
 
@@ -104,7 +123,7 @@ partial class ExpressionTypes {
     target: Read<CallTarget>,
     module: int,
   ): boolean {
-    const wanted = this.indexes.iterableItem(to);
+    const wanted = this.types.iterableItem(to);
     if (wanted == undefined) {
       return false;
     }
@@ -116,10 +135,10 @@ partial class ExpressionTypes {
 
     const item = this.iteratedItem(given);
     const second = target.method ?? "";
-    const word = this.text.of(given);
-    const other = this.text.of(wanted);
+    const word = this.types.typeText(given);
+    const other = this.types.typeText(wanted);
     if (item == undefined) {
-      this.report(module, target.loc, Code.IterableNotIterable, {
+      this.errors.write(module, target.loc, Code.IterableNotIterable, {
         word,
         other,
         second,
@@ -127,13 +146,13 @@ partial class ExpressionTypes {
 
       return true;
     }
-    if (item.kind == TypeKind.Error || this.relation.converts(item, wanted)) {
+    if (item.kind == TypeKind.Error || this.types.converts(item, wanted)) {
       return true;
     }
 
-    this.report(module, target.loc, Code.IterableElements, {
+    this.errors.write(module, target.loc, Code.IterableElements, {
       word,
-      first: this.text.of(item),
+      first: this.types.typeText(item),
       other,
       second,
     });
@@ -146,14 +165,18 @@ partial class ExpressionTypes {
 
     switch (base.kind) {
       case TypeKind.Array:
-        return base.item;
+        return this.types.store.itemOf(base);
       case TypeKind.String:
       case TypeKind.Template:
-        return this.store.plain(TypeKind.String);
+        return this.types.store.plain(TypeKind.String);
       case TypeKind.Iterator:
-        return base.shape.yielded;
+        return this.types.store.iteratorShapeOf(base).yielded;
       case TypeKind.Dict:
-        return this.indexes.iteratedDictItem(base.dict, base.key, base.value);
+        return this.types.iteratedDictItem(
+          base.dict,
+          this.types.store.keyOf(base),
+          this.types.store.valueOf(base),
+        );
       case TypeKind.Instance:
         return this.instanceItem(base);
       case TypeKind.Object:
@@ -167,10 +190,12 @@ partial class ExpressionTypes {
 
   private instanceItem(instance: InstanceType): Type | undefined {
     if (this.isDeclaredLibrary(instance.module, instance.loc)) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const entry = this.classMember(instance, kIteratorKey).entry;
+    const entryLookup = this.classMember(instance, kIteratorKey);
+
+    const entry = entryLookup.entry;
     const method = entry?.methods[0];
     if (entry == undefined || method == undefined) {
       return undefined;
@@ -178,15 +203,15 @@ partial class ExpressionTypes {
 
     const type = this.methodTypeOf(entry, method);
     if (type.kind != TypeKind.Function) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const result = type.shape.result;
+    const result = this.types.store.returnTypeOf(type);
     if (result.kind != TypeKind.Iterator) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return result.shape.yielded;
+    return this.types.store.iteratorShapeOf(result).yielded;
   }
 
   private instanceLoopCheck(
@@ -200,17 +225,17 @@ partial class ExpressionTypes {
 
     const lookup = this.classMember(instance, kIteratorKey);
     const entry = lookup.entry;
-    const word = this.text.of(instance);
+    const word = this.types.typeText(instance);
     if (!lookup.isKnown) {
       return;
     }
     if (entry == undefined && this.isConcurrentMap(instance)) {
-      this.report(module, loop.loc, Code.ForOfConcurrentMap, kNoDetails);
+      this.errors.write(module, loop.loc, Code.ForOfConcurrentMap, kNoDetails);
 
       return;
     }
     if (entry == undefined) {
-      this.report(module, loop.loc, Code.ForOfCannot, { word });
+      this.errors.write(module, loop.loc, Code.ForOfCannot, { word });
 
       return;
     }
@@ -225,24 +250,24 @@ partial class ExpressionTypes {
       return;
     }
 
-    const result = type.shape.result;
+    const result = this.types.store.returnTypeOf(type);
     const isOpen =
       result.kind == TypeKind.Iterator ||
       result.kind == TypeKind.Error ||
-      this.indexes.hasNextMethod(result);
+      this.types.hasNextMethod(result);
     if (isOpen) {
       return;
     }
 
-    this.report(module, loop.loc, Code.IteratorMethodResult, {
+    this.errors.write(module, loop.loc, Code.IteratorMethodResult, {
       word,
-      first: this.text.of(result),
+      first: this.types.typeText(result),
     });
   }
 
   private readonly isConcurrentMap(instance: InstanceType): boolean {
     return (
-      this.modules.isTypedLibrary(instance.module) &&
+      this.types.isTypedLibrary(instance.module) &&
       instance.name == kConcurrentMapName
     );
   }

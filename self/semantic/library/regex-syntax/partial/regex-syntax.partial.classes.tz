@@ -1,0 +1,409 @@
+import { RegexSyntax } from "../regex-syntax.tz";
+import {
+  kBackslashEndText,
+  kEscapeText,
+  kIntersection,
+  kInvalidClassText,
+  kLetterKCode,
+  kMaxDepth,
+  kNegatedProperty,
+  kNegatedStringsText,
+  kNoUnit,
+  kPropertyEscapes,
+  kRangeOrderText,
+  kReservedDoubles,
+  kSetCharacterText,
+  kSetOperationText,
+  kSetSyntaxChars,
+  kSubtraction,
+  kTooLargeText,
+  kTwoUnitsText,
+  kUnterminatedClassText,
+} from "../const/regex-syntax.const.tz";
+import { RegexClassAtom } from "../types/regex-syntax.types.tz";
+
+partial class RegexSyntax {
+  public legacyClass(): boolean {
+    let isAfterLead = false;
+
+    this.cursor.accept("^");
+
+    while (!this.cursor.accept("]")) {
+      if (this.cursor.isAtEnd()) {
+        return this.cursor.fail(kUnterminatedClassText);
+      }
+
+      const first = this.classAtom();
+      if (first == undefined) {
+        return false;
+      }
+
+      const isHalf =
+        !this.cursor.isUnicode &&
+        !first.isSet &&
+        isAfterLead &&
+        this.cursor.isTrail(first.char);
+      if (isHalf) {
+        return this.cursor.fail(kTwoUnitsText);
+      }
+
+      isAfterLead = !first.isSet && this.cursor.isLead(first.char);
+
+      if (this.isRangeNext() && !this.isRangeFine(first)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  public setClass(): boolean {
+    return this.classContents() != undefined;
+  }
+
+  private readonly isRangeNext(): boolean {
+    const next = this.cursor.index + 1;
+
+    return (
+      this.cursor.isAt("-") &&
+      this.cursor.charAt(next) != "]" &&
+      next < this.cursor.text.length
+    );
+  }
+
+  private isRangeFine(first: RegexClassAtom): boolean {
+    this.cursor.index += 1;
+
+    const last = this.classAtom();
+    if (last == undefined) {
+      return false;
+    }
+    if (first.isSet || last.isSet) {
+      if (this.cursor.isUnicode) {
+        return this.cursor.fail(kInvalidClassText);
+      }
+
+      return true;
+    }
+    if (first.char > last.char) {
+      return this.cursor.fail(kRangeOrderText);
+    }
+
+    return true;
+  }
+
+  private classAtom(): RegexClassAtom | undefined {
+    if (this.cursor.isAtEnd()) {
+      return this.failedAtom(kUnterminatedClassText);
+    }
+    if (!this.cursor.accept("\\")) {
+      return { char: this.cursor.nextChar(), isSet: false };
+    }
+    if (this.cursor.isAtEnd()) {
+      return this.failedAtom(kBackslashEndText);
+    }
+
+    const letter = this.cursor.current();
+    if (this.isSetEscape(letter)) {
+      this.cursor.index += 1;
+
+      return { char: kNoUnit, isSet: true };
+    }
+    if (kPropertyEscapes.includes(letter) && this.cursor.isUnicode) {
+      return this.propertyAtom(letter);
+    }
+    if (letter == "k" && !this.cursor.isUnicode && !this.cursor.hasNames) {
+      this.cursor.index += 1;
+
+      return { char: kLetterKCode, isSet: false };
+    }
+
+    const value = this.characterEscape(true);
+    if (value == kNoUnit) {
+      return undefined;
+    }
+
+    return { char: value, isSet: false };
+  }
+
+  private propertyAtom(letter: string): RegexClassAtom | undefined {
+    this.cursor.index += 1;
+
+    const isNegated = letter == kNegatedProperty;
+    if (!this.propertyEscape(isNegated)) {
+      return undefined;
+    }
+
+    return { char: kNoUnit, isSet: true };
+  }
+
+  private failedAtom(message: string): RegexClassAtom | undefined {
+    this.cursor.fail(message);
+
+    return undefined;
+  }
+
+  private classContents(): Set<string> | undefined {
+    const isNegated = this.cursor.accept("^");
+    const strings = new Set<string>();
+
+    if (!this.cursor.accept("]") && !this.isContentFine(strings)) {
+      return undefined;
+    }
+    if (isNegated && strings.size > 0) {
+      this.cursor.fail(kNegatedStringsText);
+
+      return undefined;
+    }
+
+    return strings;
+  }
+
+  private isContentFine(strings: Set<string>): boolean {
+    const first = this.classElement(strings, true);
+    if (first == 0) {
+      return false;
+    }
+
+    const operator = this.setOperator();
+    if (operator == "") {
+      return this.isUnionFine(strings);
+    }
+    if (first == 2) {
+      return this.cursor.fail(kSetOperationText);
+    }
+
+    return this.isOperationFine(strings, operator);
+  }
+
+  private isUnionFine(strings: Set<string>): boolean {
+    while (!this.cursor.accept("]")) {
+      if (this.cursor.isAtEnd()) {
+        return this.cursor.fail(kUnterminatedClassText);
+      }
+      if (this.setOperator() != "") {
+        return this.cursor.fail(kSetOperationText);
+      }
+
+      const operand = new Set<string>();
+      if (this.classElement(operand, true) == 0) {
+        return false;
+      }
+
+      for (const text of operand) {
+        strings.add(text);
+      }
+    }
+
+    return true;
+  }
+
+  private isOperationFine(strings: Set<string>, operator: string): boolean {
+    while (this.cursor.isDoubleAt(operator.slice(0, 1))) {
+      this.cursor.index += 2;
+
+      if (operator == kIntersection && this.cursor.isAt("&")) {
+        return this.cursor.fail(kSetCharacterText);
+      }
+
+      const operand = new Set<string>();
+      if (this.classElement(operand, false) == 0) {
+        return false;
+      }
+
+      this.combine(strings, operand, operator);
+    }
+
+    if (this.cursor.accept("]")) {
+      return true;
+    }
+    if (this.cursor.isAtEnd()) {
+      return this.cursor.fail(kUnterminatedClassText);
+    }
+
+    return this.cursor.fail(kSetOperationText);
+  }
+
+  private readonly combine(
+    strings: Set<string>,
+    operand: Read<Set<string>>,
+    operator: string,
+  ): void {
+    for (const text of Array.from(strings)) {
+      const isFound = operand.has(text);
+      const isKept = isFound == (operator == kIntersection);
+      if (!isKept) {
+        strings.delete(text);
+      }
+    }
+  }
+
+  private readonly setOperator(): string {
+    if (this.cursor.isDoubleAt("&")) {
+      return kIntersection;
+    }
+    if (this.cursor.isDoubleAt("-")) {
+      return kSubtraction;
+    }
+
+    return "";
+  }
+
+  private classElement(strings: Set<string>, isRangeAllowed: boolean): int {
+    const first = this.classOperand(strings);
+    if (first == undefined) {
+      return 0;
+    }
+    if (first.isSet || !this.cursor.isAt("-") || this.cursor.isNextAt("-")) {
+      return 1;
+    }
+    if (!isRangeAllowed) {
+      this.cursor.fail(kSetOperationText);
+
+      return 0;
+    }
+
+    this.cursor.index += 1;
+
+    const last = this.classOperand(new Set<string>());
+    if (last == undefined) {
+      return 0;
+    }
+    if (last.isSet) {
+      this.cursor.fail(kInvalidClassText);
+
+      return 0;
+    }
+    if (first.char > last.char) {
+      this.cursor.fail(kRangeOrderText);
+
+      return 0;
+    }
+
+    return 2;
+  }
+
+  private classOperand(strings: Set<string>): RegexClassAtom | undefined {
+    if (this.cursor.accept("[")) {
+      return this.nestedOperand(strings);
+    }
+    if (this.cursor.accept("\\")) {
+      return this.escapedOperand(strings);
+    }
+    if (this.cursor.isAtEnd()) {
+      return this.failedAtom(kUnterminatedClassText);
+    }
+
+    const char = this.cursor.current();
+    if (kReservedDoubles.includes(char) && this.cursor.isNextAt(char)) {
+      return this.failedAtom(kSetOperationText);
+    }
+    if (kSetSyntaxChars.includes(char)) {
+      return this.failedAtom(kSetCharacterText);
+    }
+
+    return { char: this.cursor.nextChar(), isSet: false };
+  }
+
+  private nestedOperand(strings: Set<string>): RegexClassAtom | undefined {
+    this.cursor.depth += 1;
+
+    if (this.cursor.depth > kMaxDepth) {
+      return this.failedAtom(kTooLargeText);
+    }
+
+    const inner = this.classContents();
+
+    this.cursor.depth -= 1;
+
+    if (inner == undefined) {
+      return undefined;
+    }
+
+    for (const text of inner) {
+      strings.add(text);
+    }
+
+    return { char: kNoUnit, isSet: true };
+  }
+
+  private escapedOperand(strings: Set<string>): RegexClassAtom | undefined {
+    if (this.cursor.isAtEnd()) {
+      return this.failedAtom(kBackslashEndText);
+    }
+
+    const letter = this.cursor.current();
+    if (letter == "q") {
+      this.cursor.index += 1;
+
+      return this.stringsOperand(strings);
+    }
+    if (this.isSetEscape(letter)) {
+      this.cursor.index += 1;
+
+      return { char: kNoUnit, isSet: true };
+    }
+    if (kPropertyEscapes.includes(letter)) {
+      return this.propertyAtom(letter);
+    }
+
+    const value = this.characterEscape(true);
+    if (value == kNoUnit) {
+      return undefined;
+    }
+
+    return { char: value, isSet: false };
+  }
+
+  private stringsOperand(strings: Set<string>): RegexClassAtom | undefined {
+    if (!this.cursor.accept("{")) {
+      return this.failedAtom(kEscapeText);
+    }
+
+    let text = "";
+    let count = 0;
+
+    while (!this.cursor.accept("}")) {
+      if (this.cursor.isAtEnd()) {
+        return this.failedAtom(kUnterminatedClassText);
+      }
+      if (this.cursor.accept("|")) {
+        this.addString(strings, text, count);
+        text = "";
+        count = 0;
+
+        continue;
+      }
+
+      const char = this.stringChar();
+      if (char == kNoUnit) {
+        return undefined;
+      }
+
+      text += `${char} `;
+      count += 1;
+    }
+
+    this.addString(strings, text, count);
+
+    return { char: kNoUnit, isSet: true };
+  }
+
+  private readonly addString(
+    strings: Set<string>,
+    text: string,
+    count: int,
+  ): void {
+    if (count != 1) {
+      strings.add(text);
+    }
+  }
+
+  private stringChar(): int {
+    if (this.cursor.accept("\\")) {
+      return this.characterEscape(true);
+    }
+
+    return this.cursor.nextChar();
+  }
+}

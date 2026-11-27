@@ -23,9 +23,15 @@ import {
   kLocaleClass,
 } from "../../../intl-rules/const/intl-rules.const.tz";
 import { IntlService } from "../../../intl-rules/types/intl-rules.types.tz";
+import {
+  kEmptyList,
+} from "../../../../../program/ast/ast-tree/const/ast-tree.const.tz";
+import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
 
 partial class ExpressionTypes {
   private intlNew(expr: NewExpr, name: string, module: int): Type {
+    const tree = this.types.program.tree;
+
     if (name == kLocaleClass) {
       return this.localeNew(expr, module);
     }
@@ -35,53 +41,75 @@ partial class ExpressionTypes {
       return this.namedLibraryType(`${kIntlPrefix}${name}`, expr.loc, module);
     }
 
-    const service = this.intl.service(name);
+    const service = this.tables.intlService(name);
     const what = `${kIntlPrefix}${name}`;
     if (service == undefined) {
-      const unknownError = this.intl.unknownServiceError(expr.loc, name);
+      const unknownError = this.types.unknownServiceError(expr.loc, name);
 
-      this.reportFound(module, unknownError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, unknownError);
+      const args = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(args, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (name == kDisplayNamesClass && expr.args.length < 2) {
-      const noTypeError = this.intl.noTypeNewError(expr.loc);
+    if (
+      name == kDisplayNamesClass &&
+      tree.argumentsOf(expr.argsList).length < 2
+    ) {
+      const noTypeError = this.types.noTypeNewError(expr.loc);
 
-      this.reportFound(module, noTypeError);
-      this.looseArguments(expr.args, module);
+      this.errors.writeFound(module, noTypeError);
+      const argsItem = tree.argumentsOf(expr.argsList);
 
-      return this.store.plain(TypeKind.Error);
+      this.looseArguments(argsItem, module);
+
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    this.intlArguments(expr.args, 0, service, what, module);
+    this.intlArguments(
+      tree.argumentsOf(expr.argsList),
+      0,
+      service,
+      what,
+      module,
+    );
 
     return this.namedLibraryType(what, expr.loc, module);
   }
 
   private localeNew(expr: NewExpr, module: int): Type {
-    const what = `${kIntlPrefix}${kLocaleClass}`;
-    const options = expr.args[1];
-    if (options != undefined) {
-      const optionsError = this.intl.localeOptionsError(options.expr.loc);
+    const tree = this.types.program.tree;
 
-      this.reportFound(module, optionsError);
-      this.looseArguments(expr.args, module);
+    const what = `${kIntlPrefix}${kLocaleClass}`;
+    const options = tree.argumentsOf(expr.argsList)[1];
+    if (options != undefined) {
+      const optionsError = this.types.localeOptionsError(
+        tree.exprOf(options.exprId).loc,
+      );
+
+      this.errors.writeFound(module, optionsError);
+      const args = tree.argumentsOf(expr.argsList);
+
+      this.looseArguments(args, module);
 
       return this.namedLibraryType(what, expr.loc, module);
     }
 
-    const tag = expr.args[0];
+    const tag = tree.argumentsOf(expr.argsList)[0];
     if (tag != undefined && !tag.spread) {
-      const given = this.typed(tag.expr, undefined, module);
+      const exprExpr = tree.exprOf(tag.exprId);
+      const given = this.typed(exprExpr, undefined, module);
 
-      this.localeTagCheck(tag.expr, given, what, true, module);
+      const tagExpr = tree.exprOf(tag.exprId);
+
+      this.localeTagCheck(tagExpr, given, what, true, module);
     }
 
     return this.namedLibraryType(what, expr.loc, module);
   }
 
-  private readonly namedLibraryType(name: string, loc: int, module: int): Type {
+  private namedLibraryType(name: string, loc: int, module: int): Type {
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
@@ -90,10 +118,14 @@ partial class ExpressionTypes {
 
     this.errors.beginTrial();
 
-    const type = this.resolver.resolve(
-      { form: { kind: TypeRefKind.Name }, name, loc, args: [] },
-      context,
-    );
+    const written: TypeRef = {
+      form: { kind: TypeRefKind.Name },
+      id: -1,
+      name,
+      loc,
+      argsList: kEmptyList,
+    };
+    const type = this.types.resolve(written, context);
 
     this.errors.endTrial();
 
@@ -107,14 +139,22 @@ partial class ExpressionTypes {
     what: string,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const locale = args[from];
     const options = args[from + 1];
     let isLocaleOk = true;
 
     if (locale != undefined && !locale.spread) {
-      const given = this.typed(locale.expr, undefined, module);
+      const expr = tree.exprOf(locale.exprId);
+      const given = this.typed(expr, undefined, module);
 
-      isLocaleOk = this.localeArgumentCheck(locale.expr, given, what, module);
+      isLocaleOk = this.localeArgumentCheck(
+        tree.exprOf(locale.exprId),
+        given,
+        what,
+        module,
+      );
     }
     if (options == undefined || options.spread) {
       return isLocaleOk;
@@ -123,7 +163,7 @@ partial class ExpressionTypes {
     const isDisplay = service.name == kDisplayNamesClass;
 
     return this.intlOptionsCheck(
-      options.expr,
+      tree.exprOf(options.exprId),
       service,
       what,
       isLocaleOk,
@@ -145,10 +185,10 @@ partial class ExpressionTypes {
     if (base.kind == TypeKind.Undefined || this.isLocaleValue(given)) {
       return true;
     }
-    if (!this.intl.isTextLike(base)) {
-      const takesError = this.intl.takesError(arg.loc, what, given);
+    if (!this.types.isTextLike(base)) {
+      const takesError = this.types.intlTakesError(arg.loc, what, given);
 
-      this.reportFound(module, takesError);
+      this.errors.writeFound(module, takesError);
 
       return false;
     }
@@ -156,13 +196,13 @@ partial class ExpressionTypes {
     return this.localeTagCheck(arg, given, what, false, module);
   }
 
-  private readonly isLocaleValue(given: Type): boolean {
+  private isLocaleValue(given: Type): boolean {
     const base = this.types.definedType(given);
 
     return (
       base.kind == TypeKind.Instance &&
       base.name == kLocaleClass &&
-      this.modules.isLibraryModule(base.module) &&
+      this.types.isLibraryModule(base.module) &&
       !this.types.isOptional(given)
     );
   }
@@ -174,7 +214,7 @@ partial class ExpressionTypes {
     isConstructor: boolean,
     module: int,
   ): boolean {
-    if (this.modules.isLibraryModule(module)) {
+    if (this.types.isLibraryModule(module)) {
       return true;
     }
 
@@ -182,19 +222,19 @@ partial class ExpressionTypes {
     if (tags == undefined) {
       const unknownError = this.tagUnknownError(arg.loc, what, isConstructor);
 
-      this.reportFound(module, unknownError);
+      this.errors.writeFound(module, unknownError);
 
       return false;
     }
 
-    const wrong = tags.find((tag) => !this.intl.isLanguageTag(tag));
+    const wrong = tags.find((tag) => !this.types.isLanguageTag(tag));
     if (wrong == undefined) {
       return true;
     }
 
-    const notTagError = this.intl.notTagError(arg.loc, wrong);
+    const notTagError = this.types.notTagError(arg.loc, wrong);
 
-    this.reportFound(module, notTagError);
+    this.errors.writeFound(module, notTagError);
 
     return false;
   }
@@ -205,20 +245,26 @@ partial class ExpressionTypes {
     isConstructor: boolean,
   ): SourceError {
     if (isConstructor) {
-      return this.intl.tagUnknownLocaleError(loc);
+      return this.types.tagUnknownLocaleError(loc);
     }
 
-    return this.intl.tagUnknownError(loc, what);
+    return this.types.tagUnknownError(loc, what);
   }
 
   private localeListCheck(list: Expr, what: string, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (list.kind == ExprKind.ArrayLit) {
-      const text = this.store.plain(TypeKind.String);
-      const wanted = this.store.arrayOf(text);
+      const text = this.types.store.plain(TypeKind.String);
+      const wanted = this.types.store.arrayOf(text);
 
       this.typed(list, wanted, module);
 
-      return this.localeElementsCheck(list.elements, what, module);
+      return this.localeElementsCheck(
+        tree.elementsOf(list.elementsList),
+        what,
+        module,
+      );
     }
 
     const given = this.typed(list, undefined, module);
@@ -229,17 +275,20 @@ partial class ExpressionTypes {
     if (base.kind != TypeKind.Array) {
       return this.localeArgumentCheck(list, given, what, module);
     }
-    if (this.types.definedType(base.item).kind != TypeKind.String) {
-      const listError = this.intl.listError(list.loc, what, given);
+    if (
+      this.types.definedType(this.types.store.itemOf(base)).kind !=
+      TypeKind.String
+    ) {
+      const listError = this.types.listError(list.loc, what, given);
 
-      this.reportFound(module, listError);
+      this.errors.writeFound(module, listError);
 
       return false;
     }
 
-    const listOpenError = this.intl.listOpenError(list.loc, what);
+    const listOpenError = this.types.listOpenError(list.loc, what);
 
-    this.reportFound(module, listOpenError);
+    this.errors.writeFound(module, listOpenError);
 
     return false;
   }
@@ -249,17 +298,31 @@ partial class ExpressionTypes {
     what: string,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     for (const element of elements) {
       if (element.spread) {
-        const spreadError = this.intl.spreadError(element.expr.loc, what);
+        const spreadError = this.types.spreadError(
+          tree.exprOf(element.exprId).loc,
+          what,
+        );
 
-        this.reportFound(module, spreadError);
+        this.errors.writeFound(module, spreadError);
 
         return false;
       }
 
-      const given = this.peekType(element.expr, module);
-      if (!this.localeTagCheck(element.expr, given, what, false, module)) {
+      const expr = tree.exprOf(element.exprId);
+      const given = this.peekType(expr, module);
+      if (
+        !this.localeTagCheck(
+          tree.exprOf(element.exprId),
+          given,
+          what,
+          false,
+          module,
+        )
+      ) {
         return false;
       }
     }

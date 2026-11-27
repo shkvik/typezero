@@ -21,25 +21,32 @@ partial class Lowering {
     expr: IndexExpr,
     object: Type,
   ): IrValue | undefined {
-    const keyType = this.typeIn(frame, expr.index);
+    const tree = this.values.types.program.tree;
+
+    const indexExpr = tree.exprOf(expr.indexId);
+    const keyType = this.typeIn(frame, indexExpr);
     const layout = this.layoutOf(object);
     const names = this.textLiterals(this.widenedKey(keyType));
-    const first = layout?.fields[0];
+    const first = this.layoutFieldAt(layout, 0);
     if (layout == undefined || first == undefined || names.length == 0) {
       this.notLowered(frame.module, expr.loc, "an index on type object");
 
       return undefined;
     }
 
-    const isSameKind = layout.fields.every((field) => field.ir == first.ir);
+    const isSameKind = this.fieldsOf(layout).every(
+      (field) => field.ir == first.ir,
+    );
     if (!isSameKind) {
       this.notLowered(frame.module, expr.loc, "an index on these fields");
 
       return undefined;
     }
 
-    const holder = this.value(frame, expr.object);
-    const key = this.value(frame, expr.index);
+    const objectExpr = tree.exprOf(expr.objectId);
+    const holder = this.value(frame, objectExpr);
+    const exprIndex = tree.exprOf(expr.indexId);
+    const key = this.value(frame, exprIndex);
     if (holder == undefined || key == undefined) {
       return undefined;
     }
@@ -63,13 +70,16 @@ partial class Lowering {
 
   private readonly widenedKey(type: Type | undefined): Type {
     if (type == undefined) {
-      return this.store.plain(TypeKind.Never);
+      return this.values.types.store.plain(TypeKind.Never);
     }
 
     return type;
   }
 
-  private keyedFinder(layout: Read<ClassLayout>, names: Read<string[]>): IrCallee {
+  private keyedFinder(
+    layout: Read<ClassLayout>,
+    names: Read<string[]>,
+  ): IrCallee {
     const key = `${layout.struct} ${names.join(" ")}`;
     const known = this.keyedFinders.get(key);
     if (known != undefined) {
@@ -92,7 +102,7 @@ partial class Lowering {
     let fallback: LLVMValue = made.field(layout.struct, object, 0);
 
     for (const one of names) {
-      const field = layout.fields.find((spot) => spot.name == one);
+      const field = this.layoutField(layout, one);
       if (field == undefined) {
         continue;
       }

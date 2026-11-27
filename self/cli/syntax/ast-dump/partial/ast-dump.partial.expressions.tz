@@ -45,12 +45,13 @@ partial class Dumper {
       case PropertyKind.Spread: {
         const locs: string[] = [];
 
-        for (const key of form.omitKeys) {
+        for (const key of this.tree.indexExprsOf(form.omitKeysList)) {
           locs.push(`${key.loc}`);
         }
 
         const keys = locs.join(",");
-        const omit = this.quoteAll(form.omit);
+        const omitItem = this.tree.textsOf(form.omitList);
+        const omit = this.quoteAll(omitItem);
 
         return `Spread omit=${omit} keys=[${keys}]`;
       }
@@ -98,7 +99,7 @@ partial class Dumper {
       case ExprKind.Template: {
         const parts: string[] = [];
 
-        for (const quasi of expr.quasis) {
+        for (const quasi of this.tree.textsOf(expr.quasisList)) {
           const text = this.quote(quasi, Quoting.EscapeUnicode);
 
           parts.push(` ${text}`);
@@ -106,25 +107,35 @@ partial class Dumper {
 
         const quasis = parts.join("");
 
-        this.line(`Template ${loc} n=${expr.quasis.length}${quasis}`);
+        this.line(
+          `Template ${loc} n=${this.tree.textsOf(expr.quasisList).length}${quasis}`,
+        );
 
-        return this.dumpChildren(expr.exprs);
+        const exprs = this.tree.exprsOf(expr.exprsList);
+
+        return this.dumpChildren(exprs);
       }
       case ExprKind.ArrayLit:
-        this.line(`ArrayLit ${loc} n=${expr.elements.length}`);
+        this.line(
+          `ArrayLit ${loc} n=${this.tree.elementsOf(expr.elementsList).length}`,
+        );
         this.nested();
-        for (const element of expr.elements) {
+        for (const element of this.tree.elementsOf(expr.elementsList)) {
           const spread = this.flag(element.spread);
           const hole = this.flag(element.hole);
 
           this.line(`Element ${spread} ${hole}`);
-          this.dumpChildren([element.expr]);
+          const exprExpr = this.tree.exprOf(element.exprId);
+
+          this.dumpChildren([exprExpr]);
         }
         return this.back();
       case ExprKind.ObjectLit:
-        this.line(`ObjectLit ${loc} n=${expr.props.length}`);
+        this.line(
+          `ObjectLit ${loc} n=${this.tree.propertiesOf(expr.propsList).length}`,
+        );
         this.nested();
-        for (const prop of expr.props) {
+        for (const prop of this.tree.propertiesOf(expr.propsList)) {
           this.dumpProperty(prop);
         }
         return this.back();
@@ -141,10 +152,14 @@ partial class Dumper {
     this.nested();
     const form = prop.form;
     if (form.kind == PropertyKind.Computed) {
-      this.dumpExpr(form.key);
+      const key = this.tree.exprOf(form.keyId);
+
+      this.dumpExpr(key);
     }
 
-    this.dumpExpr(prop.value);
+    const value = this.tree.exprOf(prop.valueId);
+
+    this.dumpExpr(value);
     this.back();
   }
 
@@ -155,9 +170,13 @@ partial class Dumper {
       case ExprKind.Name: {
         const name = this.quote(expr.name);
 
-        this.line(`Name ${loc} ${name} targs=${expr.typeArgs.length}`);
+        this.line(
+          `Name ${loc} ${name} targs=${this.tree.typeRefsOf(expr.typeArgsList).length}`,
+        );
         this.nested();
-        this.dumpTypes(expr.typeArgs);
+        const typeArgs = this.tree.typeRefsOf(expr.typeArgsList);
+
+        this.dumpTypes(typeArgs);
 
         return this.back();
       }
@@ -166,11 +185,15 @@ partial class Dumper {
         const optional = this.flag(expr.optional);
 
         this.line(
-          `Member ${loc} ${name} opt=${optional} targs=${expr.typeArgs.length}`,
+          `Member ${loc} ${name} opt=${optional} targs=${this.tree.typeRefsOf(expr.typeArgsList).length}`,
         );
         this.nested();
-        this.dumpExpr(expr.object);
-        this.dumpTypes(expr.typeArgs);
+        const object = this.tree.exprOf(expr.objectId);
+
+        this.dumpExpr(object);
+        const typeArgsItem = this.tree.typeRefsOf(expr.typeArgsList);
+
+        this.dumpTypes(typeArgsItem);
 
         return this.back();
       }
@@ -179,17 +202,25 @@ partial class Dumper {
 
         this.line(`Index ${loc} opt=${optional}`);
 
-        return this.dumpChildren([expr.object, expr.index]);
+        return this.dumpChildren([
+          this.tree.exprOf(expr.objectId),
+          this.tree.exprOf(expr.indexId),
+        ]);
       }
       case ExprKind.Unary:
         this.line(`Unary ${loc} ${expr.op}`);
-        return this.dumpChildren([expr.operand]);
+        const operand = this.tree.exprOf(expr.operandId);
+
+        return this.dumpChildren([operand]);
       case ExprKind.Binary: {
         const source = this.span(expr.source);
 
         this.line(`Binary ${loc} ${expr.op} src=${source}`);
 
-        return this.dumpChildren([expr.lhs, expr.rhs]);
+        return this.dumpChildren([
+          this.tree.exprOf(expr.lhsId),
+          this.tree.exprOf(expr.rhsId),
+        ]);
       }
       case ExprKind.Assign: {
         const opText = this.operatorText(expr.op);
@@ -197,7 +228,10 @@ partial class Dumper {
 
         this.line(`Assign ${loc} ${opText} src=${source}`);
 
-        return this.dumpChildren([expr.target, expr.value]);
+        return this.dumpChildren([
+          this.tree.exprOf(expr.targetId),
+          this.tree.exprOf(expr.valueId),
+        ]);
       }
       case ExprKind.Update: {
         const increment = this.flag(expr.increment);
@@ -205,20 +239,34 @@ partial class Dumper {
 
         this.line(`Update ${loc} inc=${increment} prefix=${prefix}`);
 
-        return this.dumpChildren([expr.target]);
+        const target = this.tree.exprOf(expr.targetId);
+
+        return this.dumpChildren([target]);
       }
       case ExprKind.Conditional:
         this.line(`Conditional ${loc}`);
-        return this.dumpChildren([expr.cond, expr.thenExpr, expr.elseExpr]);
+        return this.dumpChildren([
+          this.tree.exprOf(expr.condId),
+          this.tree.exprOf(expr.thenExprId),
+          this.tree.exprOf(expr.elseExprId),
+        ]);
       case ExprKind.Cast:
         this.line(`Cast ${loc}`);
         this.nested();
-        this.dumpExpr(expr.operand);
-        this.dumpType(expr.target);
+        const operandExpr = this.tree.exprOf(expr.operandId);
+
+        this.dumpExpr(operandExpr);
+        const targetRef = this.tree.typeRefOf(expr.targetId);
+
+        this.dumpType(targetRef);
         return this.back();
       case ExprKind.Sequence:
-        this.line(`Sequence ${loc} n=${expr.exprs.length}`);
-        return this.dumpChildren(expr.exprs);
+        this.line(
+          `Sequence ${loc} n=${this.tree.exprsOf(expr.exprsList).length}`,
+        );
+        const exprs = this.tree.exprsOf(expr.exprsList);
+
+        return this.dumpChildren(exprs);
       default:
         return this.dumpCall(expr);
     }
@@ -226,8 +274,9 @@ partial class Dumper {
 
   private dumpNew(expr: NewExpr): void {
     const form = expr.form;
-    const counts = `targs=${expr.typeArgs.length} n=${expr.args.length}`;
-    const spread = this.spreadFlags(expr.args);
+    const counts = `targs=${this.tree.typeRefsOf(expr.typeArgsList).length} n=${this.tree.argumentsOf(expr.argsList).length}`;
+    const args = this.tree.argumentsOf(expr.argsList);
+    const spread = this.spreadFlags(args);
 
     if (form.kind == NewKind.Named) {
       const name = this.quote(form.name);
@@ -249,13 +298,19 @@ partial class Dumper {
           `spread=${spread}`,
       );
       this.nested();
-      this.dumpExpr(form.callee);
+      const calleeExpr = this.tree.exprOf(form.calleeId);
+
+      this.dumpExpr(calleeExpr);
     }
 
-    this.dumpTypes(expr.typeArgs);
+    const typeArgs = this.tree.typeRefsOf(expr.typeArgsList);
 
-    for (const argument of expr.args) {
-      this.dumpExpr(argument.expr);
+    this.dumpTypes(typeArgs);
+
+    for (const argument of this.tree.argumentsOf(expr.argsList)) {
+      const exprExpr = this.tree.exprOf(argument.exprId);
+
+      this.dumpExpr(exprExpr);
     }
 
     this.back();
@@ -277,14 +332,17 @@ partial class Dumper {
       case ExprKind.Call: {
         const optional = this.flag(expr.optional);
         const tagged = this.flag(expr.tagged);
-        const spread = this.spreadFlags(expr.args);
-        const values = expr.args.map((argument) => argument.expr);
+        const args = this.tree.argumentsOf(expr.argsList);
+        const spread = this.spreadFlags(args);
+        const values = this.tree
+          .argumentsOf(expr.argsList)
+          .map((argument) => this.tree.exprOf(argument.exprId));
 
         this.line(
           `Call ${loc} opt=${optional} tagged=${tagged} ` +
-            `n=${expr.args.length} spread=${spread}`,
+            `n=${this.tree.argumentsOf(expr.argsList).length} spread=${spread}`,
         );
-        const children = [expr.callee].concat(values);
+        const children = [this.tree.exprOf(expr.calleeId)].concat(values);
 
         return this.dumpChildren(children);
       }
@@ -292,28 +350,38 @@ partial class Dumper {
         return this.dumpNew(expr);
       case ExprKind.OptionalChain:
         this.line(`OptionalChain ${loc}`);
-        return this.dumpChildren([expr.chain]);
+        const chain = this.tree.exprOf(expr.chainId);
+
+        return this.dumpChildren([chain]);
       case ExprKind.Function:
         this.line(`FunctionExpr ${loc}`);
         this.nested();
-        this.dumpFunction(expr.fn);
+        const fn = this.tree.functionOf(expr.fnId);
+
+        this.dumpFunction(fn);
         return this.back();
       case ExprKind.Yield: {
         const delegate = this.flag(expr.delegate);
 
         this.line(`Yield ${loc} delegate=${delegate}`);
         this.nested();
-        this.dumpOptionalExpr(expr.value);
+        const value = this.tree.exprAt(expr.valueId);
+
+        this.dumpOptionalExpr(value);
 
         return this.back();
       }
       case ExprKind.Await:
         this.line(`Await ${loc}`);
-        return this.dumpChildren([expr.value]);
+        const valueExpr = this.tree.exprOf(expr.valueId);
+
+        return this.dumpChildren([valueExpr]);
       case ExprKind.Class:
         this.line(`ClassExpr ${loc}`);
         this.nested();
-        this.dumpClass(expr.decl);
+        const decl = this.tree.classOf(expr.declId);
+
+        this.dumpClass(decl);
         return this.back();
       default:
         return this.line(`Unknown ${loc}`);

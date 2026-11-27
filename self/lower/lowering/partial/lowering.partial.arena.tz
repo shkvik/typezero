@@ -16,7 +16,6 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kArrayForget,
-  kCellTypeName,
   kFreshArrayMethods,
   kImmortalCount,
   kImmortalFloor,
@@ -33,8 +32,7 @@ import { Frame, IrValue, LayoutField, Place } from "../types/lowering.types.tz";
 partial class Lowering {
   private isImmortalKind(type: Type): boolean {
     const inner = this.optionalInner(type) ?? type;
-    const isKept = this.isManaged(inner) || this.isArena(inner);
-    if (this.isString(inner) || !isKept) {
+    if (this.isString(inner) || !this.isManaged(inner)) {
       return false;
     }
     if (this.isArray(inner)) {
@@ -51,56 +49,60 @@ partial class Lowering {
   private staticValue(value: Read<IrValue>): IrValue {
     const isStatic = this.isImmortalKind(value.tz);
     if (!isStatic) {
-      return { type: value.type, value: value.value, tz: value.tz, owned: value.owned };
+      return {
+        type: value.type,
+        value: value.value,
+        tz: value.tz,
+        owned: value.owned,
+      };
     }
 
-    return { type: value.type, value: value.value, tz: value.tz, isStatic: true };
+    return {
+      type: value.type,
+      value: value.value,
+      tz: value.tz,
+      isStatic: true,
+    };
   }
 
-  private madeImmortal(frame: Read<Frame>, made: IrValue | undefined): IrValue | undefined {
-    if (made != undefined && this.isArena(made.tz)) {
-      this.immortalized(frame, made);
-    }
+  private retyped(value: Read<IrValue>, type: string, tz: Type): IrValue {
+    const isStatic = value.isStatic == true;
 
-    return made;
-  }
-
-  private readonly retyped(value: Read<IrValue>, type: string, tz: Type): IrValue {
     return {
       type,
       value: value.value,
       tz,
       owned: value.owned,
       ownedFlag: value.ownedFlag,
-      isStatic: value.isStatic,
+      isStatic,
     };
   }
 
   private madeLiteral(frame: Frame, expr: ArrayLitExpr): IrValue | undefined {
-    const made = this.arrayLiteral(frame, expr);
-
-    return this.madeImmortal(frame, made);
+    return this.arrayLiteral(frame, expr);
   }
 
   private madeObject(frame: Frame, expr: NewExpr): IrValue | undefined {
-    const made = this.newValue(frame, expr);
-
-    return this.madeImmortal(frame, made);
+    return this.newValue(frame, expr);
   }
 
-  private isStaticUnionField(object: Read<IrValue>, result: Type, expr: MemberExpr): boolean {
+  private isStaticUnionField(
+    object: Read<IrValue>,
+    result: Type,
+    expr: MemberExpr,
+  ): boolean {
     const type = object.tz;
     if (type.kind != TypeKind.Union || !this.isStaticSource(object)) {
       return false;
     }
-    if (!this.isImmortalKind(result)) {
-      return false;
-    }
-
-    return type.parts.every((part) => !this.isCellFieldOf(part, expr.name));
+    return this.isImmortalKind(result);
   }
 
-  private keptOrStatic(frame: Read<Frame>, value: IrValue, isStatic: boolean): IrValue {
+  private keptOrStatic(
+    frame: Read<Frame>,
+    value: IrValue,
+    isStatic: boolean,
+  ): IrValue {
     if (isStatic) {
       return value;
     }
@@ -119,7 +121,9 @@ partial class Lowering {
     return isFresh && element == kPointerType && this.isManaged(item);
   }
 
-  private readonly isFreshArray(expr: Expr): boolean {
+  private isFreshArray(expr: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
     if (expr.kind == ExprKind.ArrayLit) {
       return true;
     }
@@ -127,12 +131,13 @@ partial class Lowering {
       return false;
     }
 
-    const callee = expr.callee;
+    const callee = tree.exprOf(expr.calleeId);
     if (callee.kind != ExprKind.Member) {
       return false;
     }
 
-    const receiver = this.typeOf(callee.object);
+    const object = tree.exprOf(callee.objectId);
+    const receiver = this.typeOf(object);
     const isArray = receiver != undefined && receiver.kind == TypeKind.Array;
 
     return isArray && kFreshArrayMethods.includes(callee.name);
@@ -146,37 +151,17 @@ partial class Lowering {
     return this.staticValue(value);
   }
 
-  private isStaticSource(object: Read<IrValue>): boolean {
-    if (object.isStatic == true) {
-      return true;
-    }
-
-    const inner = this.optionalInner(object.tz) ?? object.tz;
-    if (inner.kind == TypeKind.Union) {
-      return inner.parts.every((part) => this.isArena(part));
-    }
-
-    return this.isArena(inner) && this.isImmortalKind(inner);
+  private readonly isStaticSource(object: Read<IrValue>): boolean {
+    return object.isStatic == true;
   }
 
   private isStaticField(object: Read<IrValue>, expr: MemberExpr): boolean {
-    const isThis = expr.object.kind == ExprKind.Name && expr.object.name == kThisName;
+    const tree = this.values.types.program.tree;
 
-    return this.isStaticSource(object) && !isThis && !this.isCellFieldOf(object.tz, expr.name);
-  }
+    const holder = tree.exprOf(expr.objectId);
+    const isThis = holder.kind == ExprKind.Name && holder.name == kThisName;
 
-  private readonly isCellFieldOf(type: Type, name: string): boolean {
-    if (type.kind == TypeKind.Object) {
-      const found = type.fields.find((one) => one.name == name);
-
-      return found != undefined && found.cell == true;
-    }
-
-    const decl = this.values.classDeclOf(type);
-    const field = decl?.fields.find((one) => one.name == name);
-    const ref = field?.type;
-
-    return ref != undefined && ref.name == kCellTypeName && ref.args.length == 1;
+    return this.isStaticSource(object) && !isThis;
   }
 
   private deepImmortalCallee(type: Type): IrCallee | undefined {
@@ -211,7 +196,11 @@ partial class Lowering {
 
     const count = made.load(kIntType, object);
     const floor = this.ir.integer(kIntType, kImmortalFloor);
-    const isImmortal = made.integerCompare(IrIntPredicate.SignedLess, floor, count);
+    const isImmortal = made.integerCompare(
+      IrIntPredicate.SignedLess,
+      floor,
+      count,
+    );
 
     made.conditionalBranch(isImmortal, done, work);
     made.open(work);
@@ -225,7 +214,7 @@ partial class Lowering {
     return made.callee;
   }
 
-  private readonly forgetCallee(type: Type): IrCallee {
+  private forgetCallee(type: Type): IrCallee {
     if (this.isArray(type)) {
       return this.ir.declare(kArrayForget, kVoidType, []);
     }
@@ -236,7 +225,7 @@ partial class Lowering {
   private isImmortalGlobal(place: Read<Place>, key: string): boolean {
     const isGlobal = place.owner == kNoOwner && !this.letKeys.has(key);
 
-    return isGlobal && this.traits.isCopy(place.tz, this.values) && this.isImmortalKind(place.tz);
+    return isGlobal && this.isImmortalKind(place.tz);
   }
 
   private immortalGlobal(frame: Read<Frame>, place: Place, key: string): void {
@@ -252,7 +241,11 @@ partial class Lowering {
 
   private immortalChildren(frame: Frame, object: LLVMValue, type: Type): void {
     if (this.isArray(type) && type.kind == TypeKind.Array) {
-      return this.immortalItems(frame, object, type.item);
+      return this.immortalItems(
+        frame,
+        object,
+        this.values.types.store.itemOf(type),
+      );
     }
 
     const layout = this.layoutOf(type);
@@ -260,7 +253,7 @@ partial class Lowering {
       return;
     }
 
-    for (const field of layout.fields) {
+    for (const field of this.fieldsOf(layout)) {
       this.immortalField(frame, object, type, layout.struct, field);
     }
   }
@@ -273,7 +266,7 @@ partial class Lowering {
     field: Read<LayoutField>,
   ): void {
     const isPointer = field.ir == kPointerType;
-    if (!isPointer || this.isCellFieldOf(owner, field.name)) {
+    if (!isPointer) {
       return;
     }
 
@@ -312,7 +305,11 @@ partial class Lowering {
     made.open(cond);
 
     const index = made.load(kIntType, counter);
-    const isInside = made.integerCompare(IrIntPredicate.SignedLess, index, length);
+    const isInside = made.integerCompare(
+      IrIntPredicate.SignedLess,
+      index,
+      length,
+    );
 
     made.conditionalBranch(isInside, body, end);
     made.open(body);
@@ -326,5 +323,52 @@ partial class Lowering {
     made.store(next, counter);
     made.branch(cond);
     made.open(end);
+  }
+
+  private immortalized(frame: Read<Frame>, value: IrValue): void {
+    const inner = this.optionalInner(value.tz);
+    if (inner != undefined) {
+      const inside = this.insideValue(frame, value, inner);
+
+      return this.immortalized(frame, inside);
+    }
+    if (value.type != kPointerType) {
+      return;
+    }
+
+    const deep = this.deepImmortalCallee(value.tz);
+    if (deep != undefined) {
+      frame.made.call(deep, [value.value]);
+
+      return;
+    }
+
+    const helper = this.immortalHelper();
+
+    frame.made.call(helper, [value.value]);
+  }
+
+  private immortalHelper(): IrCallee {
+    const known = this.ir.callee(kImmortalName);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, kImmortalName, kVoidType, [
+      kPointerType,
+    ]);
+    const object = made.param(0);
+    const kept = made.block("kept");
+    const done = made.block("done");
+    const none = this.ir.zero(kPointerType);
+    const isObject = made.integerCompare(IrIntPredicate.NotEqual, object, none);
+
+    made.conditionalBranch(isObject, kept, done);
+    made.open(kept);
+    made.store(this.ir.integer(kIntType, kImmortalCount), object);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
   }
 }

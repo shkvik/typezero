@@ -1,0 +1,256 @@
+import { TypeSystem } from "../../../types/type-system/type-system.tz";
+import {
+  kBoundMark,
+  kBoundSeparator,
+  kLengthTerm,
+  kMostBoundConstant,
+  kSumSeparator,
+  kSumTerm,
+  kZeroTerm,
+} from "../../bound-rules/const/bound-rules.const.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  BinaryOp,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  BoundEdge,
+  BoundSide,
+  Linear,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+
+partial class TypeSystem {
+  public readonly constantLinear(value: uint64): Linear | undefined {
+    if (value > kMostBoundConstant) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: value.toDecimal() };
+  }
+
+  public readonly addBound(
+    facts: Map<string, Type>,
+    upper: Linear,
+    lower: Linear,
+    room: decimal,
+  ): void {
+    if (upper.term == lower.term) {
+      return;
+    }
+
+    const shifted = room - upper.offset + lower.offset;
+    const key = this.boundKey(upper.term, lower.term, shifted);
+    const mark = this.store.plain(TypeKind.Void);
+
+    facts.set(key, mark);
+  }
+
+  public readonly addEquality(
+    facts: Map<string, Type>,
+    first: Linear,
+    second: Linear,
+  ): void {
+    this.addBound(facts, first, second, 0);
+    this.addBound(facts, second, first, 0);
+  }
+
+  public readonly keepLength(term: string, lengths: Set<string>): void {
+    if (term.startsWith(kLengthTerm)) {
+      lengths.add(term);
+    }
+  }
+
+  public readonly edgeOf(key: string): BoundEdge | undefined {
+    const parts = key.split(kBoundSeparator);
+    const mark = parts[0];
+    const upper = parts[1];
+    const lower = parts[2];
+    const room = parts[3];
+    const isBound = mark == kBoundMark && parts.length == 4;
+    if (!isBound || upper == undefined || lower == undefined) {
+      return undefined;
+    }
+
+    const parsed = decimal(room ?? "");
+    if (parsed.isErr()) {
+      return undefined;
+    }
+
+    return { upper, lower, room: parsed.value };
+  }
+
+  public readonly orderBounds(
+    facts: Own<Map<string, Type>>,
+    small: Linear,
+    large: Linear,
+    isTrue: boolean,
+    room: decimal,
+  ): Map<string, Type> {
+    if (isTrue) {
+      this.addBound(facts, large, small, room);
+
+      return facts;
+    }
+
+    this.addBound(facts, small, large, 1 - room);
+
+    return facts;
+  }
+
+  public readonly equalBounds(
+    facts: Own<Map<string, Type>>,
+    op: BinaryOp,
+    left: Linear,
+    right: Linear,
+    isTrue: boolean,
+  ): Map<string, Type> {
+    const isEqual = op == BinaryOp.Eq && isTrue;
+    const isUnequal = op == BinaryOp.Ne && isTrue;
+
+    if (isEqual || (op == BinaryOp.Ne && !isTrue)) {
+      this.addEquality(facts, left, right);
+
+      return facts;
+    }
+
+    const isZeroRight = right.term == kZeroTerm && right.offset == 0;
+    const isLength = left.term.startsWith(kLengthTerm);
+
+    if ((isUnequal || (op == BinaryOp.Eq && !isTrue)) && isZeroRight) {
+      if (isLength) {
+        this.addBound(facts, left, right, 1);
+      }
+    }
+
+    return facts;
+  }
+
+  public readonly isKeptBound(
+    edge: BoundEdge,
+    value: string,
+    length: string,
+    kept: BoundSide,
+  ): boolean {
+    const isMentioned =
+      edge.upper == value ||
+      edge.lower == value ||
+      edge.upper == length ||
+      edge.lower == length;
+    if (!isMentioned) {
+      return true;
+    }
+    if (kept == BoundSide.Lower) {
+      return edge.upper == value;
+    }
+    if (kept == BoundSide.Upper) {
+      return edge.lower == value;
+    }
+
+    return false;
+  }
+
+  public readonly changedTarget(change: Expr): Expr | undefined {
+    const tree = this.program.tree;
+
+    if (change.kind == ExprKind.Update || change.kind == ExprKind.Assign) {
+      return tree.exprOf(change.targetId);
+    }
+
+    return undefined;
+  }
+
+  public readonly boundTerms(key: string): string[] {
+    const edge = this.edgeOf(key);
+    if (edge == undefined) {
+      return [];
+    }
+
+    return [edge.upper, edge.lower];
+  }
+
+  public readonly movedBound(
+    key: string,
+    moves: Read<Map<string, string>>,
+  ): string {
+    const edge = this.edgeOf(key);
+    if (edge == undefined) {
+      return "";
+    }
+
+    const upper = this.movedTerm(edge.upper, moves);
+    const lower = this.movedTerm(edge.lower, moves);
+    if (upper == "" || lower == "") {
+      return "";
+    }
+
+    return this.boundKey(upper, lower, edge.room);
+  }
+
+  public readonly writeCode(isCompound: boolean): Code {
+    if (isCompound) {
+      return Code.IndexWriteRange;
+    }
+
+    return Code.IndexWriteHoles;
+  }
+
+  public readonly writeRoom(isCompound: boolean, offset: decimal): decimal {
+    if (isCompound) {
+      return offset + 1;
+    }
+
+    return offset;
+  }
+
+  public readonly isBoundConstant(value: decimal): boolean {
+    return value.abs() <= kMostBoundConstant.toDecimal();
+  }
+
+  public readonly linearSum(first: Linear, second: Linear): Linear | undefined {
+    const offset = first.offset + second.offset;
+    if (first.term == kZeroTerm) {
+      return { term: second.term, offset };
+    }
+    if (second.term == kZeroTerm) {
+      return { term: first.term, offset };
+    }
+    if (first.term.startsWith(kSumTerm) || second.term.startsWith(kSumTerm)) {
+      return undefined;
+    }
+
+    const term = this.sumTerm(first.term, second.term);
+
+    return { term, offset };
+  }
+
+  private readonly boundKey(
+    upper: string,
+    lower: string,
+    room: decimal,
+  ): string {
+    const parts = [kBoundMark, upper, lower, `${room}`];
+
+    return parts.join(kBoundSeparator);
+  }
+
+  private readonly movedTerm(
+    term: string,
+    moves: Read<Map<string, string>>,
+  ): string {
+    if (term == kZeroTerm) {
+      return term;
+    }
+
+    return moves.get(term) ?? "";
+  }
+
+  private readonly sumTerm(first: string, second: string): string {
+    if (first < second) {
+      return `${kSumTerm}${first}${kSumSeparator}${second}`;
+    }
+
+    return `${kSumTerm}${second}${kSumSeparator}${first}`;
+  }
+}

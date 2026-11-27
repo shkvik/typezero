@@ -15,31 +15,40 @@ import { ExpressionTypes } from "../../../code/expression-types/expression-types
 
 partial class ExpressionTypes {
   private literalLength(key: string, value: Expr): void {
+    const tree = this.types.program.tree;
+
     if (value.kind != ExprKind.ArrayLit) {
       return;
     }
 
-    const isPlain = value.elements.every((one) => !one.spread && !one.hole);
+    const isPlain = tree
+      .elementsOf(value.elementsList)
+      .every((one) => !one.spread && !one.hole);
     if (!isPlain) {
       return;
     }
 
     const length: Linear = { term: kLengthTerm + key, offset: 0 };
-    const count = value.elements.length.toDecimal();
+    const count = tree.elementsOf(value.elementsList).length.toDecimal();
     const zero: Linear = { term: kZeroTerm, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    this.bounds.addBound(facts, length, zero, count);
+    this.types.addBound(facts, length, zero, count);
     this.facts = facts;
   }
 
   private arrayMadeLength(key: string, value: Expr, module: int): void {
-    if (value.kind != ExprKind.New || value.args.length != 1) {
+    const tree = this.types.program.tree;
+
+    if (
+      value.kind != ExprKind.New ||
+      tree.argumentsOf(value.argsList).length != 1
+    ) {
       return;
     }
 
     const form = value.form;
-    const size = value.args[0];
+    const size = tree.argumentsOf(value.argsList)[0];
     const isArray =
       form.kind == NewKind.Named &&
       form.name == kArrayClass &&
@@ -48,7 +57,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const count = this.linearOf(size.expr, module);
+    const expr = tree.exprOf(size.exprId);
+    const count = this.linearOf(expr, module);
     if (count == undefined) {
       return;
     }
@@ -56,7 +66,7 @@ partial class ExpressionTypes {
     const length: Linear = { term: kLengthTerm + key, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    this.bounds.addEquality(facts, length, count);
+    this.types.addEquality(facts, length, count);
     this.facts = facts;
   }
 
@@ -70,7 +80,7 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>(this.facts);
 
     this.fixedLengths.add(length.term);
-    this.bounds.addBound(facts, length, count, 0);
+    this.types.addBound(facts, length, count, 0);
     this.facts = facts;
   }
 
@@ -84,7 +94,7 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>(this.facts);
 
     this.fixedLengths.add(length.term);
-    this.bounds.addEquality(facts, length, count);
+    this.types.addEquality(facts, length, count);
     this.facts = facts;
   }
 
@@ -99,8 +109,8 @@ partial class ExpressionTypes {
 
   private sizedLinear(value: Expr, module: int): Linear | undefined {
     const size =
-      this.shapes.madeSize(value) ?? this.shapes.allocatedSize(value);
-    const source = this.shapes.copiedSource(value);
+      this.types.madeSize(value) ?? this.types.allocatedSize(value);
+    const source = this.types.copiedSource(value);
 
     if (size != undefined) {
       const sized = this.listedLinear(size) ?? this.linearOf(size, module);
@@ -116,16 +126,23 @@ partial class ExpressionTypes {
   }
 
   private readonly listedLinear(value: Expr): Linear | undefined {
+    const tree = this.types.program.tree;
+
     if (value.kind != ExprKind.ArrayLit) {
       return undefined;
     }
 
-    const isPlain = value.elements.every((one) => !one.spread && !one.hole);
+    const isPlain = tree
+      .elementsOf(value.elementsList)
+      .every((one) => !one.spread && !one.hole);
     if (!isPlain) {
       return undefined;
     }
 
-    return { term: kZeroTerm, offset: value.elements.length.toDecimal() };
+    return {
+      term: kZeroTerm,
+      offset: tree.elementsOf(value.elementsList).length.toDecimal(),
+    };
   }
 
   private readonly textLinear(value: Expr): Linear | undefined {
@@ -139,7 +156,7 @@ partial class ExpressionTypes {
   }
 
   private viewLinear(value: Expr, module: int): Linear | undefined {
-    const view = this.shapes.viewOf(value);
+    const view = this.types.viewOf(value);
     if (view == undefined) {
       return undefined;
     }
@@ -151,7 +168,7 @@ partial class ExpressionTypes {
 
     const whole = this.wholeLinear(view.buffer, module);
     const start = this.offsetLinear(view.offset, module);
-    const size = this.byteSources.sizeOfName(view.name);
+    const size = this.types.sizeOfName(view.name);
     if (whole == undefined || start == undefined || size == undefined) {
       return undefined;
     }
@@ -172,13 +189,13 @@ partial class ExpressionTypes {
   }
 
   private wholeLinear(buffer: Expr, module: int): Linear | undefined {
-    const size = this.shapes.madeBuffer(buffer);
+    const size = this.types.madeBuffer(buffer);
     if (size != undefined) {
       return this.linearOf(size, module);
     }
 
     const holder = this.peekType(buffer, module);
-    if (!this.bytes.isRaw(holder)) {
+    if (!this.types.isRaw(holder)) {
       return undefined;
     }
 
@@ -186,14 +203,16 @@ partial class ExpressionTypes {
   }
 
   private freshLength(buffer: Expr, module: int): Linear | undefined {
+    const tree = this.types.program.tree;
+
     if (buffer.kind != ExprKind.Member || buffer.name != kBufferName) {
       return this.measuredLength(buffer, module);
     }
 
-    const view = buffer.object;
+    const view = tree.exprOf(buffer.objectId);
     const count = this.madeLinear(view, module);
     const type = this.peekType(view, module);
-    const size = this.byteSources.elementSize(type);
+    const size = this.types.elementSize(type);
     if (count == undefined || size == undefined || count.term != kZeroTerm) {
       return undefined;
     }
@@ -202,8 +221,8 @@ partial class ExpressionTypes {
   }
 
   private embeddedLength(key: string, value: Expr, module: int): void {
-    const relative = this.shapes.embeddedPath(value);
-    const home = this.program.modules[module]?.source.path;
+    const relative = this.types.embeddedPath(value);
+    const home = this.types.program.modules[module]?.source.path;
     if (relative == undefined || home == undefined) {
       return;
     }
@@ -218,7 +237,7 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>(this.facts);
 
     this.fixedLengths.add(length.term);
-    this.bounds.addBound(facts, length, zero, size.toDecimal());
+    this.types.addBound(facts, length, zero, size.toDecimal());
     this.facts = facts;
   }
 }

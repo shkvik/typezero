@@ -22,18 +22,22 @@ import { ExpressionTypes } from "../../../../code/expression-types/expression-ty
 
 partial class ExpressionTypes {
   private streamFunctionCall(expr: CallExpr, name: string, module: int): Type {
+    const tree = this.types.program.tree;
+
     if (name == kFinishedName) {
-      for (const arg of expr.args) {
-        this.listenerLoose(arg.expr, module);
+      for (const arg of tree.argumentsOf(expr.argsList)) {
+        const exprExpr = tree.exprOf(arg.exprId);
+
+        this.listenerLoose(exprExpr, module);
       }
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     let chunk: Type | undefined = undefined;
 
-    for (const arg of expr.args) {
-      const value = arg.expr;
+    for (const arg of tree.argumentsOf(expr.argsList)) {
+      const value = tree.exprOf(arg.exprId);
       if (value.kind == ExprKind.Function) {
         this.listenerLoose(value, module);
         chunk = undefined;
@@ -46,14 +50,14 @@ partial class ExpressionTypes {
       chunk = this.stageChunk(name, value, type, chunk, module);
     }
 
-    if (name == kComposeName && expr.args.length < 2) {
-      this.report(module, expr.loc, Code.StreamComposeFew, kNoDetails);
+    if (name == kComposeName && tree.argumentsOf(expr.argsList).length < 2) {
+      this.errors.write(module, expr.loc, Code.StreamComposeFew, kNoDetails);
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly stageChunk(
+  private stageChunk(
     name: string,
     value: Expr,
     type: Type,
@@ -65,9 +69,9 @@ partial class ExpressionTypes {
     }
     if (!this.isStream(type)) {
       if (name == kComposeName) {
-        const word = this.text.of(type);
+        const word = this.types.typeText(type);
 
-        this.report(module, value.loc, Code.StreamComposeOther, { word });
+        this.errors.write(module, value.loc, Code.StreamComposeOther, { word });
       }
 
       return undefined;
@@ -79,7 +83,7 @@ partial class ExpressionTypes {
     return this.streamChunk(type, true);
   }
 
-  private readonly stageTakesCheck(
+  private stageTakesCheck(
     name: string,
     value: Expr,
     type: Type,
@@ -89,9 +93,11 @@ partial class ExpressionTypes {
     const takes = this.streamChunk(type, false);
     if (takes == undefined) {
       if (name == kPipelineName) {
-        const word = this.text.of(type);
+        const word = this.types.typeText(type);
 
-        this.report(module, value.loc, Code.StreamPipelineUnwritable, { word });
+        this.errors.write(module, value.loc, Code.StreamPipelineUnwritable, {
+          word,
+        });
       }
 
       return;
@@ -100,26 +106,31 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, value.loc, Code.StreamStageChunk, {
+    this.errors.write(module, value.loc, Code.StreamStageChunk, {
       word: name,
-      first: this.text.of(before),
+      first: this.types.typeText(before),
       second: this.stageText(type),
-      other: this.text.of(takes),
+      other: this.types.typeText(takes),
     });
   }
 
   private readonly stageText(type: Type): string {
-    if (type.kind != TypeKind.Instance || type.args.length == 0) {
-      return this.text.of(type);
+    if (
+      type.kind != TypeKind.Instance ||
+      this.types.store.argsOf(type).length == 0
+    ) {
+      return this.types.typeText(type);
     }
 
-    const args = type.args.map((one) => this.text.of(one));
+    const args = this.types.store
+      .argsOf(type)
+      .map((one) => this.types.typeText(one));
 
     return `${type.name}<${args.join(", ")}>`;
   }
 
-  private readonly isStreamTaking(takes: Type, chunk: Type): boolean {
-    if (takes == chunk || chunk.kind == TypeKind.Error) {
+  private isStreamTaking(takes: Type, chunk: Type): boolean {
+    if (takes.id == chunk.id || chunk.kind == TypeKind.Error) {
       return true;
     }
 
@@ -129,7 +140,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    return this.relation.extends(chunk, takes);
+    return this.types.extends(chunk, takes);
   }
 
   private streamFromCall(
@@ -138,20 +149,24 @@ partial class ExpressionTypes {
     owner: StaticOwner,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const isFrom =
       member.name == kFromName &&
       owner.decl.name == kReadableName &&
       this.isStreamModule(owner.module);
-    if (!isFrom || this.modules.isLibraryModule(module)) {
+    if (!isFrom || this.types.isLibraryModule(module)) {
       return undefined;
     }
 
-    const value = expr.args[0]?.expr;
+    const value = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
 
-    this.looseArguments(expr.args.slice(1), module);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args.slice(1), module);
 
     if (value == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const given = this.typed(value, undefined, module);
@@ -161,14 +176,14 @@ partial class ExpressionTypes {
 
     const chunk = this.fromChunk(given);
     if (chunk == undefined) {
-      const word = this.text.of(given);
+      const word = this.types.typeText(given);
 
-      this.report(module, value.loc, Code.StreamFromSource, { word });
+      this.errors.write(module, value.loc, Code.StreamFromSource, { word });
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    return this.resolver.classInstance(owner.module, owner.decl, [chunk]);
+    return this.types.classInstance(owner.module, owner.decl, [chunk]);
   }
 
   private fromChunk(given: Type): Type | undefined {

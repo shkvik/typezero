@@ -1,16 +1,14 @@
-import {
-  ImportDecl,
-  ModuleName,
-  SourceFile,
-} from "../../program/ast/types/ast.types.modules.tz";
-import {
-  Stmt,
-  StmtKind,
-} from "../../program/ast/types/ast.types.statements.tz";
+import { ModuleName } from "../../program/ast/types/ast.types.modules.tz";
+import { StmtKind } from "../../program/ast/types/ast.types.statements.tz";
 import { kLibrary } from "../../program/library/library-modules/const/library-modules.const.tz";
 import { LibraryMember } from "../../program/library/library-modules/types/library-modules.types.tz";
 import { Token, TokenKind } from "../token/types/token.types.tz";
 import { Mentions } from "./types/library-mentions.types.tz";
+import {
+  ImportDecl,
+  SourceFile,
+} from "../../program/syntax/types/syntax.types.modules.tz";
+import { Stmt } from "../../program/syntax/types/syntax.types.statements.tz";
 
 export class LibraryMentions {
   private readonly grouped(
@@ -28,7 +26,10 @@ export class LibraryMentions {
     names.push(name);
   }
 
-  public readonly imports(tokens: readonly Token[], file: Read<SourceFile>): ImportDecl[] {
+  public readonly imports(
+    tokens: Read<Token[]>,
+    file: Read<SourceFile>,
+  ): ImportDecl[] {
     const mentions = this.mentioned(tokens);
     const grouped = new Map<string, ModuleName[]>();
 
@@ -79,7 +80,7 @@ export class LibraryMentions {
     return imports;
   }
 
-  private readonly mentioned(tokens: readonly Token[]): Mentions {
+  private readonly mentioned(tokens: Read<Token[]>): Mentions {
     const mentions: Mentions = {
       globals: new Map<string, int>(),
       members: new Map<string, int>(),
@@ -97,7 +98,7 @@ export class LibraryMentions {
 
   private readonly noteName(
     mentions: Mentions,
-    tokens: readonly Token[],
+    tokens: Read<Token[]>,
     index: int,
     token: Token,
   ): void {
@@ -118,13 +119,21 @@ export class LibraryMentions {
     }
   }
 
-  private readonly noteGlobal(mentions: Mentions, name: string, loc: int): void {
+  private readonly noteGlobal(
+    mentions: Mentions,
+    name: string,
+    loc: int,
+  ): void {
     if (kLibrary.global(name) != undefined) {
       this.noteFirst(mentions.globals, name, loc);
     }
   }
 
-  private readonly noteFirst(places: Map<string, int>, name: string, loc: int): void {
+  private readonly noteFirst(
+    places: Map<string, int>,
+    name: string,
+    loc: int,
+  ): void {
     if (!places.has(name)) {
       places.set(name, loc);
     }
@@ -132,7 +141,7 @@ export class LibraryMentions {
 
   private readonly isMember(
     member: LibraryMember,
-    tokens: readonly Token[],
+    tokens: Read<Token[]>,
     index: int,
     name: string,
   ): boolean {
@@ -164,7 +173,7 @@ export class LibraryMentions {
     return own;
   }
 
-  private readonly addDeclared(own: Set<string>, item: Stmt): void {
+  private readonly addDeclared(own: Set<string>, item: Read<Stmt>): void {
     switch (item.kind) {
       case StmtKind.VarDecl:
         for (const decl of item.decls) {
@@ -185,7 +194,10 @@ export class LibraryMentions {
     }
   }
 
-  private readonly addImported(own: Set<string>, decl: ImportDecl): void {
+  private readonly addImported(
+    own: Set<string>,
+    decl: Read<ImportDecl>,
+  ): void {
     for (const name of decl.names) {
       own.add(name.as);
     }

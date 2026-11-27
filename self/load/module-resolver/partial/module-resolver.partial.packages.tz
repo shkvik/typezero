@@ -38,7 +38,7 @@ partial class ModuleResolver {
       return this.problem(Code.PackageNpm, kNoDetails);
     }
 
-    const owner = this.packages.packageAt(home);
+    const owner = this.packages[home];
     if (owner == undefined) {
       return this.problem(Code.PackageWithoutManifest, { word: spec });
     }
@@ -54,21 +54,14 @@ partial class ModuleResolver {
       return { kind: ResolutionKind.Package };
     }
 
-    const target = owner.aliases.get(specifier.name);
-    const found = this.packageTarget(target);
-    if (target == undefined || found == undefined) {
+    const at = owner.aliasNames.indexOf(specifier.name);
+    const target = owner.aliasTargets[at] ?? -1;
+    const found = this.packages[target];
+    if (found == undefined) {
       return this.notDependency(specifier.name, owner, home);
     }
 
     return this.packageFile(spec, specifier, target, found);
-  }
-
-  private readonly packageTarget(target: int | undefined): PackageInfo | undefined {
-    if (target == undefined) {
-      return undefined;
-    }
-
-    return this.packages.packageAt(target);
   }
 
   private readonly jsrImport(spec: string): Resolution {
@@ -121,7 +114,9 @@ partial class ModuleResolver {
     return text.slice(end);
   }
 
-  private readonly packageSpecifier(spec: string): PackageSpecifier | undefined {
+  private readonly packageSpecifier(
+    spec: string,
+  ): PackageSpecifier | undefined {
     const slash = spec.indexOf(kPathSeparator);
     if (spec.startsWith(kScopeMark) && slash < 0) {
       return undefined;
@@ -283,7 +278,11 @@ partial class ModuleResolver {
     return this.packageMissing(spec, found, candidates);
   }
 
-  private readonly packageModule(spec: string, target: int, file: string): Resolution {
+  private readonly packageModule(
+    spec: string,
+    target: int,
+    file: string,
+  ): Resolution {
     const extension = extname(file);
     const isKnown =
       extension == kSourceExtension || extension == kJsonExtension;

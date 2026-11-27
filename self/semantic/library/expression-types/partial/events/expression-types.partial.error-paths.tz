@@ -27,9 +27,11 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): void {
+    const tree = this.types.program.tree;
+
     const fn = this.openFunctions[this.openFunctions.length - 1];
-    const name = expr.args[0]?.expr;
-    const object = member.object;
+    const name = tree.exprAt(tree.argumentsOf(expr.argsList)[0]?.exprId);
+    const object = tree.exprOf(member.objectId);
     const isRemoving =
       member.name == kOffName || member.name == kRemoveListenerName;
     if (fn == undefined || name == undefined || isRemoving) {
@@ -59,11 +61,15 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return events.fields.some((field) => field.name == kErrorEvent);
+    return this.types.store
+      .fieldsOf(events)
+      .some((field) => field.name == kErrorEvent);
   }
 
   private errorPathsCheck(fn: FunctionDecl, module: int): void {
-    const pending = this.eventMarks.errorPending.filter((one) => one.fn == fn);
+    const pending = this.eventMarks.errorPending.filter(
+      (one) => one.fn.id == fn.id,
+    );
     const reported = new Set<string>();
 
     for (const one of pending) {
@@ -73,7 +79,7 @@ partial class ExpressionTypes {
       }
 
       reported.add(one.key);
-      this.report(module, one.loc, Code.EventErrorPaths, {
+      this.errors.write(module, one.loc, Code.EventErrorPaths, {
         word: `'${one.name}'`,
         first: one.name,
       });
@@ -85,7 +91,9 @@ partial class ExpressionTypes {
     key: string,
     module: int,
   ): boolean {
-    const body = fn.body?.body ?? [];
+    const tree = this.types.program.tree;
+
+    const body = tree.stmtsOf(tree.blockAt(fn.bodyId)?.bodyList) ?? [];
 
     return body.some((statement) =>
       this.isErrorListening(statement, key, module),
@@ -93,23 +101,25 @@ partial class ExpressionTypes {
   }
 
   private isErrorListening(statement: Stmt, key: string, module: int): boolean {
+    const tree = this.types.program.tree;
+
     if (statement.kind != StmtKind.Expr) {
       return false;
     }
 
-    const call = statement.expr;
+    const call = tree.exprOf(statement.exprId);
     if (call.kind != ExprKind.Call) {
       return false;
     }
 
-    const member = call.callee;
+    const member = tree.exprOf(call.calleeId);
     if (member.kind != ExprKind.Member) {
       return false;
     }
 
-    const name = call.args[0]?.expr;
+    const name = tree.exprAt(tree.argumentsOf(call.argsList)[0]?.exprId);
     const isListening =
-      this.events.isListenerMethod(member.name) &&
+      this.types.isListenerMethod(member.name) &&
       member.name != kOffName &&
       member.name != kRemoveListenerName;
     if (!isListening || name == undefined) {
@@ -118,6 +128,8 @@ partial class ExpressionTypes {
 
     const isError = this.constantKey(name, module) == kErrorEvent;
 
-    return isError && this.emitterKey(member.object, module) == key;
+    return (
+      isError && this.emitterKey(tree.exprOf(member.objectId), module) == key
+    );
   }
 }

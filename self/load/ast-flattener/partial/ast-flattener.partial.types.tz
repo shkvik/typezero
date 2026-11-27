@@ -1,0 +1,174 @@
+import { AstFlattener } from "../ast-flattener.tz";
+import {
+  FunctionTypeForm,
+  FunctionTypeParam,
+  ObjectTypeField,
+  ObjectTypeForm,
+  TemplateTypeForm,
+  TupleElement,
+  TupleTypeForm,
+  TypeForm,
+  TypeOfTypeForm,
+  TypeParamDecl,
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import {
+  FunctionTypeForm as SyntaxFunctionTypeForm,
+  FunctionTypeParam as SyntaxFunctionTypeParam,
+  ObjectTypeField as SyntaxObjectTypeField,
+  ObjectTypeForm as SyntaxObjectTypeForm,
+  TemplateTypeForm as SyntaxTemplateTypeForm,
+  TupleElement as SyntaxTupleElement,
+  TupleTypeForm as SyntaxTupleTypeForm,
+  TypeForm as SyntaxTypeForm,
+  TypeOfTypeForm as SyntaxTypeOfTypeForm,
+  TypeParamDecl as SyntaxTypeParamDecl,
+  TypeRef as SyntaxTypeRef,
+} from "../../../program/syntax/types/syntax.types.types.tz";
+
+partial class AstFlattener {
+  private functionTypeParam(
+    node: Read<SyntaxFunctionTypeParam>,
+  ): FunctionTypeParam {
+    const typeId = this.typeRef(node.type);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      optional: node.optional,
+      typeId,
+    };
+  }
+
+  private functionTypeForm(
+    node: Read<SyntaxFunctionTypeForm>,
+  ): FunctionTypeForm {
+    const paramsList = this.functionTypeParamList(node.params);
+    const resultId = this.typeRefAt(node.result);
+
+    return {
+      kind: node.kind,
+      paramsList,
+      rest: node.rest,
+      resultId,
+    };
+  }
+
+  private objectTypeField(node: Read<SyntaxObjectTypeField>): ObjectTypeField {
+    const typeParamsList = this.typeParamDeclList(node.typeParams);
+    const typeId = this.typeRef(node.type);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      optional: node.optional,
+      readonly: node.readonly,
+      method: node.method,
+      call: node.call,
+      typeParamsList,
+      typeId,
+    };
+  }
+
+  private objectTypeForm(node: Read<SyntaxObjectTypeForm>): ObjectTypeForm {
+    const fieldsList = this.objectTypeFieldList(node.fields);
+
+    return { kind: node.kind, fieldsList };
+  }
+
+  private tupleElement(node: Read<SyntaxTupleElement>): TupleElement {
+    const typeId = this.typeRef(node.type);
+
+    return { typeId, spread: node.spread };
+  }
+
+  private tupleTypeForm(node: Read<SyntaxTupleTypeForm>): TupleTypeForm {
+    const elementsList = this.tupleElementList(node.elements);
+
+    return {
+      kind: node.kind,
+      elementsList,
+      readonly: node.readonly,
+    };
+  }
+
+  private typeOfTypeForm(node: Read<SyntaxTypeOfTypeForm>): TypeOfTypeForm {
+    const namesList = this.textList(node.names);
+
+    return { kind: node.kind, namesList };
+  }
+
+  private templateTypeForm(
+    node: Read<SyntaxTemplateTypeForm>,
+  ): TemplateTypeForm {
+    const textsList = this.textList(node.texts);
+
+    return { kind: node.kind, textsList };
+  }
+
+  private typeForm(node: Read<SyntaxTypeForm>): TypeForm {
+    switch (node.kind) {
+      case TypeRefKind.Name:
+      case TypeRefKind.Union:
+      case TypeRefKind.Generic:
+      case TypeRefKind.KeyOf:
+      case TypeRefKind.Indexed:
+      case TypeRefKind.Conditional:
+      case TypeRefKind.Infer:
+      case TypeRefKind.Intersection:
+      case TypeRefKind.Invalid:
+        return node;
+      case TypeRefKind.Array:
+        return node;
+      case TypeRefKind.Function:
+        return this.functionTypeForm(node);
+      case TypeRefKind.Object:
+        return this.objectTypeForm(node);
+      case TypeRefKind.Tuple:
+        return this.tupleTypeForm(node);
+      case TypeRefKind.Literal:
+        return node;
+      case TypeRefKind.Predicate:
+        return node;
+      case TypeRefKind.TypeOf:
+        return this.typeOfTypeForm(node);
+      case TypeRefKind.Mapped:
+        return node;
+      case TypeRefKind.Template:
+        return this.templateTypeForm(node);
+    }
+
+    return { kind: TypeRefKind.Invalid };
+  }
+
+  private typeRef(node: Read<SyntaxTypeRef>): int {
+    const formFlat = this.typeForm(node.form);
+    const argsList = this.typeRefList(node.args);
+    const id = this.typeRefs.length;
+    const record: TypeRef = {
+      id,
+      form: formFlat,
+      name: node.name,
+      loc: node.loc,
+      argsList,
+      source: node.source,
+    };
+
+    this.typeRefs.push(record);
+
+    return id;
+  }
+
+  private typeParamDecl(node: Read<SyntaxTypeParamDecl>): TypeParamDecl {
+    const constraintId = this.typeRefAt(node.constraint);
+    const defaultTypeId = this.typeRefAt(node.defaultType);
+
+    return {
+      name: node.name,
+      loc: node.loc,
+      constraintId,
+      defaultTypeId,
+    };
+  }
+}

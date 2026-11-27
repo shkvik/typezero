@@ -1,0 +1,216 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypePlace } from "../types/file-parser.types.context.tz";
+import {
+  kBooleanTypeName,
+  kNumberTypeName,
+  kStringTypeName,
+} from "../../../../program/ast/const/ast.const.tz";
+import { kExactDoubleLimit } from "../const/file-parser.const.types.tz";
+import {
+  TemplateTypeForm,
+  TypeRef,
+} from "../../../../program/syntax/types/syntax.types.types.tz";
+
+partial class FileParser {
+  private stringLiteralType(): TypeRef {
+    const token = this.cursor.next();
+    const text = this.stringText(token);
+    const ref = this.typeRef(token.start);
+
+    ref.form = {
+      kind: TypeRefKind.Literal,
+      text,
+      number: 0.0,
+      integer: false,
+      beyondDouble: false,
+    };
+    ref.name = kStringTypeName;
+
+    return ref;
+  }
+
+  private booleanLiteralType(): TypeRef {
+    const token = this.cursor.next();
+    const truth = this.truthNumber(token.kind);
+    const ref = this.typeRef(token.start);
+
+    ref.form = {
+      kind: TypeRefKind.Literal,
+      text: "",
+      number: truth,
+      integer: false,
+      beyondDouble: false,
+    };
+    ref.name = kBooleanTypeName;
+
+    return ref;
+  }
+
+  private inferType(): TypeRef {
+    const keyword = this.cursor.peek();
+    const ref = this.typeRef(keyword.start);
+    ref.form = { kind: TypeRefKind.Infer };
+
+    this.cursor.next();
+    const variable = this.cursor.next();
+    ref.name = variable.text;
+
+    if (!this.cursor.is(TokenKind.Extends)) {
+      return ref;
+    }
+
+    const start = this.cursor.mark();
+    this.cursor.next();
+    const constraint = this.type(TypePlace.ExtendsClause);
+
+    const extendsClause = this.context.typePlace == TypePlace.ExtendsClause;
+    if (extendsClause || !this.cursor.is(TokenKind.Question)) {
+      ref.args.push(constraint);
+    } else {
+      this.cursor.reset(start);
+    }
+
+    return ref;
+  }
+
+  private templateType(): TypeRef {
+    const token = this.cursor.peek();
+    const ref = this.typeRef(token.start);
+    const first = this.templatePartText(token);
+
+    this.cursor.next();
+
+    if (token.kind == TokenKind.TemplateString) {
+      ref.form = {
+        kind: TypeRefKind.Literal,
+        text: first,
+        number: 0.0,
+        integer: false,
+        beyondDouble: false,
+      };
+      ref.name = kStringTypeName;
+
+      return ref;
+    }
+
+    const texts: string[] = [first];
+
+    let piece = token;
+    while (
+      piece.kind == TokenKind.TemplateHead ||
+      piece.kind == TokenKind.TemplateMiddle
+    ) {
+      const part = this.type();
+      ref.args.push(part);
+
+      const middle = this.cursor.peek();
+      if (
+        middle.kind != TokenKind.TemplateMiddle &&
+        middle.kind != TokenKind.TemplateTail
+      ) {
+        this.cursor.error(middle.start, Code.ExpectedTemplateTypeClose);
+
+        return this.invalidType(token.start);
+      }
+
+      const text = this.templatePartText(middle);
+      texts.push(text);
+      piece = this.cursor.next();
+    }
+
+    const parts: TemplateTypeForm = { kind: TypeRefKind.Template, texts };
+
+    ref.form = parts;
+
+    return ref;
+  }
+
+  private numberType(): TypeRef {
+    const first = this.cursor.peek();
+    const ref = this.typeRef(first.start);
+    const negative = this.cursor.accept(TokenKind.Minus);
+    const literal = this.numberLiteral();
+
+    let number = 0.0;
+    let integer = false;
+    let beyondDouble = false;
+
+    if (literal.kind == ExprKind.IntLit) {
+      number = this.integerAsDouble(literal.value);
+      integer = true;
+    }
+    if (literal.kind == ExprKind.FloatLit) {
+      number = literal.value;
+      beyondDouble = literal.beyondDouble;
+    }
+    if (negative) {
+      number = -number;
+    }
+
+    ref.form = {
+      kind: TypeRefKind.Literal,
+      text: "",
+      number,
+      integer,
+      beyondDouble,
+    };
+    ref.name = kNumberTypeName;
+
+    return ref;
+  }
+
+  private typeOfType(): TypeRef {
+    const keyword = this.cursor.peek();
+    const ref = this.typeRef(keyword.start);
+    const names: string[] = [];
+
+    this.cursor.next();
+
+    if (!this.cursor.atNameOrThis()) {
+      const token = this.cursor.peek();
+      this.cursor.error(token.start, Code.ExpectedTypeofName, {
+        found: token.kind,
+      });
+      ref.form = { kind: TypeRefKind.TypeOf, names };
+
+      return ref;
+    }
+
+    const first = this.cursor.next();
+    names.push(first.text);
+
+    while (this.qualifiedPartAhead()) {
+      this.cursor.next();
+      const part = this.cursor.next();
+      names.push(part.text);
+    }
+
+    ref.form = { kind: TypeRefKind.TypeOf, names };
+
+    return ref;
+  }
+
+  private readonly integerAsDouble(whole: uint64): double {
+    if (whole <= kExactDoubleLimit) {
+      return whole.toDouble();
+    }
+    const text = `${whole}`;
+    const parsed = Number(text);
+
+    return parsed.unwrapOr(0.0);
+  }
+
+  private readonly truthNumber(kind: TokenKind): double {
+    if (kind == TokenKind.True) {
+      return 1.0;
+    }
+
+    return 0.0;
+  }
+}

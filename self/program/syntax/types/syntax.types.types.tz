@@ -1,0 +1,84 @@
+import { Span } from "../../ast/types/ast.types.span.tz";
+import {
+  ArrayTypeForm,
+  LiteralTypeForm,
+  MappedTypeForm,
+  PlainTypeForm,
+  PredicateTypeForm,
+  TypeRefKind,
+} from "../../ast/types/ast.types.types.tz";
+
+export type FunctionTypeParam = {
+  readonly name: string;
+  readonly loc: int;
+  readonly optional: boolean;
+  readonly type: TypeRef;
+};
+
+export type FunctionTypeForm = {
+  readonly kind: TypeRefKind.Function;
+  readonly params: readonly FunctionTypeParam[];
+  readonly rest: boolean;
+  readonly result?: TypeRef;
+};
+
+export type ObjectTypeField = {
+  readonly name: string;
+  readonly loc: int;
+  readonly optional: boolean;
+  readonly readonly: boolean;
+  readonly method: boolean;
+  readonly call: boolean;
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly type: TypeRef;
+};
+
+export type ObjectTypeForm = {
+  readonly kind: TypeRefKind.Object;
+  readonly fields: readonly ObjectTypeField[];
+};
+
+export type TupleElement = { readonly type: TypeRef; readonly spread: boolean };
+
+export type TupleTypeForm = {
+  readonly kind: TypeRefKind.Tuple;
+  readonly elements: readonly TupleElement[];
+  readonly readonly: boolean;
+};
+
+export type TypeOfTypeForm = {
+  readonly kind: TypeRefKind.TypeOf;
+  readonly names: readonly string[];
+};
+
+export type TemplateTypeForm = {
+  readonly kind: TypeRefKind.Template;
+  readonly texts: readonly string[];
+};
+
+export type TypeForm =
+  | PlainTypeForm
+  | ArrayTypeForm
+  | FunctionTypeForm
+  | ObjectTypeForm
+  | TupleTypeForm
+  | LiteralTypeForm
+  | PredicateTypeForm
+  | TypeOfTypeForm
+  | MappedTypeForm
+  | TemplateTypeForm;
+
+export type TypeRef = {
+  readonly form: TypeForm;
+  readonly name: string;
+  readonly loc: int;
+  readonly args: readonly TypeRef[];
+  readonly source?: Span;
+};
+
+export type TypeParamDecl = {
+  readonly name: string;
+  readonly loc: int;
+  readonly constraint?: TypeRef;
+  readonly defaultType?: TypeRef;
+};

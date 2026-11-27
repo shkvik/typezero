@@ -1,0 +1,30 @@
+import {
+  ExportForm,
+  ModuleName,
+  ModulePath,
+  WholeImport,
+} from "../../ast/types/ast.types.modules.tz";
+import { Stmt } from "./syntax.types.statements.tz";
+
+export type ImportDecl = {
+  readonly loc: int;
+  readonly names: readonly ModuleName[];
+  readonly from: ModulePath;
+  readonly whole?: WholeImport;
+  readonly isPartList: boolean;
+};
+
+export type ExportDecl = {
+  readonly loc: int;
+  readonly form: ExportForm;
+  readonly names: readonly ModuleName[];
+  readonly from?: ModulePath;
+};
+
+export type SourceFile = {
+  readonly items: readonly Stmt[];
+  readonly imports: readonly ImportDecl[];
+  readonly exports: readonly ExportDecl[];
+  readonly fieldNames: Set<string>;
+  readonly stringConstants: Map<string, string[]>;
+};

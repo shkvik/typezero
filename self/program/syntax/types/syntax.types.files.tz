@@ -1,0 +1,16 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { SourceText } from "../../module/types/module.types.tz";
+import { DeclarationFile } from "./syntax.types.declarations.tz";
+import { SourceFile } from "./syntax.types.modules.tz";
+
+export type ParsedFile = {
+  readonly source: SourceText;
+  readonly file: SourceFile;
+  readonly errors: readonly SourceError[];
+};
+
+export type ParsedDeclaration = {
+  readonly source: SourceText;
+  readonly file: DeclarationFile;
+  readonly errors: readonly SourceError[];
+};

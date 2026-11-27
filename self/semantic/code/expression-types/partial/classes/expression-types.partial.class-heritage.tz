@@ -36,21 +36,26 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly superFrameOf(
+  private superFrameOf(
     decl: ClassDecl,
     fn: FunctionDecl,
     module: int,
   ): SuperFrame {
-    const roots = new Set<Expr>();
+    const tree = this.types.program.tree;
+
+    const roots = new Set<int>();
     const parent = this.parentClassName(decl, module);
     const isMaker = fn.role?.method == MethodKind.Constructor;
-    const isDerived = decl.base != undefined || decl.baseExpr != undefined;
+    const isDerived =
+      tree.typeRefAt(decl.baseId) != undefined ||
+      tree.exprAt(decl.baseExprId) != undefined;
     const isConstructor = isMaker && isDerived;
 
-    for (const statement of fn.body?.body ?? []) {
+    for (const statement of tree.stmtsOf(tree.blockAt(fn.bodyId)?.bodyList) ??
+      []) {
       const call = this.rootSuperOf(statement, module);
       if (call != undefined && isConstructor) {
-        roots.add(call);
+        roots.add(call.id);
       }
     }
 
@@ -58,38 +63,47 @@ partial class ExpressionTypes {
   }
 
   private readonly rootSuperOf(statement: Stmt, module: int): Expr | undefined {
+    const tree = this.types.program.tree;
+
     if (statement.kind != StmtKind.Expr) {
       return undefined;
     }
 
-    const expr = statement.expr;
+    const expr = tree.exprOf(statement.exprId);
     if (expr.kind != ExprKind.Call) {
       return undefined;
     }
-    if (!this.isSuperName(expr.callee, module)) {
+    const callee = tree.exprOf(expr.calleeId);
+    if (!this.isSuperName(callee, module)) {
       return undefined;
     }
 
     return expr;
   }
 
-  private readonly parentClassName(decl: ClassDecl, module: int): string | undefined {
-    if (decl.base == undefined) {
+  private parentClassName(decl: ClassDecl, module: int): string | undefined {
+    const tree = this.types.program.tree;
+
+    const base = tree.typeRefAt(decl.baseId);
+    if (base == undefined) {
       return undefined;
     }
 
-    const params = this.resolver.parameterTypes(module, decl.typeParams);
-    const instance = this.resolver.classInstance(module, decl, params);
+    const params = this.types.parameterTypes(
+      module,
+      tree.typeParamsOf(decl.typeParamsList),
+    );
+    const instance = this.types.classInstance(module, decl, params);
     if (instance.kind != TypeKind.Instance) {
       return undefined;
     }
 
-    const parent = this.classes.parentOf(instance, decl);
+    const parent = this.types.parentOf(instance, decl);
 
     return parent?.name;
   }
 
-  private readonly superCheck(decl: ClassDecl, fn: FunctionDecl, module: int): void {
+  private superCheck(decl: ClassDecl, fn: FunctionDecl, module: int): void {
     const frame = this.superFrames[this.superFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || frame.roots.size > 0) {
       return;
@@ -101,26 +115,28 @@ partial class ExpressionTypes {
     const first = decl.name ?? "";
     const word = frame.parent;
 
-    this.report(module, fn.loc, Code.MustCallSuper, { word, first });
+    this.errors.write(module, fn.loc, Code.MustCallSuper, { word, first });
   }
 
   private superCallTyped(expr: CallExpr, callee: Expr, module: int): Type {
     const frame = this.superFrames[this.superFrames.length - 1];
-    const nothing = this.store.plain(TypeKind.Void);
+    const nothing = this.types.store.plain(TypeKind.Void);
     const place = this.thisPlaces[this.thisPlaces.length - 1];
     const isInside = frame != undefined && place != ThisPlace.Function;
     if (frame == undefined || !frame.isConstructor || !isInside) {
-      this.report(module, callee.loc, Code.SuperOutside, kNoDetails);
+      this.errors.write(module, callee.loc, Code.SuperOutside, kNoDetails);
 
       return nothing;
     }
-    if (!frame.roots.has(expr)) {
-      this.report(module, callee.loc, Code.SuperNotStatement, kNoDetails);
+    if (!frame.roots.has(expr.id)) {
+      this.errors.write(module, callee.loc, Code.SuperNotStatement, kNoDetails);
 
       return nothing;
     }
     if (!frame.isBefore && frame.parent != "") {
-      this.report(module, callee.loc, Code.SuperTwice, { word: frame.parent });
+      this.errors.write(module, callee.loc, Code.SuperTwice, {
+        word: frame.parent,
+      });
     }
 
     frame.isBefore = false;
@@ -131,32 +147,46 @@ partial class ExpressionTypes {
   }
 
   private superArgumentsCheck(expr: CallExpr, module: int): void {
+    const tree = this.types.program.tree;
+
     const target = this.parentConstructor(expr.loc);
     if (target == undefined) {
-      for (const arg of expr.args) {
-        this.listenerLoose(arg.expr, module);
+      for (const arg of tree.argumentsOf(expr.argsList)) {
+        const exprExpr = tree.exprOf(arg.exprId);
+
+        this.listenerLoose(exprExpr, module);
       }
 
       return;
     }
 
-    this.argumentsCheck(expr.args, target, module);
+    this.argumentsCheck(
+      expr.argsList,
+      tree.argumentsOf(expr.argsList),
+      target,
+      module,
+    );
   }
 
-  private readonly parentConstructor(loc: int): CallTarget | undefined {
+  private parentConstructor(loc: int): CallTarget | undefined {
+    const tree = this.types.program.tree;
+
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
     if (owner == undefined) {
       return undefined;
     }
 
     const decl = owner.decl;
-    const params = this.resolver.parameterTypes(owner.module, decl.typeParams);
-    const self = this.resolver.classInstance(owner.module, decl, params);
+    const params = this.types.parameterTypes(
+      owner.module,
+      tree.typeParamsOf(decl.typeParamsList),
+    );
+    const self = this.types.classInstance(owner.module, decl, params);
     if (self.kind != TypeKind.Instance) {
       return undefined;
     }
 
-    const parent = this.classes.parentOf(self, decl);
+    const parent = this.types.parentOf(self, decl);
     const parentDecl = this.parentDeclOf(parent);
     if (parent == undefined || parentDecl == undefined) {
       return undefined;
@@ -176,7 +206,7 @@ partial class ExpressionTypes {
     return this.constructorTarget(maker, chosen, loc);
   }
 
-  private readonly thisBeforeSuper(expr: NameExpr, module: int): void {
+  private thisBeforeSuper(expr: NameExpr, module: int): void {
     const frame = this.superFrames[this.superFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || !frame.isBefore) {
       return;
@@ -185,39 +215,45 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.report(module, expr.loc, Code.ThisBeforeSuper, {
+    this.errors.write(module, expr.loc, Code.ThisBeforeSuper, {
       word: frame.parent,
     });
   }
 
-  private readonly returnBeforeSuper(loc: int, module: int): void {
+  private returnBeforeSuper(loc: int, module: int): void {
     const frame = this.superFrames[this.superFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || !frame.isBefore) {
       return;
     }
 
-    this.report(module, loc, Code.ReturnBeforeSuper, kNoDetails);
+    this.errors.write(module, loc, Code.ReturnBeforeSuper, kNoDetails);
   }
 
   private overrideChecks(decl: ClassDecl, module: int): void {
-    if (decl.base == undefined) {
+    const tree = this.types.program.tree;
+
+    const base = tree.typeRefAt(decl.baseId);
+    if (base == undefined) {
       return;
     }
 
-    const isOpen = decl.typeParams.length > 0;
-    const params = this.resolver.parameterTypes(module, decl.typeParams);
-    const instance = this.resolver.classInstance(module, decl, params);
+    const isOpen = tree.typeParamsOf(decl.typeParamsList).length > 0;
+    const params = this.types.parameterTypes(
+      module,
+      tree.typeParamsOf(decl.typeParamsList),
+    );
+    const instance = this.types.classInstance(module, decl, params);
     if (instance.kind != TypeKind.Instance) {
       return;
     }
 
-    const parent = this.classes.parentOf(instance, decl);
+    const parent = this.types.parentOf(instance, decl);
     if (parent == undefined || this.classOf(parent) == undefined) {
       return;
     }
 
-    for (const method of decl.methods) {
-      if (!this.classes.isStaticMethod(method)) {
+    for (const method of tree.functionsOf(decl.methodsList)) {
+      if (!this.types.isStaticMethod(method)) {
         this.overrideCheck(method, decl, parent, isOpen, module);
       }
     }
@@ -244,7 +280,7 @@ partial class ExpressionTypes {
       }
     }
     if (entry == undefined && isMarked) {
-      this.report(module, method.loc, Code.OverrideMissing, {
+      this.errors.write(module, method.loc, Code.OverrideMissing, {
         word,
         first: parent.name,
       });
@@ -267,14 +303,14 @@ partial class ExpressionTypes {
       return;
     }
     const isSame =
-      this.classes.isSameParameters(ownType, theirType) ||
+      this.types.isSameParameters(ownType, theirType) ||
       this.isLibraryHookPrefix(ownType, theirType, entry.instance.module);
     if (!isSame) {
       this.streamHookCheck(method, decl, parent, module);
       if (isMarked) {
-        const other = this.classes.variantText(theirs, theirType);
+        const other = this.types.variantText(theirs, theirType);
 
-        this.report(module, method.loc, Code.OverrideParameters, {
+        this.errors.write(module, method.loc, Code.OverrideParameters, {
           word,
           first: parent.name,
           other,
@@ -284,7 +320,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const overrideResultError = this.overrides.overrideResultCheck(
+    const overrideResultError = this.types.overrideResultCheck(
       method,
       decl,
       ownType,
@@ -292,14 +328,14 @@ partial class ExpressionTypes {
       parent,
     );
 
-    this.reportFound(module, overrideResultError);
-    const overrideAccessError = this.overrides.overrideAccessCheck(
+    this.errors.writeFound(module, overrideResultError);
+    const overrideAccessError = this.types.overrideAccessCheck(
       method,
       theirs,
       parent,
     );
 
-    this.reportFound(module, overrideAccessError);
+    this.errors.writeFound(module, overrideAccessError);
   }
 
   private ownMethodType(
@@ -316,22 +352,29 @@ partial class ExpressionTypes {
   }
 
   private inheritedResult(fn: FunctionDecl, module: int): Type | undefined {
+    const tree = this.types.program.tree;
+
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
-    const isMethod = fn.role != undefined && !this.classes.isStaticMethod(fn);
-    if (owner == undefined || !isMethod || owner.decl.typeParams.length > 0) {
+    const isMethod = fn.role != undefined && !this.types.isStaticMethod(fn);
+    if (
+      owner == undefined ||
+      !isMethod ||
+      tree.typeParamsOf(owner.decl.typeParamsList).length > 0
+    ) {
       return undefined;
     }
 
     const decl = owner.decl;
-    const instance = this.resolver.classInstance(owner.module, decl, []);
+    const instance = this.types.classInstance(owner.module, decl, []);
     if (instance.kind != TypeKind.Instance) {
       return undefined;
     }
-    if (decl.base == undefined) {
+    const base = tree.typeRefAt(decl.baseId);
+    if (base == undefined) {
       return this.contractResultOf(decl, fn, owner.module);
     }
 
-    const parent = this.classes.parentOf(instance, decl);
+    const parent = this.types.parentOf(instance, decl);
     if (parent == undefined) {
       return this.contractResultOf(decl, fn, owner.module);
     }
@@ -341,7 +384,10 @@ partial class ExpressionTypes {
     if (entry == undefined || theirs == undefined) {
       return undefined;
     }
-    if (theirs.params.length != fn.params.length) {
+    if (
+      tree.paramsOf(theirs.paramsList).length !=
+      tree.paramsOf(fn.paramsList).length
+    ) {
       return undefined;
     }
 
@@ -350,7 +396,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const result = type.shape.result;
+    const result = this.types.store.returnTypeOf(type);
     if (result.kind == TypeKind.Error) {
       return undefined;
     }
@@ -358,27 +404,31 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private readonly contractResultOf(
+  private contractResultOf(
     decl: ClassDecl,
     fn: FunctionDecl,
     module: int,
   ): Type | undefined {
+    const tree = this.types.program.tree;
+
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
       place: TypePlace.Base,
     };
 
-    for (const ref of decl.interfaces) {
-      const type = this.resolver.resolve(ref, context);
+    for (const ref of tree.typeRefsOf(decl.interfacesList)) {
+      const type = this.types.resolve(ref, context);
       if (type.kind != TypeKind.Object) {
         continue;
       }
 
-      const same = type.fields.filter((one) => one.name == fn.name);
+      const same = this.types.store
+        .fieldsOf(type)
+        .filter((one) => one.name == fn.name);
       const field = same[0];
       if (field != undefined && same.length == 1) {
-        return this.overrides.contractFieldResult(field.type);
+        return this.types.contractFieldResult(field.type);
       }
     }
 
@@ -390,30 +440,33 @@ partial class ExpressionTypes {
     fn: FunctionDecl,
   ): ClassMemberEntry | undefined {
     const lookup = this.classMember(parent, fn.name);
-    const entry = lookup.entry;
-    if (entry == undefined || entry.methods.length != 1) {
+    if (lookup.entry == undefined || lookup.entry.methods.length != 1) {
       return undefined;
     }
 
-    return entry;
+    return lookup.entry;
   }
 
-  private readonly isLibraryHookPrefix(own: Type, theirs: Type, home: int): boolean {
+  private readonly isLibraryHookPrefix(
+    own: Type,
+    theirs: Type,
+    home: int,
+  ): boolean {
     const isFunctions =
       own.kind == TypeKind.Function && theirs.kind == TypeKind.Function;
-    if (!isFunctions || !this.modules.isTypedLibrary(home)) {
+    if (!isFunctions || !this.types.isTypedLibrary(home)) {
       return false;
     }
     if (own.kind != TypeKind.Function || theirs.kind != TypeKind.Function) {
       return false;
     }
 
-    const mine = own.shape.params;
-    const wider = theirs.shape.params;
+    const mine = this.types.store.paramsOf(own);
+    const wider = this.types.store.paramsOf(theirs);
 
     return (
       mine.length < wider.length &&
-      mine.every((param, index) => param.type == wider[index]?.type)
+      mine.every((param, index) => param.type.id == wider[index]?.type.id)
     );
   }
 
@@ -423,6 +476,8 @@ partial class ExpressionTypes {
     expr: MemberExpr,
     module: int,
   ): boolean {
+    const tree = this.types.program.tree;
+
     const current = this.ownerClasses[this.ownerClasses.length - 1];
     const isOwnInside = this.isInsideClass(owner);
     if (access != Access.Protected || current == undefined || isOwnInside) {
@@ -432,7 +487,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const object = expr.object;
+    const object = tree.exprOf(expr.objectId);
     const isSelf =
       this.isThisName(object, module) || this.isSuperName(object, module);
     if (isSelf) {
@@ -458,7 +513,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.report(module, expr.loc, Code.ProtectedElsewhere, {
+    this.errors.write(module, expr.loc, Code.ProtectedElsewhere, {
       word: expr.name,
       first: owner.name ?? "",
       second: current.decl.name ?? "",

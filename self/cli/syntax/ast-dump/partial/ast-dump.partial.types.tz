@@ -3,8 +3,8 @@ import {
   FunctionTypeForm,
   ModifierChange,
   ObjectTypeField,
-  TypeRefKind,
   TypeRef,
+  TypeRefKind,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { Quoting } from "../types/ast-dump.types.tz";
 
@@ -28,8 +28,12 @@ partial class Dumper {
 
     switch (form.kind) {
       case TypeRefKind.Function: {
-        const paramNames = form.params.map((param) => param.name);
-        const optionalParams = form.params.map((param) => param.optional);
+        const paramNames = this.tree
+          .functionTypeParamsOf(form.paramsList)
+          .map((param) => param.name);
+        const optionalParams = this.tree
+          .functionTypeParamsOf(form.paramsList)
+          .map((param) => param.optional);
         const names = this.quoteAll(paramNames);
         const optional = this.flags(optionalParams);
         const rest = this.flag(form.rest);
@@ -37,10 +41,16 @@ partial class Dumper {
         return ` names=${names} opt=${optional} rest=${rest}`;
       }
       case TypeRefKind.Object:
-        return this.objectExtras(form.fields);
+        const fields = this.tree.objectFieldsOf(form.fieldsList);
+
+        return this.objectExtras(fields);
       case TypeRefKind.Tuple: {
-        const readonlyElements = form.elements.map(() => form.readonly);
-        const spreadElements = form.elements.map((element) => element.spread);
+        const readonlyElements = this.tree
+          .tupleElementsOf(form.elementsList)
+          .map(() => form.readonly);
+        const spreadElements = this.tree
+          .tupleElementsOf(form.elementsList)
+          .map((element) => element.spread);
         const readonlyFlags = this.flags(readonlyElements);
         const spread = this.flags(spreadElements);
 
@@ -63,7 +73,8 @@ partial class Dumper {
         return ` asserts=${isAsserts}`;
       }
       case TypeRefKind.TypeOf: {
-        const names = this.quoteAll(form.names);
+        const namesItem = this.tree.textsOf(form.namesList);
+        const names = this.quoteAll(namesItem);
 
         return ` names=${names}`;
       }
@@ -76,7 +87,7 @@ partial class Dumper {
       case TypeRefKind.Template: {
         const parts: string[] = [];
 
-        for (const text of form.texts) {
+        for (const text of this.tree.textsOf(form.textsList)) {
           const part = this.quote(text, Quoting.EscapeUnicode);
 
           parts.push(part);
@@ -124,7 +135,9 @@ partial class Dumper {
   }
 
   private readonly genericText(fields: Read<ObjectTypeField[]>): string {
-    const counts = fields.map((field) => field.typeParams.length);
+    const counts = fields.map(
+      (field) => this.tree.typeParamsOf(field.typeParamsList).length,
+    );
     if (!counts.some((count) => count > 0)) {
       return "";
     }
@@ -137,19 +150,25 @@ partial class Dumper {
 
     switch (form.kind) {
       case TypeRefKind.Object:
-        return form.fields.map((field) => field.type);
+        return this.tree
+          .objectFieldsOf(form.fieldsList)
+          .map((field) => this.tree.typeRefOf(field.typeId));
       case TypeRefKind.Tuple:
-        return form.elements.map((element) => element.type);
+        return this.tree
+          .tupleElementsOf(form.elementsList)
+          .map((element) => this.tree.typeRefOf(element.typeId));
       case TypeRefKind.Function:
         return this.signatureTypes(form);
       default:
-        return ref.args;
+        return this.tree.typeRefsOf(ref.argsList);
     }
   }
 
   private readonly signatureTypes(form: FunctionTypeForm): TypeRef[] {
-    const types = form.params.map((param) => param.type);
-    const result = form.result;
+    const types = this.tree
+      .functionTypeParamsOf(form.paramsList)
+      .map((param) => this.tree.typeRefOf(param.typeId));
+    const result = this.tree.typeRefAt(form.resultId);
     if (result != undefined) {
       types.push(result);
     }

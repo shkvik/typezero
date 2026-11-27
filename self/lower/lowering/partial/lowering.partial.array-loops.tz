@@ -1,0 +1,205 @@
+import { Expr } from "../../../program/ast/types/ast.types.expressions.tz";
+import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { Lowering } from "../lowering.tz";
+import { kIntType, kPointerType } from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private loopArrayType(iterated: Type | undefined, item: Type): Type {
+    if (
+      iterated != undefined &&
+      this.values.types.store.isLentArray(iterated)
+    ) {
+      return this.values.types.store.lentArrayOf(item);
+    }
+
+    return this.values.types.store.arrayOf(item);
+  }
+
+  private forOfLoop(frame: Frame, statement: ForOfStmt): void {
+    const tree = this.values.types.program.tree;
+
+    const iterableExpr = tree.exprOf(statement.iterableId);
+    const iterated = this.typeIn(frame, iterableExpr);
+    if (iterated != undefined && this.isString(iterated)) {
+      return this.textLoop(frame, statement);
+    }
+
+    const mapLoop = this.mapLoopOf(frame, statement);
+    if (mapLoop != undefined) {
+      return this.mapLoop(frame, statement, mapLoop);
+    }
+
+    const itemType = this.loopItemType(
+      frame,
+      tree.exprOf(statement.iterableId),
+    );
+    const binding = statement.binding;
+    const isPlain = !statement.isAwait && !statement.keys;
+    if (itemType == undefined || !isPlain) {
+      return this.notLowered(frame.module, statement.loc, "this loop");
+    }
+
+    const iterable = this.loopArrayType(iterated, itemType);
+
+    const cond = frame.made.block("for.of.cond");
+    const body = frame.made.block("for.of.body");
+    const end = frame.made.block("for.of.end");
+
+    this.openScope(frame);
+
+    const target = this.loopTarget(frame, end, cond);
+    const source = this.loopSourceValue(
+      frame,
+      tree.exprOf(statement.iterableId),
+    );
+    const element = this.irType(itemType);
+    if (source == undefined || element == undefined) {
+      return;
+    }
+
+    const holder: Place = {
+      pointer: frame.made.slot(kPointerType, "for.iterable"),
+      type: kPointerType,
+      tz: iterable,
+      owner: frame.id,
+      flag: this.dropFlag(frame, true),
+    };
+    const counter = frame.made.slot(kIntType, "for.index");
+    const none = this.ir.zero(kPointerType);
+
+    frame.made.entryStore(none, holder.pointer);
+    this.keepPlace(frame, holder);
+    this.flaggedInitialized(frame, holder, source, source.ownedFlag);
+    frame.made.store(this.ir.zero(kIntType), counter);
+    frame.made.open(cond);
+
+    const array = frame.made.load(kPointerType, holder.pointer);
+    const index = frame.made.load(kIntType, counter);
+    const length = this.arrayLength(frame, array);
+    const isInside = frame.made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      index,
+      length,
+    );
+
+    frame.made.conditionalBranch(isInside, body, end);
+    frame.made.open(body);
+    this.openScope(frame);
+
+    const data = this.arrayData(frame, array);
+    const address = frame.made.element(element, data, index);
+    const item = frame.made.load(element, address);
+    const one = this.ir.integer(kIntType, "1");
+    const next = frame.made.binary(IrOpcode.Add, index, one);
+
+    frame.made.store(next, counter);
+
+    const isTaken = this.isTakenItem(
+      source,
+      tree.exprOf(statement.iterableId),
+      element,
+      itemType,
+    );
+    if (isTaken) {
+      frame.made.store(this.ir.zero(element), address);
+    }
+
+    const looked: IrValue = {
+      type: element,
+      value: item,
+      tz: itemType,
+      owned: isTaken,
+    };
+    const staticItem = this.staticOrSame(looked, source.isStatic == true);
+
+    this.loopItem(frame, statement, staticItem);
+    frame.loops.push(target);
+    const bodyStmt = tree.stmtOf(statement.bodyId);
+
+    this.statement(frame, bodyStmt);
+    frame.loops.pop();
+    this.closeScope(frame);
+    this.jumpTo(frame, cond);
+    frame.made.open(end);
+    this.closeScope(frame);
+  }
+
+  private loopItemType(frame: Frame, expr: Expr): Type | undefined {
+    const tree = this.values.types.program.tree;
+
+    const type = this.typeIn(frame, expr);
+    const listed = this.listedDict(expr);
+    if (listed != undefined) {
+      const objectExpr = tree.exprOf(listed.objectId);
+      const object = this.typeOf(objectExpr);
+      if (object == undefined) {
+        return undefined;
+      }
+
+      return this.dictItemType(object, listed.name == "keys");
+    }
+    if (type == undefined) {
+      return undefined;
+    }
+    if (type.kind == TypeKind.Array) {
+      return this.values.types.store.itemOf(type);
+    }
+    if (type.kind == TypeKind.Dict && type.dict == DictKind.Set) {
+      return this.values.types.store.keyOf(type);
+    }
+    if (type.kind == TypeKind.Dict && type.dict == DictKind.Map) {
+      return this.entryType(type);
+    }
+
+    return undefined;
+  }
+
+  private entryType(map: Type): Type {
+    const key = this.values.types.store.keyOf(map);
+    const value = this.values.types.store.valueOf(map);
+    if (this.isTzMap(map)) {
+      return this.values.types.store.lentTuple([key, value]);
+    }
+
+    return this.values.types.store.plainTuple([key, value]);
+  }
+
+  private loopSource(frame: Frame, expr: Expr): IrValue | undefined {
+    const type = this.typeIn(frame, expr);
+    if (type != undefined && type.kind == TypeKind.Dict) {
+      if (type.dict == DictKind.Map) {
+        return this.dictEntries(frame, expr, type);
+      }
+
+      return this.dictItems(frame, expr, true);
+    }
+
+    return this.sourceItems(frame, expr);
+  }
+
+  private loopItem(frame: Frame, statement: ForOfStmt, item: IrValue): void {
+    const binding = statement.binding;
+    const variable = this.values.variableOf(frame.module, binding.loc);
+    const declared = this.boundOrNone(variable);
+    const isUnknown = declared == undefined || declared.kind == TypeKind.Error;
+    const place = this.boundPlace(frame, binding, item.tz, isUnknown);
+    if (place == undefined) {
+      return;
+    }
+
+    const value = this.converted(frame, item, place.tz, binding.loc);
+    if (value != undefined) {
+      this.initialized(frame, place, value);
+    }
+  }
+}

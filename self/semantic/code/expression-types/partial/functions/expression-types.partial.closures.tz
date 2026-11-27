@@ -28,13 +28,16 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const fn = expr.fn;
-    const isPlain = fn.typeParams.length == 0 && !fn.isGenerator;
-    if (!isPlain || fn.body == undefined) {
-      return this.store.plain(TypeKind.Error);
+    const tree = this.types.program.tree;
+
+    const fn = tree.functionOf(expr.fnId);
+    const isPlain =
+      tree.typeParamsOf(fn.typeParamsList).length == 0 && !fn.isGenerator;
+    if (!isPlain || tree.blockAt(fn.bodyId) == undefined) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const goal = this.functions.contextualFunction(wanted);
+    const goal = this.types.contextualFunction(wanted);
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
@@ -42,17 +45,17 @@ partial class ExpressionTypes {
     };
     const before = this.factsCopy();
     const shape = this.closureShape(fn, goal, context, module);
-    if (this.functions.isParameterClash(shape, goal)) {
-      return this.store.plain(TypeKind.Error);
+    if (this.types.isParameterClash(shape, goal)) {
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const initFrame = this.initClosureFrame();
+    const isInitClosure = this.isInitClosure();
 
-    this.enterInitClosure(initFrame);
+    this.enterInitClosure(isInitClosure);
     this.facts = this.constFacts(before);
 
-    const owner = shape.self ?? this.literalOwners.get(fn);
-    const place = this.functions.functionPlace(fn, owner);
+    const owner = shape.self ?? this.literalOwners.get(fn.id);
+    const place = this.types.functionPlace(fn, owner);
 
     if (place != undefined) {
       this.thisPlaces.push(place);
@@ -66,7 +69,7 @@ partial class ExpressionTypes {
     const result = this.closureResult(fn, goal, context, module);
 
     this.openFunctions.pop();
-    this.classes.leaveInitClosure(initFrame);
+    this.leaveInitClosure(isInitClosure);
 
     if (owner != undefined) {
       this.selves.pop();
@@ -77,17 +80,17 @@ partial class ExpressionTypes {
 
     this.facts = before;
 
-    const params = this.functions.adaptedParams(shape.params, goal);
+    const params = this.types.adaptedParams(shape.params, goal);
     const rest = shape.rest;
-    const self = shape.self ?? goal?.shape.self;
+    const self = shape.self ?? this.types.store.selfTypeOf(goal);
     const isBroken = params.some((param) => param.type.kind == TypeKind.Error);
     if (isBroken) {
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
-    const made = this.store.functionOf({ params, rest, self, result });
+    const made = this.types.store.functionOf({ params, rest, self, result });
 
-    this.closureTypes.set(expr, made);
+    this.closureTypes.set(expr.id, made);
 
     return made;
   }
@@ -95,20 +98,26 @@ partial class ExpressionTypes {
   private closureShape(
     fn: FunctionDecl,
     goal: FunctionType | undefined,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): ParameterShape {
+    const tree = this.types.program.tree;
+
     const params: FunctionParameter[] = [];
     let self: Type | undefined = undefined;
     let rest = false;
     let index = 0;
 
-    for (const param of fn.params) {
+    for (const param of tree.paramsOf(fn.paramsList)) {
       const kind = param.form.kind;
-      const given = this.closureGiven(goal, index, param.name == kThisParameter);
+      const given = this.closureGiven(
+        goal,
+        index,
+        param.name == kThisParameter,
+      );
       const type = this.closureParameter(param, given, context, module);
       const isTaken =
-        param.type == undefined &&
+        tree.typeRefAt(param.typeId) == undefined &&
         kind == ParamKind.Required &&
         given != undefined &&
         given.optional;
@@ -117,9 +126,9 @@ partial class ExpressionTypes {
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
       if (param.name == kThisParameter) {
-        const thisParameterErrors = this.calls.thisParameterCheck(fn, param);
+        const thisParameterErrors = this.types.thisParameterCheck(fn, param);
 
-        this.reportAll(module, thisParameterErrors);
+        this.errors.writeAll(module, thisParameterErrors);
         self = type;
 
         continue;
@@ -142,10 +151,10 @@ partial class ExpressionTypes {
     isThis: boolean,
   ): FunctionParameter | undefined {
     if (!isThis) {
-      return goal?.shape.params[index];
+      return this.types.store.paramsOf(goal)[index];
     }
 
-    const self = goal?.shape.self;
+    const self = this.types.store.selfTypeOf(goal);
     if (self == undefined) {
       return undefined;
     }
@@ -153,12 +162,12 @@ partial class ExpressionTypes {
     return { type: self, optional: false };
   }
 
-  private readonly closureInside(type: Type, kind: ParamKind, isTaken: boolean): Type {
+  private closureInside(type: Type, kind: ParamKind, isTaken: boolean): Type {
     if (isTaken) {
       return this.types.optional(type);
     }
 
-    return this.functions.insideType(type, kind);
+    return this.types.insideType(type, kind);
   }
 
   private closureParameter(
@@ -167,8 +176,11 @@ partial class ExpressionTypes {
     context: Read<TypeContext>,
     module: int,
   ): Type {
+    const tree = this.types.program.tree;
+
     const isWritten =
-      param.type != undefined || param.form.kind == ParamKind.Defaulted;
+      tree.typeRefAt(param.typeId) != undefined ||
+      param.form.kind == ParamKind.Defaulted;
     if (isWritten) {
       const type = this.parameterOf(param, context, module);
 
@@ -178,22 +190,22 @@ partial class ExpressionTypes {
       return given.type;
     }
 
-    this.report(module, param.loc, Code.ClosureParameterNeedsType, {
+    this.errors.write(module, param.loc, Code.ClosureParameterNeedsType, {
       word: param.name,
     });
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
-  private readonly checkedParameter(
+  private checkedParameter(
     param: Param,
     type: Type,
     given: FunctionParameter | undefined,
     module: int,
   ): Type {
-    const checked = this.functions.checkedParameter(param, type, given);
+    const checked = this.types.checkedParameter(param, type, given);
 
-    this.reportFound(module, checked.error);
+    this.errors.writeFound(module, checked.error);
 
     return checked.value;
   }
@@ -201,12 +213,14 @@ partial class ExpressionTypes {
   private closureResult(
     fn: FunctionDecl,
     goal: FunctionType | undefined,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): Type {
-    const written = fn.returnType;
+    const tree = this.types.program.tree;
+
+    const written = tree.typeRefAt(fn.returnTypeId);
     if (written != undefined) {
-      const result = this.resolver.returnType(written, context);
+      const result = this.types.returnType(written, context);
 
       this.walkWritten(fn, result, module);
 
@@ -217,7 +231,7 @@ partial class ExpressionTypes {
       return this.inferredClosure(fn, false, module);
     }
 
-    const expected = goal.shape.result;
+    const expected = this.types.store.returnTypeOf(goal);
     if (expected.kind == TypeKind.Void) {
       this.inferredClosure(fn, true, module);
 
@@ -237,7 +251,9 @@ partial class ExpressionTypes {
 
   private readonly isPromising(type: Type): boolean {
     if (type.kind == TypeKind.Union) {
-      return type.parts.some((part) => part.kind == TypeKind.Promise);
+      return this.types.store
+        .partsOf(type)
+        .some((part) => part.kind == TypeKind.Promise);
     }
 
     return type.kind == TypeKind.Promise;
@@ -248,8 +264,10 @@ partial class ExpressionTypes {
     isQuiet: boolean,
     module: int,
   ): Type {
-    const frame = this.functions.frameOf(fn, undefined);
-    const body = fn.body?.body ?? [];
+    const tree = this.types.program.tree;
+
+    const frame = this.types.frameOf(fn, undefined);
+    const body = tree.stmtsOf(tree.blockAt(fn.bodyId)?.bodyList) ?? [];
 
     this.walkStatements(body, frame, module);
 
@@ -260,7 +278,9 @@ partial class ExpressionTypes {
     return this.frameResult(fn, frame, module);
   }
 
-  private readonly constFacts(facts: Read<Map<string, Type>>): Map<string, Type> {
+  private readonly constFacts(
+    facts: Read<Map<string, Type>>,
+  ): Map<string, Type> {
     const kept = new Map<string, Type>();
 
     for (const [key, type] of facts) {
@@ -273,7 +293,7 @@ partial class ExpressionTypes {
   }
 
   private readonly isConstBound(key: string): boolean {
-    const edge = this.bounds.edgeOf(key);
+    const edge = this.types.edgeOf(key);
     if (edge == undefined) {
       return false;
     }
@@ -294,7 +314,7 @@ partial class ExpressionTypes {
 
   private readonly isConstPath(key: string): boolean {
     const dot = key.indexOf(kDot);
-    const root = this.functions.rootOf(key, dot);
+    const root = this.types.rootOf(key, dot);
 
     return this.constKeys.has(root);
   }

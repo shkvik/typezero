@@ -13,12 +13,14 @@ partial class Dumper {
 
     this.line(
       `DeclaredClass ${declared.loc} ${name} abstract=${isAbstract} ` +
-        `tp=${declared.typeParams.length} members=${declared.members.length}`,
+        `tp=${this.tree.typeParamsOf(declared.typeParamsList).length} members=${this.tree.declaredMembersOf(declared.membersList).length}`,
     );
     this.nested();
-    this.dumpTypeParams(declared.typeParams);
+    const typeParams = this.tree.typeParamsOf(declared.typeParamsList);
 
-    for (const member of declared.members) {
+    this.dumpTypeParams(typeParams);
+
+    for (const member of this.tree.declaredMembersOf(declared.membersList)) {
       this.dumpDeclaredMember(member);
     }
 
@@ -37,7 +39,9 @@ partial class Dumper {
     );
     this.nested();
     this.dumpDeclaredSignature(member.form);
-    this.dumpOptionalType(member.type);
+    const typeRef = this.tree.typeRefAt(member.typeId);
+
+    this.dumpOptionalType(typeRef);
     this.back();
   }
 
@@ -51,7 +55,7 @@ partial class Dumper {
 
     const word = this.signatureWord(form.kind);
 
-    return `${word} tp=${form.typeParams.length} params=${form.params.length}`;
+    return `${word} tp=${this.tree.typeParamsOf(form.typeParamsList).length} params=${this.tree.paramsOf(form.paramsList).length}`;
   }
 
   private readonly signatureWord(kind: DeclaredMemberKind): string {
@@ -67,9 +71,11 @@ partial class Dumper {
       return;
     }
 
-    this.dumpTypeParams(form.typeParams);
+    const typeParams = this.tree.typeParamsOf(form.typeParamsList);
 
-    for (const param of form.params) {
+    this.dumpTypeParams(typeParams);
+
+    for (const param of this.tree.paramsOf(form.paramsList)) {
       this.dumpParam(param);
     }
   }

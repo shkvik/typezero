@@ -20,28 +20,28 @@ import {
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly byteMemberRead(
+  private byteMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
   ): Type | undefined {
-    if (!this.byteSources.isBytesType(instance)) {
+    if (!this.types.isBytesType(instance)) {
       return undefined;
     }
 
     const found = this.declaredNamed(instance, expr.name);
-    const isTyped = this.byteSources.typedName(instance) != undefined;
+    const isTyped = this.types.typedName(instance) != undefined;
     if (found == undefined) {
-      const missingError = this.byteSources.missingMemberError(
+      const missingError = this.types.missingMemberError(
         expr.loc,
         expr.name,
         instance,
         false,
       );
 
-      this.reportFound(module, missingError);
+      this.errors.writeFound(module, missingError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
 
     const isMethod = found.form.kind != DeclaredMemberKind.Field;
@@ -49,16 +49,16 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const missingError = this.byteSources.missingMemberError(
+    const missingError = this.types.missingMemberError(
       expr.loc,
       expr.name,
       instance,
       true,
     );
 
-    this.reportFound(module, missingError);
+    this.errors.writeFound(module, missingError);
 
-    return this.store.plain(TypeKind.Error);
+    return this.types.store.plain(TypeKind.Error);
   }
 
   private missingByteMethod(
@@ -67,23 +67,27 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): boolean {
-    if (!this.byteSources.isBytesType(instance)) {
+    const tree = this.types.program.tree;
+
+    if (!this.types.isBytesType(instance)) {
       return false;
     }
     if (this.declaredNamed(instance, member.name) != undefined) {
       return false;
     }
 
-    const isTyped = this.byteSources.typedName(instance) != undefined;
-    const methodError = this.byteSources.missingMethodError(
+    const isTyped = this.types.typedName(instance) != undefined;
+    const methodError = this.types.missingMethodError(
       member.loc,
       member.name,
       instance,
       isTyped,
     );
 
-    this.reportFound(module, methodError);
-    this.looseArguments(expr.args, module);
+    this.errors.writeFound(module, methodError);
+    const args = tree.argumentsOf(expr.argsList);
+
+    this.looseArguments(args, module);
 
     return true;
   }
@@ -92,9 +96,13 @@ partial class ExpressionTypes {
     instance: InstanceType,
     name: string,
   ): DeclaredMember | undefined {
-    const opened = this.program.modules[instance.module];
-    const declared = opened?.declared.find((one) => one.loc == instance.loc);
-    const found = declared?.members.find(
+    const tree = this.types.program.tree;
+
+    const opened = this.types.program.modules[instance.module];
+    const declared = tree
+      .declaredClassesOf(opened?.declaredList)
+      .find((one) => one.loc == instance.loc);
+    const found = tree.declaredMembersOf(declared?.membersList).find(
       (one) => one.name == name && !one.isStatic,
     );
     if (found != undefined) {
@@ -110,76 +118,82 @@ partial class ExpressionTypes {
   }
 
   private byteIndexCheck(expr: IndexExpr, object: Type, module: int): boolean {
-    const indexError = this.byteSources.notIndexedError(expr.loc, object);
+    const tree = this.types.program.tree;
+
+    const indexError = this.types.notIndexedError(expr.loc, object);
     if (indexError == undefined) {
       return false;
     }
 
-    this.reportFound(module, indexError);
-    this.typed(expr.index, undefined, module);
+    this.errors.writeFound(module, indexError);
+    const index = tree.exprOf(expr.indexId);
+
+    this.typed(index, undefined, module);
 
     return true;
   }
 
-  private readonly byteTextCheck(operand: Expr, base: Type, module: int): boolean {
-    const textError = this.byteSources.noTextError(operand.loc, base);
+  private byteTextCheck(operand: Expr, base: Type, module: int): boolean {
+    const textError = this.types.noTextError(operand.loc, base);
     if (textError == undefined) {
       return false;
     }
 
-    this.reportFound(module, textError);
+    this.errors.writeFound(module, textError);
 
     return true;
   }
 
-  private readonly byteUnionMember(
+  private byteUnionMember(
     expr: MemberExpr,
     union: UnionType,
     module: int,
   ): Type | undefined {
-    if (!this.byteSources.isBytesUnion(union.parts)) {
+    if (!this.types.isBytesUnion(this.types.store.partsOf(union))) {
       return undefined;
     }
 
-    const unionError = this.byteSources.unionMemberError(
+    const unionError = this.types.unionMemberError(
       expr.loc,
       expr.name,
-      union.parts,
+      this.types.store.partsOf(union),
       union,
     );
     if (unionError != undefined) {
-      this.reportFound(module, unionError);
+      this.errors.writeFound(module, unionError);
 
-      return this.store.plain(TypeKind.Error);
+      return this.types.store.plain(TypeKind.Error);
     }
-    if (this.byteSources.isBufferName(expr.name)) {
-      const buffer = this.resolver.libraryInstance(kArrayBufferClass, []);
+    if (this.types.isBufferName(expr.name)) {
+      const buffer = this.types.libraryInstance(kArrayBufferClass, []);
 
-      return buffer ?? this.store.plain(TypeKind.Error);
+      return buffer ?? this.types.store.plain(TypeKind.Error);
     }
 
-    return this.store.integer(64, false);
+    return this.types.store.integer(64, false);
   }
 
-  private readonly bytesInstanceof(expr: BinaryExpr, left: Type, module: int): boolean {
-    const rhs = expr.rhs;
+  private bytesInstanceof(expr: BinaryExpr, left: Type, module: int): boolean {
+    const tree = this.types.program.tree;
+
+    const rhs = tree.exprOf(expr.rhsId);
     if (rhs.kind != ExprKind.Name || !this.isGlobalUse(rhs, module)) {
       return false;
     }
-    if (!this.byteSources.isKindName(rhs.name)) {
+    if (!this.types.isKindName(rhs.name)) {
       return false;
     }
     if (left.kind == TypeKind.Error) {
       return true;
     }
 
-    const instanceofError = this.byteSources.instanceofError(
+    const instanceofError = this.types.instanceofError(
       expr.loc,
       left,
       rhs.name,
     );
 
-    this.reportFound(module, instanceofError);
+    this.errors.writeFound(module, instanceofError);
 
     return true;
   }
