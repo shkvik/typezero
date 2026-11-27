@@ -23,6 +23,7 @@ import {
   kTextIndexOf,
   kTextLastIndexOf,
   kTextLower,
+  kTextModule,
   kTextPad,
   kTextRepeat,
   kTextReplace,
@@ -34,7 +35,12 @@ import {
   kTextUpper,
   kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue, TextArguments } from "../types/lowering.types.tz";
+import {
+  Frame,
+  IrValue,
+  RuntimeTarget,
+  TextArguments,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private stringMethod(
@@ -117,12 +123,13 @@ partial class Lowering {
       case "slice":
       case "substring":
         return this.textSlice(frame, name, receiver, given);
-      case "indexOf":
       case "lastIndexOf":
+        return this.textSearch(frame, name, receiver, given);
+      case "indexOf":
       case "includes":
       case "startsWith":
       case "endsWith":
-        return this.textSearch(frame, name, receiver, given);
+        return this.textFound(frame, call, name, receiver, given);
       case "toLowerCase":
       case "toUpperCase":
         return this.textCase(frame, name, receiver);
@@ -268,6 +275,38 @@ partial class Lowering {
     const tz = this.values.types.store.plain(TypeKind.Boolean);
 
     return { type: kBooleanType, value, tz };
+  }
+
+  private textFound(
+    frame: Read<Frame>,
+    call: CallExpr,
+    name: string,
+    receiver: IrValue,
+    given: Read<TextArguments>,
+  ): IrValue | undefined {
+    const search = given.texts[0];
+    if (search == undefined) {
+      return undefined;
+    }
+
+    const zero = this.ir.zero(kFlagType);
+    const flag = this.flagAt(given, 0);
+    const number = this.numberAt(given, 0);
+    const has = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const position: IrValue = {
+      type: kIntType,
+      value: number,
+      tz: this.values.types.store.integer(64, false),
+    };
+    const hasPosition: IrValue = {
+      type: kBooleanType,
+      value: has,
+      tz: this.values.types.store.plain(TypeKind.Boolean),
+    };
+    const target: RuntimeTarget = { module: kTextModule, name };
+    const args = [receiver, search, position, hasPosition];
+
+    return this.runtimeFunctionCall(frame, target, [], args, call.loc);
   }
 
   private readonly searchRuntime(name: string): string {

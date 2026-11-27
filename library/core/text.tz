@@ -1,0 +1,287 @@
+import { Raw, findUnit, sameCells, textCells, unitAt } from "tz:unsafe";
+
+@InPlace()
+export class Cells<C> {
+  public readonly start: Raw<C>;
+  public readonly count: int;
+
+  public constructor(start: Raw<C>, count: int) {
+    this.start = start;
+    this.count = count;
+  }
+}
+
+function isShort(count: int): boolean {
+  return count <= 16;
+}
+
+function clamped(position: int, count: int): int {
+  if (position < 0) {
+    return 0;
+  }
+  if (position > count) {
+    return count;
+  }
+
+  return position;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "at + needle.count <= hay.count: both ranges are inside their cells",
+})
+function matches<H, N>(hay: Cells<H>, at: int, needle: Cells<N>): boolean {
+  for (let index = 0; index < needle.count; index++) {
+    if (unitAt(hay.start, at + index) != unitAt(needle.start, index)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "from and end are inside the cells of hay",
+})
+function firstUnit<C>(hay: Cells<C>, from: int, end: int, unit: int): int {
+  if (!isShort(end - from)) {
+    return findUnit(hay.start, from, end, unit);
+  }
+
+  for (let at = from; at < end; at++) {
+    if (unitAt(hay.start, at) == unit) {
+      return at;
+    }
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "at + needle.count <= hay.count: both ranges are inside their cells",
+})
+function matchesSame<C>(hay: Cells<C>, at: int, needle: Cells<C>): boolean {
+  if (isShort(needle.count)) {
+    return matches(hay, at, needle);
+  }
+
+  return sameCells(hay.start, at, needle.start, 0, needle.count);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every start is at most hay.count - needle.count, so the range fits",
+})
+function foundSame<C>(hay: Cells<C>, needle: Cells<C>, from: int): int {
+  const end = hay.count - needle.count + 1;
+  if (needle.count == 0) {
+    return from;
+  }
+  if (from >= end) {
+    return -1;
+  }
+
+  const head = unitAt(needle.start, 0);
+  let at = firstUnit(hay, from, end, head);
+
+  while (at >= 0) {
+    if (needle.count == 1 || matchesSame(hay, at, needle)) {
+      return at;
+    }
+
+    at = firstUnit(hay, at + 1, end, head);
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every start is at most hay.count - needle.count, so the range fits",
+})
+function foundMixed<H, N>(hay: Cells<H>, needle: Cells<N>, from: int): int {
+  const end = hay.count - needle.count + 1;
+  if (needle.count == 0) {
+    return from;
+  }
+  if (from >= end) {
+    return -1;
+  }
+
+  const head = unitAt(needle.start, 0);
+  let at = firstUnit(hay, from, end, head);
+
+  while (at >= 0) {
+    if (matches(hay, at, needle)) {
+      return at;
+    }
+
+    at = firstUnit(hay, at + 1, end, head);
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of wanted live as long as this borrowed string",
+})
+function foundNarrow(hay: Cells<uint8>, wanted: Read<string>, from: int): int {
+  const same = textCells<uint8>(wanted);
+  if (same != undefined) {
+    return foundSame(hay, new Cells<uint8>(same, wanted.length), from);
+  }
+
+  const other = textCells<uint16>(wanted);
+  if (other != undefined) {
+    return foundMixed(hay, new Cells<uint16>(other, wanted.length), from);
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of wanted live as long as this borrowed string",
+})
+function foundWide(hay: Cells<uint16>, wanted: Read<string>, from: int): int {
+  const other = textCells<uint8>(wanted);
+  if (other != undefined) {
+    return foundMixed(hay, new Cells<uint8>(other, wanted.length), from);
+  }
+
+  const same = textCells<uint16>(wanted);
+  if (same != undefined) {
+    return foundSame(hay, new Cells<uint16>(same, wanted.length), from);
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "at + wanted.length <= hay.count is checked by the caller",
+})
+function hasNarrow(hay: Cells<uint8>, wanted: Read<string>, at: int): boolean {
+  const same = textCells<uint8>(wanted);
+  if (same != undefined) {
+    return matchesSame(hay, at, new Cells<uint8>(same, wanted.length));
+  }
+
+  const other = textCells<uint16>(wanted);
+  if (other != undefined) {
+    return matches(hay, at, new Cells<uint16>(other, wanted.length));
+  }
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "at + wanted.length <= hay.count is checked by the caller",
+})
+function hasWide(hay: Cells<uint16>, wanted: Read<string>, at: int): boolean {
+  const other = textCells<uint8>(wanted);
+  if (other != undefined) {
+    return matches(hay, at, new Cells<uint8>(other, wanted.length));
+  }
+
+  const same = textCells<uint16>(wanted);
+  if (same != undefined) {
+    return matchesSame(hay, at, new Cells<uint16>(same, wanted.length));
+  }
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the two borrowed strings",
+})
+function hasAt(text: Read<string>, wanted: Read<string>, at: int): boolean {
+  if (at < 0 || at + wanted.length > text.length) {
+    return false;
+  }
+
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return hasNarrow(new Cells<uint8>(narrow, text.length), wanted, at);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return hasWide(new Cells<uint16>(wide, text.length), wanted, at);
+  }
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the two borrowed strings",
+})
+export function indexOf(
+  text: Read<string>,
+  wanted: Read<string>,
+  position: int,
+  hasPosition: boolean,
+): int {
+  let from = 0;
+
+  if (hasPosition) {
+    from = clamped(position, text.length);
+  }
+
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return foundNarrow(new Cells<uint8>(narrow, text.length), wanted, from);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return foundWide(new Cells<uint16>(wide, text.length), wanted, from);
+  }
+
+  return -1;
+}
+
+export function includes(
+  text: Read<string>,
+  wanted: Read<string>,
+  position: int,
+  hasPosition: boolean,
+): boolean {
+  return indexOf(text, wanted, position, hasPosition) >= 0;
+}
+
+export function startsWith(
+  text: Read<string>,
+  wanted: Read<string>,
+  position: int,
+  hasPosition: boolean,
+): boolean {
+  let at = 0;
+
+  if (hasPosition) {
+    at = clamped(position, text.length);
+  }
+
+  return hasAt(text, wanted, at);
+}
+
+export function endsWith(
+  text: Read<string>,
+  wanted: Read<string>,
+  position: int,
+  hasPosition: boolean,
+): boolean {
+  let end = text.length;
+
+  if (hasPosition) {
+    end = clamped(position, text.length);
+  }
+
+  return hasAt(text, wanted, end - wanted.length);
+}

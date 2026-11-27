@@ -9,6 +9,7 @@ export const kTypedLibraries = [
   "tz:list",
   "tz:array",
   "tz:map",
+  "tz:text",
 ];
 
-export const kCheckedLibraries = ["tz:list", "tz:array", "tz:map"];
+export const kCheckedLibraries = ["tz:list", "tz:array", "tz:map", "tz:text"];

@@ -1,0 +1,53 @@
+function shown(text: string, wanted: string): void {
+  console.log(
+    text.indexOf(wanted),
+    text.indexOf(wanted, 2),
+    text.includes(wanted),
+    text.startsWith(wanted),
+    text.endsWith(wanted),
+  );
+}
+
+function main(): void {
+  const short = "abcabc";
+  const long = "the quick brown fox jumps over the lazy dog";
+  const wide = "привет, мир: hello, world";
+  const glued = long + " and " + wide;
+  const part = long.substring(4, 19);
+  const tail = wide.substring(8);
+
+  shown(short, "abc");
+  shown(short, "c");
+  shown(short, "");
+  shown(short, "abcabcabc");
+  shown(short, "x");
+  shown(long, "the");
+  shown(long, "dog");
+  shown(long, "o");
+  shown(long, "lazy dog");
+  shown(wide, "мир");
+  shown(wide, "hello");
+  shown(wide, ", ");
+  shown(wide, "привет");
+  shown(wide, "world");
+  shown(glued, "dog and привет");
+  shown(glued, "world");
+  shown(glued, "the");
+  shown(part, "quick");
+  shown(part, "fox");
+  shown(part, "the");
+  shown(tail, "мир");
+  shown(tail, "world");
+  shown(long, tail);
+  shown(short, wide);
+
+  console.log(long.indexOf("the", 1), long.indexOf("the", 100), long.indexOf("", 100));
+  console.log(long.indexOf("the", -5), wide.indexOf("о"), wide.indexOf("o"));
+  console.log(long.startsWith("quick", 4), long.startsWith("quick", 5));
+  console.log(long.endsWith("quick", 9), long.endsWith("quick", 10));
+  console.log(wide.startsWith("мир", 8), wide.endsWith("привет", 6));
+  console.log(short.startsWith("", 6), short.startsWith("", 7), short.endsWith("", 0));
+  console.log(long.includes("fox", 16), long.includes("fox", 17));
+}
+
+main();

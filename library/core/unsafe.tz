@@ -16,3 +16,25 @@ export declare function shiftCells<T>(
 export declare function forget<T>(value: Own<T>): void;
 export declare function arrayCells<T>(items: Read<T[]>): Raw<T>;
 export declare function hashOf<T>(key: Read<T>): int;
+export declare function textCells<C>(text: Read<string>): Raw<C> | undefined;
+export declare function unitAt<C>(raw: Raw<C>, index: int): int;
+export declare function findUnit<C>(
+  raw: Raw<C>,
+  from: int,
+  end: int,
+  unit: int,
+): int;
+export declare function sameCells<T>(
+  first: Raw<T>,
+  firstAt: int,
+  second: Raw<T>,
+  secondAt: int,
+  count: int,
+): boolean;
+export declare function copyCells<T>(
+  from: Raw<T>,
+  start: int,
+  into: Raw<T>,
+  at: int,
+  count: int,
+): void;

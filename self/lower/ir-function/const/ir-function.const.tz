@@ -1,3 +1,4 @@
 export const kEntryLabel = "entry";
+export const kProgramEntry = "main";
 export const kStartLabel = "start";
 export const kDeadLabel = "dead";

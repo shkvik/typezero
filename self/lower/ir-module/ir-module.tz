@@ -132,6 +132,10 @@ export class IrModule {
     return callee;
   }
 
+  public readonly keptInside(fn: LLVMValue): void {
+    LLVMSetLinkage(fn, kInternalLinkage);
+  }
+
   public integer(key: string, text: string): LLVMValue {
     return LLVMConstIntOfString(this.type(key), this.cname(text), 10);
   }

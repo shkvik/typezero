@@ -1128,6 +1128,28 @@ int32_t tz_str_index_of(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_me
   return (int32_t)index_of(&s, &t, has_from ? clamp(from, str_len(s.meta)) : 0);
 }
 
+int64_t tz_cells_find(const void *cells, int32_t two, int64_t from, int64_t end, int64_t unit) {
+  if (from >= end || unit < 0 || unit > 0xFFFF) {
+    return -1;
+  }
+  uint32_t at = find_unit(cells, two, (uint32_t)from, (uint32_t)end, (uint16_t)unit);
+
+  return at < (uint32_t)end ? (int64_t)at : -1;
+}
+
+const void *tz_str_cells(TzStr *text, int32_t two) {
+  TzStr f = flat(*text);
+  if ((is_two(f.meta) != 0) != (two != 0)) {
+    return NULL;
+  }
+  if (is_inline(f.meta)) {
+    return &text->obj;
+  }
+  const void *cells = units(&f);
+
+  return cells ? cells : (const void *)&text->obj;
+}
+
 int32_t tz_str_includes(void *s_obj, uint64_t s_meta, void *t_obj, uint64_t t_meta, int64_t from,
                         int32_t has_from) {
   return tz_str_index_of(s_obj, s_meta, t_obj, t_meta, from, has_from) >= 0;

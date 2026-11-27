@@ -140,6 +140,13 @@ export const kLibraryModules: LibraryModule[] = [
     access: LibraryAccess.Runtime,
   },
   {
+    name: "tz:text",
+    file: "text.tz",
+    parts: [],
+    specs: ["tz:text"],
+    access: LibraryAccess.Runtime,
+  },
+  {
     name: "tz:ffi",
     file: "ffi.tz",
     parts: [],

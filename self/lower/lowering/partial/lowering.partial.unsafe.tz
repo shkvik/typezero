@@ -61,6 +61,16 @@ partial class Lowering {
         return this.arrayCellsOf(frame, call);
       case "hashOf":
         return this.keyHash(frame, call, item);
+      case "textCells":
+        return this.textCellsOf(frame, call, cell);
+      case "unitAt":
+        return this.unitRead(frame, call, cell);
+      case "findUnit":
+        return this.unitFound(frame, call, cell);
+      case "sameCells":
+        return this.cellsCompared(frame, call, cell);
+      case "copyCells":
+        return this.cellsCopied(frame, call, cell);
       default:
         this.notLowered(
           frame.module,

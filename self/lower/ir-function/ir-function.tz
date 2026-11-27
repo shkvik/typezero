@@ -38,6 +38,7 @@ import { IrTypes } from "../ir-types/ir-types.tz";
 import {
   kDeadLabel,
   kEntryLabel,
+  kProgramEntry,
   kStartLabel,
 } from "./const/ir-function.const.tz";
 import {
@@ -64,6 +65,11 @@ export class IrFunction {
   ) {
     const callee = module.declare(name, result, params);
     const fn = callee.fn;
+
+    if (name != kProgramEntry) {
+      module.keptInside(fn);
+    }
+
     const context = module.context;
     const entryName = module.cname(kEntryLabel);
     const startName = module.cname(kStartLabel);
