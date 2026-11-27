@@ -22,6 +22,7 @@ import {
   kIrExtension,
   kLinkerArguments,
   kMapOption,
+  kOptimizeOption,
   kLinkerTool,
   kObjectFile,
   kOutputOption,
@@ -126,7 +127,7 @@ export class BuildCommand {
       return this.nativeFailed(natives.errors);
     }
 
-    this.executableMade(ir, output, links, options.map);
+    this.executableMade(ir, output, links, options);
   }
 
   private nativeFailed(errors: Read<string[]>): void {
@@ -142,6 +143,7 @@ export class BuildCommand {
     let isEmittingIr = false;
     let isAuditing = false;
     let isCheckingCounts = false;
+    let isOptimizing = false;
     let isWrong = false;
 
     for (let index = 3; index < this.args.length; index++) {
@@ -160,6 +162,8 @@ export class BuildCommand {
         isAuditing = true;
       } else if (arg == kCheckCountsOption) {
         isCheckingCounts = true;
+      } else if (arg == kOptimizeOption) {
+        isOptimizing = true;
       } else if (entry == undefined) {
         entry = arg;
       } else {
@@ -174,6 +178,7 @@ export class BuildCommand {
       isEmittingIr,
       isAuditing,
       isCheckingCounts,
+      isOptimizing,
       isWrong,
     };
   }
@@ -276,8 +281,9 @@ export class BuildCommand {
     ir: IrModule,
     output: string,
     links: Read<NativeLinks>,
-    map: string | undefined,
+    options: Read<BuildOptions>,
   ): void {
+    const map = options.map;
     const prefix = join(tmpdir(), kTemporaryPrefix);
     const folder = mkdtempSync(prefix);
     if (folder.isErr()) {
@@ -293,7 +299,7 @@ export class BuildCommand {
     const objectPath = join(folder.value, kObjectFile);
     const inputs = this.linkInputs(links.inputs, map);
     const isMade =
-      this.objectMade(ir, objectPath) &&
+      this.objectMade(ir, objectPath, options.isOptimizing) &&
       this.linked(objectPath, output, inputs) &&
       this.dllsCopied(links.dlls, output);
     const removed = rmSync(folder.value, { force: true, recursive: true });
@@ -306,8 +312,12 @@ export class BuildCommand {
     }
   }
 
-  private objectMade(ir: IrModule, objectPath: string): boolean {
-    if (ir.emitted(objectPath)) {
+  private objectMade(
+    ir: IrModule,
+    objectPath: string,
+    isOptimizing: boolean,
+  ): boolean {
+    if (ir.emitted(objectPath, isOptimizing)) {
       return true;
     }
 

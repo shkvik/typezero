@@ -5,4 +5,6 @@ export const kPrintMessageAction = 1;
 export const kTargetName = "x86-64";
 export const kGenericCpu = "generic";
 export const kCodeGenLevelNone = 0;
+export const kCodeGenLevelDefault = 2;
+export const kOptimizePasses = "default<O2>";
 export const kObjectFileKind = 1;

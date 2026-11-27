@@ -11,6 +11,8 @@ export declare class LLVMTargetMachine {}
 export declare class LLVMTargetData {}
 export declare class LLVMText {}
 export declare class LLVMMessageSlot {}
+export declare class LLVMPassOptions {}
+export declare class LLVMError {}
 
 export declare function LLVMContextCreate(): LLVMContext;
 export declare function LLVMModuleCreateWithNameInContext(
@@ -293,3 +295,14 @@ export declare function LLVMTargetMachineEmitToFile(
   kind: int32,
   message: LLVMMessageSlot | undefined,
 ): int32;
+export declare function LLVMCreatePassBuilderOptions(): LLVMPassOptions;
+export declare function LLVMDisposePassBuilderOptions(
+  options: LLVMPassOptions,
+): void;
+export declare function LLVMRunPasses(
+  module: LLVMModule,
+  passes: Read<cstring>,
+  machine: LLVMTargetMachine,
+  options: LLVMPassOptions,
+): LLVMError | undefined;
+export declare function LLVMConsumeError(error: LLVMError): void;

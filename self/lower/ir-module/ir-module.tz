@@ -7,6 +7,11 @@ import {
   LLVMConstArray2,
   LLVMConstIntOfString,
   LLVMConstIntToPtr,
+  LLVMConsumeError,
+  LLVMCreatePassBuilderOptions,
+  LLVMDisposePassBuilderOptions,
+  LLVMRunPasses,
+  LLVMTargetMachine,
   LLVMConstNull,
   LLVMSizeOf,
   LLVMConstReal,
@@ -48,11 +53,13 @@ import {
 } from "../llvm-api/llvm-api.tz";
 import { IrCallee } from "../ir-function/types/ir-function.types.tz";
 import {
+  kCodeGenLevelDefault,
   kCodeGenLevelNone,
   kGenericCpu,
   kGlobalUnnamed,
   kInternalLinkage,
   kObjectFileKind,
+  kOptimizePasses,
   kPrintMessageAction,
   kPrivateLinkage,
   kTargetName,
@@ -251,7 +258,31 @@ export class IrModule {
     return LLVMPrintModuleToFile(this.module, this.cname(path), undefined) == 0;
   }
 
-  public readonly emitted(path: string): boolean {
+  private readonly codeGenLevel(isOptimized: boolean): int32 {
+    if (isOptimized) {
+      return kCodeGenLevelDefault;
+    }
+
+    return kCodeGenLevelNone;
+  }
+
+  private readonly optimized(machine: LLVMTargetMachine): boolean {
+    const options = LLVMCreatePassBuilderOptions();
+    const passes = this.cname(kOptimizePasses);
+    const failure = LLVMRunPasses(this.module, passes, machine, options);
+
+    LLVMDisposePassBuilderOptions(options);
+
+    if (failure == undefined) {
+      return true;
+    }
+
+    LLVMConsumeError(failure);
+
+    return false;
+  }
+
+  public readonly emitted(path: string, isOptimized: boolean): boolean {
     LLVMInitializeX86TargetInfo();
     LLVMInitializeX86Target();
     LLVMInitializeX86TargetMC();
@@ -263,12 +294,13 @@ export class IrModule {
     }
 
     const triple = LLVMGetDefaultTargetTriple();
+    const level = this.codeGenLevel(isOptimized);
     const machine = LLVMCreateTargetMachine(
       target,
       triple,
       this.cname(kGenericCpu),
       "",
-      kCodeGenLevelNone,
+      level,
       0,
       0,
     );
@@ -277,6 +309,10 @@ export class IrModule {
 
     LLVMSetTarget(this.module, triple);
     LLVMSetModuleDataLayout(this.module, data);
+
+    if (isOptimized && !this.optimized(machine)) {
+      return false;
+    }
 
     const failed = LLVMTargetMachineEmitToFile(
       machine,
