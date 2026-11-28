@@ -262,17 +262,6 @@ static int values_equal(const TzType *type, const void *a, const void *b, int fo
   }
 }
 
-TzMap *tz_map_new(const TzMapLayout *layout) {
-  int member = (layout->base.flags & TZ_LAYOUT_GROUP) != 0;
-  TzMap *m = (TzMap *)(member ? tz_group_alloc(sizeof(TzMap)) : tz_obj_alloc(sizeof(TzMap)));
-  int64_t rc = member ? m->rc : 1;
-  memset(m, 0, sizeof *m);
-  m->rc = rc;
-  m->layout = layout;
-
-  return m;
-}
-
 static void index_insert(TzMap *m, uint32_t hash, uint32_t position) {
   uint32_t slot = hash & m->index_mask;
   while (m->index[slot]) {
@@ -343,36 +332,6 @@ TZ_NOINLINE static void make_room(TzMap *m) {
   }
 }
 
-static void *find_hashed(const TzMap *m, const void *key, uint32_t hash) {
-  const TzMapLayout *l = m->layout;
-  int fold = (m->flags & TZ_MAP_FOLD) != 0;
-  if (!m->index) {
-    for (uint32_t i = 0; i < m->used; ++i) {
-      char *e = entry_at(m, i);
-      if (header(e)->hash == hash && header(e)->live &&
-          values_equal(l->key, e + l->key_offset, key, fold)) {
-        return e;
-      }
-    }
-    return NULL;
-  }
-  for (uint32_t slot = hash & m->index_mask;; slot = (slot + 1) & m->index_mask) {
-    uint32_t position = m->index[slot];
-    if (!position) {
-      return NULL;
-    }
-    char *e = entry_at(m, position - 1);
-    if (header(e)->hash == hash && header(e)->live &&
-        values_equal(l->key, e + l->key_offset, key, fold)) {
-      return e;
-    }
-  }
-}
-
-static inline uint32_t key_hash(const TzMap *m, const void *key) {
-  return value_hash(m->layout->key, key, (m->flags & TZ_MAP_FOLD) != 0);
-}
-
 static void *append(TzMap *m, const void *key, uint32_t hash) {
   if (m->used == m->capacity) {
     make_room(m);
@@ -407,107 +366,6 @@ static void *append(TzMap *m, const void *key, uint32_t hash) {
   ++m->count;
 
   return e;
-}
-
-void *tz_map_find(TzMap *m, const void *key) {
-  if (m->count == 0) {
-    return NULL;
-  }
-
-  return find_hashed(m, key, key_hash(m, key));
-}
-
-void *tz_map_add(TzMap *m, const void *key, int32_t *added) {
-  uint32_t hash = key_hash(m, key);
-  void *e = m->count ? find_hashed(m, key, hash) : NULL;
-  *added = e == NULL;
-
-  return e ? e : append(m, key, hash);
-}
-
-TZ_NOINLINE int32_t tz_map_str_key_equal(const TzStr *stored, void *obj, uint64_t meta) {
-  return tz_str_equal(stored->obj, stored->meta, obj, meta);
-}
-
-static inline int short_key_matches(const char *e, uint32_t offset, uint32_t hash, void *obj,
-                                    uint64_t meta) {
-  const TzStr *stored = (const TzStr *)(e + offset);
-  if (header((void *)e)->hash != hash || !header((void *)e)->live) {
-    return 0;
-  }
-  if (stored->obj == obj && stored->meta == meta) {
-    return 1;
-  }
-
-  return !str_is_inline(stored->meta) && tz_map_str_key_equal(stored, obj, meta);
-}
-
-TZ_NOINLINE void *tz_map_find_short_small(TzMap *m, void *obj, uint64_t meta, uint32_t hash) {
-  uint32_t size = m->layout->entry_size, offset = m->layout->key_offset;
-  for (uint32_t i = 0; i < m->used; ++i) {
-    char *e = m->entries + (size_t)i * size;
-    if (short_key_matches(e, offset, hash, obj, meta)) {
-      return e;
-    }
-  }
-
-  return NULL;
-}
-
-TZ_NOINLINE void *tz_map_find_str_slow(TzMap *m, void *obj, uint64_t meta) {
-  if (str_is_inline(meta) && !(m->flags & TZ_MAP_FOLD) && !m->index) {
-    return tz_map_find_short_small(m, obj, meta, inline_hash(obj, meta));
-  }
-  TzStr key = {obj, meta};
-
-  return tz_map_find(m, &key);
-}
-
-TZ_NOINLINE void *tz_map_find_short_probe(TzMap *m, void *obj, uint64_t meta, uint32_t hash,
-                                          uint32_t slot) {
-  uint32_t size = m->layout->entry_size, offset = m->layout->key_offset;
-  for (;; slot = (slot + 1) & m->index_mask) {
-    uint32_t position = m->index[slot];
-    if (!position) {
-      return NULL;
-    }
-    char *e = m->entries + (size_t)(position - 1) * size;
-    if (short_key_matches(e, offset, hash, obj, meta)) {
-      return e;
-    }
-  }
-}
-
-TZ_HOT void *tz_map_find_str(TzMap *m, void *obj, uint64_t meta) {
-  if (!str_is_inline(meta) || !m->index || (m->flags & TZ_MAP_FOLD)) {
-    return tz_map_find_str_slow(m, obj, meta);
-  }
-  uint32_t hash = inline_hash(obj, meta);
-  uint32_t slot = hash & m->index_mask;
-  uint32_t position = m->index[slot];
-  if (!position) {
-    return NULL;
-  }
-  char *e = m->entries + (size_t)(position - 1) * m->layout->entry_size;
-  const TzStr *key = (const TzStr *)(e + m->layout->key_offset);
-  if (header(e)->hash == hash && key->obj == obj && key->meta == meta && header(e)->live) {
-    return e;
-  }
-
-  return tz_map_find_short_probe(m, obj, meta, hash, slot);
-}
-
-TZ_NOINLINE void *tz_map_append_str(TzMap *m, void *obj, uint64_t meta) {
-  TzStr key = {obj, meta};
-
-  return append(m, &key, key_hash(m, &key));
-}
-
-TZ_HOT void *tz_map_add_str(TzMap *m, void *obj, uint64_t meta, int32_t *added) {
-  void *e = tz_map_find_str(m, obj, meta);
-  *added = e == NULL;
-
-  return e ? e : tz_map_append_str(m, obj, meta);
 }
 
 void *tz_map_next(const TzMap *m, uint32_t *at) {
@@ -551,25 +409,6 @@ static void remove_entry(TzMap *m, char *e) {
   }
 }
 
-int32_t tz_map_delete(TzMap *m, const void *key) {
-  char *e = (char *)tz_map_find(m, key);
-  if (!e) {
-    return 0;
-  }
-  if (m->flags & TZ_MAP_ENV) {
-    tz_process_env_changed((const TzStr *)(e + m->layout->key_offset), NULL);
-  }
-  remove_entry(m, e);
-
-  return 1;
-}
-
-TZ_NOINLINE int32_t tz_map_delete_str(TzMap *m, void *obj, uint64_t meta) {
-  TzStr key = {obj, meta};
-
-  return tz_map_delete(m, &key);
-}
-
 void tz_map_clear(TzMap *m) {
   for (uint32_t i = 0; i < m->used; ++i) {
     char *e = entry_at(m, i);
@@ -588,28 +427,6 @@ void tz_map_stored(TzMap *m, void *entry) {
 
 TZ_THREAD_LOCAL TzMap *tz_map_dead;
 TZ_THREAD_LOCAL int32_t tz_map_dropping;
-
-static void release_entries(TzMap *m) {
-  const TzMapLayout *l = m->layout;
-  int managed_key = tz_is_managed(l->key);
-  int managed_value = l->value && tz_is_managed(l->value);
-  if (managed_key || managed_value) {
-    for (uint32_t i = 0; i < m->used; ++i) {
-      char *e = entry_at(m, i);
-      if (!header(e)->live) {
-        continue;
-      }
-      if (managed_key) {
-        tz_value_release_in(m, l->key, e + l->key_offset);
-      }
-      if (managed_value) {
-        tz_value_release_in(m, l->value, e + l->value_offset);
-      }
-    }
-  }
-  tz_free(m->entries);
-  tz_free(m->index);
-}
 
 #if TZ_PARALLEL
 void tz_map_publish(TzMap *m) {
@@ -633,98 +450,6 @@ void tz_map_publish(TzMap *m) {
   }
 }
 #endif
-
-void tz_map_drop(void *object) {
-  TzMap *m = (TzMap *)object;
-  if (m->rc < 0) {
-    release_entries(m);
-    m->entries = NULL;
-    m->index = NULL;
-    m->used = m->count = m->capacity = 0;
-    return;
-  }
-  if (tz_map_dropping) {
-    m->next_dead = tz_map_dead;
-    tz_map_dead = m;
-    return;
-  }
-  tz_map_dropping = 1;
-  while (m) {
-    release_entries(m);
-    if (tz_group_debugging) {
-      tz_group_forget_unstored(m);
-    }
-    tz_obj_free(m);
-    m = tz_map_dead;
-    if (m) {
-      tz_map_dead = m->next_dead;
-    }
-  }
-  tz_map_dropping = 0;
-}
-
-TzMap *tz_map_copy(const TzMap *m, const TzMapLayout *layout) {
-  TzMap *copy = tz_map_new(layout);
-  uint32_t at = 0;
-  for (char *e; (e = (char *)tz_map_next(m, &at));) {
-    const void *key = e + m->layout->key_offset;
-    uint32_t hash = m->flags & TZ_MAP_FOLD ? key_hash(copy, key) : header(e)->hash;
-    char *to = (char *)append(copy, key, hash);
-    if (layout->value) {
-      memcpy(to + layout->value_offset, e + m->layout->value_offset, layout->value->size);
-      tz_value_retain(layout->value, to + layout->value_offset);
-      if (copy->rc < 0) {
-        tz_group_store_value(copy, layout->value, to + layout->value_offset);
-      }
-    }
-  }
-
-  return copy;
-}
-
-TzArray *tz_map_keys(const TzMap *m, const TzType *element) {
-  TzArray *a = tz_arr_new(element, 0, m->count);
-  uint32_t at = 0;
-  for (char *e; (e = (char *)tz_map_next(m, &at));) {
-    tz_value_retain(element, e + m->layout->key_offset);
-    tz_arr_push_value(a, e + m->layout->key_offset);
-  }
-
-  return a;
-}
-
-TzArray *tz_map_values(const TzMap *m, const TzType *element) {
-  TzArray *a = tz_arr_new(element, 0, m->count);
-  uint32_t at = 0;
-  for (char *e; (e = (char *)tz_map_next(m, &at));) {
-    tz_value_retain(element, e + m->layout->value_offset);
-    tz_arr_push_value(a, e + m->layout->value_offset);
-  }
-
-  return a;
-}
-
-TzArray *tz_map_entries(const TzMap *m, const TzType *element, const TzLayout *tuple,
-                        int64_t size) {
-  TzArray *a = tz_arr_new(element, 0, m->count);
-  const TzMapLayout *l = m->layout;
-  uint32_t at = 0;
-  for (char *e; (e = (char *)tz_map_next(m, &at));) {
-    TzInstance *pair = (TzInstance *)tz_obj_alloc(size);
-    memset(pair, 0, (size_t)size);
-    pair->rc = 1;
-    pair->layout = tuple;
-    char *key = (char *)pair + tuple->fields[0].offset;
-    char *value = (char *)pair + tuple->fields[1].offset;
-    memcpy(key, e + l->key_offset, l->key->size);
-    tz_value_retain(l->key, key);
-    memcpy(value, e + l->value_offset, l->value->size);
-    tz_value_retain(l->value, value);
-    tz_arr_push_value(a, &pair);
-  }
-
-  return a;
-}
 
 TzMap *tz_map_set_op(const TzMap *a, const TzMap *b, int32_t op) {
   const TzMapLayout *l = a->layout;

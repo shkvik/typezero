@@ -13,8 +13,6 @@ typedef struct TzCString {
 
 extern const TzLayout tz_cstring_layout;
 
-void *tz_cstring_from_str(void *obj, uint64_t meta);
-void *tz_cstring_copy(const char *text);
 void tz_cstring_to_str(TzStr *out, const void *cstring);
 int32_t tz_cstring_equal(const void *a, const void *b);
 

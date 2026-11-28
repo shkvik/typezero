@@ -46,7 +46,7 @@ file(COPY ${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}/include
      PATTERN "hexagon_*" EXCLUDE
      PATTERN "riscv_*" EXCLUDE)
 
-add_subdirectory(runtime)
+add_custom_target(tzrt)
 add_subdirectory(compiler)
 add_subdirectory(library)
 

@@ -185,12 +185,7 @@ int64_t tz_crypto_block_update(TzCipher *c, const uint8_t *in, size_t length, ui
                                TzBlocks blocks);
 int64_t tz_crypto_block_final(TzCipher *c, uint8_t *out, TzBlocks blocks);
 
-TzBytes *tz_buffer_alloc(int64_t size, int32_t zero);
 TzArrayBuffer *tz_abuf_new(int64_t length);
-TzJson *tz_json_object_new(void);
-void tz_json_object_put(TzJson *o, void *key_obj, uint64_t key_meta, TzJson *value);
-TzJson *tz_json_string(void *obj, uint64_t meta);
-TzJson *tz_json_get(const TzJson *j, void *key_obj, uint64_t key_meta);
 
 void tz_crypto_random(uint8_t *out, size_t length);
 

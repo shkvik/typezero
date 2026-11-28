@@ -99,59 +99,6 @@ static char *utf8_of(TzStr s) {
 
 TzLock tz_process_lock;
 
-int32_t tz_process_env(TzStr *out, void *obj, uint64_t meta) {
-  TzStr name = {obj, meta};
-  out->obj = NULL;
-  out->meta = 0;
-  TzBuf b;
-  tz_buf_init(&b);
-  tz_buf_str(&b, name);
-  int found = 1;
-  for (size_t i = 0; i < b.length; ++i) {
-    found &= b.data[i] != 0;
-  }
-#ifdef _WIN32
-  tz_buf_push(&b, 0);
-  if (found) {
-    wchar_t small[256];
-    wchar_t *value = small;
-    DWORD capacity = 256, length;
-    for (;;) {
-      SetLastError(ERROR_SUCCESS);
-      length = GetEnvironmentVariableW((const wchar_t *)b.data, value, capacity);
-      if (length < capacity) {
-        break;
-      }
-      if (value != small) {
-        tz_free(value);
-      }
-      capacity = length;
-      value = (wchar_t *)tz_alloc(capacity * sizeof(wchar_t));
-    }
-    found = length > 0 || GetLastError() != ERROR_ENVVAR_NOT_FOUND;
-    if (found) {
-      *out = tz_str_from_utf16((const uint16_t *)value, length);
-    }
-    if (value != small) {
-      tz_free(value);
-    }
-  }
-#else
-  if (found) {
-    char *key = utf8_of(name);
-    const char *value = getenv(key);
-    tz_free(key);
-    found = value != NULL;
-    if (found) {
-      *out = str_from_utf8(value, strlen(value));
-    }
-  }
-#endif
-  tz_buf_free(&b);
-
-  return found;
-}
-
 TzMap *tz_env_map;
 
 TzMap *tz_process_env_map(const TzMapLayout *layout) {
@@ -228,28 +175,6 @@ void tz_process_env_changed(const TzStr *name, const TzStr *value) {
 #endif
 }
 
-void tz_process_cwd(TzStr *out) {
-#ifdef _WIN32
-  DWORD capacity = GetCurrentDirectoryW(0, NULL);
-  wchar_t *path = (wchar_t *)tz_alloc((capacity + 1) * sizeof(wchar_t));
-  DWORD length = GetCurrentDirectoryW(capacity + 1, path);
-  if (length > capacity) {
-    length = 0;
-  }
-  if (length > 3 && path[length - 1] == L'\\') {
-    --length;
-  }
-  *out = tz_str_from_utf16((const uint16_t *)path, length);
-  tz_free(path);
-#else
-  char path[4096];
-  if (!getcwd(path, sizeof path)) {
-    path[0] = 0;
-  }
-  *out = str_from_utf8(path, strlen(path));
-#endif
-}
-
 int32_t tz_process_pid(void) {
 #ifdef _WIN32
   return (int32_t)GetCurrentProcessId();
@@ -299,17 +224,3 @@ void tz_clock_init(void) {
 #endif
 }
 
-double tz_performance_now(void) {
-#ifdef _WIN32
-  LARGE_INTEGER now;
-  QueryPerformanceCounter(&now);
-  int64_t ticks = now.QuadPart - tz_clock_start;
-
-  return (double)(ticks / tz_clock_frequency) * 1000.0 +
-         (double)(ticks % tz_clock_frequency) * 1000.0 / (double)tz_clock_frequency;
-#else
-  struct timespec now;
-  clock_gettime(CLOCK_MONOTONIC, &now);
-  return (double)((int64_t)now.tv_sec * 1000000000 + now.tv_nsec - tz_clock_start) / 1e6;
-#endif
-}

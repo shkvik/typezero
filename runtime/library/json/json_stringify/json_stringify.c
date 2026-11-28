@@ -46,14 +46,6 @@ typedef struct {
   void *fail[5];
 } Writer;
 
-static void out_init(Out *o) {
-  o->data = tz_json_scratch;
-  o->capacity = tz_json_scratch_capacity;
-  o->length = 0;
-  o->two = 0;
-  o->high = 0;
-}
-
 static void out_release(Out *o) {
   if (o->two) {
     free(o->data);
@@ -66,28 +58,6 @@ static void out_release(Out *o) {
   o->data = NULL;
   o->capacity = 0;
   o->length = 0;
-}
-
-void tz_json_out_grow(Out *o, size_t n) {
-  size_t capacity = o->capacity * 2;
-  if (capacity < o->length + n) {
-    capacity = o->length + n;
-  }
-  if (capacity < 1024) {
-    capacity = 1024;
-  }
-  if (o->two) {
-    o->data = (uint8_t *)realloc(o->data, capacity * 2);
-  } else {
-    tz_json_scratch = (uint8_t *)realloc(tz_json_scratch, capacity);
-    tz_json_scratch_capacity = tz_json_scratch ? capacity : 0;
-    o->data = tz_json_scratch;
-  }
-  if (!o->data) {
-    tz_panicf("out of memory: JSON.stringify needs %llu bytes",
-              (unsigned long long)(capacity * (o->two ? 2 : 1)));
-  }
-  o->capacity = capacity;
 }
 
 static inline void out_need(Out *o, size_t n) {
@@ -870,88 +840,6 @@ static int write_value(Writer *w, const TzType *type, const void *value) {
   }
 }
 
-static void writer_init(Writer *w, Out *out) {
-  memset(w, 0, sizeof *w);
-  w->out = out;
-  w->open = w->open_inline;
-  w->capacity = sizeof w->open_inline / sizeof w->open_inline[0];
-  tz_buf_init(&w->gap);
-  tz_buf_init(&w->indent);
-}
-
-static TzStr out_text(Out *o) {
-  if (o->two) {
-    return tz_str_from_utf16((const uint16_t *)o->data, o->length);
-  }
-
-  return tz_str_from_latin1(o->data, o->length, (o->high & HIGHS) == 0);
-}
-
-int32_t tz_json_stringify(TzStr *out, const TzType *type, const void *value, int32_t space_kind,
-                          double space_number, void *space_obj, uint64_t space_meta) {
-  Writer w;
-  Out text;
-  out_init(&text);
-  writer_init(&w, &text);
-  w.owns = 1;
-  *out = tz_str_from_ascii("", 0);
-  if (__builtin_setjmp(w.fail)) {
-    return 0;
-  }
-  if (space_kind == 1) {
-    double n = space_number < 10 ? floor(space_number) : 10;
-    for (int i = 0; i < (int)n; ++i) {
-      tz_buf_push(&w.gap, ' ');
-    }
-  } else if (space_kind == 2) {
-    TzStr s = {space_obj, space_meta};
-    tz_buf_str(&w.gap, s);
-    if (w.gap.length > 10) {
-      w.gap.length = 10;
-    }
-  }
-  int written = write_value(&w, type, value);
-  if (written) {
-    *out = out_text(&text);
-  }
-  writer_release(&w);
-  out_release(&text);
-
-  return written;
-}
-
-void *tz_json_out_begin(void) {
-  out_init(&tz_json_out_state);
-
-  return &tz_json_out_state;
-}
-
-void tz_json_out_end(void *out, TzStr *text) {
-  Out *o = (Out *)out;
-  *text = out_text(o);
-  out_release(o);
-}
-
-TZ_NOINLINE void tz_json_out_raw_slow(Out *o, const char *text, int64_t length) {
-  out_ascii(o, text, (size_t)length);
-}
-
-TZ_HOT void tz_json_out_raw(void *out, const char *text, int64_t length) {
-  Out *o = (Out *)out;
-  size_t n = (size_t)length;
-  if (o->two || o->capacity - o->length < n) {
-    tz_json_out_raw_slow(o, text, length);
-    return;
-  }
-  memcpy(o->data + o->length, text, n);
-  o->length += n;
-}
-
-TZ_NOINLINE void tz_json_out_str_slow(Out *o, void *obj, uint64_t meta) {
-  TzStr s = {obj, meta};
-  quote(o, s);
-}
-
 TZ_HOT __attribute__((always_inline)) void tz_json_out_str(void *out, void *obj, uint64_t meta) {
   Out *o = (Out *)out;
   if ((meta & (STR_ROPE | STR_HEAP | STR_TWO_BYTE)) == STR_ROPE && !o->two &&
@@ -972,22 +860,3 @@ TZ_HOT __attribute__((always_inline)) void tz_json_out_str(void *out, void *obj,
   tz_json_out_str_slow(o, obj, meta);
 }
 
-void tz_json_out_int(void *out, int64_t value) { write_integer((Out *)out, TZ_T_INT64, value); }
-
-void tz_json_out_uint(void *out, uint64_t value) {
-  write_integer((Out *)out, TZ_T_UINT64, (int64_t)value);
-}
-
-void tz_json_out_double(void *out, double value) { write_number((Out *)out, value); }
-
-int32_t tz_json_out_value(void *out, const TzType *type, const void *value) {
-  Writer w;
-  writer_init(&w, (Out *)out);
-  if (__builtin_setjmp(w.fail)) {
-    tz_panicf("internal error: JSON.stringify met a cycle in a value of a type without cycles");
-  }
-  int written = write_value(&w, type, value);
-  writer_release(&w);
-
-  return written;
-}

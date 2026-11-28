@@ -782,10 +782,6 @@ static void namespaced(TzBuf *out, Span path) {
   tz_buf_free(&resolved);
 }
 
-void tz_path_namespaced_units(TzBuf *out, const uint16_t *units, size_t length) {
-  namespaced(out, (Span){units, length});
-}
-
 void tz_path_join_units(TzBuf *out, const uint16_t *a, size_t a_length, const uint16_t *b,
                         size_t b_length) {
   Span parts[2] = {{a, a_length}, {b, b_length}};

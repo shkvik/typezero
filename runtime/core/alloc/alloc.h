@@ -4,9 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void *tz_alloc(size_t size);
-void tz_free(void *p);
-void *tz_realloc(void *p, size_t size);
 void tz_weak_mark(void *p);
 void tz_weak_unmark(void *p);
 int tz_weak_marked(void *p);

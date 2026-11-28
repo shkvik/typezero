@@ -76,8 +76,6 @@ static inline TzStr make_str(void *obj, uint64_t meta) {
 #error "inline strings assume a little-endian target"
 #endif
 
-static inline uint64_t inline_bits(const TzStr *s) { return (uint64_t)(uintptr_t)s->obj; }
-
 static inline TzStr inline_from_bits(uint64_t bits, uint32_t len) {
   TzStr s;
   s.obj = (void *)(uintptr_t)bits;
@@ -93,21 +91,6 @@ static inline TzStr inline_str(const uint8_t *data, uint32_t len) {
   }
 
   return inline_from_bits(bits, len);
-}
-
-static inline TzStr inline_piece(const uint8_t *data, uint32_t end, uint32_t from, uint32_t n) {
-  uint64_t bits;
-  if (from + 8 <= end) {
-    memcpy(&bits, data + from, 8);
-    bits &= ~0ull >> (64 - 8 * n);
-  } else {
-    bits = 0;
-    for (uint32_t i = 0; i < n; ++i) {
-      bits |= (uint64_t)data[from + i] << (8 * i);
-    }
-  }
-
-  return inline_from_bits(bits, n);
 }
 
 static void *object_new(size_t size, uint32_t kind) {
@@ -166,36 +149,6 @@ static void stack_free(PtrStack *s) {
   }
 }
 
-TZ_NOINLINE void tz_str_free_rope(void *obj) {
-  PtrStack pending;
-  stack_init(&pending);
-  stack_push(&pending, obj);
-  while (pending.count > 0) {
-    Header *h = (Header *)pending.items[--pending.count];
-    if (h->kind == KIND_ROPE) {
-      Rope *r = (Rope *)h;
-      TzStr children[3] = {r->left, r->right, r->flat};
-      for (int i = 0; i < 3; ++i) {
-        if ((children[i].meta & F_HEAP) && tz_rc_dec(&((Header *)children[i].obj)->rc)) {
-          stack_push(&pending, children[i].obj);
-        }
-      }
-    }
-    --tz_live_strings;
-    tz_free(h);
-  }
-  stack_free(&pending);
-}
-
-TZ_HOT void tz_str_free(void *obj) {
-  if (((Header *)obj)->kind == KIND_ROPE) {
-    tz_str_free_rope(obj);
-    return;
-  }
-  --tz_live_strings;
-  tz_free(obj);
-}
-
 static Buffer *buffer_new(uint32_t capacity, int two) {
   Buffer *b = (Buffer *)object_new(sizeof(Buffer) + (size_t)capacity * (two ? 2 : 1),
                                    two ? KIND_BUF2 : KIND_BUF1);
@@ -250,17 +203,6 @@ static inline uint16_t unit_at(const TzStr *f, uint32_t i) {
   return is_two(f->meta) ? ((const uint16_t *)u)[i] : ((const uint8_t *)u)[i];
 }
 
-static inline int32_t direct_byte(void *obj, uint64_t meta, uint32_t i) {
-  if ((meta & (F_ROPE | F_TWO_BYTE)) == 0) {
-    return ((const uint8_t *)obj)[sizeof(Buffer) + str_off(meta) + i];
-  }
-  if (is_inline(meta)) {
-    return (uint8_t)((uint64_t)(uintptr_t)obj >> (8 * i));
-  }
-
-  return -1;
-}
-
 static void copy_units(void *dst, int dst_two, const TzStr *src) {
   uint32_t len = str_len(src->meta);
   if (len == 0) {
@@ -278,77 +220,10 @@ static void copy_units(void *dst, int dst_two, const TzStr *src) {
   }
 }
 
-static inline uint64_t add_inline_units(uint64_t bits, uint32_t pos, TzStr s) {
-  uint32_t len = str_len(s.meta);
-  if (len == 0) {
-    return bits;
-  }
-  if (is_inline(s.meta)) {
-    return bits | inline_bits(&s) << (8 * pos);
-  }
-  TzStr f = flat(s);
-  const uint8_t *u = (const uint8_t *)units(&f);
-  for (uint32_t i = 0; i < len; ++i) {
-    bits |= (uint64_t)u[i] << (8 * (pos + i));
-  }
-
-  return bits;
-}
-
 #if TZ_PARALLEL
 int32_t tz_str_flatten_lock;
 
-static void flatten_lock(void) {
-  for (unsigned spin = 0;; ++spin) {
-    int32_t free_ = 0;
-    if (__atomic_compare_exchange_n(&tz_str_flatten_lock, &free_, 1, 1, __ATOMIC_ACQUIRE,
-                                    __ATOMIC_RELAXED)) {
-      return;
-    }
-    if (spin > 64) {
-      tz_thread_yield();
-    } else {
-      tz_cpu_relax();
-    }
-  }
-}
-
-static void flatten_unlock(void) { __atomic_store_n(&tz_str_flatten_lock, 0, __ATOMIC_RELEASE); }
-
 static void flatten_rope(Rope *r, uint64_t meta);
-
-TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
-  if (!tz_rc_is_shared(r->h.rc)) {
-    PtrStack pending;
-    stack_init(&pending);
-    stack_push(&pending, &r->right);
-    stack_push(&pending, &r->left);
-    while (pending.count > 0) {
-      const TzStr *s = (const TzStr *)pending.items[--pending.count];
-      if (!is_rope(s->meta)) {
-        continue;
-      }
-      Rope *child = (Rope *)s->obj;
-      if (rope_flat_obj(child)) {
-        continue;
-      }
-      if (tz_rc_is_shared(child->h.rc)) {
-        tz_str_flatten(child, s->meta);
-        continue;
-      }
-      stack_push(&pending, &child->right);
-      stack_push(&pending, &child->left);
-    }
-    stack_free(&pending);
-    flatten_rope(r, meta);
-    return;
-  }
-  flatten_lock();
-  if (!r->flat.obj) {
-    flatten_rope(r, meta);
-  }
-  flatten_unlock();
-}
 
 static void flatten_rope(Rope *r, uint64_t meta) {
 #else
@@ -398,8 +273,6 @@ TZ_NOINLINE void tz_str_flatten(Rope *r, uint64_t meta) {
   r->right = kEmpty;
 }
 
-static TzStr single_char(uint8_t unit) { return inline_str(&unit, 1); }
-
 static TzStr string_from_units(const void *data, uint32_t len, int two) {
   if (len == 0) {
     return kEmpty;
@@ -444,21 +317,6 @@ static TzStr string_from_ascii(const char *text, size_t len) {
 }
 
 TzStr tz_str_from_ascii(const char *text, size_t length) { return string_from_ascii(text, length); }
-
-TzStr tz_str_from_latin1(const uint8_t *bytes, size_t length, int ascii) {
-  if (length <= INLINE_MAX) {
-    return length ? inline_str(bytes, (uint32_t)length) : kEmpty;
-  }
-  if (length > MAX_LENGTH) {
-    tz_panicf("string length %llu exceeds the maximum of %llu", (unsigned long long)length,
-              (unsigned long long)MAX_LENGTH);
-  }
-  Buffer *b = buffer_new((uint32_t)length, 0);
-  memcpy(buffer_units(b), bytes, length);
-  b->used = (uint32_t)length;
-
-  return make_str(b, make_meta((uint32_t)length, 0, 0, ascii, F_HEAP));
-}
 
 char *tz_str_ascii_units(size_t length, TzStr *out) {
   if (length <= INLINE_MAX) {
@@ -516,102 +374,6 @@ void tz_str_publish(TzStr s) {
 }
 #endif
 
-static inline void copy_bytes(uint8_t *dst, const uint8_t *src, uint32_t n) {
-  if (n >= 8 && n <= 16) {
-    uint64_t head, tail;
-    memcpy(&head, src, 8);
-    memcpy(&tail, src + n - 8, 8);
-    memcpy(dst, &head, 8);
-    memcpy(dst + n - 8, &tail, 8);
-  } else {
-    memcpy(dst, src, n);
-  }
-}
-
-static void join_bytes(uint8_t *out, uint32_t total, const TzStr *items, int64_t n,
-                       const TzStr *sep) {
-  uint32_t sep_len = str_len(sep->meta), pos = 0;
-  const uint8_t *sep_units = (const uint8_t *)units(sep);
-  for (int64_t i = 0; i < n; ++i) {
-    if (i > 0 && sep_len) {
-      if (sep_len == 1) {
-        out[pos] = sep_units[0];
-      } else {
-        copy_bytes(out + pos, sep_units, sep_len);
-      }
-      pos += sep_len;
-    }
-    TzStr s = items[i];
-    uint32_t len = str_len(s.meta);
-    if (is_inline(s.meta) && pos + 8 <= total) {
-      memcpy(out + pos, &s.obj, 8);
-    } else if (len) {
-      TzStr f = flat(s);
-      copy_bytes(out + pos, (const uint8_t *)units(&f), len);
-    }
-    pos += len;
-  }
-}
-
-static TzStr join_sep(const TzStr *items, int64_t n, const TzStr *sep) {
-  uint64_t total = 0;
-  int two = 0, ascii = 1;
-  for (int64_t i = 0; i < n; ++i) {
-    total += str_len(items[i].meta);
-    two |= is_two(items[i].meta);
-    ascii &= is_ascii(items[i].meta);
-  }
-  TzStr separator = kEmpty;
-  if (sep && n > 1) {
-    separator = flat(*sep);
-    total += (uint64_t)str_len(separator.meta) * (uint64_t)(n - 1);
-    two |= is_two(separator.meta);
-    ascii &= is_ascii(separator.meta);
-  }
-  if (total > MAX_LENGTH) {
-    tz_panicf("string length %llu exceeds the maximum of %llu", (unsigned long long)total,
-              (unsigned long long)MAX_LENGTH);
-  }
-  if (total == 0) {
-    return kEmpty;
-  }
-
-  uint32_t sep_len = str_len(separator.meta);
-  uint32_t pos = 0;
-  if (!two && total <= INLINE_MAX) {
-    uint64_t bits = 0;
-    for (int64_t i = 0; i < n; ++i) {
-      if (i > 0) {
-        bits = add_inline_units(bits, pos, separator);
-        pos += sep_len;
-      }
-      bits = add_inline_units(bits, pos, items[i]);
-      pos += str_len(items[i].meta);
-    }
-    return inline_from_bits(bits, pos);
-  }
-
-  Buffer *b = buffer_new((uint32_t)total, two);
-  char *dst = buffer_units(b);
-  if (!two) {
-    join_bytes((uint8_t *)dst, (uint32_t)total, items, n, &separator);
-    pos = (uint32_t)total;
-  } else {
-    for (int64_t i = 0; i < n; ++i) {
-      if (i > 0 && sep_len) {
-        copy_units(dst + (size_t)pos * 2, 1, &separator);
-        pos += sep_len;
-      }
-      TzStr f = flat(items[i]);
-      copy_units(dst + (size_t)pos * 2, 1, &f);
-      pos += str_len(f.meta);
-    }
-  }
-  b->used = pos;
-
-  return make_str(b, make_meta(pos, 0, two, ascii, F_HEAP));
-}
-
 #define NUMBER_INT 1
 #define NUMBER_DOUBLE 2
 
@@ -619,46 +381,6 @@ typedef struct {
   Buffer b;
   char units[32];
 } NumberText;
-
-void tz_str_join(TzStr *out, const TzStr *items, uint32_t n, const TzStr *sep) {
-  TzStr comma = single_char(',');
-  *out = join_sep(items, n, sep ? sep : &comma);
-}
-
-TZ_NOINLINE int tz_str_units_equal(const TzStr *a, uint32_t ia, const TzStr *b, uint32_t ib,
-                                   uint32_t n) {
-  if (n == 0) {
-    return 1;
-  }
-  if (is_two(a->meta) == is_two(b->meta)) {
-    size_t width = is_two(a->meta) ? 2 : 1;
-    return memcmp((const char *)units(a) + ia * width, (const char *)units(b) + ib * width,
-                  n * width) == 0;
-  }
-  for (uint32_t i = 0; i < n; ++i) {
-    if (unit_at(a, ia + i) != unit_at(b, ib + i)) {
-      return 0;
-    }
-  }
-
-  return 1;
-}
-
-TZ_HOT int32_t tz_str_equal(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta) {
-  uint32_t len = str_len(a_meta);
-  if (len != str_len(b_meta)) {
-    return 0;
-  }
-  if (a_obj == b_obj && a_meta == b_meta) {
-    return 1;
-  }
-  if (is_inline(a_meta) && is_inline(b_meta)) {
-    return 0;
-  }
-  TzStr a = flat(make_str(a_obj, a_meta)), b = flat(make_str(b_obj, b_meta));
-
-  return tz_str_units_equal(&a, 0, &b, 0, len);
-}
 
 static inline uint32_t find_byte(const uint8_t *data, uint32_t from, uint32_t end, uint8_t c) {
 #ifdef TZ_SSE2
@@ -709,60 +431,6 @@ static inline uint32_t find_unit(const void *units, int two, uint32_t from, uint
   return c > 0xFF ? end : find_byte((const uint8_t *)units, from, end, (uint8_t)c);
 }
 
-static void check_index(int64_t index, uint32_t len) {
-  if (index < 0 || index >= (int64_t)len) {
-    tz_panicf("internal error: string index %lld out of range for length %u", (long long)index,
-              len);
-  }
-}
-
-TZ_NOINLINE void tz_str_short_piece(TzStr *out, const TzStr *f, const uint8_t *data, uint32_t from,
-                                    uint32_t n) {
-  if (n == str_len(f->meta)) {
-    retain(*f);
-    *out = *f;
-    return;
-  }
-  Buffer *b = buffer_new(n, 0);
-  copy_bytes((uint8_t *)buffer_units(b), data + from, n);
-  b->used = n;
-  int ascii = 1;
-  if (!is_ascii(f->meta)) {
-    for (uint32_t i = 0; i < n && ascii; ++i) {
-      ascii = data[from + i] < 0x80;
-    }
-  }
-  *out = make_str(b, make_meta(n, 0, 0, ascii, F_HEAP));
-}
-
-TZ_NOINLINE void tz_str_substring_into(TzStr *out, void *obj, uint64_t meta, uint32_t from,
-                                       uint32_t to) {
-  TzStr s = make_str(obj, meta);
-  uint32_t n = to - from;
-  if (n == 0) {
-    *out = kEmpty;
-    return;
-  }
-  if (n == str_len(s.meta)) {
-    retain(s);
-    *out = s;
-    return;
-  }
-  TzStr f = flat(s);
-  if (n <= INLINE_MAX && !is_two(f.meta)) {
-    *out = inline_piece((const uint8_t *)units(&f), str_len(f.meta), from, n);
-  } else if (n < SHORT_LENGTH && !is_two(f.meta)) {
-    tz_str_short_piece(out, &f, (const uint8_t *)units(&f), from, n);
-  } else if (n < SHORT_LENGTH) {
-    *out = string_from_units((const char *)units(&f) + (size_t)from * (is_two(f.meta) ? 2 : 1), n,
-                             is_two(f.meta));
-  } else {
-    retain(f);
-    *out = make_str(f.obj, make_meta(n, str_off(f.meta) + from, is_two(f.meta), is_ascii(f.meta),
-                                     f.meta & F_HEAP));
-  }
-}
-
 static inline TzStr substring_of(TzStr s, uint32_t from, uint32_t to) {
   TzStr piece;
   tz_str_substring_into(&piece, s.obj, s.meta, from, to);
@@ -770,99 +438,12 @@ static inline TzStr substring_of(TzStr s, uint32_t from, uint32_t to) {
   return piece;
 }
 
-TzStr tz_str_sub(TzStr s, uint32_t from, uint32_t to) { return substring_of(s, from, to); }
-
 const void *tz_str_units(TzStr *s, uint32_t *length, int *two) {
   *s = flat(*s);
   *length = str_len(s->meta);
   *two = is_two(s->meta);
 
   return units(s);
-}
-
-TZ_NOINLINE void tz_str_char_at_slow(TzStr *out, void *obj, uint64_t meta, uint32_t index) {
-  tz_str_substring_into(out, obj, meta, index, index + 1);
-}
-
-TZ_HOT void tz_str_char_at(TzStr *out, void *obj, uint64_t meta, int64_t index) {
-  check_index(index, str_len(meta));
-  int32_t unit = direct_byte(obj, meta, (uint32_t)index);
-  if (unit >= 0) {
-    *out = inline_from_bits((uint64_t)unit, 1);
-  } else {
-    tz_str_char_at_slow(out, obj, meta, (uint32_t)index);
-  }
-}
-
-void tz_buf_integer(TzBuf *b, uint32_t kind, int64_t value) {
-  char text[24];
-  int negative = kind != TZ_T_UINT64 && value < 0;
-  uint64_t magnitude = negative ? 0 - (uint64_t)value : (uint64_t)value;
-  char *p = text + sizeof text;
-  do {
-    *--p = (char)('0' + magnitude % 10);
-    magnitude /= 10;
-  } while (magnitude != 0);
-  if (negative) {
-    *--p = '-';
-  }
-  tz_buf_ascii_n(b, p, (size_t)(text + sizeof text - p));
-}
-
-void tz_str_from_f64(TzStr *out, double value) {
-  char buf[64];
-  *out = string_from_ascii(buf, tz_format_f64(value, buf));
-}
-
-TZ_NOINLINE void tz_out_write_units(const void *data, uint32_t len, int two) {
-  char buf[256];
-  size_t n = 0;
-  for (uint32_t i = 0; i < len; ++i) {
-    if (n > sizeof buf - 4) {
-      tz_out_write(buf, n);
-      n = 0;
-    }
-    uint32_t cp = two ? ((const uint16_t *)data)[i] : ((const uint8_t *)data)[i];
-    if (two && cp >= 0xD800 && cp <= 0xDBFF && i + 1 < len) {
-      uint16_t low = ((const uint16_t *)data)[i + 1];
-      if (low >= 0xDC00 && low <= 0xDFFF) {
-        cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
-        ++i;
-      }
-    }
-    if (cp >= 0xD800 && cp <= 0xDFFF) {
-      cp = 0xFFFD;
-    }
-    if (cp < 0x80) {
-      buf[n++] = (char)cp;
-    } else if (cp < 0x800) {
-      buf[n++] = (char)(0xC0 | (cp >> 6));
-      buf[n++] = (char)(0x80 | (cp & 0x3F));
-    } else if (cp < 0x10000) {
-      buf[n++] = (char)(0xE0 | (cp >> 12));
-      buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-      buf[n++] = (char)(0x80 | (cp & 0x3F));
-    } else {
-      buf[n++] = (char)(0xF0 | (cp >> 18));
-      buf[n++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-      buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-      buf[n++] = (char)(0x80 | (cp & 0x3F));
-    }
-  }
-  tz_out_write(buf, n);
-}
-
-void tz_print_string(void *obj, uint64_t meta) {
-  TzStr f = flat(make_str(obj, meta));
-  uint32_t len = str_len(f.meta);
-  if (len == 0) {
-    return;
-  }
-  if (is_ascii(f.meta)) {
-    tz_out_write((const char *)units(&f), len);
-  } else {
-    tz_out_write_units(units(&f), len, is_two(f.meta));
-  }
 }
 
 void tz_buf_init(TzBuf *b) {
@@ -972,55 +553,6 @@ typedef struct {
   int two;
 } Builder;
 
-static void builder_init(Builder *w, uint32_t total, int two) {
-  w->b = !two && total <= INLINE_MAX ? NULL : buffer_new(total, two);
-  w->bits = 0;
-  w->pos = 0;
-  w->two = two;
-}
-
-static void builder_put(Builder *w, const TzStr *s, uint32_t from, uint32_t n) {
-  if (n == 0) {
-    return;
-  }
-  if (!w->b) {
-    for (uint32_t i = 0; i < n; ++i) {
-      w->bits |= (uint64_t)(uint8_t)unit_at(s, from + i) << (8 * (w->pos + i));
-    }
-  } else {
-    char *dst = buffer_units(w->b) + (size_t)w->pos * (w->two ? 2 : 1);
-    const char *src = (const char *)units(s);
-    if (is_two(s->meta) == w->two) {
-      size_t width = w->two ? 2 : 1;
-      memcpy(dst, src + (size_t)from * width, (size_t)n * width);
-    } else {
-      for (uint32_t i = 0; i < n; ++i) {
-        ((uint16_t *)dst)[i] = ((const uint8_t *)src)[from + i];
-      }
-    }
-  }
-  w->pos += n;
-}
-
-static TzStr builder_finish(Builder *w, int ascii) {
-  if (!w->b) {
-    return w->pos == 0 ? kEmpty : inline_from_bits(w->bits, w->pos);
-  }
-  w->b->used = w->pos;
-
-  return make_str(w->b, make_meta(w->pos, 0, w->two, ascii, F_HEAP));
-}
-
-static void buf_code_point(TzBuf *b, uint32_t cp) {
-  if (cp < 0x10000) {
-    tz_buf_push(b, (uint16_t)cp);
-  } else {
-    cp -= 0x10000;
-    tz_buf_push(b, (uint16_t)(0xD800 + (cp >> 10)));
-    tz_buf_push(b, (uint16_t)(0xDC00 + (cp & 0x3FF)));
-  }
-}
-
 static uint32_t next_code_point(const TzStr *s, uint32_t *i, uint32_t len) {
   uint32_t unit = unit_at(s, *i);
   ++*i;
@@ -1029,19 +561,6 @@ static uint32_t next_code_point(const TzStr *s, uint32_t *i, uint32_t len) {
     if (low >= 0xDC00 && low <= 0xDFFF) {
       ++*i;
       return 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
-    }
-  }
-
-  return unit;
-}
-
-static uint32_t previous_code_point(const TzStr *s, uint32_t *i) {
-  uint32_t unit = unit_at(s, --*i);
-  if (unit >= 0xDC00 && unit <= 0xDFFF && *i > 0) {
-    uint32_t high = unit_at(s, *i - 1);
-    if (high >= 0xD800 && high <= 0xDBFF) {
-      --*i;
-      return 0x10000 + ((high - 0xD800) << 10) + (unit - 0xDC00);
     }
   }
 
@@ -1062,136 +581,6 @@ void tz_arr_append_code_points(TzArray *a, void *obj, uint64_t meta) {
 static inline int is_space(uint32_t unit) {
   return unit == ' ' || (unit >= 9 && unit <= 13) || (unit >= 0x80 && tz_is_js_space(unit));
 }
-
-static int final_sigma(const TzStr *f, uint32_t i, uint32_t len) {
-  int preceded = 0;
-  for (uint32_t j = i; j > 0;) {
-    uint32_t cp = previous_code_point(f, &j);
-    if (!tz_is_case_ignorable(cp)) {
-      preceded = tz_is_cased(cp);
-      break;
-    }
-  }
-  if (!preceded) {
-    return 0;
-  }
-  for (uint32_t j = i + 1; j < len;) {
-    uint32_t cp = next_code_point(f, &j, len);
-    if (!tz_is_case_ignorable(cp)) {
-      return !tz_is_cased(cp);
-    }
-  }
-
-  return 1;
-}
-
-static inline int flips_case(uint8_t c, int upper) {
-  if (upper) {
-    return (c >= 'a' && c <= 'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7);
-  }
-
-  return (c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7);
-}
-
-static int latin1_case(TzStr *out, const TzStr *s, const TzStr *f, int upper) {
-  uint32_t len = str_len(f->meta);
-  const uint8_t *u = (const uint8_t *)units(f);
-  uint32_t first = len;
-  for (uint32_t i = 0; i < len; ++i) {
-    if (upper && (u[i] == 0xB5 || u[i] == 0xDF || u[i] == 0xFF)) {
-      return 0;
-    }
-    if (first == len && flips_case(u[i], upper)) {
-      first = i;
-    }
-  }
-  if (first == len) {
-    retain(*s);
-    *out = *s;
-    return 1;
-  }
-  Builder w;
-  builder_init(&w, len, 0);
-  builder_put(&w, f, 0, len);
-  uint8_t *dst = w.b ? (uint8_t *)buffer_units(w.b) : (uint8_t *)&w.bits;
-  for (uint32_t i = first; i < len; ++i) {
-    if (flips_case(dst[i], upper)) {
-      dst[i] ^= 0x20;
-    }
-  }
-  *out = builder_finish(&w, 0);
-
-  return 1;
-}
-
-static void convert_case(TzStr *out, void *obj, uint64_t meta, int upper) {
-  TzStr s = make_str(obj, meta);
-  TzStr f = flat(s);
-  uint32_t len = str_len(f.meta);
-  if (is_ascii(f.meta) && is_inline(f.meta)) {
-    uint64_t bits = inline_bits(&f);
-    uint64_t from = upper ? 0x1F1F1F1F1F1F1F1Full : 0x3F3F3F3F3F3F3F3Full;
-    uint64_t past = upper ? 0x0505050505050505ull : 0x2525252525252525ull;
-    uint64_t letters = (bits + from) & ~(bits + past) & 0x8080808080808080ull;
-    *out = inline_from_bits(bits ^ (letters >> 2), len);
-    return;
-  }
-  if (!is_two(f.meta) && !is_ascii(f.meta) && latin1_case(out, &s, &f, upper)) {
-    return;
-  }
-  if (is_ascii(f.meta)) {
-    const uint8_t *u = (const uint8_t *)units(&f);
-    uint8_t from = upper ? 'a' : 'A';
-    uint32_t i = 0;
-    while (i < len && (uint8_t)(u[i] - from) > 25) {
-      ++i;
-    }
-    if (i == len) {
-      retain(s);
-      *out = s;
-      return;
-    }
-    Builder w;
-    builder_init(&w, len, 0);
-    builder_put(&w, &f, 0, len);
-    uint8_t *dst = w.b ? (uint8_t *)buffer_units(w.b) : (uint8_t *)&w.bits;
-    for (; i < len; ++i) {
-      if ((uint8_t)(dst[i] - from) <= 25) {
-        dst[i] ^= 0x20;
-      }
-    }
-    *out = builder_finish(&w, 1);
-    return;
-  }
-  TzBuf b;
-  tz_buf_init(&b);
-  int changed = 0;
-  for (uint32_t i = 0; i < len;) {
-    uint32_t at = i;
-    uint32_t cp = next_code_point(&f, &i, len);
-    uint32_t mapped[3];
-    int count;
-    if (!upper && cp == 0x3A3) {
-      mapped[0] = final_sigma(&f, at, len) ? 0x3C2 : 0x3C3;
-      count = 1;
-    } else {
-      count = tz_case_map(cp, upper, mapped);
-    }
-    changed |= count != 1 || mapped[0] != cp;
-    for (int k = 0; k < count; ++k) {
-      buf_code_point(&b, mapped[k]);
-    }
-  }
-  if (!changed) {
-    tz_buf_free(&b);
-    retain(s);
-    *out = s;
-    return;
-  }
-  *out = tz_buf_take(&b);
-}
-
-void tz_str_to_lower(TzStr *out, void *obj, uint64_t meta) { convert_case(out, obj, meta, 0); }
 
 #define URI_BIT(c) (1ull << ((c) & 63))
 #define URI_RANGE(a, b) ((~0ull >> (63 - ((b) & 63))) & (~0ull << ((a) & 63)))

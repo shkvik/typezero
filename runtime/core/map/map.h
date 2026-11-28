@@ -40,11 +40,6 @@ typedef struct {
   uint32_t live;
 } TzMapEntry;
 
-TzMap *tz_map_new(const TzMapLayout *layout);
-void tz_map_drop(void *map);
-void *tz_map_find(TzMap *m, const void *key);
-void *tz_map_add(TzMap *m, const void *key, int32_t *added);
-int32_t tz_map_delete(TzMap *m, const void *key);
 void *tz_map_next(const TzMap *m, uint32_t *at);
 
 #endif

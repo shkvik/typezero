@@ -9,11 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-TzJson *tz_json_string_node(TzStr s);
 
-TzJson *tz_json_array_node(uint32_t capacity);
 
-TzJson *tz_json_object_new(void);
 
 
 #endif

@@ -22,27 +22,6 @@ typedef struct {
 
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
-static const CaseRun *find_run(const CaseRun *runs, size_t n, uint32_t cp) {
-  size_t lo = 0, hi = n;
-  while (lo < hi) {
-    size_t mid = (lo + hi) / 2;
-    if (runs[mid].start <= cp) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  if (lo == 0) {
-    return NULL;
-  }
-  const CaseRun *run = &runs[lo - 1];
-  if (cp > run->end || (cp - run->start) % run->stride != 0) {
-    return NULL;
-  }
-
-  return run;
-}
-
 static int in_ranges(const CodeRange *ranges, size_t n, uint32_t cp) {
   size_t lo = 0, hi = n;
   while (lo < hi) {
@@ -59,33 +38,3 @@ static int in_ranges(const CodeRange *ranges, size_t n, uint32_t cp) {
   return 0;
 }
 
-int tz_case_map(uint32_t cp, int upper, uint32_t out[3]) {
-  const CaseSpecial *special = upper ? upper_special : lower_special;
-  size_t lo = 0, hi = upper ? COUNT(upper_special) : COUNT(lower_special);
-  while (lo < hi) {
-    size_t mid = (lo + hi) / 2;
-    if (special[mid].cp < cp) {
-      lo = mid + 1;
-    } else if (special[mid].cp > cp) {
-      hi = mid;
-    } else {
-      for (uint32_t k = 0; k < special[mid].count; ++k) {
-        out[k] = special[mid].to[k];
-      }
-      return (int)special[mid].count;
-    }
-  }
-  const CaseRun *run = upper ? find_run(upper_runs, COUNT(upper_runs), cp)
-                             : find_run(lower_runs, COUNT(lower_runs), cp);
-  out[0] = run ? (uint32_t)((int32_t)cp + run->delta) : cp;
-
-  return 1;
-}
-
-int tz_is_cased(uint32_t cp) { return in_ranges(cased_ranges, COUNT(cased_ranges), cp); }
-
-int tz_is_case_ignorable(uint32_t cp) {
-  return in_ranges(case_ignorable_ranges, COUNT(case_ignorable_ranges), cp);
-}
-
-int tz_is_js_space(uint32_t unit) { return tz_js_space(unit); }

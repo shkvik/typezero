@@ -9,7 +9,6 @@ typedef struct {
   TzStr root, dir, base, ext, name;
 } TzParsedPath;
 
-void tz_path_namespaced_units(TzBuf *out, const uint16_t *units, size_t length);
 void tz_path_join_units(TzBuf *out, const uint16_t *a, size_t a_length, const uint16_t *b,
                         size_t b_length);
 

@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-int tz_f64_digits(double value, char *digits, int32_t *exponent);
 
 double tz_number_from_ascii(const char *text, size_t length, int complete);
 double tz_parse_int_ascii(const char *text, size_t length, int32_t radix);

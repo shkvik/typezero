@@ -37,14 +37,8 @@ void tz_str_retain_value(TzStr s);
 void tz_str_release_value(TzStr s);
 TzStr tz_str_from_utf16(const uint16_t *units, size_t length);
 TzStr tz_str_from_ascii(const char *text, size_t length);
-TzStr tz_str_from_latin1(const uint8_t *bytes, size_t length, int ascii);
 char *tz_str_ascii_units(size_t length, TzStr *out);
-int32_t tz_str_equal(void *a_obj, uint64_t a_meta, void *b_obj, uint64_t b_meta);
-void tz_str_join(TzStr *out, const TzStr *items, uint32_t n, const TzStr *sep);
-TzStr tz_str_sub(TzStr s, uint32_t from, uint32_t to);
 const void *tz_str_units(TzStr *s, uint32_t *length, int *two);
-void tz_print_string(void *obj, uint64_t meta);
-void tz_str_from_f64(TzStr *out, double value);
 
 typedef struct {
   uint16_t *data;
@@ -56,14 +50,12 @@ void tz_buf_free(TzBuf *b);
 void tz_buf_push(TzBuf *b, uint16_t unit);
 void tz_buf_ascii(TzBuf *b, const char *text);
 void tz_buf_ascii_n(TzBuf *b, const char *text, size_t length);
-void tz_buf_integer(TzBuf *b, uint32_t kind, int64_t value);
 void tz_buf_units(TzBuf *b, const uint16_t *units, size_t length);
 void tz_buf_bytes(TzBuf *b, const uint8_t *units, size_t length);
 void tz_buf_utf8(TzBuf *b, const char *text, size_t length);
 void tz_buf_str(TzBuf *b, TzStr s);
 TzStr tz_buf_take(TzBuf *b);
 
-void tz_str_to_lower(TzStr *out, void *obj, uint64_t meta);
 
 typedef struct {
   TzStr value;

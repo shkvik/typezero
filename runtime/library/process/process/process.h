@@ -9,7 +9,5 @@ void tz_process_env_changed(const TzStr *name, const TzStr *value);
 
 void tz_process_shutdown(void);
 void tz_clock_init(void);
-void tz_process_cwd(TzStr *out);
-int32_t tz_process_env(TzStr *out, void *obj, uint64_t meta);
 
 #endif

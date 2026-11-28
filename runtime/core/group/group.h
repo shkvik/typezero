@@ -78,7 +78,6 @@ void tz_group_join(void *owner, void *ref);
 void tz_group_join_value(void *owner, const TzType *type, void *value);
 void tz_group_store_value(void *owner, const TzType *type, void *value);
 void tz_group_take_value(void *owner, const TzType *type, void *value);
-void tz_value_release_in(void *owner, const TzType *type, void *value);
 void tz_group_pin_value(const TzType *type, void *value);
 void tz_group_end_value(const TzType *type, void *value);
 void tz_group_shutdown(void);

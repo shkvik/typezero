@@ -232,16 +232,6 @@ static TzBytes *bytes_alloc(int32_t kind, int64_t length, int zero) {
   return view_of(kind, abuf_alloc(length * tz_bytes_element_size(kind), zero), 0, length);
 }
 
-void tz_bytes_drop(void *object) {
-  TzBytes *b = (TzBytes *)object;
-  tz_instance_release((TzInstance *)b->buffer);
-  tz_obj_free(b);
-}
-
-void tz_abuf_drop(void *object) { tz_obj_free(object); }
-
-void tz_bytes_object_drop(void *object) { tz_obj_free(object); }
-
 TzBytes *tz_bytes_new(int32_t kind, int64_t length) {
   if (length < 0) {
     tz_panicf("internal error: a typed array of %lld elements", (long long)length);
@@ -333,20 +323,6 @@ TzBytes *tz_bytes_from_array(int32_t kind, const TzArray *a) {
   return b;
 }
 
-TzBytes *tz_bytes_from_bytes(int32_t kind, const TzBytes *src) {
-  int32_t from = tz_bytes_kind(src);
-  TzBytes *b = bytes_alloc(kind, src->length, 0);
-  if (same_bits(kind, from)) {
-    memcpy(b->data, src->data, (size_t)src->length * (size_t)tz_bytes_element_size(kind));
-    return b;
-  }
-  for (int32_t i = 0; i < src->length; ++i) {
-    put(b->data, kind, i, get(src->data, from, i));
-  }
-
-  return b;
-}
-
 TzArray *tz_bytes_to_array(const TzBytes *b, const TzType *element) {
   int32_t kind = tz_bytes_kind(b);
   TzArray *a = tz_arr_new(element, b->length, b->length);
@@ -386,15 +362,6 @@ static void range_of(int64_t length, int64_t start, int64_t end, int32_t has, in
   if (*to < *from) {
     *to = *from;
   }
-}
-
-TzBytes *tz_bytes_subarray(TzBytes *b, int64_t start, int64_t end, int32_t has) {
-  int64_t from, to;
-  range_of(b->length, start, end, has, &from, &to);
-  int32_t kind = tz_bytes_kind(b);
-  tz_rc_inc(&b->buffer->rc);
-
-  return view_of(kind, b->buffer, b->offset + from * tz_bytes_element_size(kind), to - from);
 }
 
 TzBytes *tz_bytes_slice(TzBytes *b, int64_t start, int64_t end, int32_t has) {

@@ -27,7 +27,5 @@ typedef struct TzFunctionInfo {
 } TzFunctionInfo;
 
 /* An object made immortal (Interned, a copyable module constant) is never freed and is no leak. */
-void *tz_obj_alloc(int64_t size);
-void tz_obj_free(void *object);
 
 #endif

@@ -8,7 +8,6 @@
 #include <stdint.h>
 
 TzBytes *tz_buffer_copy_of(const uint8_t *data, int64_t length);
-TzBytes *tz_buffer_from_string(void *obj, uint64_t meta, int32_t encoding);
 TzStr tz_buffer_decode(const uint8_t *data, int64_t length, int32_t encoding);
 
 

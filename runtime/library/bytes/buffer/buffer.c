@@ -361,17 +361,6 @@ static TzBytes *buffer_of(int64_t length) {
   return tz_bytes_new_unset(TZ_BYTES_BUFFER, length);
 }
 
-TzBytes *tz_buffer_from_string(void *obj, uint64_t meta, int32_t encoding) {
-  Units u;
-  units_of(&u, obj, meta);
-  int64_t size = byte_length(&u, encoding);
-  TzBytes *b = buffer_of(size);
-  int64_t written = encode_into(b->data, size, &u, encoding);
-  b->length = (int32_t)written;
-
-  return b;
-}
-
 TzBytes *tz_buffer_copy_of(const uint8_t *data, int64_t length) {
   TzBytes *b = buffer_of(length);
   if (length) {
@@ -561,18 +550,6 @@ TzStr tz_buffer_decode(const uint8_t *data, int64_t length, int32_t encoding) {
   return encode_text(data, length, encoding);
 }
 
-TzBytes *tz_buffer_alloc(int64_t size, int32_t zero) {
-  if (size < 0) {
-    tz_panicf("internal error: a Buffer of %lld bytes", (long long)size);
-  }
-  if (size > MAX_LENGTH) {
-    tz_panicf("a Buffer of %lld bytes exceeds the maximum of %lld", (long long)size,
-              (long long)MAX_LENGTH);
-  }
-
-  return zero ? tz_bytes_new(TZ_BYTES_BUFFER, size) : buffer_of(size);
-}
-
 TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, int32_t has) {
   if (!(has & 1)) {
     offset = 0;
@@ -596,34 +573,6 @@ TzBytes *tz_buffer_view(TzArrayBuffer *buffer, int64_t offset, int64_t length, i
   b->offset = (int32_t)offset;
   b->buffer = buffer;
   tz_rc_inc(&buffer->rc);
-
-  return b;
-}
-
-TzBytes *tz_buffer_concat(const TzArray *list, int64_t total, int32_t has_total) {
-  TzBytes *const *items = (TzBytes *const *)list->data;
-  if (!has_total) {
-    total = 0;
-    for (uint32_t i = 0; i < list->length; ++i) {
-      total += items[i]->length;
-    }
-  }
-  TzBytes *b = tz_buffer_alloc(total, 0);
-  if (!b) {
-    return NULL;
-  }
-  int64_t at = 0;
-  for (uint32_t i = 0; i < list->length && at < total; ++i) {
-    int64_t n = items[i]->length;
-    if (n > total - at) {
-      n = total - at;
-    }
-    memcpy(b->data + at, items[i]->data, (size_t)n);
-    at += n;
-  }
-  if (at < total) {
-    memset(b->data + at, 0, (size_t)(total - at));
-  }
 
   return b;
 }
