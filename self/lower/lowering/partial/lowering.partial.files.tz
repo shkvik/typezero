@@ -13,16 +13,15 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kBytesLayouts,
   kFlagType,
   kFsCompose,
   kFsErrorOrders,
-  kFsReadFileBytes,
   kFsStat,
   kFilesModule,
   kFsVerbs,
   kIntType,
   kPointerType,
-  kReadFlag,
   kStatsOrder,
   kTextCompareC,
   kVoidType,
@@ -171,30 +170,21 @@ partial class Lowering {
   }
 
   private fileBytesRead(frame: Frame, call: CallExpr): IrValue | undefined {
-    const parts = this.fileResultParts(frame, call);
     const path = this.pathArgument(frame, call);
-    if (parts == undefined || path == undefined) {
+    if (path == undefined) {
       return undefined;
     }
 
-    const flag = this.stringValue(kReadFlag);
-    const args = this.textParts(frame, path).concat(
-      this.textParts(frame, flag),
-    );
-    const params = [kPointerType, kIntType, kPointerType, kIntType];
-    const all = params.concat([kPointerType]);
-    const callee = this.ir.declare(kFsReadFileBytes, kPointerType, all);
-    const read = frame.made.call(callee, args.concat([parts.maker]));
-    const value: IrValue = {
-      type: kPointerType,
-      value: read,
-      tz: parts.value,
-      owned: true,
-    };
+    const int = this.values.types.store.integer(64, false);
+    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const raw: IrValue = { type: kPointerType, value: layouts, tz: int };
+    const target: RuntimeTarget = { module: kFilesModule, name: "readBytes" };
+    const given = [path, raw];
+    const found = this.runtimeFunctionCall(frame, target, [], given, call.loc);
 
     this.dropping(frame, path);
 
-    return this.caughtResult(frame, value, parts.type, call.loc);
+    return found;
   }
 
   private fileStatus(frame: Frame, call: CallExpr): IrValue | undefined {

@@ -258,6 +258,7 @@ export const kLibraryModules: LibraryModule[] = [
       "children_run.tz",
       "children_start.tz",
       "children_wait.tz",
+      "children_bytes.tz",
     ],
     specs: ["tz:children"],
     access: LibraryAccess.Runtime,

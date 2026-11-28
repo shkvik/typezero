@@ -5,30 +5,16 @@ import {
   ExprKind,
   NameExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
-import { IrFunction } from "../../ir-function/ir-function.tz";
-import {
-  IrIntPredicate,
-  IrOpcode,
-} from "../../ir-function/types/ir-function.types.tz";
-import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kBooleanType,
-  kChildRun,
+  kBytesLayouts,
   kChildrenModule,
-  kDoubleType,
   kEncodingNames,
-  kFlagType,
   kIntType,
   kPointerType,
-  kSpawnParts,
-  kSpawnRequest,
-  kStringType,
-  kStrcmp,
 } from "../const/lowering.const.tz";
 import {
-  ClassLayout,
   Frame,
   IrValue,
   RuntimeTarget,
@@ -75,52 +61,31 @@ partial class Lowering {
       return this.spawnTextCall(frame, call, file, list, encoding);
     }
 
-    const string = this.values.types.store.plain(TypeKind.String);
-    const descriptor = this.descriptor(string);
-    const resultMaker = this.spawnMaker(this.values.types.store.valueOf(type));
-    const errorMaker = this.spawnErrorMaker(
-      this.values.types.store.errorOf(type),
-    );
-    if (file == undefined || list == undefined || descriptor == undefined) {
+    return this.spawnBytesCall(frame, call, file, list);
+  }
+
+  private spawnBytesCall(
+    frame: Frame,
+    call: CallExpr,
+    file: IrValue | undefined,
+    list: IrValue | undefined,
+  ): IrValue | undefined {
+    if (file == undefined || list == undefined) {
       return undefined;
     }
-    if (resultMaker == undefined || errorMaker == undefined) {
-      this.notLowered(frame.module, call.loc, "a result of this spawnSync");
 
-      return undefined;
-    }
-
-    const request = frame.made.slot(kSpawnRequest, "spawn.request");
-
-    frame.made.store(this.ir.zero(kSpawnRequest), request);
-    frame.made.store(file.value, frame.made.field(kSpawnRequest, request, 0));
-    frame.made.store(list.value, frame.made.field(kSpawnRequest, request, 1));
-    frame.made.store(descriptor, frame.made.field(kSpawnRequest, request, 9));
-
-    const code = this.ir.integer(kFlagType, `${encoding}`);
-
-    frame.made.store(code, frame.made.field(kSpawnRequest, request, 23));
-
-    const parts = frame.made.slot(kSpawnParts, "spawn.parts");
-    const params = [kPointerType, kPointerType, kPointerType, kPointerType];
-    const running = this.ir.declare(kChildRun, kPointerType, params);
-    const ran = frame.made.call(running, [
-      request,
-      parts,
-      errorMaker,
-      resultMaker,
-    ]);
-    const value: IrValue = {
-      type: kPointerType,
-      value: ran,
-      tz: this.values.types.store.valueOf(type),
-      owned: true,
-    };
+    const int = this.values.types.store.integer(64, false);
+    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const raw: IrValue = { type: kPointerType, value: layouts, tz: int };
+    const name = "spawnBytes";
+    const target: RuntimeTarget = { module: kChildrenModule, name };
+    const given = [file, list, raw];
+    const found = this.runtimeFunctionCall(frame, target, [], given, call.loc);
 
     this.dropping(frame, file);
     this.dropping(frame, list);
 
-    return this.caughtResult(frame, value, type, call.loc);
+    return found;
   }
 
   private spawnTextCall(
@@ -233,366 +198,5 @@ partial class Lowering {
     const tz = this.values.types.store.arrayOf(string);
 
     return { type: kPointerType, value, tz, owned: true };
-  }
-
-  private makerFrame(made: Own<IrFunction>): Frame {
-    return {
-      made,
-      id: this.frameId(),
-      module: 0,
-      loops: [],
-      scopes: [],
-    };
-  }
-
-  private spawnMaker(type: Type): LLVMValue | undefined {
-    const known = this.makers.get(type.id);
-    if (known != undefined) {
-      return known;
-    }
-
-    const layout = this.layoutOf(type);
-    if (layout == undefined) {
-      return undefined;
-    }
-
-    const name = this.ir.uniqueName("tz.make.spawn.");
-    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
-    const frame = this.makerFrame(made);
-    const parts = made.param(0);
-    const object = this.allocated(frame, layout);
-
-    this.makers.set(type.id, made.callee.fn);
-
-    for (const field of this.fieldsOf(layout)) {
-      const value = this.spawnField(frame, parts, field.name, field.type);
-      if (value != undefined) {
-        const address = made.field(layout.struct, object, field.index);
-
-        made.store(value, address);
-      }
-    }
-
-    made.finishValue(object);
-
-    return made.callee.fn;
-  }
-
-  private readonly spawnPart(
-    frame: Read<Frame>,
-    parts: LLVMValue,
-    index: int,
-  ): LLVMValue {
-    const type = this.spawnPartType(index);
-
-    return frame.made.load(type, frame.made.field(kSpawnParts, parts, index));
-  }
-
-  private readonly spawnPartType(index: int): string {
-    if (index == 4 || (index >= 16 && index <= 18)) {
-      return kPointerType;
-    }
-    if (index >= 8 && index <= 14) {
-      return kFlagType;
-    }
-    if (index == 23) {
-      return kIntType;
-    }
-    if (index == 24) {
-      return kDoubleType;
-    }
-
-    return kStringType;
-  }
-
-  private spawnField(
-    frame: Read<Frame>,
-    parts: LLVMValue,
-    name: string,
-    type: Type,
-  ): LLVMValue | undefined {
-    const literals = this.textLiterals(type);
-    const only = literals[0];
-    if (type.kind == TypeKind.Literal && only != undefined) {
-      return this.stringValue(only).value;
-    }
-
-    const isChosen = literals.length > 0;
-
-    switch (name) {
-      case "message":
-        return this.spawnPart(frame, parts, 0);
-      case "code":
-        return this.chosenPart(frame, parts, 17, 1, type, isChosen);
-      case "syscall":
-        return this.spawnPart(frame, parts, 2);
-      case "command":
-      case "file":
-        return this.spawnPart(frame, parts, 19);
-      case "args":
-        return this.spawnPart(frame, parts, 4);
-      case "cwd":
-        return this.spawnPart(frame, parts, 20);
-      case "shell":
-        return this.spawnPart(frame, parts, 21);
-      case "argument":
-        return this.chosenPart(frame, parts, 18, 22, type, isChosen);
-      case "timeout":
-      case "maxBuffer":
-        return this.spawnPart(frame, parts, 23);
-      case "value":
-        return this.spawnPart(frame, parts, 24);
-      case "stream":
-      case "crash":
-        return this.codeChosen(frame, this.spawnPart(frame, parts, 18), type);
-      case "status":
-        return this.maybePart(frame, parts, 10, 11, type);
-      case "signal":
-        return this.signalPart(frame, parts, type, isChosen);
-      case "pid": {
-        const pid = this.spawnPart(frame, parts, 13);
-
-        return frame.made.cast(IrOpcode.SExt, pid, kIntType);
-      }
-      case "stdout":
-        return this.spawnStream(frame, parts, 1, type, false);
-      case "stderr":
-        return this.spawnStream(frame, parts, 2, type, false);
-      case "output":
-        return this.spawnOutput(frame, parts, type);
-      default:
-        return undefined;
-    }
-  }
-
-  private chosenPart(
-    frame: Read<Frame>,
-    parts: LLVMValue,
-    chosen: int,
-    plain: int,
-    type: Type,
-    isChosen: boolean,
-  ): LLVMValue {
-    if (isChosen) {
-      return this.codeChosen(frame, this.spawnPart(frame, parts, chosen), type);
-    }
-
-    return this.spawnPart(frame, parts, plain);
-  }
-
-  private signalPart(
-    frame: Read<Frame>,
-    parts: LLVMValue,
-    type: Type,
-    isChosen: boolean,
-  ): LLVMValue | undefined {
-    if (isChosen) {
-      return this.codeChosen(frame, this.spawnPart(frame, parts, 18), type);
-    }
-    if (this.optionalInner(type) != undefined) {
-      return this.maybePart(frame, parts, 5, 12, type);
-    }
-
-    return this.spawnPart(frame, parts, 5);
-  }
-
-  private maybePart(
-    frame: Read<Frame>,
-    parts: LLVMValue,
-    index: int,
-    flag: int,
-    type: Type,
-  ): LLVMValue | undefined {
-    const inner = this.optionalInner(type);
-    const typeIr = this.irType(type);
-    if (inner == undefined || typeIr == undefined) {
-      return undefined;
-    }
-
-    let raw: LLVMValue = this.spawnPart(frame, parts, index);
-
-    if (this.isInteger(inner)) {
-      raw = frame.made.cast(IrOpcode.SExt, raw, kIntType);
-    }
-
-    const innerIr = this.irType(inner) ?? kIntType;
-    const present: IrValue = { type: innerIr, value: raw, tz: inner };
-    const placed = this.somewhere(frame, present, type);
-    const has = this.spawnPart(frame, parts, flag);
-    const zero = this.ir.zero(kFlagType);
-    const isGiven = frame.made.integerCompare(
-      IrIntPredicate.NotEqual,
-      has,
-      zero,
-    );
-
-    return frame.made.select(isGiven, placed.value, this.ir.zero(typeIr));
-  }
-
-  private spawnStream(
-    frame: Read<Frame>,
-    parts: LLVMValue,
-    stream: int,
-    type: Type,
-    isKept: boolean,
-  ): LLVMValue | undefined {
-    const inner = this.optionalInner(type);
-    const plain = this.definedOf(type);
-    const isText = this.isString(plain);
-    let index = 7;
-
-    if (isText) {
-      index = 6;
-    }
-
-    const list = frame.made.field(kSpawnParts, parts, index);
-    const itemType = this.pick(isText, kStringType, kPointerType);
-    const position = this.ir.integer(kIntType, `${stream}`);
-    const loaded = frame.made.load(
-      itemType,
-      frame.made.element(itemType, list, position),
-    );
-
-    let raw: IrValue = { type: itemType, value: loaded, tz: plain };
-
-    if (isKept) {
-      raw = this.owning(frame, raw);
-    }
-    if (inner == undefined) {
-      return raw.value;
-    }
-
-    const typeIr = this.irType(type);
-    if (typeIr == undefined) {
-      return undefined;
-    }
-
-    const placed = this.somewhere(frame, raw, type);
-    const piped = frame.made.field(kSpawnParts, parts, 15);
-    const pipedAt = frame.made.element(kFlagType, piped, position);
-    const flag = frame.made.load(kFlagType, pipedAt);
-    const zero = this.ir.zero(kFlagType);
-    const isPiped = frame.made.integerCompare(
-      IrIntPredicate.NotEqual,
-      flag,
-      zero,
-    );
-
-    return frame.made.select(isPiped, placed.value, this.ir.zero(typeIr));
-  }
-
-  private spawnOutput(
-    frame: Read<Frame>,
-    parts: LLVMValue,
-    type: Type,
-  ): LLVMValue | undefined {
-    const item = this.itemOf(type);
-    const element = this.typeOrUndefined(item);
-    const descriptor = this.descriptor(item ?? type);
-    if (item == undefined || element == undefined) {
-      return undefined;
-    }
-    if (descriptor == undefined) {
-      return undefined;
-    }
-
-    const array = this.newArray(frame, descriptor, 3);
-    const data = this.arrayData(frame, array);
-
-    for (let stream = 0; stream < 3; stream++) {
-      const value = this.spawnStream(frame, parts, stream, item, true);
-      if (value == undefined) {
-        return undefined;
-      }
-
-      const position = this.ir.integer(kIntType, `${stream}`);
-
-      frame.made.store(value, frame.made.element(element, data, position));
-    }
-
-    return array;
-  }
-
-  private spawnErrorMaker(type: Type): LLVMValue | undefined {
-    if (type.kind != TypeKind.Union) {
-      return this.spawnMaker(type);
-    }
-
-    const known = this.makers.get(type.id);
-    if (known != undefined) {
-      return known;
-    }
-
-    const name = this.ir.uniqueName("tz.make.spawn.error.");
-    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
-    const frame = this.makerFrame(made);
-    const parts = made.param(0);
-    const reason = this.spawnPart(frame, parts, 16);
-    const compare = this.ir.declare(kStrcmp, kFlagType, [
-      kPointerType,
-      kPointerType,
-    ]);
-    const zero = this.ir.zero(kFlagType);
-    let system: LLVMValue | undefined = undefined;
-
-    this.makers.set(type.id, made.callee.fn);
-
-    for (const variant of this.values.types.store.partsOf(type)) {
-      const maker = this.spawnMaker(variant);
-      const reasonText = this.spawnReason(variant);
-      if (maker == undefined) {
-        return undefined;
-      }
-      if (reasonText == "SYSTEM") {
-        system = maker;
-      }
-
-      const order = made.call(compare, [reason, this.cText(reasonText)]);
-      const isSame = made.integerCompare(IrIntPredicate.Equal, order, zero);
-      const hit = made.block("spawn.variant");
-      const next = made.block("spawn.next");
-
-      made.conditionalBranch(isSame, hit, next);
-      made.open(hit);
-      made.returned(this.makerCalled(made, maker, parts));
-      made.open(next);
-    }
-    if (system == undefined) {
-      return undefined;
-    }
-
-    const codeName = made.field(kSpawnParts, parts, 17);
-
-    made.store(this.cText("UNKNOWN"), codeName);
-    made.finishValue(this.makerCalled(made, system, parts));
-
-    return made.callee.fn;
-  }
-
-  private makerCalled(
-    made: IrFunction,
-    maker: LLVMValue,
-    parts: LLVMValue,
-  ): LLVMValue {
-    const signature = this.ir.signature(kPointerType, [kPointerType]);
-
-    return made.indirectCall(signature, maker, [parts]);
-  }
-
-  private spawnReason(variant: Type): string {
-    const layout = this.layoutOf(variant);
-    const kind = this.layoutField(layout, "kind");
-    if (kind == undefined) {
-      return "";
-    }
-
-    const literals = this.textLiterals(kind.type);
-    const text = literals[0] ?? "";
-    const at = text.indexOf("_ERROR_");
-    if (at < 0) {
-      return text;
-    }
-
-    return text.slice(at + 7);
   }
 }

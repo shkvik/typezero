@@ -1,5 +1,11 @@
 import { wideOf } from "tz:ffi";
-import { SpawnTextError, SpawnTextResult } from "tz:child_process/errors";
+import {
+  SpawnBytesError,
+  SpawnBytesResult,
+  SpawnTextError,
+  SpawnTextResult,
+} from "tz:child_process/errors";
+import { bufferOfBytes, bytesViewed } from "tz:buffers";
 import { environmentValue, textOfUnits } from "tz:files";
 import { textOfBytes } from "tz:text";
 import { memset } from "tz:win32/ucrt";
@@ -40,6 +46,7 @@ import {
   Raw,
   allocate,
   bitsRaw,
+  bufferOf,
   cellsAt,
   copyCells,
   frameCells,

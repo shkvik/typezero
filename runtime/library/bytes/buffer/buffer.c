@@ -79,15 +79,6 @@ int32_t tz_buffer_encoding(void *obj, uint64_t meta) {
   return -1;
 }
 
-int32_t tz_buffer_encoding_checked(void *obj, uint64_t meta) {
-  int32_t encoding = tz_buffer_encoding(obj, meta);
-  if (encoding < 0) {
-    tz_panicf("internal error: an encoding Buffer does not know");
-  }
-
-  return encoding;
-}
-
 static uint32_t code_point(const Units *u, uint32_t i, uint32_t *taken) {
   uint32_t c = unit_at(u, i);
   *taken = 1;
@@ -185,13 +176,6 @@ static int64_t byte_length(const Units *u, int32_t encoding) {
   default:
     return n;
   }
-}
-
-int32_t tz_buffer_byte_length(void *obj, uint64_t meta, int32_t encoding) {
-  Units u;
-  units_of(&u, obj, meta);
-
-  return (int32_t)byte_length(&u, encoding);
 }
 
 static int base64_group(uint8_t *dst, size_t dstlen, const Units *u, size_t *i, size_t *k) {
@@ -577,18 +561,6 @@ TzStr tz_buffer_decode(const uint8_t *data, int64_t length, int32_t encoding) {
   return encode_text(data, length, encoding);
 }
 
-void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t start, int64_t end,
-                         int32_t has) {
-  int64_t n = b->length;
-  int64_t from = (has & 1) ? (start < 0 ? 0 : start) : 0;
-  int64_t to = (has & 2) ? (end > n ? n : end) : n;
-  if (from >= to) {
-    *out = tz_str_from_ascii("", 0);
-    return;
-  }
-  *out = encode_text(b->data + from, to - from, encoding);
-}
-
 TzBytes *tz_buffer_alloc(int64_t size, int32_t zero) {
   if (size < 0) {
     tz_panicf("internal error: a Buffer of %lld bytes", (long long)size);
@@ -817,16 +789,6 @@ static int32_t find_bytes(const TzBytes *b, const uint8_t *needle, int64_t n, in
   }
 
   return mode == 2 ? 0 : -1;
-}
-
-int32_t tz_buffer_index_of_string(const TzBytes *b, void *obj, uint64_t meta, int64_t from,
-                                  int32_t has_from, int32_t encoding, int32_t mode) {
-  int64_t n;
-  uint8_t *needle = bytes_of_string(obj, meta, encoding, &n);
-  int32_t found = find_bytes(b, needle, n, from, has_from, mode);
-  tz_free(needle);
-
-  return found;
 }
 
 int32_t tz_buffer_index_of_bytes(const TzBytes *b, const TzBytes *needle, int64_t from,

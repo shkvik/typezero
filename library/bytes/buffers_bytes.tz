@@ -117,6 +117,25 @@ function bufferSizeChecked(size: int): void {
   }
 }
 
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bytes hold length bytes; the new Buffer gets a copy",
+})
+export function bufferOfBytes(
+  bytes: Raw<uint8>,
+  length: int,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  bufferSizeChecked(length);
+
+  const buffer = bytesMade(bufferKind(), length, false, layouts);
+  const head = viewAt<BytesHead>(buffer, 0);
+
+  copyCells(bytes, 0, head.data, 0, length);
+
+  return buffer;
+}
+
 export function bufferMade(
   size: int,
   zero: int32,

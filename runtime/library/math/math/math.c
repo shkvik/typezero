@@ -11,38 +11,6 @@
 #include <unistd.h>
 #endif
 
-TZ_HOT double tz_math_pow(double x, double y) {
-  if (isnan(y) || (fabs(x) == 1 && isinf(y))) {
-    return NAN;
-  }
-
-  return pow(x, y);
-}
-
-TZ_COLD TZ_NORETURN void tz_panic_zero_power(void) { tz_panicf("Division by zero"); }
-
-TZ_HOT int64_t tz_math_pow_long(int64_t base, int64_t exponent) {
-  if (exponent < 0) {
-    if (base == 0) {
-      tz_panic_zero_power();
-      return 0;
-    }
-    if (base == 1 || base == -1) {
-      return (exponent & 1) ? base : 1;
-    }
-    return 0;
-  }
-  uint64_t result = 1, factor = (uint64_t)base;
-  for (uint64_t e = (uint64_t)exponent; e; e >>= 1) {
-    if (e & 1) {
-      result *= factor;
-    }
-    factor *= factor;
-  }
-
-  return (int64_t)result;
-}
-
 #define MATH1(name)                                                                                \
   TZ_HOT double tz_math_##name(double x) { return name(x); }
 

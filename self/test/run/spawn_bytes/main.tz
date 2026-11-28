@@ -1,0 +1,41 @@
+import { spawnSync } from "node:child_process";
+
+function shown(bytes: Read<Buffer> | undefined): string {
+  if (bytes == undefined) {
+    return "<none>";
+  }
+
+  return `${bytes.length}:${bytes.toString("hex")}`;
+}
+
+function ran(file: string, args: Read<string[]>): void {
+  const done = spawnSync(file, args);
+  if (done.isErr()) {
+    const error = done.error;
+
+    console.log(`error ${error.kind} ${error.code}`);
+    console.log(`  ${error.message}`);
+
+    return;
+  }
+
+  const value = done.value;
+  const output = value.output;
+
+  console.log(`ok status=${value.status ?? -999} pid>0=${value.pid > 0}`);
+  console.log(`  out=${shown(value.stdout)} err=${shown(value.stderr)}`);
+  console.log(`  output=${output.length} first=${shown(output[0])}`);
+}
+
+function main(): void {
+  ran("cmd.exe", ["/d", "/c", "echo hi"]);
+  ran("cmd", ["/d", "/c", "exit 3"]);
+  ran("cmd", ["/d", "/c", "echo err 1>&2"]);
+  ran("cmd", ["/d", "/c", "chcp 65001 >nul & echo мир"]);
+  ran("no-such-program-here", []);
+  ran("", []);
+  ran("cmd", ["/d", "/c", "echo a\0b"]);
+  ran("C:/no/such/folder/prog.exe", ["x"]);
+}
+
+main();

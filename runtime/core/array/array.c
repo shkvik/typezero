@@ -340,14 +340,6 @@ static void retain_range(TzArray *a, uint32_t from, uint32_t to) {
 #endif
 }
 
-static void retain_range_of(const TzType *type, char *values, uint32_t n) {
-  if (tz_is_managed(type)) {
-    for (uint32_t i = 0; i < n; ++i) {
-      tz_value_retain(type, values + (size_t)i * type->size);
-    }
-  }
-}
-
 TzArray *tz_arr_new(const TzType *type, int64_t length, int64_t capacity) {
   if (capacity < length) {
     capacity = length;
@@ -678,112 +670,6 @@ void tz_arr_append_taken(TzArray *dst, TzArray *src) {
   }
 }
 
-static int values_equal(const TzType *type, const void *a, const void *b, int same_value_zero) {
-  switch (type->kind) {
-  case TZ_T_ATOM:
-    return *(const int32_t *)a == *(const int32_t *)b;
-  case TZ_T_UNION: {
-    uint32_t tag = *(const uint32_t *)a;
-    if (tag != *(const uint32_t *)b) {
-      return 0;
-    }
-    if (tag == 0) {
-      return 1;
-    }
-    const void *x = a, *y = b;
-    tz_resolve(type, &y);
-    type = tz_resolve(type, &x);
-    return values_equal(type, x, y, same_value_zero);
-  }
-  case TZ_T_INT8:
-  case TZ_T_INT16:
-  case TZ_T_INT32:
-  case TZ_T_INT64:
-  case TZ_T_UINT8:
-  case TZ_T_UINT16:
-  case TZ_T_UINT32:
-  case TZ_T_UINT64:
-    return tz_load_integer(type->kind, a) == tz_load_integer(type->kind, b);
-  case TZ_T_DOUBLE: {
-    double x = *(const double *)a, y = *(const double *)b;
-    return x == y || (same_value_zero && isnan(x) && isnan(y));
-  }
-  case TZ_T_BOOL:
-    return (*(const uint8_t *)a != 0) == (*(const uint8_t *)b != 0);
-  case TZ_T_STRING: {
-    const TzStr *x = (const TzStr *)a, *y = (const TzStr *)b;
-    return tz_str_equal(x->obj, x->meta, y->obj, y->meta);
-  }
-  case TZ_T_OBJECT:
-    if (tz_is_cstring(*(const TzInstance *const *)a)) {
-      return tz_cstring_equal(*(void *const *)a, *(void *const *)b);
-    }
-    return *(void *const *)a == *(void *const *)b;
-  case TZ_T_ARRAY:
-  case TZ_T_HANDLE:
-    return *(void *const *)a == *(void *const *)b;
-  case TZ_T_JSON:
-    return tz_json_strict_equal(*(TzJson *const *)a, *(TzJson *const *)b);
-  case TZ_T_UNKNOWN:
-    return tz_unknown_equal(*(void *const *)a, *(void *const *)b);
-  case TZ_T_DECIMAL: {
-    const TzDec *x = (const TzDec *)a, *y = (const TzDec *)b;
-    return tz_dec_equal(x->coef, x->meta, y->coef, y->meta);
-  }
-  case TZ_T_FUNCTION: {
-    const TzFunction *x = (const TzFunction *)a, *y = (const TzFunction *)b;
-    return x->info == y->info && x->env == y->env;
-  }
-  case TZ_T_OPTIONAL: {
-    int has_a = tz_optional_has(type, a), has_b = tz_optional_has(type, b);
-    if (!has_a || !has_b) {
-      return has_a == has_b;
-    }
-    return values_equal(type->inner, a, b, same_value_zero);
-  }
-  case TZ_T_RECORD: {
-    const TzLayout *layout = tz_record_fields(type);
-    for (uint32_t i = 0; i < layout->count; ++i) {
-      const TzField *field = &layout->fields[i];
-      if (!tz_record_holds(field)) {
-        continue;
-      }
-      const char *x = (const char *)a + field->offset;
-      const char *y = (const char *)b + field->offset;
-      if (!values_equal(field->type, x, y, same_value_zero)) {
-        return 0;
-      }
-    }
-    return 1;
-  }
-  default:
-    return 0;
-  }
-}
-
-int32_t tz_arr_index_of(TzArray *a, const void *value, int64_t from, int32_t has_from,
-                        int32_t mode) {
-  int64_t length = a->length;
-  if (mode == 1) {
-    int64_t i = !has_from  ? length - 1
-                : from < 0 ? length + from
-                           : (from < length ? from : length - 1);
-    for (; i >= 0; --i) {
-      if (values_equal(a->type, element(a, (uint32_t)i), value, 0)) {
-        return (int32_t)i;
-      }
-    }
-    return -1;
-  }
-  for (int64_t i = has_from ? relative(from, length) : 0; i < length; ++i) {
-    if (values_equal(a->type, element(a, (uint32_t)i), value, mode == 2)) {
-      return mode == 2 ? 1 : (int32_t)i;
-    }
-  }
-
-  return mode == 2 ? 0 : -1;
-}
-
 void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join) {
   char text[64];
   type = tz_resolve(type, &value);
@@ -863,23 +749,6 @@ void tz_buf_join(TzBuf *out, const TzArray *a, const TzBuf *sep) {
   }
 }
 
-void tz_arr_join(TzStr *out, TzArray *a, void *sep_obj, uint64_t sep_meta, int32_t has_sep) {
-  TzStr separator = {sep_obj, sep_meta};
-  if (a->type->kind == TZ_T_STRING) {
-    tz_str_join(out, (const TzStr *)a->data, a->length, has_sep ? &separator : NULL);
-    return;
-  }
-  TzBuf buf, sep;
-  tz_buf_init(&buf);
-  tz_buf_init(&sep);
-  if (has_sep) {
-    tz_buf_str(&sep, separator);
-  }
-  tz_buf_join(&buf, a, has_sep ? &sep : NULL);
-  tz_buf_free(&sep);
-  *out = tz_buf_take(&buf);
-}
-
 void tz_value_to_string(TzStr *out, const TzType *type, const void *value) {
   type = tz_resolve(type, &value);
   if (type->kind == TZ_T_STRING) {
@@ -897,21 +766,6 @@ void tz_value_to_string(TzStr *out, const TzType *type, const void *value) {
   tz_buf_init(&buf);
   tz_buf_value(&buf, type, value, 0);
   *out = tz_buf_take(&buf);
-}
-
-void tz_arr_reverse(TzArray *a) {
-  size_t size = a->type->size;
-  char small[32];
-  char *tmp = size <= sizeof small ? small : (char *)tz_alloc(size);
-  for (uint32_t i = 0, j = a->length; i + 1 < j; ++i, --j) {
-    char *x = element(a, i), *y = element(a, j - 1);
-    memcpy(tmp, x, size);
-    memcpy(x, y, size);
-    memcpy(y, tmp, size);
-  }
-  if (tmp != small) {
-    tz_free(tmp);
-  }
 }
 
 void tz_arr_fill(TzArray *a, const void *value, int64_t start, int64_t end, int32_t has_start,
@@ -942,149 +796,5 @@ typedef struct {
   uint8_t owned;
 } SortItem;
 
-static int sort_before(const SortItem *a, const SortItem *b) {
-  if (a->undefined || b->undefined) {
-    return !a->undefined && b->undefined;
-  }
-
-  return tz_str_compare(a->key.obj, a->key.meta, b->key.obj, b->key.meta) < 0;
-}
-
-static void merge_sort(SortItem *items, SortItem *tmp, size_t n) {
-  if (n < 2) {
-    return;
-  }
-  size_t half = n / 2;
-  merge_sort(items, tmp, half);
-  merge_sort(items + half, tmp, n - half);
-  size_t i = 0, j = half, k = 0;
-  while (i < half && j < n) {
-    tmp[k++] = sort_before(&items[j], &items[i]) ? items[j++] : items[i++];
-  }
-  while (i < half) {
-    tmp[k++] = items[i++];
-  }
-  while (j < n) {
-    tmp[k++] = items[j++];
-  }
-  memcpy(items, tmp, n * sizeof(SortItem));
-}
-
 typedef int32_t (*TzCompare)(void *ctx, const void *x, const void *y);
 
-static void merge_sort_with(char *items, char *tmp, size_t n, size_t size, TzCompare compare,
-                            void *ctx) {
-  if (n < 2) {
-    return;
-  }
-  size_t half = n / 2;
-  merge_sort_with(items, tmp, half, size, compare, ctx);
-  merge_sort_with(items + half * size, tmp, n - half, size, compare, ctx);
-  size_t i = 0, j = half, k = 0;
-  while (i < half && j < n) {
-    if (compare(ctx, items + i * size, items + j * size) > 0) {
-      memcpy(tmp + k++ * size, items + j++ * size, size);
-    } else {
-      memcpy(tmp + k++ * size, items + i++ * size, size);
-    }
-  }
-  while (i < half) {
-    memcpy(tmp + k++ * size, items + i++ * size, size);
-  }
-  while (j < n) {
-    memcpy(tmp + k++ * size, items + j++ * size, size);
-  }
-  memcpy(items, tmp, n * size);
-}
-
-void tz_arr_sort_with(TzArray *a, TzCompare compare, void *ctx) {
-  uint32_t n = a->length;
-  if (n < 2) {
-    return;
-  }
-  const TzType *type = a->type;
-  size_t size = type->size;
-  char *items = (char *)tz_alloc((size_t)n * size);
-  char *tmp = (char *)tz_alloc((size_t)n * size);
-  size_t defined = 0, undefined = n;
-  for (uint32_t i = 0; i < n; ++i) {
-    const char *value = element(a, i);
-    if (type->kind == TZ_T_OPTIONAL && !tz_optional_has(type, value)) {
-      memcpy(tmp + (size_t)--undefined * size, value, size);
-    } else {
-      memcpy(items + defined++ * size, value, size);
-    }
-  }
-  for (size_t i = defined; i < n; ++i) {
-    memcpy(items + i * size, tmp + (n - 1 - (i - defined)) * size, size);
-  }
-  retain_range_of(type, items, n);
-  merge_sort_with(items, tmp, defined, size, compare, ctx);
-  if (a->length == n) {
-    release_range(a, 0, n);
-    memcpy(a->data, items, (size_t)n * size);
-    if (tz_rc_is_member(a->rc) && tz_is_managed(type)) {
-      for (uint32_t i = 0; i < n; ++i) {
-        tz_group_store_value(a, type, element(a, i));
-      }
-    }
-  } else if (tz_is_managed(type)) {
-    for (uint32_t i = 0; i < n; ++i) {
-      tz_value_release(type, items + (size_t)i * size);
-    }
-  }
-  tz_free(items);
-  tz_free(tmp);
-}
-
-void tz_arr_sort(TzArray *a) {
-  uint32_t n = a->length;
-  if (n < 2) {
-    return;
-  }
-  const TzType *type = a->type;
-  size_t size = type->size;
-  SortItem *items = (SortItem *)tz_alloc(n * sizeof(SortItem));
-  SortItem *tmp = (SortItem *)tz_alloc(n * sizeof(SortItem));
-  for (uint32_t i = 0; i < n; ++i) {
-    const char *value = element(a, i);
-    const TzType *t = type;
-    SortItem *item = &items[i];
-    item->index = i;
-    item->undefined = 0;
-    item->owned = 0;
-    if (t->kind == TZ_T_OPTIONAL) {
-      if (!tz_optional_has(t, value)) {
-        item->undefined = 1;
-        item->key.obj = NULL;
-        item->key.meta = 0;
-        continue;
-      }
-      t = t->inner;
-    }
-    if (t->kind == TZ_T_STRING) {
-      item->key = *(const TzStr *)value;
-    } else {
-      TzBuf buf;
-      tz_buf_init(&buf);
-      tz_buf_value(&buf, t, value, 0);
-      item->key = tz_buf_take(&buf);
-      item->owned = 1;
-    }
-  }
-  merge_sort(items, tmp, n);
-
-  char *sorted = (char *)tz_alloc((size_t)n * size);
-  for (uint32_t k = 0; k < n; ++k) {
-    memcpy(sorted + (size_t)k * size, element(a, items[k].index), size);
-  }
-  memcpy(a->data, sorted, (size_t)n * size);
-  tz_free(sorted);
-  for (uint32_t i = 0; i < n; ++i) {
-    if (items[i].owned) {
-      tz_str_release_value(items[i].key);
-    }
-  }
-  tz_free(items);
-  tz_free(tmp);
-}

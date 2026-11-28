@@ -126,6 +126,10 @@ class ByteStore {
     return textOfBytes(this.bytes, this.count, encoding);
   }
 
+  public readonly bytesIn(layouts: Raw<uint8>): Raw<uint8> {
+    return bufferOfBytes(this.bytes, this.count, layouts);
+  }
+
   @Unsafe({
     uses: [UnsafeUse.Memory],
     reason: "the room came from allocate and nothing else holds it",

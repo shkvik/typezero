@@ -97,69 +97,7 @@ static char *utf8_of(TzStr s) {
 }
 #endif
 
-static TzStr exec_path(void) {
-#ifdef _WIN32
-  DWORD capacity = MAX_PATH;
-  for (;;) {
-    wchar_t *path = (wchar_t *)tz_alloc(capacity * sizeof(wchar_t));
-    DWORD length = GetModuleFileNameW(NULL, path, capacity);
-    if (length < capacity) {
-      TzStr s = tz_str_from_utf16((const uint16_t *)path, length);
-      tz_free(path);
-      return s;
-    }
-    tz_free(path);
-    capacity *= 2;
-  }
-#else
-  char path[4096];
-  ssize_t length = readlink("/proc/self/exe", path, sizeof path);
-  if (length > 0 && (size_t)length < sizeof path) {
-    return str_from_utf8(path, (size_t)length);
-  }
-  const char *argv0 = tz_posix_argc > 0 ? tz_posix_argv[0] : "";
-  return str_from_utf8(argv0, strlen(argv0));
-#endif
-}
-
 TzLock tz_process_lock;
-
-TzArray *tz_process_argv(const TzType *string_type) {
-  tz_lock(&tz_process_lock);
-  if (!tz_argv) {
-#ifdef _WIN32
-    _configure_wide_argv(_crt_argv_unexpanded_arguments);
-    int argc = __argc;
-    wchar_t **argv = __wargv;
-#else
-    int argc = tz_posix_argc;
-    char **argv = tz_posix_argv;
-#endif
-    TzArray *a = tz_arr_new(string_type, 0, argc > 0 ? argc + 1 : 2);
-    TzStr exe = exec_path();
-    tz_str_retain_value(exe);
-    tz_arr_push_value(a, &exe);
-    tz_arr_push_value(a, &exe);
-    for (int i = 1; i < argc && argv; ++i) {
-#ifdef _WIN32
-      TzStr arg = tz_str_from_utf16((const uint16_t *)argv[i], wcslen(argv[i]));
-#else
-      TzStr arg = str_from_utf8(argv[i], strlen(argv[i]));
-#endif
-      tz_arr_push_value(a, &arg);
-    }
-#if TZ_PARALLEL
-    const TzType array_type = {TZ_T_ARRAY, sizeof(TzArray *), string_type};
-    tz_publish_value(&array_type, &a);
-#endif
-    tz_argv = a;
-  }
-  tz_rc_inc(&tz_argv->rc);
-  TzArray *argv = tz_argv;
-  tz_unlock(&tz_process_lock);
-
-  return argv;
-}
 
 int32_t tz_process_env(TzStr *out, void *obj, uint64_t meta) {
   TzStr name = {obj, meta};
@@ -312,23 +250,11 @@ void tz_process_cwd(TzStr *out) {
 #endif
 }
 
-void tz_process_exec_path(TzStr *out) { *out = exec_path(); }
-
 int32_t tz_process_pid(void) {
 #ifdef _WIN32
   return (int32_t)GetCurrentProcessId();
 #else
   return (int32_t)getpid();
-#endif
-}
-
-void tz_process_platform(TzStr *out) {
-#if defined(_WIN32)
-  *out = tz_str_from_ascii("win32", 5);
-#elif defined(__APPLE__)
-  *out = tz_str_from_ascii("darwin", 6);
-#else
-  *out = tz_str_from_ascii("linux", 5);
 #endif
 }
 
@@ -377,20 +303,6 @@ void tz_clock_init(void) {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
   tz_clock_start = (int64_t)now.tv_sec * 1000000000 + now.tv_nsec;
-#endif
-}
-
-int64_t tz_date_now(void) {
-#ifdef _WIN32
-  FILETIME time;
-  GetSystemTimePreciseAsFileTime(&time);
-  uint64_t ticks = ((uint64_t)time.dwHighDateTime << 32) | time.dwLowDateTime;
-
-  return (int64_t)(ticks - 116444736000000000ull) / 10000;
-#else
-  struct timespec now;
-  clock_gettime(CLOCK_REALTIME, &now);
-  return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 #endif
 }
 

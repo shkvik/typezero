@@ -1,0 +1,20 @@
+ok status=0 pid>0=true
+  out=4:68690d0a err=0:
+  output=3 first=<none>
+ok status=3 pid>0=true
+  out=0: err=0:
+  output=3 first=<none>
+ok status=0 pid>0=true
+  out=0: err=6:657272200d0a
+  output=3 first=<none>
+ok status=0 pid>0=true
+  out=8:d0bcd0b8d1800d0a err=0:
+  output=3 first=<none>
+error SPAWN_BYTES_ERROR_PROGRAM_NOT_FOUND_IN_PATH ENOENT
+  could not run no-such-program-here: there is no such program in PATH; install it or give the full path
+error SPAWN_BYTES_ERROR_EMPTY_NAME ERR_INVALID_ARG_VALUE
+  could not run a program: its name is empty
+error SPAWN_BYTES_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE
+  could not run cmd: args[2] has a zero character in it
+error SPAWN_BYTES_ERROR_PROGRAM_FILE_NOT_FOUND ENOENT
+  could not run C:/no/such/folder/prog.exe: there is no such file

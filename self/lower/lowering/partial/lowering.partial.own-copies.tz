@@ -15,6 +15,16 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
+  private makerFrame(made: Own<IrFunction>): Frame {
+    return {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+  }
+
   private uniqueOwned(
     frame: Read<Frame>,
     source: Read<IrValue>,

@@ -49,6 +49,9 @@ partial class Lowering {
     if (callee.name == "rawBits") {
       return this.bitsOfRaw(frame, call);
     }
+    if (callee.name == "bufferOf") {
+      return this.bufferOfRaw(frame, call);
+    }
     if (callee.name == "wrappedProduct") {
       return this.productWrapped(frame, call);
     }

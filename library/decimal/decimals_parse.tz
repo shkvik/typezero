@@ -634,10 +634,6 @@ export function fromTextChecked(
 
 @Unsafe({
   uses: [UnsafeUse.Memory],
-  reason: "a decimal is read and made only through its two words",
-})
-@Unsafe({
-  uses: [UnsafeUse.Memory],
   reason: "the text of a double has at most 26 cells; the frame holds 32",
 })
 export function fromDouble(value: double): decimal {

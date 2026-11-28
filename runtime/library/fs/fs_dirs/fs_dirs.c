@@ -521,60 +521,6 @@ int32_t tz_fs_mkdir(TzStr *out, void *path_obj, uint64_t path_meta, int32_t recu
   return made;
 }
 
-void tz_fs_mkdtemp(TzStr *out, void *prefix_obj, uint64_t prefix_meta, TzMaker make) {
-  static const char letters[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  out->obj = NULL;
-  out->meta = 0;
-  Path prefix;
-  if (!tz_fs_path_init(&prefix, prefix_obj, prefix_meta, make, "mkdtemp")) {
-    return;
-  }
-  for (int attempt = 0;; ++attempt) {
-    TzBuf name;
-    tz_buf_init(&name);
-    tz_buf_units(&name, prefix.given.data, prefix.given.length);
-    for (int i = 0; i < 6; ++i) {
-      unsigned int r;
-#ifdef _WIN32
-      if (rand_s(&r) != 0) {
-        r = (unsigned int)GetTickCount() * 2654435761u + (unsigned int)i;
-      }
-#else
-      r = (unsigned int)rand() ^ (unsigned int)time(NULL) ^ ((unsigned int)getpid() << 8);
-#endif
-      tz_buf_push(&name, (uint16_t)letters[r % 62]);
-    }
-    Path dir;
-    tz_fs_path_of_units(&dir, name.data, name.length);
-#ifdef _WIN32
-    DWORD error = tz_fs_make_dir(dir.wide.data);
-    int exists = error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS;
-    Failure f = tz_fs_win32_failure(error);
-#else
-    int error = mkdir(tz_fs_native(&dir), 0700) == 0 ? 0 : errno;
-    int exists = error == EEXIST;
-    Failure f = error ? tz_fs_errno_failure(error) : (Failure){0, 0, 0};
-#endif
-    tz_fs_path_free(&dir);
-    if (!error) {
-      *out = tz_buf_take(&name);
-      break;
-    }
-    if (!exists || attempt >= 100) {
-      TzBuf shown;
-      tz_buf_init(&shown);
-      tz_buf_units(&shown, prefix.given.data, prefix.given.length);
-      tz_buf_ascii(&shown, "XXXXXX");
-      tz_fs_throw_failure(make, f, "mkdtemp", &shown, NULL);
-      tz_buf_free(&shown);
-      tz_buf_free(&name);
-      break;
-    }
-    tz_buf_free(&name);
-  }
-  tz_fs_path_free(&prefix);
-}
-
 void tz_fs_rmdir(void *path_obj, uint64_t path_meta, TzMaker make) {
   Path p;
   if (!tz_fs_path_init(&p, path_obj, path_meta, make, "rmdir")) {
@@ -783,23 +729,3 @@ void tz_fs_throw_rm_directory(const Path *p, TzMaker make) {
                       NULL);
 }
 
-void tz_fs_rm(void *path_obj, uint64_t path_meta, int32_t recursive, int32_t force, TzMaker make) {
-  Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta, make, "rm")) {
-    return;
-  }
-  Failure failure;
-  const char *syscall = NULL;
-  int depth;
-  switch (tz_fs_rm_raw(&p, recursive, force, &failure, &syscall, &depth)) {
-  case RM_FAILED:
-    tz_fs_throw_failure(make, failure, syscall, &p.shown, NULL);
-    break;
-  case RM_DIRECTORY:
-    tz_fs_throw_rm_directory(&p, make);
-    break;
-  default:
-    break;
-  }
-  tz_fs_path_free(&p);
-}

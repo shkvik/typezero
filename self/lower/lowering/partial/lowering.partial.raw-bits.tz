@@ -61,6 +61,16 @@ partial class Lowering {
     return { type: kIntType, value, tz };
   }
 
+  private bufferOfRaw(frame: Frame, call: CallExpr): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const type = this.typeOf(call);
+    if (raw == undefined || type == undefined) {
+      return undefined;
+    }
+
+    return { type: kPointerType, value: raw, tz: type, owned: true };
+  }
+
   private droppedCall(frame: Frame, call: CallExpr): IrValue | undefined {
     const drop = this.rawArgument(frame, call, 0);
     const object = this.rawArgument(frame, call, 1);

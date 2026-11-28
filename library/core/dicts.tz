@@ -201,7 +201,7 @@ function isInlineMeta(meta: uint64): boolean {
 
 @Unsafe({
   uses: [UnsafeUse.Memory],
-  reason: "temporary: give the reason",
+  reason: "only numbers are multiplied, modulo 2 to the 64",
 })
 function mixedWord(hash: uint64, word: uint64): uint64 {
   const mixed = wrappedProduct(hash ^ word, mixKey());
@@ -211,7 +211,7 @@ function mixedWord(hash: uint64, word: uint64): uint64 {
 
 @Unsafe({
   uses: [UnsafeUse.Memory],
-  reason: "temporary: give the reason",
+  reason: "only numbers are multiplied, modulo 2 to the 64",
 })
 function finishedHash(hash: uint64): uint32 {
   const first = hash ^ (hash >> 29);

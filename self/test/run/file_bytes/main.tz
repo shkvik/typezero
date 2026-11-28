@@ -1,0 +1,37 @@
+import { readFileSync } from "node:fs";
+
+function main(): void {
+  const read = readFileSync("main.tz");
+
+  if (read.isOk()) {
+    const bytes = read.value;
+    const text = readFileSync("main.tz", "utf8");
+
+    console.log(bytes.length > 500, bytes.subarray(0, 12).toString("hex"));
+
+    if (text.isOk()) {
+      console.log(bytes.toString() == text.value, bytes.length == text.value.length);
+    }
+  }
+
+  const missing = readFileSync("no-such-file.bin");
+
+  if (missing.isErr()) {
+    console.log(missing.error.code, missing.error.syscall);
+    console.log(missing.error.message.endsWith("no-such-file.bin: there is no such file"));
+  }
+
+  const folder = readFileSync(".");
+
+  if (folder.isErr()) {
+    console.log(folder.error.code, folder.error.syscall);
+  }
+
+  const folderText = readFileSync(".", "utf8");
+
+  if (folderText.isErr()) {
+    console.log(folderText.error.code, folderText.error.syscall);
+  }
+}
+
+main();

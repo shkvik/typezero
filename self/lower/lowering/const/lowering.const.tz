@@ -207,7 +207,6 @@ export const kMathCeil = "ceil";
 export const kMathTrunc = "trunc";
 export const kFsModule = "node:fs";
 export const kFsCompose = "tz_fs_compose";
-export const kFsReadFileBytes = "tz_fs_read_file_bytes";
 export const kFsStat = "tz_fs_stat";
 export const kFsErrorOrders = [
   ["message", "errno", "code", "syscall", "path", "dest"],
@@ -244,7 +243,6 @@ export const kFsVerbs = new Map<string, string>([
   ["ForceRemoveError", "remove"],
   ["CopyFileError", "copy"],
 ]);
-export const kReadFlag = "r";
 export const kProcessName = "process";
 export const kPlatformName = "win32";
 export const kProcessSetExitCode = "tz_process_set_exit_code";
@@ -277,8 +275,6 @@ export const kFileKinds = new Map<string, int>([
 ]);
 export const kBufferConcat = "tz_buffer_concat";
 export const kChildModule = "node:child_process";
-export const kChildRun = "tz_child_run";
-export const kStrcmp = "strcmp";
 export const kOsModule = "node:os";
 export const kMemModule = "tz:mem";
 export const kUnsafeModule = "tz:unsafe";
@@ -412,15 +408,6 @@ export const kEncodingNames = [
   "base64url",
   "hex",
 ];
-export const kSpawnRequest =
-  "{ { ptr, i64 }, ptr, { ptr, i64 }, { ptr, i64 }, { ptr, i64 }, " +
-  "{ ptr, i64 }, { ptr, i64 }, ptr, ptr, ptr, double, double, " +
-  "i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, [3 x i32], i32 }";
-export const kSpawnParts =
-  "{ { ptr, i64 }, { ptr, i64 }, { ptr, i64 }, { ptr, i64 }, ptr, " +
-  "{ ptr, i64 }, [3 x { ptr, i64 }], [3 x ptr], " +
-  "i32, i32, i32, i32, i32, i32, i32, [3 x i32], ptr, ptr, ptr, " +
-  "{ ptr, i64 }, { ptr, i64 }, { ptr, i64 }, { ptr, i64 }, i64, double }";
 export const kOsTexts = ["homedir", "tmpdir"];
 export const kHandleKind = 24;
 export const kRecordKind = 25;

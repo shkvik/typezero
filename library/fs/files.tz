@@ -11,6 +11,7 @@ import {
 } from "tz:fs/errors";
 import { rand_s } from "tz:win32/ucrt";
 import { textOfBytes } from "tz:text";
+import { bufferOfBytes } from "tz:buffers";
 import {
   CloseHandle,
   CopyFileW,
@@ -41,6 +42,7 @@ import {
   Raw,
   allocate,
   bitsRaw,
+  bufferOf,
   cellsAt,
   copyCells,
   frameCells,

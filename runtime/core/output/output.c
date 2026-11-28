@@ -448,15 +448,6 @@ void tz_print_f64(double value) {
   tz_out_write(buf, tz_format_f64(value, buf));
 }
 
-TZ_HOT double tz_math_round(double x) {
-  double r = floor(x);
-  if (x - r >= 0.5) {
-    r += 1;
-  }
-
-  return r == 0 ? copysign(0.0, x) : r;
-}
-
 TZ_NOINLINE int32_t tz_to_int32_slow(double x) {
   if (!isfinite(x)) {
     return 0;
@@ -492,14 +483,6 @@ TZ_COLD TZ_NORETURN void tz_panic_int_does_not_fit(int64_t x, int32_t is_unsigne
     tz_panicf("%llu does not fit in %s", (unsigned long long)x, type);
   }
   tz_panicf("%lld does not fit in %s", (long long)x, type);
-}
-
-void tz_debugger(void) {
-#ifdef _WIN32
-  if (IsDebuggerPresent()) {
-    __builtin_debugtrap();
-  }
-#endif
 }
 
 TZ_NORETURN void tz_panic(const char *message, int64_t len) {

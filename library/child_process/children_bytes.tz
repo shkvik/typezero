@@ -1,0 +1,274 @@
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "output holds views over the same bytes as stdout and stderr",
+})
+function bytesResult(
+  pid: int,
+  status: int,
+  stdout: Raw<uint8>,
+  stderr: Raw<uint8>,
+  layouts: Raw<uint8>,
+): SpawnBytesResult {
+  const outView = bytesViewed(stdout, 0, 0, 0, layouts);
+  const errView = bytesViewed(stderr, 0, 0, 0, layouts);
+  const outShared = bufferOf(outView);
+  const errShared = bufferOf(errView);
+  const output: (Buffer | undefined)[] = [undefined, outShared, errShared];
+  const out = bufferOf(stdout);
+  const errors = bufferOf(stderr);
+
+  return { pid, status, output, stdout: out, stderr: errors };
+}
+
+function bytesErrorOf(
+  error: Read<SpawnTextError>,
+  stdout: Own<Buffer | undefined>,
+  stderr: Own<Buffer | undefined>,
+): SpawnBytesError {
+  switch (error.kind) {
+    case "SPAWN_TEXT_ERROR_PROGRAM_NOT_FOUND_IN_PATH":
+      return {
+        kind: "SPAWN_BYTES_ERROR_PROGRAM_NOT_FOUND_IN_PATH",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_PROGRAM_FILE_NOT_FOUND":
+      return {
+        kind: "SPAWN_BYTES_ERROR_PROGRAM_FILE_NOT_FOUND",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_CWD_NOT_FOUND":
+      return {
+        kind: "SPAWN_BYTES_ERROR_CWD_NOT_FOUND",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+        cwd: error.cwd,
+      };
+    case "SPAWN_TEXT_ERROR_CWD_NOT_A_FOLDER":
+      return {
+        kind: "SPAWN_BYTES_ERROR_CWD_NOT_A_FOLDER",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+        cwd: error.cwd,
+      };
+    case "SPAWN_TEXT_ERROR_NO_PERMISSION":
+      return {
+        kind: "SPAWN_BYTES_ERROR_NO_PERMISSION",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_NEEDS_ADMINISTRATOR":
+      return {
+        kind: "SPAWN_BYTES_ERROR_NEEDS_ADMINISTRATOR",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_BATCH_FILE_WITHOUT_SHELL":
+      return {
+        kind: "SPAWN_BYTES_ERROR_BATCH_FILE_WITHOUT_SHELL",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_NOT_A_PROGRAM":
+      return {
+        kind: "SPAWN_BYTES_ERROR_NOT_A_PROGRAM",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_COMMAND_LINE_TOO_LONG":
+      return {
+        kind: "SPAWN_BYTES_ERROR_COMMAND_LINE_TOO_LONG",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_PATH_TOO_LONG":
+      return {
+        kind: "SPAWN_BYTES_ERROR_PATH_TOO_LONG",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_TOO_MANY_FILES":
+      return {
+        kind: "SPAWN_BYTES_ERROR_TOO_MANY_FILES",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_TOO_MANY_PROCESSES":
+      return {
+        kind: "SPAWN_BYTES_ERROR_TOO_MANY_PROCESSES",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_INPUT_CLOSED":
+      return {
+        kind: "SPAWN_BYTES_ERROR_INPUT_CLOSED",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+        stdout,
+        stderr,
+      };
+    case "SPAWN_TEXT_ERROR_TIMEOUT":
+      return {
+        kind: "SPAWN_BYTES_ERROR_TIMEOUT",
+        code: error.code,
+        message: error.message,
+        command: error.command,
+        args: error.args.slice(),
+        timeout: error.timeout,
+        signal: error.signal,
+        stdout,
+        stderr,
+      };
+    case "SPAWN_TEXT_ERROR_OUTPUT_TOO_LARGE":
+      return {
+        kind: "SPAWN_BYTES_ERROR_OUTPUT_TOO_LARGE",
+        code: error.code,
+        message: error.message,
+        command: error.command,
+        args: error.args.slice(),
+        stream: error.stream,
+        maxBuffer: error.maxBuffer,
+        signal: error.signal,
+        stdout,
+        stderr,
+      };
+    case "SPAWN_TEXT_ERROR_ZERO_CHARACTER":
+      return {
+        kind: "SPAWN_BYTES_ERROR_ZERO_CHARACTER",
+        code: error.code,
+        message: error.message,
+        argument: error.argument,
+      };
+    case "SPAWN_TEXT_ERROR_EMPTY_NAME":
+      return {
+        kind: "SPAWN_BYTES_ERROR_EMPTY_NAME",
+        code: error.code,
+        message: error.message,
+      };
+    case "SPAWN_TEXT_ERROR_OUT_OF_RANGE":
+      return {
+        kind: "SPAWN_BYTES_ERROR_OUT_OF_RANGE",
+        code: error.code,
+        message: error.message,
+        argument: error.argument,
+        value: error.value,
+      };
+    case "SPAWN_TEXT_ERROR_UNKNOWN_SIGNAL":
+      return {
+        kind: "SPAWN_BYTES_ERROR_UNKNOWN_SIGNAL",
+        code: error.code,
+        message: error.message,
+        signal: error.signal,
+      };
+    case "SPAWN_TEXT_ERROR_OUT_OF_MEMORY":
+      return {
+        kind: "SPAWN_BYTES_ERROR_OUT_OF_MEMORY",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+    case "SPAWN_TEXT_ERROR_SYSTEM":
+      return {
+        kind: "SPAWN_BYTES_ERROR_SYSTEM",
+        code: error.code,
+        message: error.message,
+        syscall: error.syscall,
+        command: error.command,
+        args: error.args.slice(),
+      };
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the Buffers are made from the bytes the child wrote",
+})
+export function spawnBytes(
+  file: Read<string>,
+  args: Read<string[]>,
+  layouts: Raw<uint8>,
+): Result<SpawnBytesResult, SpawnBytesError> {
+  if (file.includes("\0")) {
+    const error = zeroError(file, "file");
+
+    return err(bytesErrorOf(error, undefined, undefined));
+  }
+  if (file.length == 0) {
+    const error = emptyError();
+
+    return err(bytesErrorOf(error, undefined, undefined));
+  }
+
+  const zeroAt = zeroArgument(args);
+  if (zeroAt >= 0) {
+    const error = zeroError(file, `args[${zeroAt}]`);
+
+    return err(bytesErrorOf(error, undefined, undefined));
+  }
+
+  const run = new ChildRun();
+
+  childStarted(run, file, args);
+
+  if (run.failure() == noError()) {
+    const stdout = run.output.bytesIn(layouts);
+    const stderr = run.errors.bytesIn(layouts);
+
+    const result = bytesResult(run.pid, run.status, stdout, stderr, layouts);
+
+    return ok(result);
+  }
+  if (!run.isStarted) {
+    const error = runError(file, args, run, undefined, undefined);
+
+    return err(bytesErrorOf(error, undefined, undefined));
+  }
+
+  const stdout = bufferOf(run.output.bytesIn(layouts));
+  const stderr = bufferOf(run.errors.bytesIn(layouts));
+  const error = runError(file, args, run, undefined, undefined);
+
+  return err(bytesErrorOf(error, stdout, stderr));
+}

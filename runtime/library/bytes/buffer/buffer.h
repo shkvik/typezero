@@ -11,8 +11,6 @@ TzBytes *tz_buffer_copy_of(const uint8_t *data, int64_t length);
 TzBytes *tz_buffer_from_string(void *obj, uint64_t meta, int32_t encoding);
 TzStr tz_buffer_decode(const uint8_t *data, int64_t length, int32_t encoding);
 
-void tz_buffer_to_string(TzStr *out, const TzBytes *b, int32_t encoding, int64_t start, int64_t end,
-                         int32_t has);
 
 const char *tz_text_decoder_name(const void *decoder);
 int32_t tz_text_decoder_flag(const void *decoder, int32_t which);

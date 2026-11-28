@@ -119,6 +119,72 @@ function fileBytesRead(
 
 @Unsafe({
   uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer grows before each read; the system writes got",
+})
+function fileBufferRead(
+  file: Raw<uint8>,
+  native: Read<string>,
+  layouts: Raw<uint8>,
+): Result<Buffer, ReadFileError> {
+  const size = new LargeInteger();
+  let capacity = readChunk();
+
+  if (GetFileSizeEx(file, size) != 0) {
+    const known = size.value;
+
+    if (known > 0 && known < 2147483648) {
+      capacity = known + 1 + readChunk();
+    }
+  }
+
+  let bytes = allocate<uint8>(capacity);
+  let length = 0;
+  const got = frameCells<uint32>(1);
+  const none = bitsRaw(0);
+  const chunk = readChunk().toUint32();
+
+  while (true) {
+    if (capacity - length < readChunk()) {
+      capacity = capacity * 2;
+      bytes = reallocate(bytes, capacity);
+    }
+
+    putUnit(got, 0, 0);
+
+    const into = cellsAt<uint8>(bytes, length);
+    const isRead = ReadFile(file, into, chunk, got, none) != 0;
+
+    if (!isRead) {
+      const error = GetLastError();
+      if (error == handleEnd() || error == brokenPipe()) {
+        break;
+      }
+
+      release(bytes);
+
+      const shown = shownOf(native);
+      const failure = windowsFailure(error, "read", shown, "");
+
+      return err(readFileErrorOf(failure));
+    }
+
+    const count = unitAt(got, 0);
+    if (count == 0) {
+      break;
+    }
+
+    length += count;
+  }
+
+  const made = bufferOfBytes(bytes, length, layouts);
+
+  release(bytes);
+
+  return ok(bufferOf(made));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
   reason: "the name ends with a zero; the handle is closed on every path",
 })
 export function readText(
@@ -153,6 +219,48 @@ export function readText(
   }
 
   const read = fileBytesRead(file, native, encoding);
+
+  CloseHandle(file);
+
+  return read;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the name ends with a zero; the handle is closed on every path",
+})
+export function readBytes(
+  path: Read<string>,
+  layouts: Raw<uint8>,
+): Result<Buffer, ReadFileError> {
+  const native = toNamespacedPath(path);
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    const failure = codeFailure("ERR_INVALID_PATH", "open", path);
+
+    return err(readFileErrorOf(failure));
+  }
+
+  const none = bitsRaw(0);
+  const flags = normalAttribute() | backupFlag();
+  const file = CreateFileW(
+    wide,
+    genericRead(),
+    shareAll(),
+    none,
+    openExisting(),
+    flags,
+    none,
+  );
+  if (rawBits(file) == badHandle()) {
+    const error = GetLastError();
+    const shown = shownOf(native);
+    const failure = windowsFailure(error, "open", shown, "");
+
+    return err(readFileErrorOf(failure));
+  }
+
+  const read = fileBufferRead(file, native, layouts);
 
   CloseHandle(file);
 

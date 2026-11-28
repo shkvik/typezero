@@ -1433,56 +1433,6 @@ static void format_value(Ctx *ctx, TzBuf *out, const TzType *type, const void *v
   }
 }
 
-void tz_print_value(const TzType *type, const void *value) {
-  if (type->kind == TZ_T_UNKNOWN) {
-    const TzInstance *u = *(const TzInstance *const *)value;
-    if (!u) {
-      tz_out_write("undefined", 9);
-      return;
-    }
-    if (u->layout->flags & TZ_LAYOUT_BOX) {
-      const TzBox *box = (const TzBox *)u;
-      tz_print_value(box->type, TZ_BOX_VALUE(box));
-      return;
-    }
-  }
-  if (type->kind == TZ_T_OPTIONAL) {
-    if (!tz_optional_has(type, value)) {
-      tz_out_write("undefined", 9);
-      return;
-    }
-    type = type->inner;
-  }
-  type = tz_resolve(type, &value);
-  if (type->kind == TZ_T_STRING) {
-    const TzStr *s = (const TzStr *)value;
-    tz_print_string(s->obj, s->meta);
-    return;
-  }
-  if (type->kind == TZ_T_OBJECT && tz_is_cstring(*(const TzInstance *const *)value)) {
-    TzStr text;
-    tz_cstring_to_str(&text, *(const TzInstance *const *)value);
-    tz_print_string(text.obj, text.meta);
-    tz_str_release_value(text);
-    return;
-  }
-  if (type->kind == TZ_T_JSON) {
-    const TzJson *j = *(TzJson *const *)value;
-    if (j && j->kind == TZ_JSON_STRING) {
-      tz_print_string(j->u.string.obj, j->u.string.meta);
-      return;
-    }
-  }
-  Ctx ctx;
-  memset(&ctx, 0, sizeof ctx);
-  TzBuf out;
-  tz_buf_init(&out);
-  format_value(&ctx, &out, type, value, 0);
-  tz_out_write_utf16(out.data, out.length);
-  tz_buf_free(&out);
-  tz_free((void *)ctx.circular);
-}
-
 void tz_lib_inspect(TzStr *out, const void *u, TzMaker make) {
   (void)make;
   static const TzType unknown_type = {TZ_T_UNKNOWN, sizeof(void *), NULL};
