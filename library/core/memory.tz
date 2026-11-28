@@ -1,0 +1,470 @@
+import { panicked } from "tz:runtime";
+import {
+  Raw,
+  bitsRaw,
+  cellsAt,
+  copyCells,
+  frameCells,
+  peekAt,
+  putAt,
+  putUnit,
+  rawBits,
+  textCells,
+  threadState,
+  unitAt,
+  viewAt,
+} from "tz:unsafe";
+import { VirtualAlloc, VirtualFree } from "tz:win32/kernel32";
+
+@InPlace({ layout: Layout.C })
+class PageHead {
+  public free: Raw<uint8>;
+  public bump: Raw<uint8>;
+  public end: Raw<uint8>;
+  public used: uint32;
+  public blockSize: uint32;
+  public bin: uint8;
+  public units: uint8;
+  public listed: uint8;
+  public next: Raw<uint8>;
+  public prev: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+class SegmentHead {
+  public kind: uint32;
+  public hugeUnits: uint32;
+  public owner: Raw<uint8>;
+  public osBase: Raw<uint8>;
+  public osSize: uint64;
+  public freeUnits: uint64;
+  public next: Raw<uint8>;
+  public prev: Raw<uint8>;
+  public hugeWeak: uint64;
+}
+
+@InPlace({ layout: Layout.C })
+class HeapTail {
+  public segments: Raw<uint8>;
+  public spare: Raw<uint8>;
+}
+
+function segmentSize(): int {
+  return 4194304;
+}
+
+function segmentMask(): uint64 {
+  return 18446744073705357312;
+}
+
+function unitSize(): int {
+  return 65536;
+}
+
+function unitsCount(): int {
+  return 64;
+}
+
+function mostSmall(): int {
+  return 32768;
+}
+
+function hugeHeader(): int {
+  return 64;
+}
+
+function hugeSpares(): int {
+  return 4;
+}
+
+function hugeSpareUnits(): uint32 {
+  return 16;
+}
+
+function smallKind(): uint32 {
+  return 1;
+}
+
+function hugeKind(): uint32 {
+  return 2;
+}
+
+function allUnitsFree(): uint64 {
+  return 18446744073709551614;
+}
+
+function allUnits(): uint64 {
+  return 18446744073709551615;
+}
+
+function heapAt(): int {
+  return 48;
+}
+
+function heapTailAt(): int {
+  return 352;
+}
+
+function hugeSparesAt(): int {
+  return 368;
+}
+
+function firstUnitsAt(): int {
+  return 64;
+}
+
+function pagesAt(): int {
+  return 128;
+}
+
+function pageSize(): int {
+  return 56;
+}
+
+function reserveKind(): uint32 {
+  return 8192;
+}
+
+function commitKind(): uint32 {
+  return 4096;
+}
+
+function releaseKind(): uint32 {
+  return 32768;
+}
+
+function readWrite(): uint32 {
+  return 4;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the heap of the thread lies after its counters",
+})
+function heap(): Raw<uint8> {
+  return cellsAt<uint8>(threadState(), heapAt());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the heap starts with one page list for every bin",
+})
+function binCell(bin: int): Raw<Raw<uint8>> {
+  return cellsAt<Raw<uint8>>(heap(), bin * 8);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the heap keeps four spare huge segments",
+})
+function hugeCell(index: int): Raw<Raw<uint8>> {
+  return cellsAt<Raw<uint8>>(heap(), hugeSparesAt() + index * 8);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a free block keeps the address of the next one in its first word",
+})
+function nextFree(block: Raw<uint8>): Raw<uint8> {
+  return peekAt(cellsAt<Raw<uint8>>(block, 0), 0);
+}
+
+function isNone(raw: Raw<uint8>): boolean {
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "temporary: give the reason",
+  })
+  return rawBits(raw) == 0;
+}
+
+function highBit(value: int): int {
+  if (value >= 4096) {
+    if (value >= 16384) {
+      return 14;
+    }
+    if (value >= 8192) {
+      return 13;
+    }
+
+    return 12;
+  }
+  if (value >= 1024) {
+    if (value >= 2048) {
+      return 11;
+    }
+
+    return 10;
+  }
+  if (value >= 256) {
+    if (value >= 512) {
+      return 9;
+    }
+
+    return 8;
+  }
+  if (value >= 128) {
+    return 7;
+  }
+
+  return 6;
+}
+
+function binOf(size: int): int {
+  if (size <= 64) {
+    if (size == 0) {
+      return 0;
+    }
+
+    return (size - 1) >> 3;
+  }
+
+  const bit = highBit(size - 1);
+
+  return 8 + (bit - 6) * 4 + (((size - 1) >> (bit - 2)) & 3);
+}
+
+function binSize(bin: int): int {
+  if (bin < 8) {
+    return (bin + 1) * 8;
+  }
+
+  const bit = 6 + (bin - 8) / 4;
+  const part = (bin - 8) % 4;
+
+  return (1 << bit) + (part + 1) * (1 << (bit - 2));
+}
+
+function binUnits(bin: int): int {
+  const bytes = binSize(bin) * 8;
+  if (bytes <= unitSize()) {
+    return 1;
+  }
+
+  return (bytes + unitSize() - 1) / unitSize();
+}
+
+function unitsMask(units: int): uint64 {
+  if (units >= 64) {
+    return allUnits();
+  }
+
+  return (1 << units).toUint64() - 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room holds the text and at most twenty digits",
+})
+function outOfMemory(size: int): void {
+  const text = "out of memory allocating ";
+  const tail = " bytes";
+  const room = frameCells<uint8>(64);
+  const digits = frameCells<uint8>(24);
+  const head = textCells<uint8>(text);
+  const end = textCells<uint8>(tail);
+  let rest = size;
+  let start = 24;
+  let length = 0;
+
+  if (rest < 0) {
+    rest = 0;
+  }
+
+  while (true) {
+    start -= 1;
+    putUnit(digits, start, 48 + rest % 10);
+    rest = rest / 10;
+
+    if (rest == 0) {
+      break;
+    }
+  }
+
+  if (head != undefined) {
+    copyCells(head, 0, room, 0, text.length);
+    length = text.length;
+  }
+
+  copyCells(digits, start, room, length, 24 - start);
+  length += 24 - start;
+
+  if (end != undefined) {
+    copyCells(end, 0, room, length, tail.length);
+    length += tail.length;
+  }
+
+  panicked(room, length);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the system gives the pages; the base goes to the cell of the caller",
+})
+function systemAligned(size: int, base: Raw<Raw<uint8>>): Raw<uint8> {
+  const none = bitsRaw(0);
+  const total = (size + segmentSize()).toUint64();
+  const reserved = VirtualAlloc(none, total, reserveKind(), readWrite());
+  if (reserved == undefined) {
+    return none;
+  }
+
+  const rounded = rawBits(reserved) + segmentSize().toUint64() - 1;
+  const aligned = bitsRaw(rounded & segmentMask());
+  const kind = commitKind();
+  const made = VirtualAlloc(aligned, size.toUint64(), kind, readWrite());
+  if (made == undefined) {
+    VirtualFree(reserved, 0, releaseKind());
+
+    return none;
+  }
+
+  putAt(base, 0, reserved);
+
+  return aligned;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the base came from the system and nothing in it is used any more",
+})
+function systemFreed(base: Raw<uint8>): void {
+  VirtualFree(base, 0, releaseKind());
+}
+
+function segmentOf(block: Raw<uint8>): Raw<uint8> {
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "temporary: give the reason",
+  })
+  return bitsRaw(rawBits(block) & segmentMask());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the segments of the heap make a list through next and prev",
+})
+function segmentLinked(segment: Raw<uint8>): void {
+  const tail = viewAt<HeapTail>(heap(), heapTailAt());
+  const head = viewAt<SegmentHead>(segment, 0);
+  const first = tail.segments;
+
+  head.prev = bitsRaw(0);
+  head.next = first;
+
+  if (!isNone(first)) {
+    viewAt<SegmentHead>(first, 0).prev = segment;
+  }
+
+  tail.segments = segment;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the segments of the heap make a list through next and prev",
+})
+function segmentUnlinked(segment: Raw<uint8>): void {
+  const tail = viewAt<HeapTail>(heap(), heapTailAt());
+  const head = viewAt<SegmentHead>(segment, 0);
+  const next = head.next;
+  const prev = head.prev;
+
+  if (!isNone(prev)) {
+    viewAt<SegmentHead>(prev, 0).next = next;
+  } else {
+    tail.segments = next;
+  }
+  if (!isNone(next)) {
+    viewAt<SegmentHead>(next, 0).prev = prev;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a new segment starts with its head; the spare one keeps its head",
+})
+function segmentMade(): Raw<uint8> {
+  const tail = viewAt<HeapTail>(heap(), heapTailAt());
+  let segment = tail.spare;
+
+  if (!isNone(segment)) {
+    tail.spare = bitsRaw(0);
+  } else {
+    const base = frameCells<Raw<uint8>>(1);
+
+    segment = systemAligned(segmentSize(), base);
+
+    if (isNone(segment)) {
+      outOfMemory(segmentSize());
+    }
+
+    const made = viewAt<SegmentHead>(segment, 0);
+
+    made.kind = smallKind();
+    made.owner = heap();
+    made.osBase = peekAt(base, 0);
+    made.osSize = (segmentSize() * 2).toUint64();
+  }
+
+  viewAt<SegmentHead>(segment, 0).freeUnits = allUnitsFree();
+  segmentLinked(segment);
+
+  return segment;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the head of a segment keeps one bit for every unit",
+})
+function unitsFound(segment: Raw<uint8>, units: int): int {
+  const free = viewAt<SegmentHead>(segment, 0).freeUnits;
+  const mask = unitsMask(units);
+
+  for (let unit = 1; unit + units <= unitsCount(); unit++) {
+    if (((free >> unit.toUint64()) & mask) == mask) {
+      return unit;
+    }
+  }
+
+  return 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the pages of a bin make a list through next and prev",
+})
+function binPushed(page: Raw<uint8>): void {
+  const head = viewAt<PageHead>(page, 0);
+  const cell = binCell(head.bin.toInt());
+  const first = peekAt(cell, 0);
+
+  head.prev = bitsRaw(0);
+  head.next = first;
+
+  if (!isNone(first)) {
+    viewAt<PageHead>(first, 0).prev = page;
+  }
+
+  putAt(cell, 0, page);
+  head.listed = 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the pages of a bin make a list through next and prev",
+})
+function binRemoved(page: Raw<uint8>): void {
+  const head = viewAt<PageHead>(page, 0);
+  const next = head.next;
+  const prev = head.prev;
+
+  if (!isNone(prev)) {
+    viewAt<PageHead>(prev, 0).next = next;
+  } else {
+    putAt(binCell(head.bin.toInt()), 0, next);
+  }
+  if (!isNone(next)) {
+    viewAt<PageHead>(next, 0).prev = prev;
+  }
+
+  head.listed = 0;
+}

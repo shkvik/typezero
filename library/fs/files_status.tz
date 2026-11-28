@@ -1,0 +1,245 @@
+const kStatusErrorCodes: string[] = [
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EBUSY",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "UNKNOWN",
+];
+
+function statusErrorOf(failure: Read<FsFailure>): StatusError {
+  const isKnown = kStatusErrorCodes.includes(failure.code);
+  const verb = "get the info of";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOENT":
+      return { kind: "STATUS_ERROR_NOT_FOUND", code, message, syscall, path };
+    case "ENOTDIR":
+      return { kind: "STATUS_ERROR_WRONG_TYPE", code, message, syscall, path };
+    case "EACCES":
+    case "EPERM":
+      return { kind: "STATUS_ERROR_PERMISSION", code, message, syscall, path };
+    case "EBUSY":
+      return { kind: "STATUS_ERROR_BUSY", code, message, syscall, path };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+      return { kind: "STATUS_ERROR_PATH", code, message, syscall, path };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+      return { kind: "STATUS_ERROR_SYSTEM", code, message, syscall, path };
+    default:
+      return {
+        kind: "STATUS_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+      };
+  }
+}
+
+function statsSize(): int {
+  return 112;
+}
+
+function unixEpochTicks(): int {
+  return 116444736000000000;
+}
+
+function linkMode(): int {
+  return 40960;
+}
+
+function folderMode(): int {
+  return 16384;
+}
+
+function fileMode(): int {
+  return 32768;
+}
+
+function milliseconds(ticks: int): double {
+  const since = ticks - unixEpochTicks();
+  let seconds = since / 10000000;
+  let rest = since % 10000000;
+
+  if (rest < 0) {
+    rest += 10000000;
+    seconds -= 1;
+  }
+
+  return seconds.toDouble() * 1000.0 + (rest * 100).toDouble() / 1000000.0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the record holds a word at the offset",
+})
+function wordIn(record: Raw<uint8>, offset: int): int {
+  return unitAt(cellsAt<uint64>(record, offset), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the record holds four bytes at the offset",
+})
+function halfIn(record: Raw<uint8>, offset: int): int {
+  return unitAt(cellsAt<uint32>(record, offset), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the parts hold ten whole numbers and four times",
+})
+function statsWritten(
+  parts: Raw<uint8>,
+  info: Raw<uint8>,
+  basic: Raw<uint8>,
+  standard: Raw<uint8>,
+  isLink: boolean,
+): void {
+  const numbers = cellsAt<uint64>(parts, 0);
+  const times = cellsAt<double>(parts, 80);
+  const attributes = halfIn(info, 0).toUint32();
+  let mode = 438;
+
+  if ((attributes & readOnlyAttribute()) != 0) {
+    mode = 292;
+  }
+  if (isLink) {
+    mode = mode | linkMode();
+  } else if ((attributes & folderAttribute()) != 0) {
+    mode = mode | folderMode();
+  } else {
+    mode = mode | fileMode();
+  }
+
+  putUnit(numbers, 0, halfIn(info, 28));
+  putUnit(numbers, 1, mode);
+  putUnit(numbers, 2, halfIn(standard, 16));
+  putUnit(numbers, 3, 0);
+  putUnit(numbers, 4, 0);
+  putUnit(numbers, 5, 0);
+  putUnit(numbers, 6, 4096);
+  putUnit(numbers, 7, (halfIn(info, 44) << 32) | halfIn(info, 48));
+  putUnit(numbers, 8, wordIn(standard, 8));
+  putUnit(numbers, 9, wordIn(standard, 0) >> 9);
+  putAt(times, 0, milliseconds(wordIn(basic, 8)));
+  putAt(times, 1, milliseconds(wordIn(basic, 16)));
+  putAt(times, 2, milliseconds(wordIn(basic, 24)));
+  putAt(times, 3, milliseconds(wordIn(basic, 0)));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the name ends with a zero; the handle is closed on every path",
+})
+function statsFilled(
+  native: Read<string>,
+  isFollowing: boolean,
+  parts: Raw<uint8>,
+): uint32 {
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    return invalidName();
+  }
+
+  const none = bitsRaw(0);
+  let flags = backupFlag();
+
+  if (!isFollowing) {
+    flags = flags | reparseFlag();
+  }
+
+  const file = CreateFileW(
+    wide,
+    readAttributes(),
+    shareAll(),
+    none,
+    openExisting(),
+    flags,
+    none,
+  );
+  if (rawBits(file) == badHandle()) {
+    return GetLastError();
+  }
+
+  const info = frameCells<uint8>(52);
+  const basic = frameCells<uint8>(40);
+  const standard = frameCells<uint8>(24);
+  let isRead = GetFileInformationByHandle(file, info) != 0;
+
+  if (isRead) {
+    isRead = GetFileInformationByHandleEx(file, 0, basic, 40) != 0;
+  }
+  if (isRead) {
+    isRead = GetFileInformationByHandleEx(file, 1, standard, 24) != 0;
+  }
+  if (!isRead) {
+    const error = GetLastError();
+
+    CloseHandle(file);
+
+    return error;
+  }
+
+  const attributes = halfIn(info, 0).toUint32();
+  let isLink = false;
+
+  if (!isFollowing && (attributes & reparseAttribute()) != 0) {
+    isLink = isLinkTag(file);
+  }
+
+  CloseHandle(file);
+  statsWritten(parts, info, basic, standard, isLink);
+
+  return 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the maker reads the parts and gives a new object",
+})
+export function status(
+  path: Read<string>,
+  maker: Raw<uint8>,
+): Result<Raw<uint8>, StatusError> {
+  if (path.includes("\0")) {
+    const failure = codeFailure("ERR_INVALID_PATH", "stat", path);
+
+    return err(statusErrorOf(failure));
+  }
+
+  const native = toNamespacedPath(path);
+  const parts = allocate<uint8>(statsSize());
+  const error = statsFilled(native, true, parts);
+
+  if (error != 0) {
+    const failure = windowsFailure(error, "stat", shownOf(native), "");
+
+    release(parts);
+
+    return err(statusErrorOf(failure));
+  }
+
+  const made = invoked(maker, rawBits(parts));
+
+  release(parts);
+
+  return ok(bitsRaw(made));
+}

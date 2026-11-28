@@ -10,7 +10,6 @@ export const kIrExtension = ".ll";
 export const kTemporaryPrefix = "tz-";
 export const kObjectFile = "main.obj";
 export const kLinkerTool = "lld-link.exe";
-export const kRuntimeLibrary = "tzrt.lib";
 export const kLinkerArguments = [
   "/nologo",
   "/subsystem:console",

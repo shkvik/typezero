@@ -1,11 +1,9 @@
 import { CallExpr } from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
-import { IrFunction } from "../../ir-function/ir-function.tz";
 import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kFailedSlot,
   kFlagType,
   kIntType,
   kPanicText,
@@ -18,81 +16,6 @@ import {
 import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private failureMaker(
-    error: Type,
-    extra: Read<string[]> = [],
-  ): LLVMValue | undefined {
-    const known = this.makers.get(error.id);
-    if (known != undefined) {
-      return known;
-    }
-
-    const layout = this.layoutOf(error);
-    const code = this.layoutField(layout, "code");
-    const message = this.layoutField(layout, "message");
-    if (layout == undefined || code == undefined || message == undefined) {
-      return undefined;
-    }
-
-    const name = this.ir.uniqueName("tz.make.");
-    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
-    const frame: Frame = {
-      made,
-      id: this.frameId(),
-      module: 0,
-      loops: [],
-      scopes: [],
-    };
-    const parts = made.param(0);
-    const object = this.allocated(frame, layout);
-    const partsType = this.failurePartsType(extra.length);
-    const codeAddress = made.field(partsType, parts, 0);
-    const codeText = made.load(kPointerType, codeAddress);
-    const codeValue = this.codeChosen(frame, codeText, code.type);
-    const messageAddress = made.field(partsType, parts, 1);
-    const messageValue = made.load(kStringType, messageAddress);
-
-    made.store(codeValue, made.field(layout.struct, object, code.index));
-    made.store(messageValue, made.field(layout.struct, object, message.index));
-
-    for (let index = 0; index < extra.length; index++) {
-      const field = this.layoutField(layout, extra[index]);
-      if (field == undefined) {
-        continue;
-      }
-
-      const address = made.field(partsType, parts, index + 2);
-      const value = made.load(kStringType, address);
-
-      made.store(value, made.field(layout.struct, object, field.index));
-    }
-
-    for (const field of this.fieldsOf(layout)) {
-      const literals = this.textLiterals(field.type);
-      const only = literals[0];
-      const isFixed = field.name != "code" && literals.length == 1;
-      if (isFixed && only != undefined) {
-        const address = made.field(layout.struct, object, field.index);
-
-        made.store(this.stringValue(only).value, address);
-      }
-    }
-    made.finishValue(object);
-    this.makers.set(error.id, made.callee.fn);
-
-    return made.callee.fn;
-  }
-
-  private readonly failurePartsType(extra: int): string {
-    let parts = `{ ${kPointerType}, ${kStringType}`;
-
-    for (let index = 0; index < extra; index++) {
-      parts = `${parts}, ${kStringType}`;
-    }
-
-    return `${parts} }`;
-  }
-
   private codeChosen(
     frame: Read<Frame>,
     text: LLVMValue,
@@ -139,68 +62,6 @@ partial class Lowering {
     }
 
     return texts;
-  }
-
-  private failedSlot(): LLVMValue {
-    return this.ir.external(kFailedSlot, "{ ptr }");
-  }
-
-  private caughtResult(
-    frame: Frame,
-    value: IrValue,
-    type: Type,
-    loc: int,
-  ): IrValue | undefined {
-    const layout = this.resultLayout(type);
-    if (layout == undefined || type.kind != TypeKind.Result) {
-      return undefined;
-    }
-
-    const slot = this.failedSlot();
-    const failure = frame.made.load(kPointerType, slot);
-    const none = this.ir.zero(kPointerType);
-    const isFailed = frame.made.integerCompare(
-      IrIntPredicate.NotEqual,
-      failure,
-      none,
-    );
-    const failed = frame.made.block("call.failed");
-    const fine = frame.made.block("call.ok");
-    const end = frame.made.block("call.end");
-
-    frame.made.conditionalBranch(isFailed, failed, fine);
-    frame.made.open(failed);
-    frame.made.store(none, slot);
-
-    const error: IrValue = {
-      type: kPointerType,
-      value: failure,
-      tz: this.values.types.store.errorOf(type),
-      owned: true,
-    };
-    const bad = this.madeResult(frame, type, false, error, loc);
-    const badEnd = frame.made.currentBlock();
-
-    frame.made.branch(end);
-    frame.made.open(fine);
-
-    const good = this.madeResult(frame, type, true, value, loc);
-    const goodEnd = frame.made.currentBlock();
-
-    frame.made.branch(end);
-    frame.made.open(end);
-
-    if (bad == undefined || good == undefined) {
-      return undefined;
-    }
-
-    const result = frame.made.phi(
-      layout.struct,
-      [bad.value, good.value],
-      [badEnd, goodEnd],
-    );
-
-    return { type: layout.struct, value: result, tz: type, owned: true };
   }
 
   private numberOf(frame: Frame, call: CallExpr): IrValue | undefined {

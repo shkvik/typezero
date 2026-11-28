@@ -100,12 +100,6 @@ export type ResultShape = {
   readonly siteOffset: int;
 };
 
-export type FileCallParts = {
-  readonly type: Type;
-  readonly value: Type;
-  readonly maker: LLVMValue;
-};
-
 export type EachLoop = {
   readonly item: IrValue;
   readonly index: IrValue;

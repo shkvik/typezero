@@ -171,9 +171,8 @@ partial class Lowering {
     }
 
     const bytes = this.cellBytes(frame, cell, count);
-    const allocating = this.ir.declare(kMemoryAllocate, kPointerType, [
-      kIntType,
-    ]);
+    const name = this.memoryHelper(kMemoryAllocate);
+    const allocating = this.ir.declare(name, kPointerType, [kIntType]);
     const value = frame.made.call(allocating, [bytes]);
 
     return this.rawMade(call, value);
@@ -192,7 +191,8 @@ partial class Lowering {
 
     const bytes = this.cellBytes(frame, cell, count);
     const params = [kPointerType, kIntType];
-    const resizing = this.ir.declare(kMemoryResize, kPointerType, params);
+    const name = this.memoryHelper(kMemoryResize);
+    const resizing = this.ir.declare(name, kPointerType, params);
     const value = frame.made.call(resizing, [raw, bytes]);
 
     return this.rawMade(call, value);
@@ -204,7 +204,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const freeing = this.ir.declare(kMemoryFree, kVoidType, [kPointerType]);
+    const name = this.memoryHelper(kMemoryFree);
+    const freeing = this.ir.declare(name, kVoidType, [kPointerType]);
 
     frame.made.call(freeing, [raw]);
 

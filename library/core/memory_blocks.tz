@@ -1,0 +1,320 @@
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the pages of a segment lie after its head, one for every unit",
+})
+function pageAt(segment: Raw<uint8>, unit: int): Raw<uint8> {
+  return cellsAt<uint8>(segment, pagesAt() + unit * pageSize());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the units are taken from the segment before the page is filled",
+})
+function pageMade(bin: int): Raw<uint8> {
+  const tail = viewAt<HeapTail>(heap(), heapTailAt());
+  const units = binUnits(bin);
+  let segment = tail.segments;
+  let first = 0;
+
+  while (!isNone(segment)) {
+    first = unitsFound(segment, units);
+
+    if (first != 0) {
+      break;
+    }
+
+    segment = viewAt<SegmentHead>(segment, 0).next;
+  }
+
+  if (isNone(segment)) {
+    segment = segmentMade();
+    first = 1;
+  }
+
+  const head = viewAt<SegmentHead>(segment, 0);
+  const mask = unitsMask(units) << first.toUint64();
+  const firstUnits = cellsAt<uint8>(segment, firstUnitsAt());
+
+  head.freeUnits = head.freeUnits & (mask ^ allUnits());
+
+  for (let unit = first; unit < first + units; unit++) {
+    putUnit(firstUnits, unit, first);
+  }
+
+  const page = pageAt(segment, first);
+  const made = viewAt<PageHead>(page, 0);
+  const block = binSize(bin);
+  const start = cellsAt<uint8>(segment, first * unitSize());
+  const room = (units * unitSize() / block) * block;
+
+  made.free = bitsRaw(0);
+  made.bump = start;
+  made.end = cellsAt<uint8>(start, room);
+  made.used = 0;
+  made.blockSize = block.toUint32();
+  made.bin = bin.toUint8();
+  made.units = units.toUint8();
+  binPushed(page);
+
+  return page;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the page has no used block; its units go back to the segment",
+})
+function pageReleased(page: Raw<uint8>): void {
+  const tail = viewAt<HeapTail>(heap(), heapTailAt());
+  const made = viewAt<PageHead>(page, 0);
+  const segment = segmentOf(page);
+  const head = viewAt<SegmentHead>(segment, 0);
+  const offset = rawBits(page) - rawBits(segment) - pagesAt().toUint64();
+  const first = offset / pageSize().toUint64();
+
+  binRemoved(page);
+  head.freeUnits = head.freeUnits | (unitsMask(made.units.toInt()) << first);
+
+  if (head.freeUnits != allUnitsFree()) {
+    return;
+  }
+
+  segmentUnlinked(segment);
+
+  if (isNone(tail.spare)) {
+    tail.spare = segment;
+  } else {
+    systemFreed(head.osBase);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a huge block lies after the head of its own segment",
+})
+function hugeAllocated(size: int): Raw<uint8> {
+  const whole = hugeHeader() + size + unitSize() - 1;
+  const total = whole - whole % unitSize();
+  if (size < 0 || total < size) {
+    outOfMemory(size);
+  }
+
+  const units = total / unitSize();
+
+  for (let index = 0; index < hugeSpares(); index++) {
+    const cell = hugeCell(index);
+    const spare = peekAt(cell, 0);
+    if (isNone(spare)) {
+      continue;
+    }
+
+    const kept = viewAt<SegmentHead>(spare, 0);
+    const held = kept.hugeUnits.toInt();
+
+    if (held >= units && held <= 2 * units) {
+      putAt(cell, 0, bitsRaw(0));
+      kept.hugeWeak = 0;
+
+      return cellsAt<uint8>(spare, hugeHeader());
+    }
+  }
+
+  const base = frameCells<Raw<uint8>>(1);
+  const segment = systemAligned(total, base);
+  if (isNone(segment)) {
+    outOfMemory(size);
+  }
+
+  const head = viewAt<SegmentHead>(segment, 0);
+
+  head.kind = hugeKind();
+  head.owner = bitsRaw(0);
+  head.hugeWeak = 0;
+  head.hugeUnits = Math.min(units, 4294967295).toUint32();
+  head.osBase = peekAt(base, 0);
+  head.osSize = (total + segmentSize()).toUint64();
+
+  return cellsAt<uint8>(segment, hugeHeader());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the block comes from the free list or the unused end of a page",
+})
+function allocatedSlow(size: int): Raw<uint8> {
+  if (size > mostSmall() || size < 0) {
+    return hugeAllocated(size);
+  }
+
+  const bin = binOf(size);
+  const cell = binCell(bin);
+  let page = peekAt(cell, 0);
+
+  while (!isNone(page)) {
+    const full = viewAt<PageHead>(page, 0);
+    const isFull = isNone(full.free) && rawBits(full.bump) >= rawBits(full.end);
+
+    if (!isFull) {
+      break;
+    }
+
+    binRemoved(page);
+    page = peekAt(cell, 0);
+  }
+
+  if (isNone(page)) {
+    page = pageMade(bin);
+  }
+
+  const head = viewAt<PageHead>(page, 0);
+  let block = head.free;
+
+  if (!isNone(block)) {
+    head.free = nextFree(block);
+  } else {
+    block = head.bump;
+    head.bump = cellsAt<uint8>(block, head.blockSize.toInt());
+  }
+
+  head.used += 1;
+
+  return block;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the block comes from the free list or the unused end of a page",
+})
+export function allocated(size: int): Raw<uint8> {
+  if (size >= 0 && size <= mostSmall()) {
+    const page = peekAt(binCell(binOf(size)), 0);
+
+    if (!isNone(page)) {
+      const head = viewAt<PageHead>(page, 0);
+      const block = head.free;
+
+      if (!isNone(block)) {
+        head.free = nextFree(block);
+        head.used += 1;
+
+        return block;
+      }
+      if (rawBits(head.bump) < rawBits(head.end)) {
+        const made = head.bump;
+
+        head.bump = cellsAt<uint8>(made, head.blockSize.toInt());
+        head.used += 1;
+
+        return made;
+      }
+    }
+  }
+
+  return allocatedSlow(size);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the segment keeps the first unit of the page of every unit",
+})
+function pageOf(segment: Raw<uint8>, block: Raw<uint8>): Raw<uint8> {
+  const unit = ((rawBits(block) - rawBits(segment)) >> 16).toInt();
+  const first = unitAt(cellsAt<uint8>(segment, firstUnitsAt()), unit);
+
+  return pageAt(segment, first);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the block is free already; its page or its segment may go too",
+})
+function freedSlow(block: Raw<uint8>): void {
+  const segment = segmentOf(block);
+  const head = viewAt<SegmentHead>(segment, 0);
+
+  if (head.kind == hugeKind()) {
+    if (head.hugeUnits <= hugeSpareUnits()) {
+      for (let index = 0; index < hugeSpares(); index++) {
+        const cell = hugeCell(index);
+
+        if (isNone(peekAt(cell, 0))) {
+          putAt(cell, 0, segment);
+
+          return;
+        }
+      }
+    }
+
+    systemFreed(head.osBase);
+
+    return;
+  }
+
+  const page = pageOf(segment, block);
+  const made = viewAt<PageHead>(page, 0);
+
+  if (made.listed == 0) {
+    binPushed(page);
+  } else if (made.used == 0) {
+    if (!isNone(made.next) || !isNone(made.prev)) {
+      pageReleased(page);
+    }
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the block came from allocated and no one uses it any more",
+})
+export function freed(block: Raw<uint8>): void {
+  if (isNone(block)) {
+    return;
+  }
+
+  const segment = segmentOf(block);
+
+  if (viewAt<SegmentHead>(segment, 0).kind == smallKind()) {
+    const page = pageOf(segment, block);
+    const head = viewAt<PageHead>(page, 0);
+
+    putAt(cellsAt<Raw<uint8>>(block, 0), 0, head.free);
+    head.free = block;
+    head.used -= 1;
+
+    if (head.used != 0 && head.listed != 0) {
+      return;
+    }
+  }
+
+  freedSlow(block);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the old block holds as many bytes as its page or segment says",
+})
+export function resized(block: Raw<uint8>, size: int): Raw<uint8> {
+  if (isNone(block)) {
+    return allocated(size);
+  }
+
+  const segment = segmentOf(block);
+  const head = viewAt<SegmentHead>(segment, 0);
+  let old = 0;
+
+  if (head.kind == hugeKind()) {
+    old = head.hugeUnits.toInt() * unitSize() - hugeHeader();
+  } else {
+    old = viewAt<PageHead>(pageOf(segment, block), 0).blockSize.toInt();
+  }
+
+  if (size <= old) {
+    return block;
+  }
+
+  const grown = allocated(size);
+
+  copyCells(block, 0, grown, 0, old);
+  freed(block);
+
+  return grown;
+}

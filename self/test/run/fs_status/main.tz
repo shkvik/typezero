@@ -1,0 +1,36 @@
+import { statSync } from "node:fs";
+
+function shown(path: string): void {
+  const found = statSync(path);
+
+  if (found.isErr()) {
+    const message = found.error.message;
+    const reason = message.slice(message.lastIndexOf(": ") + 2);
+    const isAbout = message.startsWith("could not get the info of ");
+
+    console.log(found.error.kind, found.error.code, found.error.syscall);
+    console.log(isAbout, reason, found.error.path.endsWith(path));
+
+    return;
+  }
+
+  const stats = found.value;
+  const isSized = stats.size > 0;
+  const isTimed = stats.mtimeMs > 1600000000000.0;
+  const isBorn = stats.birthtimeMs <= stats.mtimeMs + 1000.0;
+
+  console.log(stats.isFile(), stats.isDirectory(), isSized, isTimed, isBorn);
+  console.log(stats.nlink, stats.uid, stats.gid, stats.rdev, stats.blksize);
+  console.log(stats.mode, stats.atimeMs >= stats.birthtimeMs - 1000.0);
+}
+
+function main(): void {
+  shown("main.tz");
+  shown(".");
+  shown("missing.txt");
+  shown("main.tz/inside");
+  shown("bad\0name");
+  shown("");
+}
+
+main();

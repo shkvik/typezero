@@ -26,7 +26,6 @@ import {
   kLinkerTool,
   kObjectFile,
   kOutputOption,
-  kRuntimeLibrary,
   kSystemLibraries,
   kTemporaryPrefix,
 } from "./const/build-command.const.tz";
@@ -376,8 +375,7 @@ export class BuildCommand {
     libraries: Own<string[]>,
   ): boolean {
     const linker = this.toolPath(kLinkerTool);
-    const runtime = this.toolPath(kRuntimeLibrary);
-    const inputs = [`/out:${output}`, objectPath, runtime].concat(libraries);
+    const inputs = [`/out:${output}`, objectPath].concat(libraries);
     const system = kSystemLibraries.slice();
     const args = kLinkerArguments.concat(inputs, system);
 

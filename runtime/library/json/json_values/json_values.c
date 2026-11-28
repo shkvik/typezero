@@ -15,8 +15,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-TzJson *tz_json_null(void) { return tz_json_retained(&tz_json_null_node); }
-
 TzJson *tz_json_number(double value) {
   TzJson *j = tz_json_node_new(TZ_JSON_NUMBER, sizeof(double));
   j->u.number.value = value;

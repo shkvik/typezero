@@ -1,0 +1,14 @@
+true false true true true
+1 0 0 0 4096
+33206 true
+false true false true true
+1 0 0 0 4096
+16822 true
+STATUS_ERROR_NOT_FOUND ENOENT stat
+true there is no such file or folder true
+STATUS_ERROR_NOT_FOUND ENOENT stat
+true there is no such file or folder false
+STATUS_ERROR_PATH ERR_INVALID_PATH stat
+true the path has a zero character in it true
+STATUS_ERROR_NOT_FOUND ENOENT stat
+true there is no such file or folder true

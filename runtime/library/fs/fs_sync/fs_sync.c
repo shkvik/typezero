@@ -332,40 +332,6 @@ int tz_fs_stat_of(const char *path, int follow, TzStatsParts *st) {
 }
 #endif
 
-void *tz_fs_stat(void *path_obj, uint64_t path_meta, int32_t follow, int32_t throw_if_missing,
-                 TzMaker make_stats, TzMaker make) {
-  Path p;
-  if (!tz_fs_path_init(&p, path_obj, path_meta, make, follow ? "stat" : "lstat")) {
-    return NULL;
-  }
-  TzStatsParts st;
-  void *result = NULL;
-  const char *syscall = follow ? "stat" : "lstat";
-#ifdef _WIN32
-  DWORD error = tz_fs_stat_of(tz_fs_wide(&p), follow, &st);
-  if (error) {
-    Failure f = tz_fs_win32_failure(error);
-    if (throw_if_missing || (f.index != E_ENOENT && f.index != E_ENOTDIR)) {
-      tz_fs_fail_win32(make, error, syscall, &p, NULL);
-    }
-  } else {
-    result = make_stats(&st);
-  }
-#else
-  int error = tz_fs_stat_of(tz_fs_native(&p), follow, &st);
-  if (error) {
-    if (throw_if_missing || (error != ENOENT && error != ENOTDIR)) {
-      tz_fs_fail_errno(make, error, syscall, &p, NULL);
-    }
-  } else {
-    result = make_stats(&st);
-  }
-#endif
-  tz_fs_path_free(&p);
-
-  return result;
-}
-
 #ifndef _WIN32
 int tz_fs_rename_no_replace(const char *from, const char *to) {
 #if defined(__linux__) && defined(SYS_renameat2)

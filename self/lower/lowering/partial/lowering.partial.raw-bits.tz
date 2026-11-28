@@ -9,7 +9,11 @@ import { TypeKind } from "../../../program/type/types/type.types.tz";
 import {
   kByteCell,
   kDecimalType,
-  kFailedSlot,
+  kMemoryHelpers,
+  kMemoryModule,
+  kThreadName,
+  kThreadOfC,
+  kThreadRecord,
   kFlagType,
   kIntType,
   kPointerType,
@@ -176,9 +180,31 @@ partial class Lowering {
   }
 
   private threadStateOf(call: CallExpr): IrValue | undefined {
-    const state = this.ir.external(kFailedSlot, "{ ptr }");
+    return this.rawMade(call, this.threadRecord());
+  }
 
-    return this.rawMade(call, state);
+  private threadRecord(): LLVMValue {
+    const known = this.threadGlobal;
+    if (known != undefined) {
+      return known;
+    }
+
+    if (this.moduleIdNamed(kMemoryModule) == undefined) {
+      return this.ir.external(kThreadOfC, "{ ptr }");
+    }
+
+    const zero = this.ir.zero(kThreadRecord);
+    const global = this.ir.global(kThreadName, kThreadRecord, zero, false);
+
+    this.threadGlobal = global;
+
+    return global;
+  }
+
+  private memoryHelper(name: string): string {
+    const helper = kMemoryHelpers.get(name) ?? name;
+
+    return this.runtimeHelperName(kMemoryModule, helper, name);
   }
 
   private cellsAtMade(frame: Frame, call: CallExpr): IrValue | undefined {

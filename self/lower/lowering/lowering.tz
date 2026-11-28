@@ -135,7 +135,7 @@ export class Lowering {
   private cstringLayoutGlobal: LLVMValue | undefined;
   private bytesLayoutsGlobal: LLVMValue | undefined;
   private jsonLayoutGlobal: LLVMValue | undefined;
-  private readonly makers: Map<int, LLVMValue>;
+  private threadGlobal: LLVMValue | undefined;
   private readonly orderedDescriptors: Map<string, LLVMValue>;
   private readonly orderMakers: Map<string, LLVMValue>;
   private readonly keyedFinders: Map<string, IrCallee>;
@@ -200,7 +200,7 @@ export class Lowering {
     this.cstringLayoutGlobal = undefined;
     this.bytesLayoutsGlobal = undefined;
     this.jsonLayoutGlobal = undefined;
-    this.makers = new Map<int, LLVMValue>();
+    this.threadGlobal = undefined;
     this.orderedDescriptors = new Map<string, LLVMValue>();
     this.orderMakers = new Map<string, LLVMValue>();
     this.keyedFinders = new Map<string, IrCallee>();

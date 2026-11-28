@@ -425,3 +425,9 @@ export declare function RtlVirtualUnwind(
   frame: Raw<uint64>,
   pointers: Raw<uint8>,
 ): Raw<uint8> | undefined;
+
+export declare function VirtualFree(
+  address: Raw<uint8>,
+  size: uint64,
+  kind: uint32,
+): int32;

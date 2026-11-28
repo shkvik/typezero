@@ -182,7 +182,6 @@ export const kBytesFromBytes = "tz_bytes_from_bytes";
 export const kBufferKindCode = "11";
 export const kArrayName = "Array";
 export const kFromName = "from";
-export const kFailedSlot = "tz_thread";
 export const kFailureParts = "{ ptr, { ptr, i64 } }";
 export const kTextCompareC = "strcmp";
 export const kNumberName = "Number";
@@ -201,15 +200,6 @@ export const kMathFloor = "floor";
 export const kMathCeil = "ceil";
 export const kMathTrunc = "trunc";
 export const kFsModule = "node:fs";
-export const kFsCompose = "tz_fs_compose";
-export const kFsStat = "tz_fs_stat";
-export const kFsErrorOrders = [
-  ["message", "errno", "code", "syscall", "path", "dest"],
-  ["code", "message", "syscall", "path"],
-  ["code", "message", "syscall", "path", "dest"],
-  ["code", "message", "path"],
-  ["code", "message"],
-];
 export const kStatsOrder = [
   "dev",
   "mode",
@@ -226,18 +216,6 @@ export const kStatsOrder = [
   "ctimeMs",
   "birthtimeMs",
 ];
-export const kFsVerbs = new Map<string, string>([
-  ["ReadFileError", "read"],
-  ["WriteFileError", "write"],
-  ["StatusError", "get the info of"],
-  ["StatusIfExistsError", "get the info of"],
-  ["ReadDirectoryError", "list"],
-  ["RealPathError", "resolve"],
-  ["MakeTemporaryDirectoryError", "create a temporary folder at"],
-  ["RemoveError", "remove"],
-  ["ForceRemoveError", "remove"],
-  ["CopyFileError", "copy"],
-]);
 export const kProcessName = "process";
 export const kPlatformName = "win32";
 export const kExitCodeSet = "exitCodeSet";
@@ -332,6 +310,7 @@ export const kRuntimeModules = [
   "tz:dicts",
   "tz:runtime",
   "tz:jsons",
+  "tz:memory",
 ];
 export const kSystemModulePrefix = "tz:win32/";
 export const kFilesModule = "tz:files";
@@ -347,6 +326,10 @@ export const kCountsModule = "tz:counts";
 export const kDictsModule = "tz:dicts";
 export const kRuntimeModule = "tz:runtime";
 export const kJsonsModule = "tz:jsons";
+export const kMemoryModule = "tz:memory";
+export const kThreadRecord = "[64 x i64]";
+export const kThreadName = "tz.thread";
+export const kThreadOfC = "tz_thread";
 export const kJsonClassId = 1073741312;
 export const kJsonLayout = `{ ${kLayoutHead}, ptr, ptr }`;
 export const kJsonTypeName = "Json";
@@ -361,6 +344,11 @@ export const kArrayForget = "arrayForgotten";
 export const kMemoryAllocate = "tz_alloc";
 export const kMemoryResize = "tz_realloc";
 export const kMemoryFree = "tz_free";
+export const kMemoryHelpers = new Map<string, string>([
+  ["tz_alloc", "allocated"],
+  ["tz_realloc", "resized"],
+  ["tz_free", "freed"],
+]);
 export const kMemoryMove = "memmove";
 export const kMemoryCompare = "memcmp";
 export const kMemoryFind = "memchr";

@@ -1,0 +1,87 @@
+function textsKept(rounds: int): int {
+  const kept: string[] = [];
+  let total = 0;
+
+  for (let round = 0; round < rounds; round++) {
+    const text = "ab".repeat(round % 700);
+
+    const at = round % 300;
+
+    if (at < kept.length) {
+      total += kept[at]?.length ?? 0;
+      kept[at] = text;
+    } else {
+      kept.push(text);
+    }
+  }
+
+  for (const text of kept) {
+    total += text.length;
+  }
+
+  return total;
+}
+
+function arrayGrown(count: int): int {
+  const numbers: int[] = [];
+
+  for (let index = 0; index < count; index++) {
+    numbers.push(index * 3);
+  }
+
+  let sum = 0;
+
+  for (const number of numbers) {
+    sum += number;
+  }
+
+  return sum;
+}
+
+function hugeBlocks(): int {
+  let total = 0;
+
+  for (let round = 0; round < 12; round++) {
+    const small = Buffer.alloc(40000 + round * 9000);
+    const large = Buffer.alloc(3000000 + round * 500000);
+    const text = "long".repeat(300000 + round * 70000);
+
+    total += small.length + large.length + text.length;
+    total += text.lastIndexOf("gl") + large.subarray(100, 5000).length;
+  }
+
+  return total;
+}
+
+function mapsFilled(count: int): int {
+  const names = new Map<string, int[]>();
+
+  for (let index = 0; index < count; index++) {
+    const key = `key ${index % 500}`;
+    const list = names.get(key);
+
+    if (list == undefined) {
+      names.set(key, [index]);
+    } else {
+      list.push(index);
+    }
+  }
+
+  let sum = 0;
+
+  for (const list of names.values()) {
+    sum += list.length;
+  }
+
+  return sum + names.size;
+}
+
+function main(): void {
+  console.log(textsKept(20000));
+  console.log(arrayGrown(300000));
+  console.log(hugeBlocks());
+  console.log(mapsFilled(60000));
+  console.log(textsKept(5000) + arrayGrown(1000) + mapsFilled(3000));
+}
+
+main();

@@ -6,28 +6,17 @@ import {
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
-import {
-  IrIntPredicate,
-  IrOpcode,
-} from "../../ir-function/types/ir-function.types.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kFlagType,
-  kFsCompose,
-  kFsErrorOrders,
-  kFsStat,
   kFilesModule,
-  kFsVerbs,
   kIntType,
   kPointerType,
   kStatsOrder,
-  kTextCompareC,
-  kVoidType,
 } from "../const/lowering.const.tz";
 import {
   ClassLayout,
-  FileCallParts,
   Frame,
   IrValue,
   RuntimeTarget,
@@ -113,27 +102,6 @@ partial class Lowering {
     return found;
   }
 
-  private fileResultParts(
-    frame: Read<Frame>,
-    call: CallExpr,
-  ): FileCallParts | undefined {
-    const type = this.typeOf(call);
-    if (type == undefined || type.kind != TypeKind.Result) {
-      this.notLowered(frame.module, call.loc, "a result of this type");
-
-      return undefined;
-    }
-
-    const maker = this.fsErrorMaker(this.values.types.store.errorOf(type));
-    if (maker == undefined) {
-      this.notLowered(frame.module, call.loc, "an error of this type");
-
-      return undefined;
-    }
-
-    return { type, value: this.values.types.store.valueOf(type), maker };
-  }
-
   private fileRead(frame: Frame, call: CallExpr): IrValue | undefined {
     const tree = this.values.types.program.tree;
 
@@ -189,13 +157,19 @@ partial class Lowering {
   private fileStatus(frame: Frame, call: CallExpr): IrValue | undefined {
     const tree = this.values.types.program.tree;
 
-    const parts = this.fileResultParts(frame, call);
+    const answered = this.typeOf(call);
     const path = this.pathArgument(frame, call);
-    if (parts == undefined || path == undefined) {
+    if (answered == undefined || answered.kind != TypeKind.Result) {
+      this.notLowered(frame.module, call.loc, "a result of this type");
+
+      return undefined;
+    }
+    if (path == undefined) {
       return undefined;
     }
 
-    const stats = this.definedOf(parts.value);
+    const value = this.values.types.store.valueOf(answered);
+    const stats = this.definedOf(value);
     const statsMaker = this.orderMaker(stats, kStatsOrder);
     if (statsMaker == undefined || tree.argumentsOf(call.argsList).length > 1) {
       this.notLowered(frame.module, call.loc, "this call of statSync");
@@ -203,33 +177,23 @@ partial class Lowering {
       return undefined;
     }
 
-    const params = [
-      kPointerType,
-      kIntType,
-      kFlagType,
-      kFlagType,
-      kPointerType,
-      kPointerType,
-    ];
-    const callee = this.ir.declare(kFsStat, kPointerType, params);
-    const yes = this.ir.integer(kFlagType, "1");
-    const args = this.textParts(frame, path).concat([
-      yes,
-      yes,
-      statsMaker,
-      parts.maker,
-    ]);
-    const found = frame.made.call(callee, args);
-    const value: IrValue = {
-      type: kPointerType,
-      value: found,
-      tz: stats,
-      owned: true,
-    };
+    const int = this.values.types.store.integer(64, false);
+    const maker: IrValue = { type: kPointerType, value: statsMaker, tz: int };
+    const target: RuntimeTarget = { module: kFilesModule, name: "status" };
+    const given = [path, maker];
+    const found = this.runtimeFunctionCall(frame, target, [], given, call.loc);
 
     this.dropping(frame, path);
 
-    return this.caughtResult(frame, value, parts.type, call.loc);
+    const type = this.irType(answered);
+    const isSame = found != undefined && type == found.type;
+    if (found == undefined || type == undefined || !isSame) {
+      this.notLowered(frame.module, call.loc, "this call of statSync");
+
+      return undefined;
+    }
+
+    return { type, value: found.value, tz: answered, owned: true };
   }
 
   private directoryRead(frame: Frame, call: CallExpr): IrValue | undefined {
@@ -315,159 +279,6 @@ partial class Lowering {
     }
 
     return value.value;
-  }
-
-  private fsErrorMaker(error: Type): LLVMValue | undefined {
-    const known = this.makers.get(error.id);
-    if (known != undefined) {
-      return known;
-    }
-
-    const variants = this.objectParts(error);
-    const makers: LLVMValue[] = [];
-
-    for (const variant of variants) {
-      const order = this.errorOrder(variant);
-      const maker = this.orderMakerOrNone(variant, order);
-      if (maker == undefined) {
-        return undefined;
-      }
-
-      makers.push(maker);
-    }
-
-    const label = this.values.types.store.labelOf(error) ?? "";
-    const verb = kFsVerbs.get(label) ?? "";
-    const name = this.ir.uniqueName("tz.make.fs.");
-    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
-    const parts = made.param(0);
-    const code = made.load(kPointerType, parts);
-    const chosen = this.variantChosen(made, code, variants);
-    const compose = this.ir.declare(kFsCompose, kVoidType, [
-      kPointerType,
-      kPointerType,
-      kFlagType,
-    ]);
-    const none = this.ir.integer(kFlagType, "-1");
-    const isKnown = made.integerCompare(IrIntPredicate.NotEqual, chosen, none);
-    const knownFlag = made.cast(IrOpcode.ZExt, isKnown, kFlagType);
-    const unknown = this.unknownVariant(variants);
-    const fallback = this.ir.integer(kFlagType, `${unknown}`);
-    const index = made.select(isKnown, chosen, fallback);
-
-    made.call(compose, [parts, this.cText(verb), knownFlag]);
-
-    const result = this.ir.zero(kPointerType);
-
-    for (let position = 0; position < makers.length; position++) {
-      const maker = makers[position];
-      if (maker == undefined) {
-        continue;
-      }
-
-      const wanted = this.ir.integer(kFlagType, `${position}`);
-      const isThis = made.integerCompare(IrIntPredicate.Equal, index, wanted);
-      const signature = this.ir.signature(kPointerType, [kPointerType]);
-      const thisBlock = made.block("variant.make");
-      const nextBlock = made.block("variant.next");
-
-      made.conditionalBranch(isThis, thisBlock, nextBlock);
-      made.open(thisBlock);
-      made.returned(made.indirectCall(signature, maker, [parts]));
-      made.open(nextBlock);
-    }
-
-    made.finishValue(result);
-    this.makers.set(error.id, made.callee.fn);
-
-    return made.callee.fn;
-  }
-
-  private variantChosen(
-    made: IrFunction,
-    code: LLVMValue,
-    variants: Read<Type[]>,
-  ): LLVMValue {
-    const compare = this.ir.declare(kTextCompareC, kFlagType, [
-      kPointerType,
-      kPointerType,
-    ]);
-    const zero = this.ir.zero(kFlagType);
-    let index: LLVMValue = this.ir.integer(kFlagType, "-1");
-
-    for (let position = 0; position < variants.length; position++) {
-      const codes = this.variantCodes(variants[position]);
-
-      for (const literal of codes) {
-        const order = made.call(compare, [code, this.cText(literal)]);
-        const isSame = made.integerCompare(IrIntPredicate.Equal, order, zero);
-        const value = this.ir.integer(kFlagType, `${position}`);
-
-        index = made.select(isSame, value, index);
-      }
-    }
-
-    return index;
-  }
-
-  private readonly variantCodes(variant: Type | undefined): string[] {
-    if (variant == undefined || variant.kind != TypeKind.Object) {
-      return [];
-    }
-
-    const field = this.values.types.store
-      .fieldsOf(variant)
-      .find((one) => one.name == "code");
-    if (field == undefined) {
-      return [];
-    }
-
-    return this.textLiterals(field.type);
-  }
-
-  private readonly unknownVariant(variants: Read<Type[]>): int {
-    for (let position = 0; position < variants.length; position++) {
-      if (this.variantCodes(variants[position]).includes("UNKNOWN")) {
-        return position;
-      }
-    }
-
-    return 0;
-  }
-
-  private readonly errorOrder(variant: Type): string[] {
-    if (variant.kind != TypeKind.Object) {
-      return [];
-    }
-
-    const fields = this.values.types.store.fieldsOf(variant).slice();
-
-    for (const order of kFsErrorOrders) {
-      const isPresent = order.every((name) =>
-        fields.some((field) => field.name == name),
-      );
-      const isCovered = fields.every(
-        (field) =>
-          order.includes(field.name) ||
-          this.textLiterals(field.type).length == 1,
-      );
-      if (isPresent && isCovered) {
-        return order.slice();
-      }
-    }
-
-    return [];
-  }
-
-  private orderMakerOrNone(
-    type: Type,
-    order: Read<string[]>,
-  ): LLVMValue | undefined {
-    if (order.length == 0) {
-      return undefined;
-    }
-
-    return this.orderMaker(type, order);
   }
 
   private orderMaker(type: Type, order: Read<string[]>): LLVMValue | undefined {

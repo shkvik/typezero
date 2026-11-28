@@ -8,6 +8,7 @@ import {
   ReadFileError,
   RealPathError,
   RemoveError,
+  StatusError,
 } from "tz:fs/errors";
 import { rand_s } from "tz:win32/ucrt";
 import { textOfBytes } from "tz:text";
@@ -46,6 +47,8 @@ import {
   cellsAt,
   copyCells,
   frameCells,
+  invoked,
+  putAt,
   putUnit,
   rawBits,
   reallocate,

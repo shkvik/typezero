@@ -242,6 +242,7 @@ export const kLibraryModules: LibraryModule[] = [
       "files_read.tz",
       "files_dirs.tz",
       "files_list.tz",
+      "files_status.tz",
     ],
     specs: ["tz:files"],
     access: LibraryAccess.Runtime,
@@ -300,6 +301,13 @@ export const kLibraryModules: LibraryModule[] = [
     file: "dicts.tz",
     parts: ["dicts_find.tz", "dicts_lists.tz"],
     specs: ["tz:dicts"],
+    access: LibraryAccess.Runtime,
+  },
+  {
+    name: "tz:memory",
+    file: "memory.tz",
+    parts: ["memory_blocks.tz"],
+    specs: ["tz:memory"],
     access: LibraryAccess.Runtime,
   },
   {
