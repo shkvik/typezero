@@ -4,15 +4,15 @@ import {
   ExprKind,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kFlagType,
-  kIntType,
+  kBooleanType,
+  kExitCodeSet,
   kPlatformName,
   kProcessModule,
   kProcessName,
-  kProcessSetExitCode,
-  kVoidType,
+  kRuntimeModule,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
@@ -93,11 +93,13 @@ partial class Lowering {
       return undefined;
     }
 
-    const params = [kIntType, kFlagType];
-    const callee = this.ir.declare(kProcessSetExitCode, kVoidType, params);
-    const has = this.ir.integer(kFlagType, "1");
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
+    const set = this.ir.integer(kBooleanType, "1");
+    const isSet: IrValue = { type: kBooleanType, value: set, tz: boolean };
+    const name = kExitCodeSet;
+    const setter: RuntimeTarget = { module: kRuntimeModule, name };
 
-    frame.made.call(callee, [code.value, has]);
+    this.runtimeFunctionCall(frame, setter, [], [code, isSet], expr.loc);
 
     return code;
   }

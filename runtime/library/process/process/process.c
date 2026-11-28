@@ -266,13 +266,6 @@ int32_t tz_process_get_exit_code(int32_t *has) {
   return tz_exit_code;
 }
 
-void tz_process_set_exit_code(int64_t code, int32_t has) {
-  tz_exit_code = has ? code : 0;
-  tz_has_exit_code = has;
-}
-
-int32_t tz_process_exit_status(void) { return tz_exit_code; }
-
 void tz_process_shutdown(void) {
   TzArray *a = tz_argv;
   tz_argv = NULL;

@@ -1,5 +1,9 @@
-import { CallExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  CallExpr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
 import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import { TypeKind } from "../../../program/type/types/type.types.tz";
 import {
@@ -59,6 +63,92 @@ partial class Lowering {
     const tz = this.values.types.store.integer(64, false);
 
     return { type: kIntType, value, tz };
+  }
+
+  private invokedCall(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const entry = this.rawArgument(frame, call, 0);
+    if (entry == undefined) {
+      return undefined;
+    }
+
+    const tz = this.values.types.store.integer(64, true);
+    const params: string[] = [];
+    const given: LLVMValue[] = [];
+
+    for (const argument of tree.argumentsOf(call.argsList).slice(1)) {
+      const expr = tree.exprOf(argument.exprId);
+      const found = this.wantedValue(frame, expr, tz);
+      if (found == undefined) {
+        return undefined;
+      }
+
+      const value = this.converted(frame, found, tz, expr.loc);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      params.push(kIntType);
+      given.push(value.value);
+    }
+
+    const signature = this.ir.signature(kIntType, params);
+    const value = frame.made.indirectCall(signature, entry, given);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private entryOfFunction(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const named = tree.exprOf(argument.exprId);
+    const module = frame.module;
+    if (named.kind != ExprKind.Name) {
+      this.notLowered(module, call.loc, "entryOf of this expression");
+
+      return undefined;
+    }
+
+    const fn = this.functionNamed(module, named.name);
+    if (fn == undefined) {
+      this.notLowered(module, call.loc, "entryOf of this name");
+
+      return undefined;
+    }
+
+    const declared = this.values.functionOf(module, fn.loc);
+    if (declared.kind != TypeKind.Function) {
+      this.notLowered(module, call.loc, "entryOf of this name");
+
+      return undefined;
+    }
+
+    const shape = this.values.types.store.functionShapeOf(declared);
+    const name = this.instanceName(module, fn, []);
+    const result = this.irType(shape.result);
+    const types = this.shapeTypes(shape);
+    if (result == undefined || types == undefined) {
+      this.notLowered(module, call.loc, "entryOf of this function");
+
+      return undefined;
+    }
+
+    const params = this.values.types.parameterTypes(
+      module,
+      tree.typeParamsOf(fn.typeParamsList),
+    );
+
+    this.instanceWanted({ module, fn, name, params, args: [] });
+
+    const callee = this.ir.declare(name, result, types);
+
+    return this.rawMade(call, callee.fn);
   }
 
   private bufferOfRaw(frame: Frame, call: CallExpr): IrValue | undefined {

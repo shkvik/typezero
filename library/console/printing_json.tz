@@ -1,0 +1,187 @@
+function jsonClass(): uint32 {
+  return 1073741312;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an object starts with its count and its layout",
+})
+function isJsonNode(object: Raw<uint8>): boolean {
+  if (rawBits(object) == 0) {
+    return false;
+  }
+
+  const layout = viewAt<LayoutHead>(layoutOfObject(object), 0);
+
+  return layout.classId == jsonClass();
+}
+
+function isJsonText(object: Raw<uint8>): boolean {
+  return isJsonNode(object) && jsonKind(object) == 3;
+}
+
+function isJsonNumber(object: Raw<uint8>): boolean {
+  return isJsonNode(object) && jsonKind(object) == 2;
+}
+
+function nodeTableFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  node: Raw<uint8>,
+  depth: int,
+): void {
+  const order = jsonOrder(node);
+  if (order.length == 0) {
+    out.add("{}");
+
+    return;
+  }
+  if (depth > depthLimit()) {
+    out.add("[Object]");
+
+    return;
+  }
+
+  const next = depth + 1;
+  const key = keyOf(node);
+  const output: string[] = [];
+  const entry = new TextBuilder();
+
+  context.seen.push(key);
+  context.currentDepth = next;
+
+  for (const position of order) {
+    recordKeyInto(entry, jsonKeyAt(node, position));
+    entry.add(": ");
+    context.indentation += 2;
+    nodeFormatted(context, entry, jsonValueAt(node, position), next);
+    context.indentation -= 2;
+    output.push(entry.taken());
+  }
+
+  context.seen.pop();
+
+  const base = context.baseOf(key);
+
+  singleString(context, out, output, next, plainBraces("{", 125, base));
+}
+
+function nodeFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  node: Raw<uint8>,
+  depth: int,
+): void {
+  const kind = jsonKind(node);
+
+  if (kind < 0) {
+    out.add("undefined");
+  } else if (kind == 0) {
+    out.add("null");
+  } else if (kind == 1) {
+    if (jsonAsBoolean(node)) {
+      out.add("true");
+    } else {
+      out.add("false");
+    }
+  } else if (kind == 2) {
+    const number = jsonAsNumber(node);
+
+    if (isNegativeZero(number)) {
+      out.add("-0");
+    } else {
+      out.addDouble(number);
+    }
+  } else if (kind == 3) {
+    stringFormatted(context, out, jsonAsText(node));
+  } else if (kind == 4) {
+    const array = jsonItems(node);
+    const circular = context.circularOf(keyOf(array));
+
+    if (circular > 0) {
+      out.add(`[Circular *${circular}]`);
+    } else {
+      arrayFormatted(context, out, array, depth);
+    }
+  } else {
+    nodeTableFormatted(context, out, node, depth);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array of an array node holds length addresses of nodes",
+})
+function nodeItemsWritten(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  array: Raw<uint8>,
+): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const count = head.length.toInt();
+
+  writer.entered(keyOf(array));
+  out.addUnit(91);
+  jsonElements(writer, out, head.type, head.data, count);
+  writer.left();
+  writer.closed(out, count, 93);
+}
+
+function nodeWritten(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  node: Raw<uint8>,
+): boolean {
+  const kind = jsonKind(node);
+
+  if (kind < 0) {
+    return false;
+  }
+  if (kind == 0) {
+    out.add("null");
+
+    return true;
+  }
+  if (kind == 1) {
+    if (jsonAsBoolean(node)) {
+      out.add("true");
+    } else {
+      out.add("false");
+    }
+
+    return true;
+  }
+  if (kind == 2) {
+    jsonNumber(out, jsonAsNumber(node));
+
+    return true;
+  }
+  if (kind == 3) {
+    jsonQuoted(out, jsonAsText(node));
+
+    return true;
+  }
+  if (kind == 4) {
+    nodeItemsWritten(writer, out, jsonItems(node));
+
+    return true;
+  }
+
+  let written = 0;
+
+  writer.entered(keyOf(node));
+  out.addUnit(123);
+
+  for (const position of jsonOrder(node)) {
+    writer.separated(out, written);
+    written += 1;
+    jsonQuoted(out, jsonKeyAt(node, position));
+    writer.colon(out);
+    nodeWritten(writer, out, jsonValueAt(node, position));
+  }
+
+  writer.left();
+  writer.closed(out, written, 125);
+
+  return true;
+}

@@ -273,6 +273,7 @@ export const kLibraryModules: LibraryModule[] = [
       "printing_values.tz",
       "printing_objects.tz",
       "printing_bytes.tz",
+      "printing_json.tz",
       "values_equal.tz",
       "values_sort.tz",
       "values_json.tz",
@@ -299,6 +300,25 @@ export const kLibraryModules: LibraryModule[] = [
     file: "dicts.tz",
     parts: ["dicts_find.tz", "dicts_lists.tz"],
     specs: ["tz:dicts"],
+    access: LibraryAccess.Runtime,
+  },
+  {
+    name: "tz:jsons",
+    file: "jsons.tz",
+    parts: ["jsons_values.tz", "jsons_parse.tz", "jsons_read.tz"],
+    specs: ["tz:jsons"],
+    access: LibraryAccess.Runtime,
+  },
+  {
+    name: "tz:runtime",
+    file: "runtime.tz",
+    parts: [
+      "runtime_output.tz",
+      "runtime_stop.tz",
+      "runtime_trace.tz",
+      "runtime_symbols.tz",
+    ],
+    specs: ["tz:runtime"],
     access: LibraryAccess.Runtime,
   },
   {

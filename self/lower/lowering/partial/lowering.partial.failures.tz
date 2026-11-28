@@ -10,10 +10,10 @@ import {
   kIntType,
   kPanicText,
   kPointerType,
+  kRuntimeModule,
   kStringType,
   kTextCompareC,
   kTextModule,
-  kVoidType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
@@ -278,10 +278,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const params = [kPointerType, kIntType];
-    const stopping = this.ir.declare(kPanicText, kVoidType, params);
+    const name = kPanicText;
+    const target: RuntimeTarget = { module: kRuntimeModule, name };
 
-    frame.made.call(stopping, this.textParts(frame, message));
+    this.runtimeFunctionCall(frame, target, [], [message], call.loc);
     frame.made.unreachable();
 
     return this.nothing();

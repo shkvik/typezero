@@ -8,7 +8,6 @@ import {
 import { TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kBytesLayouts,
   kChildrenModule,
   kEncodingNames,
   kIntType,
@@ -75,7 +74,7 @@ partial class Lowering {
     }
 
     const int = this.values.types.store.integer(64, false);
-    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const layouts = this.bytesLayouts();
     const raw: IrValue = { type: kPointerType, value: layouts, tz: int };
     const name = "spawnBytes";
     const target: RuntimeTarget = { module: kChildrenModule, name };

@@ -28,6 +28,7 @@ import {
   kLengthMask,
   kNineCode,
   kNoOwner,
+  kNullName,
   kThisName,
   kTrue,
   kZeroCode,
@@ -193,13 +194,16 @@ partial class Lowering {
     if (this.moves.has(expr.id) && frame.inline == undefined) {
       const moved = this.movedLocal(frame, expr);
       if (moved != undefined) {
-        return moved;
+        return this.jsonMoved(frame, moved, expr);
       }
     }
 
     const target = this.values.valueTargetOf(expr, frame.module);
     if (target != undefined && target.kind == SymbolKind.Function) {
       return this.functionValue(frame, expr);
+    }
+    if (target == undefined && expr.name == kNullName) {
+      return this.jsonNullValue(frame, expr.loc);
     }
 
     const place = this.namePlace(frame, expr);
@@ -217,7 +221,9 @@ partial class Lowering {
     if (seenType == undefined) {
       return loaded;
     }
-    if (seenType == place.type) {
+
+    const isRead = this.isJsonish(loaded.tz) && !this.isJsonish(seen);
+    if (seenType == place.type && !isRead) {
       return this.retyped(loaded, loaded.type, seen);
     }
 
@@ -284,6 +290,8 @@ partial class Lowering {
         return this.minus(frame, expr);
       case UnaryOp.BitNot:
         return this.inverted(frame, expr);
+      case UnaryOp.TypeOf:
+        return this.typeNamed(frame, expr);
       default:
         this.notLowered(frame.module, expr.loc, "this operator");
 
@@ -319,10 +327,10 @@ partial class Lowering {
     }
 
     const answered = this.typeOf(expr);
+    const isNarrow =
+      this.isInteger(operand.tz) || this.isJsonish(operand.tz);
     const isWidened =
-      answered != undefined &&
-      this.isDouble(answered) &&
-      this.isInteger(operand.tz);
+      answered != undefined && this.isDouble(answered) && isNarrow;
     if (isWidened && answered != undefined) {
       const wide = this.converted(frame, operand, answered, expr.loc);
       if (wide != undefined) {

@@ -1,0 +1,22 @@
+function main(): void {
+  console.log("plain");
+  console.log("café déjà");
+  console.log("привет, мир");
+  console.log("smile 😀 end");
+  console.log("lone \uD800 high");
+  console.log("lone \uDC00 low");
+  console.error("to errors");
+  console.error("ошибка", 12, true);
+  console.log("ж".repeat(5000).length);
+  console.log("ж".repeat(5000));
+  console.log("é".repeat(9000));
+  console.log("x".repeat(8191));
+  console.log("y".repeat(8192));
+  console.log("z".repeat(8193));
+  console.error("w".repeat(10000));
+  console.log("😀".repeat(3000));
+  console.log("end");
+  process.exitCode = 3;
+}
+
+main();

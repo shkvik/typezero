@@ -37,6 +37,10 @@ partial class Lowering {
     const tree = this.values.types.program.tree;
 
     const known = this.knownOr(this.typeOf(expr), wanted);
+    if (this.isJsonish(known) || this.isJsonish(wanted)) {
+      return this.jsonObjectLiteral(frame, expr);
+    }
+
     const type = this.literalTarget(frame, expr, known);
     if (type == undefined || type.kind != TypeKind.Object) {
       this.notLowered(frame.module, expr.loc, "this object");

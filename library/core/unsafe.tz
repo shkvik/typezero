@@ -79,3 +79,9 @@ export declare function threadState(): Raw<uint8>;
 export declare function dropped(drop: Raw<uint8>, object: Raw<uint8>): void;
 export declare function wrappedProduct(first: uint64, second: uint64): uint64;
 export declare function bufferOf(raw: Raw<uint8>): Buffer;
+export declare function entryOf<F>(handler: F): Raw<uint8>;
+export declare function jsonOf(raw: Raw<uint8>): Json;
+export declare function invoked(
+  entry: Raw<uint8>,
+  ...values: uint64[]
+): uint64;

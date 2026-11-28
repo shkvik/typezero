@@ -1,0 +1,437 @@
+class Output {
+  public static out: uint64 = 0;
+  public static errors: uint64 = 0;
+  public static isOutConsole: boolean = false;
+  public static isErrorsConsole: boolean = false;
+  public static isOutGone: boolean = false;
+  public static isErrorsGone: boolean = false;
+  public static isToErrors: boolean = false;
+  public static cells: uint64 = 0;
+  public static count: int = 0;
+}
+
+function badHandle(): uint64 {
+  return 18446744073709551615;
+}
+
+function standardOutput(): uint32 {
+  return 4294967285;
+}
+
+function standardErrors(): uint32 {
+  return 4294967284;
+}
+
+function outputRoom(): int {
+  return 8192;
+}
+
+function wideRoom(): int {
+  return 4096;
+}
+
+function writeLimit(): int {
+  return 1073741824;
+}
+
+function utf8Page(): uint32 {
+  return 65001;
+}
+
+function noData(): uint32 {
+  return 232;
+}
+
+function brokenPipe(): uint32 {
+  return 109;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the system writes the mode into one cell of the frame",
+})
+function isConsoleHandle(handle: uint64): boolean {
+  if (handle == 0 || handle == badHandle()) {
+    return false;
+  }
+
+  const mode = frameCells<uint32>(1);
+
+  return GetConsoleMode(bitsRaw(handle), mode) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer of the output lives until the program ends",
+})
+function streamsOpened(): void {
+  const out = GetStdHandle(standardOutput());
+  const errors = GetStdHandle(standardErrors());
+  const cells = allocate<uint8>(outputRoom());
+
+  if (out != undefined) {
+    Output.out = rawBits(out);
+  }
+  if (errors != undefined) {
+    Output.errors = rawBits(errors);
+  }
+
+  Output.isOutConsole = isConsoleHandle(Output.out);
+  Output.isErrorsConsole = isConsoleHandle(Output.errors);
+  Output.cells = rawBits(cells);
+  Output.count = 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller gives count cells",
+})
+function completePrefix(cells: Raw<uint8>, count: int): int {
+  let index = count;
+  let continuation = 0;
+
+  while (continuation < 3 && index > 0) {
+    if ((unitAt(cells, index - 1) & 192) != 128) {
+      break;
+    }
+
+    index -= 1;
+    continuation += 1;
+  }
+
+  if (index == 0) {
+    return count;
+  }
+
+  const lead = unitAt(cells, index - 1);
+  let need = 1;
+
+  if (lead >= 240) {
+    need = 4;
+  } else if (lead >= 224) {
+    need = 3;
+  } else if (lead >= 192) {
+    need = 2;
+  }
+
+  if (continuation + 1 >= need) {
+    return count;
+  }
+
+  return index - 1;
+}
+
+function streamGone(isErrors: boolean): void {
+  if (isErrors) {
+    Output.isErrorsGone = true;
+  } else {
+    Output.isOutGone = true;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the caller gives count cells; the system writes one cell",
+})
+function fileWritten(
+  isErrors: boolean,
+  handle: Raw<uint8>,
+  cells: Raw<uint8>,
+  count: int,
+): void {
+  const written = frameCells<uint32>(1);
+  const none = bitsRaw(0);
+  let at = 0;
+
+  while (at < count) {
+    let chunk = count - at;
+
+    if (chunk > writeLimit()) {
+      chunk = writeLimit();
+    }
+
+    putUnit(written, 0, 0);
+
+    const from = cellsAt<uint8>(cells, at);
+    const size = chunk.toUint32();
+    const isDone = WriteFile(handle, from, size, written, none) != 0;
+    const got = unitAt(written, 0);
+
+    if (!isDone || got == 0) {
+      const failure = GetLastError();
+
+      if (failure == noData() || failure == brokenPipe()) {
+        streamGone(isErrors);
+      }
+
+      return;
+    }
+
+    at += got;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the caller gives count cells; the wide room holds a whole part",
+})
+function consoleWritten(
+  handle: Raw<uint8>,
+  cells: Raw<uint8>,
+  count: int,
+): void {
+  const wide = frameCells<uint16>(4096);
+  const written = frameCells<uint32>(1);
+  const none = bitsRaw(0);
+  const room = wideRoom().toInt32();
+  let at = 0;
+
+  while (at < count) {
+    const from = cellsAt<uint8>(cells, at);
+    let chunk = count - at;
+
+    if (chunk >= wideRoom()) {
+      chunk = completePrefix(from, wideRoom());
+    }
+
+    const size = chunk.toInt32();
+    const page = utf8Page();
+    const units = MultiByteToWideChar(page, 0, from, size, wide, room);
+
+    if (units > 0) {
+      WriteConsoleW(handle, wide, units.toUint32(), written, none);
+    }
+
+    at += chunk;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller gives count cells",
+})
+function streamWritten(
+  isErrors: boolean,
+  cells: Raw<uint8>,
+  count: int,
+): void {
+  let handle = Output.out;
+  let isConsole = Output.isOutConsole;
+
+  if (isErrors) {
+    handle = Output.errors;
+    isConsole = Output.isErrorsConsole;
+  }
+
+  if (handle == 0 || handle == badHandle()) {
+    return;
+  }
+  if (isConsole) {
+    consoleWritten(bitsRaw(handle), cells, count);
+  } else {
+    fileWritten(isErrors, bitsRaw(handle), cells, count);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the buffer holds Output.count bytes",
+})
+function outputFlushed(isAll: boolean): void {
+  if (Output.cells == 0) {
+    return;
+  }
+
+  const cells = bitsRaw(Output.cells);
+  let count = Output.count;
+
+  if (!isAll) {
+    count = completePrefix(cells, count);
+  }
+
+  streamWritten(Output.isToErrors, cells, count);
+
+  const rest = Output.count - count;
+
+  shiftCells(cells, count, 0, rest);
+  Output.count = rest;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the buffer holds at most its room of bytes",
+})
+function outputRescued(): void {
+  let count = Output.count;
+
+  if (count > outputRoom()) {
+    count = outputRoom();
+  }
+  if (count <= 0 || Output.cells == 0) {
+    return;
+  }
+
+  streamWritten(Output.isToErrors, bitsRaw(Output.cells), count);
+
+  if (Output.count == count) {
+    Output.count = 0;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller gives count cells; a part that fits is copied",
+})
+function bytesPrinted(cells: Raw<uint8>, count: int): void {
+  if (count > outputRoom() - Output.count) {
+    outputFlushed(true);
+
+    if (count >= outputRoom()) {
+      streamWritten(Output.isToErrors, cells, count);
+
+      return;
+    }
+  }
+
+  const into = bitsRaw(Output.cells);
+
+  copyCells(cells, 0, into, Output.count, count);
+  Output.count += count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "four bytes of room are kept before a code is written",
+})
+function codePrinted(code: int): void {
+  if (outputRoom() - Output.count < 4) {
+    outputFlushed(true);
+  }
+
+  const cells = bitsRaw(Output.cells);
+  const at = Output.count;
+
+  if (code < 128) {
+    putUnit(cells, at, code);
+    Output.count = at + 1;
+  } else if (code < 2048) {
+    putUnit(cells, at, 192 | (code >> 6));
+    putUnit(cells, at + 1, 128 | (code & 63));
+    Output.count = at + 2;
+  } else if (code < 65536) {
+    putUnit(cells, at, 224 | (code >> 12));
+    putUnit(cells, at + 1, 128 | ((code >> 6) & 63));
+    putUnit(cells, at + 2, 128 | (code & 63));
+    Output.count = at + 3;
+  } else {
+    putUnit(cells, at, 240 | (code >> 18));
+    putUnit(cells, at + 1, 128 | ((code >> 12) & 63));
+    putUnit(cells, at + 2, 128 | ((code >> 6) & 63));
+    putUnit(cells, at + 3, 128 | (code & 63));
+    Output.count = at + 4;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller gives count cells",
+})
+function unitsPrinted<C>(cells: Raw<C>, count: int, isWide: boolean): void {
+  let index = 0;
+
+  while (index < count) {
+    let code = unitAt(cells, index);
+    const isHigh = code >= 55296 && code <= 56319;
+
+    if (isWide && isHigh && index + 1 < count) {
+      const low = unitAt(cells, index + 1);
+
+      if (low >= 56320 && low <= 57343) {
+        code = 65536 + ((code - 55296) << 10) + (low - 56320);
+        index += 1;
+      }
+    }
+
+    if (code >= 55296 && code <= 57343) {
+      code = 65533;
+    }
+
+    codePrinted(code);
+    index += 1;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of a string hold its length in units",
+})
+export function textPrinted(text: Read<string>): void {
+  const count = text.length;
+  if (count == 0) {
+    return;
+  }
+
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    if (isAscii(text)) {
+      bytesPrinted(narrow, count);
+    } else {
+      unitsPrinted<uint8>(narrow, count, false);
+    }
+
+    return;
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    unitsPrinted<uint16>(wide, count, true);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the buffer has room for one more byte after a flush",
+})
+export function charPrinted(code: int32): void {
+  if (Output.count >= outputRoom()) {
+    outputFlushed(true);
+  }
+
+  putUnit(bitsRaw(Output.cells), Output.count, code.toInt());
+  Output.count += 1;
+
+  if (code == 10 && isTargetConsole()) {
+    outputFlushed(false);
+  }
+}
+
+function isTargetConsole(): boolean {
+  if (Output.isToErrors) {
+    return Output.isErrorsConsole;
+  }
+
+  return Output.isOutConsole;
+}
+
+export function errorsBegun(): void {
+  outputFlushed(true);
+  Output.isToErrors = true;
+}
+
+export function errorsEnded(): void {
+  outputFlushed(true);
+  Output.isToErrors = false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of an ASCII string hold its length in bytes",
+})
+function textToErrors(text: Read<string>): void {
+  const cells = textCells<uint8>(text);
+  if (cells == undefined) {
+    return;
+  }
+
+  streamWritten(true, cells, text.length);
+}

@@ -307,3 +307,121 @@ export declare function GetExitCodeProcess(
 export declare function IsDebuggerPresent(): int32;
 
 export declare function DebugBreak(): void;
+
+export declare function AddVectoredExceptionHandler(
+  first: uint32,
+  handler: Raw<uint8>,
+): Raw<uint8> | undefined;
+
+export declare function SetUnhandledExceptionFilter(
+  handler: Raw<uint8>,
+): Raw<uint8> | undefined;
+
+export declare function GetStdHandle(which: uint32): Raw<uint8> | undefined;
+
+export declare function WriteFile(
+  file: Raw<uint8>,
+  buffer: Raw<uint8>,
+  size: uint32,
+  written: Raw<uint32>,
+  overlapped: Raw<uint8>,
+): int32;
+
+export declare function CreateThread(
+  security: Raw<uint8>,
+  stackSize: uint64,
+  entry: Raw<uint8>,
+  argument: Raw<uint8>,
+  flags: uint32,
+  id: Raw<uint8>,
+): Raw<uint8> | undefined;
+
+export declare function WaitForSingleObject(
+  handle: Raw<uint8>,
+  milliseconds: uint32,
+): uint32;
+
+export declare function GetConsoleMode(
+  handle: Raw<uint8>,
+  mode: Raw<uint32>,
+): int32;
+
+export declare function WriteConsoleW(
+  handle: Raw<uint8>,
+  cells: Raw<uint16>,
+  count: uint32,
+  written: Raw<uint32>,
+  reserved: Raw<uint8>,
+): int32;
+
+export declare function MultiByteToWideChar(
+  codePage: uint32,
+  flags: uint32,
+  bytes: Raw<uint8>,
+  count: int32,
+  wide: Raw<uint16>,
+  size: int32,
+): int32;
+
+export declare function WideCharToMultiByte(
+  codePage: uint32,
+  flags: uint32,
+  wide: Raw<uint16>,
+  count: int32,
+  bytes: Raw<uint8>,
+  size: int32,
+  missing: Raw<uint8>,
+  isMissing: Raw<uint8>,
+): int32;
+
+export declare function SetThreadStackGuarantee(size: Raw<uint32>): int32;
+
+export declare function SetConsoleCtrlHandler(
+  handler: Raw<uint8>,
+  isAdded: int32,
+): int32;
+
+export declare function VirtualAlloc(
+  address: Raw<uint8>,
+  size: uint64,
+  kind: uint32,
+  protection: uint32,
+): Raw<uint8> | undefined;
+
+export declare function GetModuleHandleW(name: Raw<uint16>): Raw<uint8>;
+
+export declare function LoadLibraryExW(
+  name: Raw<uint16>,
+  file: Raw<uint8>,
+  flags: uint32,
+): Raw<uint8> | undefined;
+
+export declare function GetProcAddress(
+  module: Raw<uint8>,
+  name: Raw<uint8>,
+): Raw<uint8> | undefined;
+
+export declare function GetLongPathNameW(
+  short: Raw<uint16>,
+  long: Raw<uint16>,
+  size: uint32,
+): uint32;
+
+export declare function RtlCaptureContext(context: Raw<uint8>): void;
+
+export declare function RtlLookupFunctionEntry(
+  address: uint64,
+  base: Raw<uint64>,
+  history: Raw<uint8>,
+): Raw<uint8> | undefined;
+
+export declare function RtlVirtualUnwind(
+  kind: uint32,
+  base: uint64,
+  address: uint64,
+  entry: Raw<uint8>,
+  context: Raw<uint8>,
+  handler: Raw<uint64>,
+  frame: Raw<uint64>,
+  pointers: Raw<uint8>,
+): Raw<uint8> | undefined;

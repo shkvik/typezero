@@ -177,8 +177,6 @@ TZ_HOT void tz_json_release_value(TzJson *j) {
 
 TZ_THREAD_LOCAL TzMaker tz_json_error_maker;
 
-void tz_json_errors(TzMaker make) { tz_json_error_maker = make; }
-
 typedef struct {
   const char *code;
   TzStr message;
@@ -329,22 +327,6 @@ void tz_json_put(TzJson *o, TzStr key, TzJson *value) {
   } else if (o->u.object.count > INDEX_FROM) {
     index_build(o);
   }
-}
-
-void tz_json_object_remove(TzJson *o, TzStr key) {
-  int64_t at = tz_json_object_find(o, key);
-  if (at < 0) {
-    return;
-  }
-  TzJsonEntry removed = o->u.object.entries[at];
-  memmove(o->u.object.entries + at, o->u.object.entries + at + 1,
-          (o->u.object.count - (uint32_t)at - 1) * sizeof(TzJsonEntry));
-  --o->u.object.count;
-  if (o->u.object.index) {
-    index_build(o);
-  }
-  tz_str_release_value(removed.key);
-  tz_json_release(removed.value);
 }
 
 typedef struct {

@@ -1,0 +1,196 @@
+import { ThreadHead } from "tz:core";
+import { wideOf } from "tz:ffi";
+import {
+  Raw,
+  allocate,
+  bitsRaw,
+  cellsAt,
+  copyCells,
+  entryOf,
+  frameCells,
+  invoked,
+  isAscii,
+  putUnit,
+  rawBits,
+  sameCells,
+  shiftCells,
+  textCells,
+  threadState,
+  unitAt,
+  viewAt,
+} from "tz:unsafe";
+import {
+  AddVectoredExceptionHandler,
+  CloseHandle,
+  CreateThread,
+  GetConsoleMode,
+  GetCurrentProcess,
+  GetEnvironmentVariableW,
+  GetLastError,
+  GetLongPathNameW,
+  GetModuleFileNameW,
+  GetModuleHandleW,
+  GetProcAddress,
+  GetStdHandle,
+  LoadLibraryExW,
+  MultiByteToWideChar,
+  RtlCaptureContext,
+  RtlLookupFunctionEntry,
+  RtlVirtualUnwind,
+  SetConsoleCtrlHandler,
+  SetThreadStackGuarantee,
+  SetUnhandledExceptionFilter,
+  TerminateProcess,
+  VirtualAlloc,
+  WaitForSingleObject,
+  WideCharToMultiByte,
+  WriteConsoleW,
+  WriteFile,
+} from "tz:win32/kernel32";
+import { atexit, exit } from "tz:win32/ucrt";
+
+class Program {
+  public static exitCode: int32 = 0;
+  public static immortalObjects: int = 0;
+  public static immortalArrays: int = 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the room has two cells and the call is told so",
+})
+function isCheckingLeaks(): boolean {
+  const name = wideOf("TZ_CHECK_LEAKS");
+  if (name == undefined) {
+    return false;
+  }
+
+  const room = frameCells<uint16>(2);
+
+  return GetEnvironmentVariableW(name, room, 2) != 0;
+}
+
+function onExit(): void {
+  outputFlushed(true);
+}
+
+function onConsole(kind: uint32): int32 {
+  outputRescued();
+
+  return 0;
+}
+
+function stackGuarantee(): int {
+  return 65536;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the handlers are functions that live as long as the program",
+})
+export function started(): void {
+  streamsOpened();
+  AddVectoredExceptionHandler(1, entryOf(onException));
+  SetUnhandledExceptionFilter(entryOf(onUnhandled));
+
+  const guarantee = frameCells<uint32>(1);
+
+  putUnit(guarantee, 0, stackGuarantee());
+  SetThreadStackGuarantee(guarantee);
+  atexit(entryOf(onExit));
+  SetConsoleCtrlHandler(entryOf(onConsole), 1);
+}
+
+export function exitCodeSet(code: int, isSet: boolean): void {
+  if (isSet) {
+    Program.exitCode = code.toInt32();
+  } else {
+    Program.exitCode = 0;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the thread record starts with the counters of live values",
+})
+export function objectForgotten(): void {
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  thread.liveObjects -= 1;
+  Program.immortalObjects += 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the thread record starts with the counters of live values",
+})
+export function arrayForgotten(): void {
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  thread.liveArrays -= 1;
+  Program.immortalArrays += 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the program ends here",
+})
+export function mainDone(): void {
+  if (isCheckingLeaks()) {
+    return;
+  }
+
+  outputFlushed(true);
+  exit(Program.exitCode);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the thread record starts with the counters of live values",
+})
+function leaksReported(): void {
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+  const strings = thread.liveStrings;
+  const arrays = thread.liveArrays;
+  const objects = thread.liveObjects + thread.liveJson;
+  const decimals = thread.liveDecimals;
+  const isClean = strings == 0 && arrays == 0 && objects == 0;
+
+  if (isClean && decimals == 0) {
+    return;
+  }
+
+  const counted = `tz: ${strings} string object(s), ${arrays} array(s)`;
+  const others = `${decimals} long decimal(s) and ${objects} object(s)`;
+  const line = `${counted}, ${others} or closure environment(s) leaked\n`;
+
+  textToErrors(line);
+}
+
+function immortalsReported(): void {
+  const objects = Program.immortalObjects;
+  const arrays = Program.immortalArrays;
+  if (objects == 0 && arrays == 0) {
+    return;
+  }
+
+  const counted = `tz: ${objects} object(s) and ${arrays} array(s)`;
+  const line = `${counted} were made immortal (never freed)\n`;
+
+  textToErrors(line);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the program ends here",
+})
+export function finished(): void {
+  outputFlushed(true);
+
+  if (isCheckingLeaks()) {
+    leaksReported();
+    immortalsReported();
+  }
+
+  exit(Program.exitCode);
+}

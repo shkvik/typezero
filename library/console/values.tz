@@ -14,6 +14,16 @@ import {
   TypeHead,
 } from "tz:core";
 import { printText } from "tz:inspect";
+import {
+  jsonAsBoolean,
+  jsonAsNumber,
+  jsonAsText,
+  jsonItems,
+  jsonKeyAt,
+  jsonKind,
+  jsonOrder,
+  jsonValueAt,
+} from "tz:jsons";
 import { panic } from "tz:intrinsics";
 import {
   TextBuilder,
@@ -89,7 +99,9 @@ function objectFormatted(
   const flags = flagsOf(layout);
   const iterator = iteratorName(flags);
 
-  if ((flags & 512) != 0) {
+  if (isJsonNode(object)) {
+    nodeFormatted(context, out, object, depth);
+  } else if ((flags & 512) != 0) {
     stringFormatted(context, out, cTextOf(object));
   } else if ((flags & 4096) != 0) {
     dictFormatted(context, out, object, depth);
@@ -133,6 +145,11 @@ export function printValue(type: Raw<uint8>, value: Raw<uint8>): void {
   }
   if (kind == 10 && isCText(pointerAt(value, 0))) {
     printText(cTextOf(pointerAt(value, 0)));
+
+    return;
+  }
+  if (kind == 10 && isJsonText(pointerAt(value, 0))) {
+    printText(jsonAsText(pointerAt(value, 0)));
 
     return;
   }

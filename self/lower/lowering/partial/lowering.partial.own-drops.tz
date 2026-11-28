@@ -35,7 +35,7 @@ partial class Lowering {
     if (this.optionalInner(type) != undefined || this.values.isCopy(type)) {
       return false;
     }
-    if (this.hasCopyPart(type)) {
+    if (this.hasCopyPart(type) || this.holdsJson(type)) {
       return false;
     }
 

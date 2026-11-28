@@ -1,0 +1,426 @@
+export function jsonKind(node: Raw<uint8>): int {
+  return kindOf(node);
+}
+
+export function jsonTypeName(node: Raw<uint8>): string {
+  const kind = kindOf(node);
+
+  if (kind < 0) {
+    return "undefined";
+  }
+  if (kind == nullKind()) {
+    return "null";
+  }
+  if (kind == booleanKind()) {
+    return "boolean";
+  }
+  if (kind == numberKind()) {
+    return "double";
+  }
+  if (kind == textKind()) {
+    return "string";
+  }
+  if (kind == arrayKind()) {
+    return "array";
+  }
+
+  return "object";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first word of a number node holds the bits of the number",
+})
+export function jsonAsNumber(node: Raw<uint8>): double {
+  if (kindOf(node) != numberKind()) {
+    return 0.0;
+  }
+
+  return bitsDouble(viewAt<JsonHead>(node, 0).first);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first word of a boolean node is 0 or 1",
+})
+export function jsonAsBoolean(node: Raw<uint8>): boolean {
+  if (kindOf(node) != booleanKind()) {
+    return false;
+  }
+
+  return viewAt<JsonHead>(node, 0).first != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a string node lies after its head",
+})
+export function jsonAsText(node: Raw<uint8>): string {
+  if (kindOf(node) != textKind()) {
+    return "";
+  }
+
+  return peekAt(nodeText(node), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array of an array node gets one more holder",
+})
+export function jsonAsArray(
+  node: Raw<uint8>,
+  layout: Raw<uint8>,
+): Raw<uint8> {
+  if (kindOf(node) != arrayKind()) {
+    const type = viewAt<JsonLayoutHead>(layout, 0).itemType;
+
+    return arrayMade(type, 0, 0);
+  }
+
+  const array = nodeArray(node);
+  const head = viewAt<ArrayHead>(array, 0);
+
+  head.count += 1;
+
+  return array;
+}
+
+export function jsonLentArray(node: Raw<uint8>): Raw<uint8> {
+  if (kindOf(node) != arrayKind()) {
+    panic("internal error: a Json that is not an array is read as one");
+  }
+
+  return nodeArray(node);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both nodes are read by their kind",
+})
+export function jsonEqual(first: Raw<uint8>, second: Raw<uint8>): boolean {
+  const kind = kindOf(first);
+
+  if (kind < 0 || kindOf(second) < 0) {
+    return rawBits(first) == rawBits(second);
+  }
+  if (kind != kindOf(second)) {
+    return false;
+  }
+  if (kind == nullKind()) {
+    return true;
+  }
+  if (kind == booleanKind()) {
+    return jsonAsBoolean(first) == jsonAsBoolean(second);
+  }
+  if (kind == numberKind()) {
+    return jsonAsNumber(first) == jsonAsNumber(second);
+  }
+  if (kind == textKind()) {
+    return peekAt(nodeText(first), 0) == peekAt(nodeText(second), 0);
+  }
+  if (kind == arrayKind()) {
+    return rawBits(nodeArray(first)) == rawBits(nodeArray(second));
+  }
+
+  return rawBits(first) == rawBits(second);
+}
+
+export function jsonEqualsNumber(node: Raw<uint8>, value: double): boolean {
+  return kindOf(node) == numberKind() && jsonAsNumber(node) == value;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a string node lies after its head",
+})
+export function jsonEqualsText(node: Raw<uint8>, text: Read<string>): boolean {
+  return kindOf(node) == textKind() && peekAt(nodeText(node), 0) == text;
+}
+
+export function jsonEqualsBoolean(node: Raw<uint8>, value: boolean): boolean {
+  return kindOf(node) == booleanKind() && jsonAsBoolean(node) == value;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the node is an array or a string and its layout is read",
+})
+function elementOf(node: Raw<uint8>, index: int): Raw<uint8> {
+  const layout = viewAt<JsonHead>(node, 0).layout;
+
+  if (kindOf(node) == arrayKind()) {
+    const array = nodeArray(node);
+    if (index >= arrayLength(array)) {
+      return bitsRaw(0);
+    }
+
+    return retained(itemAt(array, index));
+  }
+
+  const text = jsonAsText(node);
+  if (index >= text.length) {
+    return bitsRaw(0);
+  }
+
+  const unit = String.fromCharCode(text.charCodeAt(index));
+
+  return jsonText(layout, unit);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the node is read by its kind",
+})
+export function jsonGet(node: Raw<uint8>, key: Read<string>): Raw<uint8> {
+  const kind = kindOf(node);
+
+  if (kind == tableKind()) {
+    const at = tableFound(node, key);
+    if (at < 0) {
+      return bitsRaw(0);
+    }
+
+    return retained(valueAt(node, at));
+  }
+  if (kind != arrayKind() && kind != textKind()) {
+    return bitsRaw(0);
+  }
+
+  const index = indexOfKey(key);
+  if (index >= 0) {
+    return elementOf(node, index);
+  }
+  if (key != "length") {
+    return bitsRaw(0);
+  }
+
+  const layout = viewAt<JsonHead>(node, 0).layout;
+
+  if (kind == arrayKind()) {
+    return jsonNumber(layout, arrayLength(nodeArray(node)).toDouble());
+  }
+
+  return jsonNumber(layout, jsonAsText(node).length.toDouble());
+}
+
+function isWholeIndex(index: double): boolean {
+  if (index < 0.0 || index > 4294967294.0) {
+    return false;
+  }
+
+  return index == Math.floor(index);
+}
+
+export function jsonGetIndex(node: Raw<uint8>, index: double): Raw<uint8> {
+  const kind = kindOf(node);
+
+  if (isWholeIndex(index) && (kind == arrayKind() || kind == textKind())) {
+    return elementOf(node, Math.trunc(index).toInt());
+  }
+
+  const key = `${index}`;
+
+  return jsonGet(node, key);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array grows by holes of null before a far item is set",
+})
+function elementSet(node: Raw<uint8>, index: int, value: Raw<uint8>): void {
+  const layout = viewAt<JsonHead>(node, 0).layout;
+  const array = nodeArray(node);
+  let item = value;
+
+  if (rawBits(item) == 0) {
+    item = jsonNull(layout);
+  }
+
+  while (index > arrayLength(array)) {
+    itemPushed(array, jsonNull(layout));
+  }
+
+  if (index == arrayLength(array)) {
+    itemPushed(array, item);
+
+    return;
+  }
+
+  const head = viewAt<ArrayHead>(array, 0);
+  const cells = cellsAt<uint64>(head.data, 0);
+  const old = itemAt(array, index);
+
+  putUnit(cells, index, rawBits(item).toInt());
+  objectReleased(old);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the node becomes the holder of the value or the value is dropped",
+})
+export function jsonSet(
+  node: Raw<uint8>,
+  key: Read<string>,
+  value: Raw<uint8>,
+): void {
+  const kind = kindOf(node);
+
+  if (kind == tableKind()) {
+    if (rawBits(value) != 0) {
+      tablePut(node, key, value);
+    } else {
+      tableRemoved(node, key);
+    }
+
+    return;
+  }
+
+  let index = -1;
+
+  if (kind == arrayKind()) {
+    index = indexOfKey(key);
+  }
+  if (index >= 0) {
+    elementSet(node, index, value);
+
+    return;
+  }
+
+  objectReleased(value);
+}
+
+export function jsonSetIndex(
+  node: Raw<uint8>,
+  index: double,
+  value: Raw<uint8>,
+): void {
+  if (isWholeIndex(index) && kindOf(node) == arrayKind()) {
+    elementSet(node, Math.trunc(index).toInt(), value);
+
+    return;
+  }
+
+  const key = `${index}`;
+
+  jsonSet(node, key, value);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the node is read by its kind",
+})
+function keyCount(node: Raw<uint8>): int {
+  const kind = kindOf(node);
+
+  if (kind == tableKind()) {
+    return viewAt<JsonTableHead>(node, 0).used.toInt();
+  }
+  if (kind == arrayKind()) {
+    return arrayLength(nodeArray(node));
+  }
+  if (kind == textKind()) {
+    return jsonAsText(node).length;
+  }
+
+  return 0;
+}
+
+export function jsonKeys(node: Raw<uint8>): string[] {
+  const keys: string[] = [];
+
+  if (kindOf(node) == tableKind()) {
+    for (const position of tableOrder(node)) {
+      keys.push(keyAt(node, position));
+    }
+
+    return keys;
+  }
+
+  const count = keyCount(node);
+
+  for (let index = 0; index < count; index++) {
+    keys.push(`${index}`);
+  }
+
+  return keys;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new array holds one count of every value it lists",
+})
+export function jsonValues(node: Raw<uint8>, layout: Raw<uint8>): Raw<uint8> {
+  const type = viewAt<JsonLayoutHead>(layout, 0).itemType;
+  const count = keyCount(node);
+  const values = arrayMade(type, 0, count);
+
+  if (kindOf(node) == tableKind()) {
+    for (const position of tableOrder(node)) {
+      itemPushed(values, retained(valueAt(node, position)));
+    }
+
+    return values;
+  }
+
+  for (let index = 0; index < count; index++) {
+    itemPushed(values, elementOf(node, index));
+  }
+
+  return values;
+}
+
+export function jsonPut(
+  node: Raw<uint8>,
+  key: Read<string>,
+  value: Raw<uint8>,
+): void {
+  tablePut(node, key, value);
+}
+
+export function jsonPushed(node: Raw<uint8>, item: Raw<uint8>): void {
+  itemPushed(nodeArray(node), item);
+}
+
+export function jsonOrder(node: Raw<uint8>): int[] {
+  return tableOrder(node);
+}
+
+export function jsonKeyAt(node: Raw<uint8>, position: int): string {
+  return keyAt(node, position);
+}
+
+export function jsonValueAt(node: Raw<uint8>, position: int): Raw<uint8> {
+  return valueAt(node, position);
+}
+
+export function jsonItems(node: Raw<uint8>): Raw<uint8> {
+  return nodeArray(node);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every pair holds one count of the value it lists",
+})
+export function jsonEntries(node: Raw<uint8>): [string, Json][] {
+  const entries: [string, Json][] = [];
+
+  if (kindOf(node) == tableKind()) {
+    for (const position of tableOrder(node)) {
+      const value = jsonOf(retained(valueAt(node, position)));
+
+      entries.push([keyAt(node, position), value]);
+    }
+
+    return entries;
+  }
+
+  const count = keyCount(node);
+
+  for (let index = 0; index < count; index++) {
+    const value = jsonOf(elementOf(node, index));
+
+    entries.push([`${index}`, value]);
+  }
+
+  return entries;
+}

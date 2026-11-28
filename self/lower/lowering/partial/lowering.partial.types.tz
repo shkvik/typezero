@@ -82,6 +82,7 @@ partial class Lowering {
       case TypeKind.Tuple:
       case TypeKind.Dict:
       case TypeKind.Function:
+      case TypeKind.Json:
         return kPointerType;
       case TypeKind.Void:
         return kVoidType;
@@ -154,6 +155,7 @@ partial class Lowering {
     return (
       this.isObjectLike(type) ||
       type.kind == TypeKind.Dict ||
+      type.kind == TypeKind.Json ||
       type.kind == TypeKind.Function
     );
   }

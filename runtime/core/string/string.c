@@ -110,8 +110,6 @@ static inline TzStr inline_piece(const uint8_t *data, uint32_t end, uint32_t fro
   return inline_from_bits(bits, n);
 }
 
-int64_t tz_str_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_strings)); }
-
 static void *object_new(size_t size, uint32_t kind) {
   Header *h = (Header *)tz_alloc(size);
   h->rc = 1;

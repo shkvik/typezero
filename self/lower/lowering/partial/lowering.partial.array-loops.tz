@@ -40,17 +40,24 @@ partial class Lowering {
       return this.mapLoop(frame, statement, mapLoop);
     }
 
-    const itemType = this.loopItemType(
-      frame,
-      tree.exprOf(statement.iterableId),
-    );
+    const isJsonKeys = statement.keys && this.isJsonish(iterated);
+    let itemType = this.loopItemType(frame, tree.exprOf(statement.iterableId));
+
+    if (isJsonKeys) {
+      itemType = this.values.types.store.plain(TypeKind.String);
+    }
+
     const binding = statement.binding;
-    const isPlain = !statement.isAwait && !statement.keys;
+    const isPlain = !statement.isAwait && (!statement.keys || isJsonKeys);
     if (itemType == undefined || !isPlain) {
       return this.notLowered(frame.module, statement.loc, "this loop");
     }
 
-    const iterable = this.loopArrayType(iterated, itemType);
+    let iterable = this.loopArrayType(iterated, itemType);
+
+    if (isJsonKeys) {
+      iterable = this.values.types.store.arrayOf(itemType);
+    }
 
     const cond = frame.made.block("for.of.cond");
     const body = frame.made.block("for.of.body");
@@ -59,10 +66,15 @@ partial class Lowering {
     this.openScope(frame);
 
     const target = this.loopTarget(frame, end, cond);
-    const source = this.loopSourceValue(
+    let source = this.loopSourceValue(
       frame,
       tree.exprOf(statement.iterableId),
     );
+
+    if (isJsonKeys && source != undefined) {
+      source = this.jsonLoopKeys(frame, source, statement.loc);
+    }
+
     const element = this.irType(itemType);
     if (source == undefined || element == undefined) {
       return;

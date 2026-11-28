@@ -1,0 +1,418 @@
+class Trace {
+  public static isBusy: boolean = false;
+  public static block: uint64 = 0;
+  public static count: int = 0;
+  public static isExact: boolean = false;
+  public static base: uint64 = 0;
+  public static end: uint64 = 0;
+  public static shown: int = 0;
+  public static repeats: int = 0;
+  public static lastLength: int = 0;
+  public static process: uint64 = 0;
+  public static fromAddress: uint64 = 0;
+  public static lineFromAddress: uint64 = 0;
+  public static inlineCount: uint64 = 0;
+  public static inlineQuery: uint64 = 0;
+  public static fromInline: uint64 = 0;
+  public static lineFromInline: uint64 = 0;
+}
+
+function maxFrames(): int {
+  return 64;
+}
+
+function maxShown(): int {
+  return 24;
+}
+
+function maxPath(): int {
+  return 260;
+}
+
+function blockSize(): uint64 {
+  return 16384;
+}
+
+function contextAt(): int {
+  return 512;
+}
+
+function contextSize(): int {
+  return 1232;
+}
+
+function contextStack(): int {
+  return 152;
+}
+
+function symbolAt(): int {
+  return 1792;
+}
+
+function lineAt(): int {
+  return 2912;
+}
+
+function lastAt(): int {
+  return 2960;
+}
+
+function textAt(): int {
+  return 4560;
+}
+
+function textRoomSize(): int {
+  return 1600;
+}
+
+function functionAt(): int {
+  return 6160;
+}
+
+function fileAt(): int {
+  return 6672;
+}
+
+function exeAt(): int {
+  return 7696;
+}
+
+function folderAt(): int {
+  return 8224;
+}
+
+function nameAt(): int {
+  return 8768;
+}
+
+function pdbNameAt(): int {
+  return 9552;
+}
+
+function scratchAt(): int {
+  return 10336;
+}
+
+function namesAt(): int {
+  return 10464;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the offset is inside the block of the trace",
+})
+function traceCells<T>(offset: int): Raw<T> {
+  return cellsAt<T>(bitsRaw(Trace.block), offset);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text room holds 1600 bytes and the last one stays free",
+})
+function lineBytes(at: int, cells: Raw<uint8>, count: int): int {
+  const room = textRoomSize() - 1 - at;
+  let fitting = count;
+
+  if (fitting > room) {
+    fitting = room;
+  }
+  if (fitting <= 0) {
+    return at;
+  }
+
+  copyCells(cells, 0, traceCells<uint8>(textAt()), at, fitting);
+
+  return at + fitting;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of an ASCII string hold its length in bytes",
+})
+function lineText(at: int, text: Read<string>): int {
+  const cells = textCells<uint8>(text);
+  if (cells == undefined) {
+    return at;
+  }
+
+  return lineBytes(at, cells, text.length);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a number of 64 bits has at most 20 digits",
+})
+function lineNumber(at: int, value: uint64, base: uint64): int {
+  const digits = frameCells<uint8>(24);
+  let rest = value;
+  let start = 24;
+
+  while (true) {
+    const digit = (rest % base).toInt();
+
+    start -= 1;
+
+    if (digit < 10) {
+      putUnit(digits, start, 48 + digit);
+    } else {
+      putUnit(digits, start, 87 + digit);
+    }
+
+    rest = rest / base;
+
+    if (rest == 0) {
+      break;
+    }
+  }
+
+  return lineBytes(at, cellsAt<uint8>(digits, start), 24 - start);
+}
+
+function linePut(length: int): void {
+  streamWritten(true, traceCells<uint8>(textAt()), length);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the room holds size bytes and the call is told so",
+})
+function utf8Of(wide: Raw<uint16>, room: Raw<uint8>, size: int): int {
+  const none = bitsRaw(0);
+  const page = utf8Page();
+  const limit = size.toInt32();
+  const count = WideCharToMultiByte(page, 0, wide, -1, room, limit, none, none);
+
+  if (count <= 0) {
+    putUnit(room, 0, 0);
+
+    return 0;
+  }
+
+  return count.toInt() - 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells end with a zero unit",
+})
+function wideLength(cells: Raw<uint16>): int {
+  let count = 0;
+
+  while (unitAt(cells, count) != 0) {
+    count += 1;
+  }
+
+  return count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller gives count cells",
+})
+function lastUnit(cells: Raw<uint16>, count: int, unit: int): int {
+  for (let index = count - 1; index >= 0; index--) {
+    if (unitAt(cells, index) == unit) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the context and the cells of the frame belong to this walk",
+})
+function framesWalked(context: Raw<uint8>): int {
+  const frames = traceCells<uint64>(0);
+  const instruction = cellsAt<uint64>(context, contextInstruction());
+  const stack = cellsAt<uint64>(context, contextStack());
+  const base = traceCells<uint64>(scratchAt());
+  const handler = traceCells<uint64>(scratchAt() + 8);
+  const frame = traceCells<uint64>(scratchAt() + 16);
+  const none = bitsRaw(0);
+  let count = 0;
+
+  while (count < maxFrames() && unitAt(instruction, 0) != 0) {
+    const address = unitAt(instruction, 0).toUint64();
+
+    putUnit(frames, count, unitAt(instruction, 0));
+    count += 1;
+    putUnit(base, 0, 0);
+
+    const entry = RtlLookupFunctionEntry(address, base, none);
+
+    if (entry == undefined) {
+      const top = unitAt(stack, 0);
+      const cell = cellsAt<uint64>(bitsRaw(top.toUint64()), 0);
+
+      putUnit(instruction, 0, unitAt(cell, 0));
+      putUnit(stack, 0, top + 8);
+
+      continue;
+    }
+
+    const image = unitAt(base, 0).toUint64();
+
+    putUnit(handler, 0, 0);
+    putUnit(frame, 0, 0);
+    RtlVirtualUnwind(0, image, address, entry, context, handler, frame, none);
+  }
+
+  return count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the headers of the image give its size",
+})
+function imageBounds(): void {
+  const image = GetModuleHandleW(cellsAt<uint16>(bitsRaw(0), 0));
+  const start = rawBits(image);
+  const shift = unitAt(cellsAt<int32>(image, 60), 0);
+  const size = unitAt(cellsAt<uint32>(image, shift + 80), 0);
+
+  Trace.base = start;
+  Trace.end = start + size.toUint64();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the frames hold Trace.count addresses",
+})
+function isOwnFrame(index: int): boolean {
+  const address = unitAt(traceCells<uint64>(0), index).toUint64();
+
+  return address > Trace.base && address < Trace.end;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the rooms of the block hold a path of 260 units each",
+})
+function pdbHinted(length: int, nameStart: int, nameLength: int): void {
+  const exe = traceCells<uint16>(exeAt());
+  const pdb = traceCells<uint16>(folderAt());
+  const none = cellsAt<uint16>(bitsRaw(0), 0);
+
+  copyCells(exe, 0, pdb, 0, length + 1);
+
+  const dot = lastUnit(pdb, length, 46);
+  if (dot <= nameStart) {
+    return;
+  }
+
+  putUnit(pdb, dot + 1, 112);
+  putUnit(pdb, dot + 2, 100);
+  putUnit(pdb, dot + 3, 98);
+  putUnit(pdb, dot + 4, 0);
+
+  if (GetLongPathNameW(pdb, none, 0) != 0) {
+    return;
+  }
+
+  const pdbName = traceCells<uint8>(pdbNameAt());
+  const name = traceCells<uint8>(nameAt());
+  const from = traceCells<uint16>(folderAt() + nameStart * 2);
+  const pdbLength = utf8Of(from, pdbName, maxPath() * 3);
+  let at = lineText(0, "    (no ");
+
+  at = lineBytes(at, pdbName, pdbLength);
+  at = lineText(at, " next to ");
+  at = lineBytes(at, name, nameLength);
+  at = lineText(at, ": only addresses)\n");
+  linePut(at);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the rooms of the block hold a path of 260 units each",
+})
+function addressesPrinted(): void {
+  const exe = traceCells<uint16>(exeAt());
+  const name = traceCells<uint8>(nameAt());
+  const none = bitsRaw(0);
+  const size = maxPath().toUint32();
+  let length = GetModuleFileNameW(none, exe, size).toInt();
+  let nameStart = 0;
+
+  if (length > 0 && length < maxPath()) {
+    nameStart = lastUnit(exe, length, 92) + 1;
+  } else {
+    putUnit(exe, 0, 0);
+    length = 0;
+  }
+
+  const file = traceCells<uint16>(exeAt() + nameStart * 2);
+  const nameLength = utf8Of(file, name, maxPath() * 3);
+
+  if (length > 0) {
+    pdbHinted(length, nameStart, nameLength);
+  }
+
+  let shown = 0;
+
+  for (let index = 0; index < Trace.count && shown < maxShown(); index++) {
+    if (!isOwnFrame(index)) {
+      continue;
+    }
+
+    const address = unitAt(traceCells<uint64>(0), index).toUint64();
+    let at = lineText(0, "    at ");
+
+    at = lineBytes(at, name, nameLength);
+    at = lineText(at, "+0x");
+    at = lineNumber(at, address - Trace.base, 16);
+    at = lineText(at, "\n");
+    linePut(at);
+    shown += 1;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the block of the trace lives until the program ends",
+})
+function tracePrinted(context: Raw<uint8>): void {
+  if (Trace.isBusy) {
+    return;
+  }
+
+  Trace.isBusy = true;
+
+  const none = bitsRaw(0);
+  const block = VirtualAlloc(none, blockSize(), 12288, 4);
+  if (block == undefined) {
+    return;
+  }
+
+  Trace.block = rawBits(block);
+
+  const copy = traceCells<uint8>(contextAt());
+
+  if (rawBits(context) != 0) {
+    copyCells(context, 0, copy, 0, contextSize());
+    Trace.isExact = true;
+  } else {
+    RtlCaptureContext(copy);
+    Trace.isExact = false;
+  }
+
+  imageBounds();
+  Trace.count = framesWalked(copy);
+  Trace.shown = 0;
+  Trace.repeats = 0;
+  Trace.lastLength = 0;
+
+  const entry = entryOf(symbolsShown);
+  const thread = CreateThread(none, 1048576, entry, block, 0, none);
+
+  if (thread != undefined) {
+    WaitForSingleObject(thread, 4294967295);
+    CloseHandle(thread);
+  }
+
+  if (Trace.shown == 0) {
+    addressesPrinted();
+  }
+}

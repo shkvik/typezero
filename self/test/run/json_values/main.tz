@@ -1,0 +1,197 @@
+function parse(text: string): Json {
+  return JSON.parse(text).unwrapOr(null);
+}
+
+function shown(text: string): void {
+  const parsed = JSON.parse(text);
+
+  console.log(parsed);
+}
+
+function parsing(): void {
+  shown('{"name": "Ann", "phone": null, "age": 30, "tags": ["a", "b"], "address": {"city": "Riga"}}');
+  shown("[1, 2.5, -0, true, false, null, \"x\"]");
+  shown('{"b": 1, "2": 2, "a": 3, "1": 4, "01": 5}');
+  shown('{\n  "a": 1\n  "b": 2\n}');
+  shown("");
+  shown("[1, 2");
+  shown('"tab\tq\\" \u00e9"');
+}
+
+function reads(): void {
+  const text =
+    '{"name": "Ann", "phone": null, "age": 30, "tags": ["a", "b"], "address": {"city": "Riga"}}';
+  const user = parse(text);
+
+  console.log(user);
+  console.log(user.name, user.phone, user.email, user.age);
+  console.log(user.tags[0], user.tags[5], user.address.city);
+  console.log(user["address"]["city"]);
+  console.log(user.tags.length, user.name.length, user.age.length);
+}
+
+function describe(x: Json | undefined): string {
+  if (x == undefined) {
+    return "nothing";
+  }
+  if (typeof x == "string") {
+    return `the string ${x.toUpperCase()}`;
+  }
+  if (typeof x == "double") {
+    return `the number ${-x}`;
+  }
+  if (typeof x == "boolean") {
+    return `the boolean ${!x}`;
+  }
+  if (Array.isArray(x)) {
+    return `an array of ${x.length}`;
+  }
+  if (x == null) {
+    return "null";
+  }
+
+  return `an object with ${Object.keys(x).length} keys`;
+}
+
+function checks(): void {
+  const text =
+    '{"name": "Ann", "phone": null, "age": 30, "tags": ["a", "b"], "address": {"city": "Riga"}}';
+  const user = parse(text);
+
+  console.log(user?.address?.city, user.nothing?.city, user.phone?.number);
+  console.log(user.phone == null, user.phone == undefined);
+  console.log(user.email == null, user.age != null);
+  console.log(user.phone ?? "no phone", user.email ?? "no email", user.age ?? 0);
+  console.log(typeof user, typeof user.name, typeof user.age);
+  console.log(typeof user.phone, typeof user.email, typeof user.tags);
+  console.log(user.age == 30, user.age == 31, user.name == "Ann");
+  console.log(user.name == 30, user.tags == user.tags);
+
+  for (const key of ["name", "phone", "age", "tags", "address", "email"]) {
+    console.log(key, describe(user[key]));
+  }
+
+  console.log(describe(parse("false")), describe(parse("{}")));
+}
+
+function writes(): void {
+  const user = parse('{"name": "Ann", "tags": ["a", "b"], "age": 30}');
+  const tags = user.tags;
+
+  if (Array.isArray(tags)) {
+    for (const tag of tags) {
+      console.log(tag);
+    }
+  }
+
+  const keys = parse('{"b": 1, "2": 2, "a": 3, "1": 4, "01": 5}');
+
+  console.log(keys);
+  console.log(Object.keys(keys), Object.values(keys));
+  console.log(Object.keys(parse('["x", "y"]')), Object.keys(parse("5")));
+  console.log(parse('{"a": 1, "b": 2, "a": 3}'));
+
+  const settings = parse("{}");
+
+  settings.port = 8080;
+  settings["host name"] = "localhost";
+  settings.list = [1, "two", null];
+  settings.port = 8081;
+  console.log(settings);
+
+  const numbers = parse("[1, 2]");
+
+  numbers[2] = 3;
+  numbers[0] = "one";
+
+  if (Array.isArray(numbers)) {
+    numbers.push(true);
+  }
+
+  console.log(numbers);
+
+  const patch: Json = {
+    phone: null,
+    name: "Bob",
+    age: 31,
+    tags: ["x", 1, false, null],
+    nested: {},
+  };
+
+  console.log(patch);
+
+  const values: Json[] = [1, "a"];
+
+  values.push(null);
+
+  const array: Json = values;
+
+  console.log(array);
+  console.log(JSON.stringify(user));
+  console.log(JSON.stringify(patch, null, 2));
+}
+
+function loops(): void {
+  const keys = parse('{"b": 1, "2": 2, "a": 3}');
+
+  console.log(Object.entries(parse('{"x": [1]}')));
+
+  for (const key in keys) {
+    console.log(key, keys[key]);
+  }
+
+  const items = parse('[{"kind": "a"}, {"kind": "b"}, {"kind": null}, {}]');
+
+  if (Array.isArray(items)) {
+    for (const item of items) {
+      switch (item.kind) {
+        case "a":
+          console.log("kind a");
+          break;
+        case null:
+          console.log("kind null");
+          break;
+        case undefined:
+          console.log("no kind");
+          break;
+        default:
+          console.log("another kind:", item.kind);
+      }
+    }
+  }
+
+  const user = parse('{"name": "Ann", "tags": ["a", "b"], "address": {"city": "Riga"}}');
+  const { name: who, address: { city }, nothing } = user;
+  const [first, second, third] = user.tags;
+
+  console.log(who, city, nothing, first, second, third);
+
+  const tags = user.tags;
+
+  if (Array.isArray(tags)) {
+    console.log(tags.map((t) => typeof t == "string" ? t.repeat(2) : "?").join("+"));
+  }
+
+}
+
+function holes(): void {
+  const j = JSON.parse('{"users": [{"name": "Ann"}], "owner": null, "list": [1]}').unwrapOr(null);
+
+  j.owner.name = "Bob";
+  console.log(1);
+  j.users[0].name.first = "A";
+  console.log(2);
+  j.list[3] = 4;
+  console.log(3);
+  j.list[1] = undefined;
+  console.log(4);
+  console.log(j.owner, j.users);
+  console.log(JSON.stringify(j.list));
+}
+
+parsing();
+reads();
+checks();
+writes();
+loops();
+holes();

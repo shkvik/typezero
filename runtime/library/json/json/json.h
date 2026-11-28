@@ -73,7 +73,6 @@ TzJson *tz_json_retained(TzJson *j);
 void tz_json_publish(TzJson *root);
 #endif
 
-void tz_json_errors(TzMaker make);
 void tz_json_fail(const char *code, TzBuf *message);
 
 typedef struct {
@@ -99,6 +98,5 @@ int64_t tz_json_object_find(const TzJson *o, TzStr key);
 
 void tz_json_put(TzJson *o, TzStr key, TzJson *value);
 
-void tz_json_object_remove(TzJson *o, TzStr key);
 
 #endif

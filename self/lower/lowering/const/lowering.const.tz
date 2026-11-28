@@ -1,17 +1,13 @@
 export const kMainName = "main";
-export const kRuntimeInit = "tz_rt_init";
-export const kRuntimeMainDone = "tz_rt_main_done";
-export const kRuntimeShutdown = "tz_rt_shutdown";
-export const kPrintInt = "tz_print_i64";
-export const kPrintUnsigned = "tz_print_u64";
-export const kPrintDouble = "tz_print_f64";
-export const kPrintBoolean = "tz_print_bool";
-export const kPrintChar = "tz_print_char";
-export const kPrintString = "tz_print_string";
-export const kErrorBegin = "tz_err_begin";
-export const kErrorEnd = "tz_err_end";
-export const kPanic = "tz_panic";
-export const kPanicText = "tz_panic_str";
+export const kRuntimeStarted = "started";
+export const kRuntimeMainDone = "mainDone";
+export const kRuntimeFinished = "finished";
+export const kPrintChar = "charPrinted";
+export const kPrintString = "textPrinted";
+export const kErrorBegin = "errorsBegun";
+export const kErrorEnd = "errorsEnded";
+export const kPanic = "panicked";
+export const kPanicText = "panickedText";
 export const kPanicName = "panic";
 export const kIntrinsicsModule = "tz:intrinsics";
 export const kConsoleName = "console";
@@ -142,7 +138,6 @@ export const kIntegerNames = [
   "toUint32",
   "toUint64",
 ];
-export const kPanicIntegerFit = "tz_panic_int_does_not_fit";
 export const kDecimalName = "decimal";
 export const kEmptyType = "{ }";
 export const kResultKind = 12;
@@ -245,7 +240,7 @@ export const kFsVerbs = new Map<string, string>([
 ]);
 export const kProcessName = "process";
 export const kPlatformName = "win32";
-export const kProcessSetExitCode = "tz_process_set_exit_code";
+export const kExitCodeSet = "exitCodeSet";
 export const kArraySplice = "tz_arr_splice";
 export const kArrayUnshift = "tz_arr_unshift_slots";
 export const kDivisionPlaces = 20;
@@ -335,6 +330,8 @@ export const kRuntimeModules = [
   "tz:buffers",
   "tz:counts",
   "tz:dicts",
+  "tz:runtime",
+  "tz:jsons",
 ];
 export const kSystemModulePrefix = "tz:win32/";
 export const kFilesModule = "tz:files";
@@ -348,13 +345,19 @@ export const kValuesModule = "tz:values";
 export const kBuffersModule = "tz:buffers";
 export const kCountsModule = "tz:counts";
 export const kDictsModule = "tz:dicts";
+export const kRuntimeModule = "tz:runtime";
+export const kJsonsModule = "tz:jsons";
+export const kJsonClassId = 1073741312;
+export const kJsonLayout = `{ ${kLayoutHead}, ptr, ptr }`;
+export const kJsonTypeName = "Json";
+export const kNullName = "null";
 export const kWideName = "wstring";
 export const kWideCells = "cells";
 export const kImmortalName = "tz.immortal";
 export const kImmortalCount = "1152921504606846976";
 export const kImmortalFloor = "576460752303423488";
-export const kObjectForget = "tz_obj_forget";
-export const kArrayForget = "tz_arr_forget";
+export const kObjectForget = "objectForgotten";
+export const kArrayForget = "arrayForgotten";
 export const kMemoryAllocate = "tz_alloc";
 export const kMemoryResize = "tz_realloc";
 export const kMemoryFree = "tz_free";
@@ -373,7 +376,28 @@ export const kObjectMade = "objectMade";
 export const kObjectFreed = "objectFreed";
 export const kCStringMade = "cstringMade";
 export const kCStringCopied = "cstringCopied";
-export const kBytesLayouts = "tz_bytes_layouts";
+export const kBytesLayoutFlag = 524288;
+export const kBytesLayoutShift = 16777216;
+export const kBytesClassBase = 1073741568;
+export const kBytesDropped = "bytesDropped";
+export const kPlainBytesDropped = "plainBytesDropped";
+export const kBytesLayoutNames = [
+  "Uint8Array",
+  "Int8Array",
+  "Uint8ClampedArray",
+  "Int16Array",
+  "Uint16Array",
+  "Int32Array",
+  "Uint32Array",
+  "Float16Array",
+  "Float32Array",
+  "Float64Array",
+  "Buffer",
+  "ArrayBuffer",
+  "DataView",
+  "TextEncoder",
+  "TextDecoder",
+];
 export const kTextShortCount = "8";
 export const kTextAsciiBit = "1000000000000000";
 export const kTextShortAscii = "5000000000000000";

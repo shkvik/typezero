@@ -69,6 +69,9 @@ import "./partial/lowering.partial.tables.tz";
 import "./partial/lowering.partial.number-bits.tz";
 import "./partial/lowering.partial.raw-bits.tz";
 import "./partial/lowering.partial.json.tz";
+import "./partial/lowering.partial.json-values.tz";
+import "./partial/lowering.partial.json-calls.tz";
+import "./partial/lowering.partial.json-writes.tz";
 import "./partial/lowering.partial.cells.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
@@ -87,10 +90,12 @@ import {
   kMainFrame,
   kFlagType,
   kMainName,
-  kRuntimeInit,
+  kRuntimeFinished,
   kRuntimeMainDone,
+  kRuntimeModule,
   kRuntimeModules,
-  kRuntimeShutdown,
+  kRuntimeStarted,
+  kVoidType,
 } from "./const/lowering.const.tz";
 import {
   ClassLayout,
@@ -128,6 +133,8 @@ export class Lowering {
   private readonly handles: Map<int, boolean>;
   private readonly cstrings: Map<string, LLVMValue>;
   private cstringLayoutGlobal: LLVMValue | undefined;
+  private bytesLayoutsGlobal: LLVMValue | undefined;
+  private jsonLayoutGlobal: LLVMValue | undefined;
   private readonly makers: Map<int, LLVMValue>;
   private readonly orderedDescriptors: Map<string, LLVMValue>;
   private readonly orderMakers: Map<string, LLVMValue>;
@@ -191,6 +198,8 @@ export class Lowering {
     this.handles = new Map<int, boolean>();
     this.cstrings = new Map<string, LLVMValue>();
     this.cstringLayoutGlobal = undefined;
+    this.bytesLayoutsGlobal = undefined;
+    this.jsonLayoutGlobal = undefined;
     this.makers = new Map<int, LLVMValue>();
     this.orderedDescriptors = new Map<string, LLVMValue>();
     this.orderMakers = new Map<string, LLVMValue>();
@@ -261,8 +270,6 @@ export class Lowering {
       this.isRuntimeModule(module),
     );
 
-    this.runtimeCall(main, kRuntimeInit, []);
-
     for (const module of runtime) {
       this.moduleGlobals(module);
     }
@@ -271,6 +278,10 @@ export class Lowering {
     }
     for (const module of runtime) {
       this.runtimeGlobalsMade(main, module);
+
+      if (this.values.types.program.modules[module]?.name == kRuntimeModule) {
+        this.ownRuntimeCall(main, kRuntimeStarted);
+      }
     }
 
     for (const module of modules) {
@@ -295,12 +306,24 @@ export class Lowering {
       this.instancesLowered();
     }
 
-    this.runtimeCall(main, kRuntimeMainDone, []);
+    this.ownRuntimeCall(main, kRuntimeMainDone);
     this.globalsReleased(main);
-    this.runtimeCall(main, kRuntimeShutdown, []);
+    this.ownRuntimeCall(main, kRuntimeFinished);
+    this.instancesLowered();
+
+    while (this.closuresLowered()) {
+      this.instancesLowered();
+    }
+
     main.finishValue(this.ir.integer(kFlagType, "0"));
 
     return { unlowered: replace(this.unlowered, []) };
+  }
+
+  private ownRuntimeCall(made: IrFunction, name: string): void {
+    const callee = this.runtimeHelperName(kRuntimeModule, name, name);
+
+    made.call(this.ir.declare(callee, kVoidType, []), []);
   }
 
   private globalsReleased(main: Own<IrFunction>): void {

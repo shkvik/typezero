@@ -230,7 +230,7 @@ function decimalReleased(place: Raw<uint8>): void {
   uses: [UnsafeUse.Memory],
   reason: "an array starts with its count",
 })
-function arrayReleased(array: Raw<uint8>): void {
+export function arrayReleased(array: Raw<uint8>): void {
   if (rawZero(array)) {
     return;
   }
@@ -248,7 +248,7 @@ function arrayReleased(array: Raw<uint8>): void {
   uses: [UnsafeUse.Memory],
   reason: "an object starts with its count and its layout, the drop first",
 })
-function objectReleased(object: Raw<uint8>): void {
+export function objectReleased(object: Raw<uint8>): void {
   if (rawZero(object)) {
     return;
   }

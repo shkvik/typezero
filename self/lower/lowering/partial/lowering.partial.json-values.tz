@@ -1,0 +1,322 @@
+import {
+  CallExpr,
+  IndexExpr,
+  MemberExpr,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kDoubleType,
+  kFlagType,
+  kJsonClassId,
+  kJsonLayout,
+  kJsonTypeName,
+  kJsonsModule,
+  kLayoutHead,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private holdsJson(type: Type): boolean {
+    if (type.kind == TypeKind.Json) {
+      return true;
+    }
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    const parts = this.values.types.store.partsOf(type);
+
+    return parts.some((part) => part.kind == TypeKind.Json);
+  }
+
+  private jsonLayout(): LLVMValue {
+    const known = this.jsonLayoutGlobal;
+    if (known != undefined) {
+      return known;
+    }
+
+    const json = this.values.types.store.plain(TypeKind.Json);
+    const string = this.values.types.store.plain(TypeKind.String);
+    const none = this.ir.zero(kPointerType);
+    const dropName = this.runtimeHelperName(kJsonsModule, "jsonDropped", "");
+    const dropping = this.ir.declare(dropName, kVoidType, [kPointerType]);
+    const head = this.ir.constStruct([
+      dropping.fn,
+      none,
+      this.ir.integer(kFlagType, "0"),
+      this.ir.integer(kFlagType, "0"),
+      this.cText(kJsonTypeName),
+      this.ir.integer(kFlagType, `${kJsonTypeName.length}`),
+      this.ir.integer(kFlagType, `${kJsonClassId}`),
+    ]);
+    const value = this.ir.constStruct([
+      head,
+      this.descriptor(json) ?? none,
+      this.descriptor(string) ?? none,
+    ]);
+    const name = this.ir.uniqueName("tz.layout.json.");
+    const global = this.ir.global(name, kJsonLayout, value, true);
+
+    this.jsonLayoutGlobal = global;
+
+    return global;
+  }
+
+  private jsonLayoutValue(): IrValue {
+    const tz = this.values.types.store.integer(64, false);
+
+    return { type: kPointerType, value: this.jsonLayout(), tz };
+  }
+
+  private jsonCall(
+    frame: Read<Frame>,
+    name: string,
+    given: Read<IrValue[]>,
+    loc: int,
+  ): IrValue | undefined {
+    const target: RuntimeTarget = { module: kJsonsModule, name };
+
+    return this.runtimeFunctionCall(frame, target, [], given, loc);
+  }
+
+  private jsonParsed(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const first = tree.argumentsOf(call.argsList)[0];
+    if (first == undefined) {
+      this.notLowered(frame.module, call.loc, "this call of JSON.parse");
+
+      return undefined;
+    }
+
+    const text = this.value(frame, tree.exprOf(first.exprId));
+    if (text == undefined) {
+      return undefined;
+    }
+
+    const given = [text, this.jsonLayoutValue()];
+    const parsed = this.jsonCall(frame, "jsonParsed", given, call.loc);
+
+    this.dropping(frame, text);
+
+    return parsed;
+  }
+
+  private isJsonish(type: Type | undefined): boolean {
+    if (type == undefined) {
+      return false;
+    }
+    if (type.kind == TypeKind.Json) {
+      return true;
+    }
+
+    const inner = this.optionalInner(type);
+
+    return inner != undefined && inner.kind == TypeKind.Json;
+  }
+
+  private jsonRaw(value: Read<IrValue>): IrValue {
+    const tz = this.values.types.store.integer(64, false);
+
+    return { type: kPointerType, value: value.value, tz };
+  }
+
+  private jsonOwned(found: IrValue | undefined, tz: Type): IrValue | undefined {
+    if (found == undefined) {
+      return undefined;
+    }
+
+    return { type: kPointerType, value: found.value, tz, owned: true };
+  }
+
+  private optionalJson(): Type {
+    const json = this.values.types.store.plain(TypeKind.Json);
+
+    return this.values.types.optional(json);
+  }
+
+  private jsonNullValue(frame: Read<Frame>, loc: int): IrValue | undefined {
+    const json = this.values.types.store.plain(TypeKind.Json);
+    const layout = this.jsonLayoutValue();
+    const made = this.jsonCall(frame, "jsonNull", [layout], loc);
+
+    return this.jsonOwned(made, json);
+  }
+
+  private jsonSeen(
+    frame: Frame,
+    found: IrValue | undefined,
+    seen: Type | undefined,
+    loc: int,
+  ): IrValue | undefined {
+    const whole = this.jsonOwned(found, this.optionalJson());
+    if (whole == undefined || seen == undefined) {
+      return whole;
+    }
+    if (seen.kind == TypeKind.Error || this.isJsonish(seen)) {
+      return this.jsonOwned(found, this.optionalJson());
+    }
+
+    return this.converted(frame, whole, seen, loc);
+  }
+
+  private jsonMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const object = this.value(frame, tree.exprOf(expr.objectId));
+    if (object == undefined) {
+      return undefined;
+    }
+
+    const given = [this.jsonRaw(object), this.stringValue(expr.name)];
+    const found = this.jsonCall(frame, "jsonGet", given, expr.loc);
+
+    this.dropping(frame, object);
+
+    return this.jsonSeen(frame, found, this.typeOf(expr), expr.loc);
+  }
+
+  private jsonIndexed(frame: Frame, expr: IndexExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const object = this.value(frame, tree.exprOf(expr.objectId));
+    const index = this.value(frame, tree.exprOf(expr.indexId));
+    if (object == undefined || index == undefined) {
+      return undefined;
+    }
+
+    let found: IrValue | undefined = undefined;
+
+    if (this.isString(index.tz)) {
+      const given = [this.jsonRaw(object), index];
+
+      found = this.jsonCall(frame, "jsonGet", given, expr.loc);
+    } else {
+      const number = this.jsonDouble(frame, index);
+      const given = [this.jsonRaw(object), number];
+
+      found = this.jsonCall(frame, "jsonGetIndex", given, expr.loc);
+    }
+
+    this.dropping(frame, index);
+    this.dropping(frame, object);
+
+    return this.jsonSeen(frame, found, this.typeOf(expr), expr.loc);
+  }
+
+  private jsonDouble(frame: Read<Frame>, value: IrValue): IrValue {
+    const tz = this.values.types.store.plain(TypeKind.Double);
+    if (!this.isInteger(value.tz)) {
+      return { type: kDoubleType, value: value.value, tz };
+    }
+
+    const opcode = this.integerToDouble(value.tz);
+    const made = frame.made.cast(opcode, value.value, kDoubleType);
+
+    return { type: kDoubleType, value: made, tz };
+  }
+
+  private jsonConverted(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const isFromJson = this.isJsonish(value.tz);
+    if (isFromJson && this.isJsonish(target)) {
+      return this.retyped(value, kPointerType, target);
+    }
+    if (isFromJson) {
+      return this.jsonNarrowed(frame, value, target, loc);
+    }
+
+    return this.jsonWrapped(frame, value, target, loc);
+  }
+
+  private jsonNarrowed(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const node = this.jsonRaw(value);
+    let made: IrValue | undefined = undefined;
+
+    if (this.isString(target)) {
+      made = this.jsonCall(frame, "jsonAsText", [node], loc);
+    } else if (this.isDouble(target)) {
+      made = this.jsonCall(frame, "jsonAsNumber", [node], loc);
+    } else if (target.kind == TypeKind.Boolean) {
+      made = this.jsonCall(frame, "jsonAsBoolean", [node], loc);
+    } else if (this.isArray(target) && value.owned != true) {
+      const array = this.jsonCall(frame, "jsonLentArray", [node], loc);
+
+      if (array != undefined) {
+        made = { type: kPointerType, value: array.value, tz: target };
+      }
+    } else if (this.isArray(target)) {
+      const given = [node, this.jsonLayoutValue()];
+      const array = this.jsonCall(frame, "jsonAsArray", given, loc);
+
+      made = this.jsonOwned(array, target);
+    } else {
+      const kind = this.kindName(target);
+
+      this.notLowered(frame.module, loc, `a Json read as ${kind}`);
+    }
+
+    this.dropping(frame, value);
+
+    return made;
+  }
+
+  private jsonWrapped(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const layout = this.jsonLayoutValue();
+    const source = value.tz;
+    let made: IrValue | undefined = undefined;
+
+    if (source.kind == TypeKind.Boolean) {
+      made = this.jsonCall(frame, "jsonBoolean", [layout, value], loc);
+    } else if (this.isInteger(source) || this.isDouble(source)) {
+      const number = this.jsonDouble(frame, value);
+
+      made = this.jsonCall(frame, "jsonNumber", [layout, number], loc);
+    } else if (this.isString(source)) {
+      made = this.jsonCall(frame, "jsonText", [layout, value], loc);
+      this.dropping(frame, value);
+    } else if (this.isArray(source)) {
+      const array = this.jsonRaw(this.owning(frame, value));
+
+      made = this.jsonCall(frame, "jsonOfArray", [layout, array], loc);
+    } else {
+      const kind = this.kindName(source);
+
+      this.notLowered(frame.module, loc, `a value of type ${kind} as Json`);
+    }
+
+    return this.jsonOwned(made, target);
+  }
+
+  private jsonMoved(frame: Frame, moved: IrValue, expr: NameExpr): IrValue {
+    const seen = this.typeOf(expr);
+    if (seen == undefined || !this.isJsonish(moved.tz)) {
+      return moved;
+    }
+    if (seen.kind == TypeKind.Error || this.isJsonish(seen)) {
+      return moved;
+    }
+
+    return this.converted(frame, moved, seen, expr.loc) ?? moved;
+  }
+}

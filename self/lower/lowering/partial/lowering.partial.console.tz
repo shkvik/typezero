@@ -20,6 +20,8 @@ import {
   kPrintChar,
   kPrintNestedName,
   kPrintString,
+  kRuntimeModule,
+  kStringType,
   kValuesModule,
   kQuoteCode,
   kSpaceCode,
@@ -92,7 +94,7 @@ partial class Lowering {
     }
 
     if (isError) {
-      this.runtimeCall(frame.made, kErrorBegin, []);
+      this.ownRuntimeCall(frame.made, kErrorBegin);
     }
 
     for (let index = 0; index < values.length; index++) {
@@ -114,7 +116,7 @@ partial class Lowering {
     }
 
     if (isError) {
-      this.runtimeCall(frame.made, kErrorEnd, []);
+      this.ownRuntimeCall(frame.made, kErrorEnd);
     }
 
     const tz = this.values.types.store.plain(TypeKind.Void);
@@ -136,9 +138,7 @@ partial class Lowering {
       return this.mapPrinted(frame, value);
     }
     if (this.isString(value.tz)) {
-      const parts = this.stringParts(frame, value);
-
-      return this.runtimeCall(frame.made, kPrintString, parts);
+      return this.textPrinted(frame, value);
     }
     if (this.isDouble(value.tz)) {
       return this.numberPrinted(frame, "printDouble", value);
@@ -251,11 +251,22 @@ partial class Lowering {
     this.runtimeFunctionCall(frame, target, [], args, 0);
   }
 
+  private textPrinted(frame: Read<Frame>, value: IrValue): void {
+    const tz = this.values.types.store.plain(TypeKind.String);
+    const text: IrValue = { type: kStringType, value: value.value, tz };
+    const name = kPrintString;
+    const target: RuntimeTarget = { module: kRuntimeModule, name };
+
+    this.runtimeFunctionCall(frame, target, [], [text], 0);
+  }
+
   private printCode(frame: Read<Frame>, code: int): void {
     const tz = this.values.types.store.integer(32, false);
     const made = this.ir.integer(kCharType, `${code}`);
     const value: IrValue = { type: kCharType, value: made, tz };
+    const name = kPrintChar;
+    const target: RuntimeTarget = { module: kRuntimeModule, name };
 
-    this.runtimeCall(frame.made, kPrintChar, [value]);
+    this.runtimeFunctionCall(frame, target, [], [value], 0);
   }
 }

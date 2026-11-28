@@ -83,6 +83,9 @@ partial class Lowering {
     const isPlain = tree.elementsOf(expr.elementsList).every(
       (element) => !element.spread && !element.hole,
     );
+    if (this.isJsonish(type)) {
+      return this.jsonArrayLiteral(frame, expr);
+    }
     if (type != undefined && type.kind == TypeKind.Tuple && isPlain) {
       return this.tupleLiteral(frame, expr, type);
     }
@@ -355,6 +358,9 @@ partial class Lowering {
       this.notLowered(frame.module, expr.loc, "this index");
 
       return undefined;
+    }
+    if (this.isJsonish(object)) {
+      return this.jsonIndexed(frame, expr);
     }
     if (this.isString(object)) {
       return this.textIndexed(frame, expr, result);

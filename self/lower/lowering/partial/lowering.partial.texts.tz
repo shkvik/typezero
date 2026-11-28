@@ -310,6 +310,10 @@ partial class Lowering {
 
     const objectExpr = tree.exprOf(expr.objectId);
     const object = this.typeIn(frame, objectExpr);
+    if (this.isJsonish(object)) {
+      return this.jsonMember(frame, expr);
+    }
+
     const isArray = object != undefined && this.isArray(object);
     if (isArray && expr.name == "length") {
       return this.arrayMember(frame, expr);

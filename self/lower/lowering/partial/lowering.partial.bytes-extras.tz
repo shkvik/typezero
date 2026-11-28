@@ -14,7 +14,6 @@ import {
   kBufferFromText,
   kBooleanType,
   kBuffersModule,
-  kBytesLayouts,
   kByteType,
   kFlagType,
   kIntType,
@@ -74,7 +73,7 @@ partial class Lowering {
       return frame.made.call(callee, call.args);
     }
 
-    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const layouts = this.bytesLayouts();
     const params = call.params.concat([kPointerType]);
     const args = call.args.concat([layouts]);
     const callee = this.ir.declare(name, kPointerType, params);
@@ -100,7 +99,7 @@ partial class Lowering {
       return frame.made.call(callee, args);
     }
 
-    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const layouts = this.bytesLayouts();
     const params = [kStringType, kFlagType, kPointerType];
     const callee = this.ir.declare(name, kPointerType, params);
 

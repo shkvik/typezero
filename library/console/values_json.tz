@@ -472,6 +472,9 @@ function jsonObject(
   const flags = flagsOf(layout);
   const kind = (flags >> 24).toInt();
 
+  if (isJsonNode(object)) {
+    return nodeWritten(writer, out, object);
+  }
   if ((flags & 2097152) != 0) {
     return false;
   }

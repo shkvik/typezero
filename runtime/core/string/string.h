@@ -33,7 +33,6 @@ static inline const TzType *tz_resolve(const TzType *type, const void **value) {
   return type;
 }
 
-int64_t tz_str_live_objects(void);
 void tz_str_retain_value(TzStr s);
 void tz_str_release_value(TzStr s);
 TzStr tz_str_from_utf16(const uint16_t *units, size_t length);

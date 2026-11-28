@@ -1,0 +1,174 @@
+function stackOverflow(): int {
+  return 3221225725;
+}
+
+function accessViolation(): int {
+  return 3221225477;
+}
+
+function illegalInstruction(): int {
+  return 3221225501;
+}
+
+function integerDivision(): int {
+  return 3221225620;
+}
+
+function arrayBounds(): int {
+  return 3221225612;
+}
+
+function breakpoint(): int {
+  return 2147483651;
+}
+
+function contextInstruction(): int {
+  return 248;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the caller gives length bytes of the message",
+})
+export function panicked(message: Raw<uint8>, length: int): void {
+  outputFlushed(true);
+  textToErrors("panic: ");
+  streamWritten(true, message, length);
+  textToErrors("\n");
+  tracePrinted(bitsRaw(0));
+  exit(2);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room holds 512 bytes and at most 511 are written",
+})
+export function panickedText(text: Read<string>): void {
+  const room = frameCells<uint8>(512);
+  const count = text.length;
+  let length = 0;
+
+  for (let index = 0; index < count && length < 511; index++) {
+    const unit = text.charCodeAt(index);
+
+    if (unit < 128) {
+      putUnit(room, length, unit);
+    } else {
+      putUnit(room, length, 63);
+    }
+
+    length += 1;
+  }
+
+  panicked(room, length);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the system gives the address of a record and a context",
+})
+function exceptionCode(info: Raw<uint8>): int {
+  const record = unitAt(cellsAt<uint64>(info, 0), 0);
+
+  return unitAt(cellsAt<uint32>(bitsRaw(record.toUint64()), 0), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the system gives the address of a record and a context",
+})
+function exceptionContext(info: Raw<uint8>): Raw<uint8> {
+  const context = unitAt(cellsAt<uint64>(info, 8), 0);
+
+  return bitsRaw(context.toUint64());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the system calls the function with the record of a failure",
+})
+function onException(info: Raw<uint8>): int32 {
+  if (exceptionCode(info) != stackOverflow()) {
+    return 0;
+  }
+
+  outputFlushed(true);
+  textToErrors("panic: stack overflow\n");
+  tracePrinted(exceptionContext(info));
+  TerminateProcess(GetCurrentProcess(), 2);
+
+  return 0;
+}
+
+function failureName(code: int): string {
+  if (code == accessViolation()) {
+    return "access violation";
+  }
+  if (code == illegalInstruction()) {
+    return "illegal instruction";
+  }
+  if (code == integerDivision()) {
+    return "integer division by zero";
+  }
+  if (code == arrayBounds()) {
+    return "array bounds exceeded";
+  }
+
+  return "";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room holds the text and eight digits",
+})
+function unknownFailure(code: int): void {
+  const room = frameCells<uint8>(16);
+
+  for (let index = 0; index < 8; index++) {
+    const digit = (code >> ((7 - index) * 4)) & 15;
+
+    if (digit < 10) {
+      putUnit(room, index, 48 + digit);
+    } else {
+      putUnit(room, index, 87 + digit);
+    }
+  }
+
+  textToErrors("panic: internal error: exception 0x");
+  streamWritten(true, room, 8);
+  textToErrors("\n");
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the system calls the function with the record of a failure",
+})
+function onUnhandled(info: Raw<uint8>): int32 {
+  const code = exceptionCode(info);
+  const context = exceptionContext(info);
+
+  if (code == breakpoint()) {
+    const place = cellsAt<uint64>(context, contextInstruction());
+
+    putUnit(place, 0, unitAt(place, 0) + 1);
+
+    return -1;
+  }
+
+  const name = failureName(code);
+
+  outputRescued();
+
+  if (name.length > 0) {
+    textToErrors("panic: internal error: ");
+    textToErrors(name);
+    textToErrors("\n");
+  } else {
+    unknownFailure(code);
+  }
+
+  tracePrinted(context);
+  TerminateProcess(GetCurrentProcess(), 2);
+
+  return 0;
+}

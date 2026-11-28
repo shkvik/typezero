@@ -19,7 +19,6 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
-import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
@@ -31,7 +30,6 @@ import {
   kPointerType,
   kRuntimeModules,
   kSystemModulePrefix,
-  kVoidType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
@@ -424,6 +422,9 @@ partial class Lowering {
       }
 
       const calleeObject = tree.exprOf(callee.objectId);
+      if (this.isJsonHelper(frame, call, callee)) {
+        return this.jsonHelperCall(frame, call, callee);
+      }
       if (this.isBufferName(calleeObject)) {
         return this.bufferStatic(frame, call, callee);
       }
@@ -495,18 +496,6 @@ partial class Lowering {
     const kind = this.kindName(object);
 
     return `${kind}.${callee.name}`;
-  }
-
-  private runtimeCall(
-    made: IrFunction,
-    name: string,
-    args: Read<IrValue[]>,
-  ): void {
-    const params = args.map((arg) => arg.type);
-    const given = args.map((arg) => arg.value);
-    const callee = this.ir.declare(name, kVoidType, params);
-
-    made.call(callee, given);
   }
 
   private runtimeValue(

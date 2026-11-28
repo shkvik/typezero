@@ -24,6 +24,8 @@ export const kTypedLibraries = [
   "tz:buffers",
   "tz:counts",
   "tz:dicts",
+  "tz:runtime",
+  "tz:jsons",
   "tz:win32/ucrt",
 ];
 
@@ -45,4 +47,6 @@ export const kCheckedLibraries = [
   "tz:buffers",
   "tz:counts",
   "tz:dicts",
+  "tz:runtime",
+  "tz:jsons",
 ];

@@ -1,0 +1,182 @@
+import {
+  ArrayLitExpr,
+  AssignExpr,
+  Expr,
+  ExprKind,
+  ObjectLitExpr,
+  PropertyKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import { kIntType } from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isJsonTarget(frame: Frame, target: Expr): boolean {
+    const tree = this.values.types.program.tree;
+
+    if (target.kind != ExprKind.Index && target.kind != ExprKind.Member) {
+      return false;
+    }
+
+    return this.isJsonish(this.typeIn(frame, tree.exprOf(target.objectId)));
+  }
+
+  private jsonValueOf(frame: Frame, expr: Expr): IrValue | undefined {
+    if (expr.kind == ExprKind.ObjectLit) {
+      return this.jsonObjectLiteral(frame, expr);
+    }
+    if (expr.kind == ExprKind.ArrayLit) {
+      return this.jsonArrayLiteral(frame, expr);
+    }
+
+    const json = this.values.types.store.plain(TypeKind.Json);
+    const given = this.value(frame, expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    let wanted = json;
+
+    if (this.optionalInner(given.tz) != undefined) {
+      wanted = this.optionalJson();
+    }
+    if (given.tz.kind == TypeKind.Undefined) {
+      wanted = this.optionalJson();
+    }
+
+    const made = this.converted(frame, given, wanted, expr.loc);
+    if (made == undefined) {
+      return undefined;
+    }
+
+    return this.owning(frame, made);
+  }
+
+  private jsonObjectLiteral(
+    frame: Frame,
+    expr: ObjectLitExpr,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const json = this.values.types.store.plain(TypeKind.Json);
+    const layout = this.jsonLayoutValue();
+    const made = this.jsonCall(frame, "jsonObject", [layout], expr.loc);
+    if (made == undefined) {
+      return undefined;
+    }
+
+    for (const property of tree.propertiesOf(expr.propsList)) {
+      const key = this.propertyKey(frame, property);
+      if (property.form.kind == PropertyKind.Spread || key == undefined) {
+        this.notLowered(frame.module, property.loc, "this property of a Json");
+
+        return undefined;
+      }
+
+      const value = this.jsonValueOf(frame, tree.exprOf(property.valueId));
+      if (value == undefined) {
+        return undefined;
+      }
+
+      const given = [made, this.stringValue(key), this.jsonRaw(value)];
+
+      this.jsonCall(frame, "jsonSet", given, property.loc);
+    }
+
+    return this.jsonOwned(made, json);
+  }
+
+  private jsonArrayLiteral(
+    frame: Frame,
+    expr: ArrayLitExpr,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const json = this.values.types.store.plain(TypeKind.Json);
+    const int = this.values.types.store.integer(64, false);
+    const elements = tree.elementsOf(expr.elementsList);
+    const count = this.ir.integer(kIntType, `${elements.length}`);
+    const capacity: IrValue = { type: kIntType, value: count, tz: int };
+    const given = [this.jsonLayoutValue(), capacity];
+    const made = this.jsonCall(frame, "jsonArray", given, expr.loc);
+    if (made == undefined) {
+      return undefined;
+    }
+
+    for (const element of elements) {
+      if (element.spread || element.hole) {
+        this.notLowered(frame.module, expr.loc, "this element of a Json");
+
+        return undefined;
+      }
+
+      const value = this.jsonValueOf(frame, tree.exprOf(element.exprId));
+      if (value == undefined) {
+        return undefined;
+      }
+
+      const item = [made, this.jsonRaw(value)];
+
+      this.jsonCall(frame, "jsonPushed", item, expr.loc);
+    }
+
+    return this.jsonOwned(made, json);
+  }
+
+  private jsonAssigned(frame: Frame, expr: AssignExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const target = tree.exprOf(expr.targetId);
+    if (expr.op != undefined) {
+      this.notLowered(frame.module, expr.loc, "this assignment to a Json");
+
+      return undefined;
+    }
+    if (target.kind != ExprKind.Index && target.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const object = this.value(frame, tree.exprOf(target.objectId));
+    if (object == undefined) {
+      return undefined;
+    }
+
+    let key = this.stringValue("");
+    let isNumbered = false;
+
+    if (target.kind == ExprKind.Member) {
+      key = this.stringValue(target.name);
+    } else {
+      const index = this.value(frame, tree.exprOf(target.indexId));
+      if (index == undefined) {
+        return undefined;
+      }
+
+      isNumbered = !this.isString(index.tz);
+      key = index;
+
+      if (isNumbered) {
+        key = this.jsonDouble(frame, index);
+      }
+    }
+
+    const value = this.jsonValueOf(frame, tree.exprOf(expr.valueId));
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const given = [this.jsonRaw(object), key, this.jsonRaw(value)];
+
+    if (isNumbered) {
+      this.jsonCall(frame, "jsonSetIndex", given, expr.loc);
+    } else {
+      this.jsonCall(frame, "jsonSet", given, expr.loc);
+      this.dropping(frame, key);
+    }
+
+    this.dropping(frame, object);
+
+    return this.nothing();
+  }
+}

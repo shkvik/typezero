@@ -62,7 +62,12 @@ partial class Lowering {
     this.dropping(frame, value);
     this.dropping(frame, gap);
 
-    return text;
+    const answered = this.typeOf(call);
+    if (answered == undefined || answered.kind != TypeKind.Result) {
+      return text;
+    }
+
+    return this.madeResult(frame, answered, true, text, call.loc);
   }
 
   private jsonSpace(frame: Frame, call: CallExpr): IrValue[] | undefined {

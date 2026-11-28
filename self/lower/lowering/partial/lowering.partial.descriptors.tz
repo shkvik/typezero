@@ -103,6 +103,7 @@ partial class Lowering {
       case TypeKind.Object:
       case TypeKind.Tuple:
       case TypeKind.Dict:
+      case TypeKind.Json:
         return { kind: 10, size: 8 };
       case TypeKind.Union:
         return this.unionShape(type);

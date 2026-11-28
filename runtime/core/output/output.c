@@ -150,8 +150,6 @@ void tz_err_end(void) {
   tz_out_target = &tz_out_stream;
 }
 
-static void out_flush_all(void) { tz_out_flush(1); }
-
 void tz_out_idle(void) {
   if (tz_out_len != 0) {
     tz_out_flush(!tz_out_target->isConsole);
@@ -192,121 +190,11 @@ void tz_out_write(const char *data, size_t len) {
 
 void tz_err_raw(const char *data, size_t len) { stream_write(&tz_err_stream, data, len); }
 
-#ifdef _WIN32
-static LONG WINAPI on_exception(EXCEPTION_POINTERS *info) {
-  if (info->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
-    return EXCEPTION_CONTINUE_SEARCH;
-  }
-  static const char message[] = "panic: stack overflow\n";
-  tz_out_flush(1);
-  stream_write(&tz_err_stream, message, sizeof message - 1);
-  tz_stack_print(info->ContextRecord);
-  TerminateProcess(GetCurrentProcess(), 2);
-
-  return EXCEPTION_CONTINUE_SEARCH;
-}
-
-static LONG WINAPI on_unhandled(EXCEPTION_POINTERS *info) {
-  DWORD code = info->ExceptionRecord->ExceptionCode;
-#if defined(_M_X64) || defined(__x86_64__)
-  if (code == EXCEPTION_BREAKPOINT) {
-    info->ContextRecord->Rip += 1;
-    return EXCEPTION_CONTINUE_EXECUTION;
-  }
-#endif
-  const char *what = code == EXCEPTION_ACCESS_VIOLATION        ? "access violation"
-                     : code == EXCEPTION_ILLEGAL_INSTRUCTION   ? "illegal instruction"
-                     : code == EXCEPTION_INT_DIVIDE_BY_ZERO    ? "integer division by zero"
-                     : code == EXCEPTION_ARRAY_BOUNDS_EXCEEDED ? "array bounds exceeded"
-                                                               : NULL;
-  char line[96];
-  int n = what ? snprintf(line, sizeof line, "panic: internal error: %s\n", what)
-               : snprintf(line, sizeof line, "panic: internal error: exception 0x%08lx\n",
-                          (unsigned long)code);
-  tz_out_rescue();
-  stream_write(&tz_err_stream, line, (size_t)n);
-  tz_stack_print(info->ContextRecord);
-  TerminateProcess(GetCurrentProcess(), 2);
-
-  return EXCEPTION_CONTINUE_SEARCH;
-}
-#endif
-
-extern int32_t tz_group_listing;
-
 void tz_thread_stack_init(void) {
 #ifdef _WIN32
   ULONG guarantee = 64 * 1024;
   SetThreadStackGuarantee(&guarantee);
 #endif
-}
-
-void tz_rt_init(void) {
-  tz_group_listing = getenv("TZ_CHECK_LEAKS") != NULL;
-#ifdef _WIN32
-  stream_init(&tz_out_stream, STD_OUTPUT_HANDLE);
-  stream_init(&tz_err_stream, STD_ERROR_HANDLE);
-  AddVectoredExceptionHandler(1, on_exception);
-  SetUnhandledExceptionFilter(on_unhandled);
-#else
-  stream_init(&tz_out_stream, 1);
-  stream_init(&tz_err_stream, 2);
-#endif
-  tz_thread_register();
-  tz_thread_stack_init();
-  tz_parallel_init();
-  atexit(out_flush_all);
-  tz_signal_init();
-  tz_clock_init();
-}
-
-void tz_rt_main_done(void) {
-  if (!getenv("TZ_CHECK_LEAKS")) {
-    tz_out_flush(1);
-    exit(tz_process_exit_status());
-  }
-}
-
-void tz_rt_shutdown(void) {
-  tz_process_shutdown();
-  tz_signal_shutdown();
-  tz_meta_shutdown();
-  tz_fs_shutdown();
-  tz_intl_shutdown();
-  tz_out_flush(1);
-  tz_group_shutdown();
-  int64_t strings = tz_str_live_objects(), arrays = tz_arr_live_objects();
-  int64_t objects = tz_obj_live_objects() + tz_json_live_objects();
-  int64_t decimals = tz_dec_live_objects();
-  if ((strings != 0 || arrays != 0 || objects != 0 || decimals != 0) && getenv("TZ_CHECK_LEAKS")) {
-    char message[224];
-    int len =
-        snprintf(message, sizeof message,
-                 "tz: %lld string object(s), %lld array(s), %lld long decimal(s) and %lld "
-                 "object(s) or closure environment(s) leaked\n",
-                 (long long)strings, (long long)arrays, (long long)decimals, (long long)objects);
-    tz_out_flush(1);
-    stream_write(&tz_err_stream, message, (size_t)len);
-  }
-  int64_t immortal_objects = tz_obj_immortal_objects();
-  int64_t immortal_arrays = tz_arr_immortal_arrays();
-  if ((immortal_objects != 0 || immortal_arrays != 0) && getenv("TZ_CHECK_LEAKS")) {
-    char message[160];
-    int len = snprintf(message, sizeof message,
-                       "tz: %lld object(s) and %lld array(s) were made immortal (never freed)\n",
-                       (long long)immortal_objects, (long long)immortal_arrays);
-    tz_out_flush(1);
-    stream_write(&tz_err_stream, message, (size_t)len);
-  }
-  exit(tz_process_exit_status());
-}
-
-void tz_print_char(int32_t c) {
-  char ch = (char)c;
-  tz_out_write(&ch, 1);
-  if (c == '\n' && tz_out_target->isConsole) {
-    tz_out_flush(0);
-  }
 }
 
 int32_t tz_stdout_write(void *obj, uint64_t meta) {
@@ -341,37 +229,6 @@ int32_t tz_stderr_write(void *obj, uint64_t meta) {
 int32_t tz_is_tty(int64_t fd) { return (fd == 2 ? &tz_err_stream : &tz_out_stream)->isConsole; }
 
 int32_t tz_std_gone(int32_t fd) { return (fd == 2 ? &tz_err_stream : &tz_out_stream)->gone; }
-
-static void print_u64(uint64_t value, int negative) {
-  char buf[24];
-  char *p = buf + sizeof buf;
-  do {
-    *--p = (char)('0' + value % 10);
-    value /= 10;
-  } while (value != 0);
-  if (negative) {
-    *--p = '-';
-  }
-  tz_out_write(p, (size_t)(buf + sizeof buf - p));
-}
-
-void tz_print_i64(int64_t value) {
-  if (value < 0) {
-    print_u64(0 - (uint64_t)value, 1);
-  } else {
-    print_u64((uint64_t)value, 0);
-  }
-}
-
-void tz_print_u64(uint64_t value) { print_u64(value, 0); }
-
-void tz_print_bool(int32_t value) {
-  if (value) {
-    tz_out_write("true", 4);
-  } else {
-    tz_out_write("false", 5);
-  }
-}
 
 size_t tz_format_f64(double value, char *out) {
   char *p = out;
@@ -439,15 +296,6 @@ size_t tz_format_f64(double value, char *out) {
   return (size_t)(p - out);
 }
 
-void tz_print_f64(double value) {
-  char buf[64];
-  if (value == 0 && signbit(value)) {
-    tz_out_write("-0", 2);
-    return;
-  }
-  tz_out_write(buf, tz_format_f64(value, buf));
-}
-
 TZ_NOINLINE int32_t tz_to_int32_slow(double x) {
   if (!isfinite(x)) {
     return 0;
@@ -477,37 +325,29 @@ TZ_COLD TZ_NORETURN void tz_panic_does_not_fit(double x, const char *type) {
   tz_panicf("%s does not fit in %s", text, type);
 }
 
-TZ_COLD TZ_NORETURN void tz_panic_int_does_not_fit(int64_t x, int32_t is_unsigned,
-                                                   const char *type) {
-  if (is_unsigned) {
-    tz_panicf("%llu does not fit in %s", (unsigned long long)x, type);
+static void err_stream_ready(void) {
+#ifdef _WIN32
+  if (tz_err_stream.handle == NULL) {
+    stream_init(&tz_err_stream, STD_ERROR_HANDLE);
   }
-  tz_panicf("%lld does not fit in %s", (long long)x, type);
+#else
+  if (tz_err_stream.fd == 0) {
+    stream_init(&tz_err_stream, 2);
+  }
+#endif
 }
 
 TZ_NORETURN void tz_panic(const char *message, int64_t len) {
   if (len < 0) {
     len = (int64_t)strlen(message);
   }
+  err_stream_ready();
   tz_out_flush(1);
   stream_write(&tz_err_stream, "panic: ", 7);
   stream_write(&tz_err_stream, message, (size_t)len);
   stream_write(&tz_err_stream, "\n", 1);
   tz_stack_print(NULL);
   exit(2);
-}
-
-TZ_NORETURN void tz_panic_str(void *obj, uint64_t meta) {
-  TzBuf units;
-  tz_buf_init(&units);
-  tz_buf_str(&units, (TzStr){obj, meta});
-  char text[512];
-  size_t n = 0;
-  for (size_t i = 0; i < units.length && n + 1 < sizeof text; ++i) {
-    text[n++] = units.data[i] < 0x80 ? (char)units.data[i] : '?';
-  }
-  tz_buf_free(&units);
-  tz_panic(text, (int64_t)n);
 }
 
 TZ_NORETURN void tz_panicf(const char *format, ...) {

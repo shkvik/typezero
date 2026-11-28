@@ -1,0 +1,218 @@
+import {
+  BinaryExpr,
+  BinaryOp,
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+  UnaryExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kIntType,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private jsonCompared(
+    frame: Frame,
+    expr: BinaryExpr,
+    left: IrValue,
+    right: IrValue,
+  ): LLVMValue | undefined {
+    let node = left;
+    let other = right;
+
+    if (!this.isJsonish(left.tz)) {
+      node = right;
+      other = left;
+    }
+
+    const raw = this.jsonRaw(node);
+    let found: IrValue | undefined = undefined;
+
+    if (this.isJsonish(other.tz)) {
+      const given = [raw, this.jsonRaw(other)];
+
+      found = this.jsonCall(frame, "jsonEqual", given, expr.loc);
+    } else if (this.isInteger(other.tz) || this.isDouble(other.tz)) {
+      const given = [raw, this.jsonDouble(frame, other)];
+
+      found = this.jsonCall(frame, "jsonEqualsNumber", given, expr.loc);
+    } else if (this.isString(other.tz)) {
+      found = this.jsonCall(frame, "jsonEqualsText", [raw, other], expr.loc);
+    } else if (other.tz.kind == TypeKind.Boolean) {
+      const name = "jsonEqualsBoolean";
+
+      found = this.jsonCall(frame, name, [raw, other], expr.loc);
+    }
+
+    if (found == undefined) {
+      const kind = this.kindName(other.tz);
+
+      this.notLowered(frame.module, expr.loc, `a Json compared with ${kind}`);
+
+      return undefined;
+    }
+    if (expr.op == BinaryOp.Eq) {
+      return found.value;
+    }
+
+    const yes = this.ir.integer(kBooleanType, "1");
+
+    return frame.made.integerCompare(IrIntPredicate.NotEqual, found.value, yes);
+  }
+
+  private typeNamed(frame: Frame, expr: UnaryExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const operand = this.value(frame, tree.exprOf(expr.operandId));
+    if (operand == undefined) {
+      return undefined;
+    }
+    if (this.isJsonish(operand.tz)) {
+      const given = [this.jsonRaw(operand)];
+      const name = this.jsonCall(frame, "jsonTypeName", given, expr.loc);
+
+      this.dropping(frame, operand);
+
+      return name;
+    }
+
+    this.dropping(frame, operand);
+
+    if (this.isString(operand.tz)) {
+      return this.stringValue("string");
+    }
+    if (this.isDouble(operand.tz)) {
+      return this.stringValue("double");
+    }
+    if (operand.tz.kind == TypeKind.Boolean) {
+      return this.stringValue("boolean");
+    }
+
+    const kind = this.kindName(operand.tz);
+
+    this.notLowered(frame.module, expr.loc, `typeof of a ${kind}`);
+
+    return undefined;
+  }
+
+  private isJsonHelper(
+    frame: Frame,
+    call: CallExpr,
+    callee: MemberExpr,
+  ): boolean {
+    const tree = this.values.types.program.tree;
+
+    const holder = tree.exprOf(callee.objectId);
+    const first = tree.argumentsOf(call.argsList)[0];
+    if (holder.kind != ExprKind.Name || first == undefined) {
+      return false;
+    }
+
+    const key = `${holder.name}.${callee.name}`;
+    const isKnown =
+      key == "Array.isArray" || key == "Object.keys" || key == "Object.values";
+    if (!isKnown && key != "Object.entries") {
+      return false;
+    }
+
+    return this.isJsonish(this.typeIn(frame, tree.exprOf(first.exprId)));
+  }
+
+  private jsonHelperCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: MemberExpr,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const first = tree.argumentsOf(call.argsList)[0];
+    if (first == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, tree.exprOf(first.exprId));
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const raw = this.jsonRaw(given);
+    let made: IrValue | undefined = undefined;
+
+    if (callee.name == "isArray") {
+      made = this.jsonIsArray(frame, raw, call.loc);
+    } else if (callee.name == "keys") {
+      made = this.jsonCall(frame, "jsonKeys", [raw], call.loc);
+    } else if (callee.name == "entries") {
+      made = this.jsonCall(frame, "jsonEntries", [raw], call.loc);
+    } else {
+      const pair = [raw, this.jsonLayoutValue()];
+      const values = this.jsonCall(frame, "jsonValues", pair, call.loc);
+      const json = this.values.types.store.plain(TypeKind.Json);
+
+      made = this.jsonOwned(values, this.values.types.store.arrayOf(json));
+    }
+
+    this.dropping(frame, given);
+
+    return made;
+  }
+
+  private jsonIsArray(
+    frame: Read<Frame>,
+    raw: IrValue,
+    loc: int,
+  ): IrValue | undefined {
+    const kind = this.jsonCall(frame, "jsonKind", [raw], loc);
+    if (kind == undefined) {
+      return undefined;
+    }
+
+    const array = this.ir.integer(kIntType, "4");
+    const value = frame.made.integerCompare(
+      IrIntPredicate.Equal,
+      kind.value,
+      array,
+    );
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private jsonPresent(
+    frame: Read<Frame>,
+    value: Read<IrValue>,
+    loc: int,
+  ): LLVMValue | undefined {
+    const kind = this.jsonCall(frame, "jsonKind", [this.jsonRaw(value)], loc);
+    if (kind == undefined) {
+      return undefined;
+    }
+
+    const zero = this.ir.zero(kIntType);
+
+    return frame.made.integerCompare(
+      IrIntPredicate.SignedGreater,
+      kind.value,
+      zero,
+    );
+  }
+
+  private jsonLoopKeys(
+    frame: Read<Frame>,
+    node: IrValue,
+    loc: int,
+  ): IrValue | undefined {
+    const keys = this.jsonCall(frame, "jsonKeys", [this.jsonRaw(node)], loc);
+
+    this.dropping(frame, node);
+
+    return keys;
+  }
+}

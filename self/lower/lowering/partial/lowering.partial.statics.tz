@@ -77,6 +77,8 @@ partial class Lowering {
       }
       case "JSON.stringify":
         return this.jsonStringified(frame, call);
+      case "JSON.parse":
+        return this.jsonParsed(frame, call);
       case "Date.now": {
         const target: RuntimeTarget = { module: kTimeModule, name: "dateNow" };
 

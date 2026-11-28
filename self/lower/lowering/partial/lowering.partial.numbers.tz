@@ -22,6 +22,9 @@ partial class Lowering {
     if (value.tz.kind == TypeKind.Undefined) {
       return { type, value: this.ir.zero(type), tz: target };
     }
+    if (this.isJsonish(value.tz) || this.isJsonish(target)) {
+      return this.jsonConverted(frame, value, target, loc);
+    }
 
     const inner = this.optionalInner(target);
     const sourceInner = this.optionalInner(value.tz);

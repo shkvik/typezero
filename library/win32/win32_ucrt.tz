@@ -18,3 +18,5 @@ export declare function memchr(
   value: int32,
   count: uint64,
 ): Raw<uint8> | undefined;
+export declare function exit(code: int32): void;
+export declare function atexit(handler: Raw<uint8>): int32;

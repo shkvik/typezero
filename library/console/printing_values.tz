@@ -165,6 +165,10 @@ function isNumberElement(type: Raw<uint8>, value: Raw<uint8>): boolean {
     kind = kindOf(innerOf(type));
   }
 
+  if (kind == 10) {
+    return isJsonNumber(pointerAt(value, 0));
+  }
+
   return isIntegerKind(kind) || kind == 3 || kind == 11;
 }
 

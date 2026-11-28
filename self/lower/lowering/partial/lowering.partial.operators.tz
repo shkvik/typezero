@@ -18,6 +18,7 @@ import {
   kPanic,
   kPointerType,
   kMathsModule,
+  kRuntimeModule,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
@@ -428,8 +429,9 @@ partial class Lowering {
     const length = this.ir.integer(kIntType, `${text.length}`);
     const pointer: IrValue = { type: kPointerType, value: text.pointer, tz };
     const size: IrValue = { type: kIntType, value: length, tz };
+    const target: RuntimeTarget = { module: kRuntimeModule, name: kPanic };
 
-    this.runtimeCall(frame.made, kPanic, [pointer, size]);
+    this.runtimeFunctionCall(frame, target, [], [pointer, size], 0);
     frame.made.unreachable();
   }
 }

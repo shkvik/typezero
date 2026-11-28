@@ -1,0 +1,358 @@
+function textToken(): int {
+  return 0;
+}
+
+function numberToken(): int {
+  return 1;
+}
+
+function spaceToken(): int {
+  return 2;
+}
+
+function endToken(): int {
+  return 3;
+}
+
+function otherToken(): int {
+  return 4;
+}
+
+function mostDouble(): double {
+  return 1.7976931348623157e308;
+}
+
+function unitOf(text: Read<string>, index: int): int {
+  return text.charCodeAt(index) ?? 0;
+}
+
+function isDigit(unit: int): boolean {
+  return unit >= 48 && unit <= 57;
+}
+
+function tokenOf(unit: int): int {
+  if (unit < 0) {
+    return endToken();
+  }
+  if (isDigit(unit) || unit == 45) {
+    return numberToken();
+  }
+  if (unit == 34) {
+    return textToken();
+  }
+  if (unit == 32 || unit == 9 || unit == 10 || unit == 13) {
+    return spaceToken();
+  }
+
+  return otherToken();
+}
+
+function hexValue(unit: int): int {
+  if (unit >= 48 && unit <= 57) {
+    return unit - 48;
+  }
+  if (unit >= 97 && unit <= 102) {
+    return unit - 87;
+  }
+  if (unit >= 65 && unit <= 70) {
+    return unit - 55;
+  }
+
+  return -1;
+}
+
+function escapedUnit(unit: int): int {
+  switch (unit) {
+    case 34:
+    case 92:
+    case 47:
+      return unit;
+    case 98:
+      return 8;
+    case 102:
+      return 12;
+    case 110:
+      return 10;
+    case 114:
+      return 13;
+    case 116:
+      return 9;
+    default:
+      return -1;
+  }
+}
+
+class JsonReader {
+  public readonly text: string;
+  public readonly layout: Raw<uint8>;
+  public readonly count: int;
+  public at: int;
+  public containers: uint64[];
+  public keys: string[];
+  public pending: uint64;
+  public failure: string;
+  public isFailed: boolean;
+
+  public constructor(text: Read<string>, layout: Raw<uint8>) {
+    this.text = text;
+    this.layout = layout;
+    this.count = text.length;
+    this.at = 0;
+    this.containers = [];
+    this.keys = [];
+    this.pending = 0;
+    this.failure = "";
+    this.isFailed = false;
+  }
+
+  public readonly current(): int {
+    if (this.at >= this.count) {
+      return -1;
+    }
+
+    return unitOf(this.text, this.at);
+  }
+
+  public spacesSkipped(): void {
+    while (tokenOf(this.current()) == spaceToken()) {
+      this.at += 1;
+    }
+  }
+
+  public readonly placeText(): string {
+    let line = 1;
+    let lineStart = 0;
+    let index = 0;
+
+    while (index < this.at) {
+      let unit = unitOf(this.text, index);
+      const isPair = unit == 13 && index + 1 < this.at;
+
+      if (isPair && unitOf(this.text, index + 1) == 10) {
+        index += 1;
+        unit = 10;
+      }
+      if (unit == 13 || unit == 10) {
+        line += 1;
+        lineStart = index + 1;
+      }
+
+      index += 1;
+    }
+
+    const column = this.at - lineStart + 1;
+
+    return ` at position ${this.at} (line ${line} column ${column})`;
+  }
+
+  public readonly isSpecial(): boolean {
+    const text = this.text;
+    const isValue = text == "undefined" || text == "Infinity" || text == "NaN";
+
+    return isValue || text == "[object Object]";
+  }
+
+  public readonly tokenText(): string {
+    const text = this.text;
+    const unit = String.fromCharCode(this.current());
+    let from = 0;
+    let to = this.count;
+    let before = "";
+    let after = "";
+
+    if (this.count >= 21) {
+      if (this.at < 10) {
+        to = this.at + 10;
+        after = "...";
+      } else if (this.at < this.count - 10) {
+        from = this.at - 10;
+        to = this.at + 10;
+        before = "...";
+        after = "...";
+      } else {
+        from = this.at - 10;
+        before = "...";
+      }
+    }
+
+    const shown = text.slice(from, to);
+    const head = `Unexpected token '${unit}', ${before}"${shown}"${after}`;
+
+    return `${head} is not valid JSON`;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the open containers and the pending value have no other holder",
+  })
+  public failed(token: int, message: Read<string>): void {
+    for (const container of this.containers) {
+      objectReleased(bitsRaw(container));
+    }
+
+    objectReleased(bitsRaw(this.pending));
+    this.containers = [];
+    this.keys = [];
+    this.pending = 0;
+    this.isFailed = true;
+
+    if (message.length > 0) {
+      this.failure = `${message}${this.placeText()}`;
+    } else if (token == endToken()) {
+      this.failure = "Unexpected end of JSON input";
+    } else if (token == numberToken()) {
+      this.failure = `Unexpected number in JSON${this.placeText()}`;
+    } else if (token == textToken()) {
+      this.failure = `Unexpected string in JSON${this.placeText()}`;
+    } else if (this.isSpecial()) {
+      this.failure = `"${this.text}" is not valid JSON`;
+    } else {
+      this.failure = this.tokenText();
+    }
+  }
+
+  public failedHere(): void {
+    this.failed(tokenOf(this.current()), "");
+  }
+
+  public wordRead(word: Read<string>): void {
+    this.at += 1;
+
+    for (let index = 1; index < word.length; index++) {
+      if (this.at >= this.count) {
+        this.failed(endToken(), "");
+
+        return;
+      }
+      if (unitOf(this.text, this.at) != unitOf(word, index)) {
+        this.failedHere();
+
+        return;
+      }
+
+      this.at += 1;
+    }
+  }
+
+  public escapeRead(out: Mut<TextBuilder>): void {
+    this.at += 1;
+
+    if (this.at >= this.count) {
+      this.failed(endToken(), "");
+
+      return;
+    }
+
+    const unit = unitOf(this.text, this.at);
+    const plain = escapedUnit(unit);
+
+    if (plain >= 0) {
+      out.addUnit(plain);
+      this.at += 1;
+
+      return;
+    }
+    if (unit != 117) {
+      this.failed(otherToken(), "Bad escaped character in JSON");
+
+      return;
+    }
+
+    let value = 0;
+
+    for (let digit = 0; digit < 4; digit++) {
+      this.at += 1;
+
+      const found = hexValue(this.current());
+      if (found < 0) {
+        this.failed(otherToken(), "Bad Unicode escape in JSON");
+
+        return;
+      }
+
+      value = value * 16 + found;
+    }
+
+    out.addUnit(value);
+    this.at += 1;
+  }
+
+  public escapedRead(start: int): string {
+    const out = new TextBuilder();
+
+    out.addPart(this.text, start, this.at);
+
+    while (true) {
+      if (this.at >= this.count) {
+        this.failed(otherToken(), "Unterminated string in JSON");
+
+        return "";
+      }
+
+      const unit = unitOf(this.text, this.at);
+
+      if (unit == 34) {
+        this.at += 1;
+
+        return out.taken();
+      }
+      if (unit < 32) {
+        const message = "Bad control character in string literal in JSON";
+
+        this.failed(otherToken(), message);
+
+        return "";
+      }
+      if (unit != 92) {
+        out.addUnit(unit);
+        this.at += 1;
+
+        continue;
+      }
+
+      this.escapeRead(out);
+
+      if (this.isFailed) {
+        return "";
+      }
+    }
+
+    return "";
+  }
+
+  public textRead(): string {
+    const start = this.at;
+
+    while (true) {
+      if (this.at >= this.count) {
+        this.failed(otherToken(), "Unterminated string in JSON");
+
+        return "";
+      }
+
+      const unit = unitOf(this.text, this.at);
+
+      if (unit == 34) {
+        const found = this.text.slice(start, this.at);
+
+        this.at += 1;
+
+        return found;
+      }
+      if (unit == 92) {
+        return this.escapedRead(start);
+      }
+      if (unit < 32) {
+        const message = "Bad control character in string literal in JSON";
+
+        this.failed(otherToken(), message);
+
+        return "";
+      }
+
+      this.at += 1;
+    }
+
+    return "";
+  }
+}

@@ -444,3 +444,18 @@ export function bytesCopied(
 
   return copy;
 }
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a view of bytes holds one count of its ArrayBuffer",
+})
+export function bytesDropped(object: Raw<uint8>): void {
+  const head = viewAt<BytesHead>(object, 0);
+
+  objectReleased(head.buffer);
+  objectFreed(object);
+}
+
+export function plainBytesDropped(object: Raw<uint8>): void {
+  objectFreed(object);
+}

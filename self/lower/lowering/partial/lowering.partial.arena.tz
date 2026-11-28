@@ -24,6 +24,7 @@ import {
   kNoOwner,
   kObjectForget,
   kPointerType,
+  kRuntimeModule,
   kThisName,
   kVoidType,
 } from "../const/lowering.const.tz";
@@ -227,11 +228,15 @@ partial class Lowering {
   }
 
   private forgetCallee(type: Type): IrCallee {
+    let name = kObjectForget;
+
     if (this.isArray(type)) {
-      return this.ir.declare(kArrayForget, kVoidType, []);
+      name = kArrayForget;
     }
 
-    return this.ir.declare(kObjectForget, kVoidType, []);
+    const callee = this.runtimeHelperName(kRuntimeModule, name, name);
+
+    return this.ir.declare(callee, kVoidType, []);
   }
 
   private isImmortalGlobal(place: Read<Place>, key: string): boolean {

@@ -20,17 +20,6 @@
 
 #define MAX_LENGTH ((1u << 30) - 1)
 
-int64_t tz_arr_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_arrays)); }
-
-static int64_t tz_immortal_arrays_count = 0;
-
-int64_t tz_arr_immortal_arrays(void) { return tz_immortal_arrays_count; }
-
-void tz_arr_forget(void) {
-  --tz_live_arrays;
-  ++tz_immortal_arrays_count;
-}
-
 const TzType tz_string_type = {TZ_T_STRING, sizeof(TzStr), NULL};
 const TzType tz_undefined_type = {TZ_T_UNDEFINED, 0, NULL};
 

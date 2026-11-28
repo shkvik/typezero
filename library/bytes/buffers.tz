@@ -5,7 +5,12 @@ import {
   CStringHead,
   LayoutHead,
 } from "tz:core";
-import { objectMade, zeroFilled } from "tz:counts";
+import {
+  objectFreed,
+  objectMade,
+  objectReleased,
+  zeroFilled,
+} from "tz:counts";
 import { panic } from "tz:intrinsics";
 import { textOfBytes } from "tz:text";
 import {

@@ -13,7 +13,6 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kBytesLayouts,
   kFlagType,
   kFsCompose,
   kFsErrorOrders,
@@ -176,7 +175,7 @@ partial class Lowering {
     }
 
     const int = this.values.types.store.integer(64, false);
-    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const layouts = this.bytesLayouts();
     const raw: IrValue = { type: kPointerType, value: layouts, tz: int };
     const target: RuntimeTarget = { module: kFilesModule, name: "readBytes" };
     const given = [path, raw];

@@ -25,6 +25,9 @@ partial class Lowering {
     const tree = this.values.types.program.tree;
 
     const target = tree.exprOf(expr.targetId);
+    if (this.isJsonTarget(frame, target)) {
+      return this.jsonAssigned(frame, expr);
+    }
     if (target.kind == ExprKind.Index) {
       return this.elementAssigned(frame, expr, target);
     }

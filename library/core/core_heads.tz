@@ -200,3 +200,41 @@ export class ThreadHead {
   public liveDecimals: int;
   public liveJson: int;
 }
+
+@InPlace({ layout: Layout.C })
+export class JsonHead {
+  public count: int;
+  public layout: Raw<uint8>;
+  public kind: uint32;
+  public flags: uint32;
+  public first: uint64;
+  public second: uint64;
+  public third: uint64;
+  public fourth: uint64;
+}
+
+@InPlace({ layout: Layout.C })
+export class JsonTableHead {
+  public count: int;
+  public layout: Raw<uint8>;
+  public kind: uint32;
+  public flags: uint32;
+  public entries: Raw<uint8>;
+  public used: uint32;
+  public capacity: uint32;
+  public index: Raw<uint32>;
+  public indexSize: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class JsonLayoutHead {
+  public drop: Raw<uint8>;
+  public fields: Raw<uint8>;
+  public count: uint32;
+  public flags: uint32;
+  public name: Raw<uint8>;
+  public nameLength: uint32;
+  public classId: uint32;
+  public itemType: Raw<uint8>;
+  public textType: Raw<uint8>;
+}

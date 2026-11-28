@@ -1,0 +1,569 @@
+import {
+  ArrayHead,
+  JsonHead,
+  JsonLayoutHead,
+  JsonTableHead,
+} from "tz:core";
+import {
+  arrayGrown,
+  arrayMade,
+  arrayReleased,
+  objectFreed,
+  objectMade,
+  objectReleased,
+} from "tz:counts";
+import { panic } from "tz:intrinsics";
+import { TextBuilder } from "tz:text";
+import {
+  Raw,
+  allocate,
+  bitsDouble,
+  bitsRaw,
+  cellsAt,
+  copyCells,
+  destroyAt,
+  doubleBits,
+  frameCells,
+  jsonOf,
+  peekAt,
+  putAt,
+  putUnit,
+  rawBits,
+  release,
+  shiftCells,
+  textCells,
+  unitAt,
+  viewAt,
+} from "tz:unsafe";
+import { strtod } from "tz:win32/ucrt";
+
+function nullKind(): int {
+  return 0;
+}
+
+function booleanKind(): int {
+  return 1;
+}
+
+function numberKind(): int {
+  return 2;
+}
+
+function textKind(): int {
+  return 3;
+}
+
+function arrayKind(): int {
+  return 4;
+}
+
+function tableKind(): int {
+  return 5;
+}
+
+function indexKeysFlag(): uint32 {
+  return 1;
+}
+
+function numberTextFlag(): uint32 {
+  return 2;
+}
+
+function nodeSize(): int {
+  return 56;
+}
+
+function entrySize(): int {
+  return 24;
+}
+
+function indexFrom(): int {
+  return 8;
+}
+
+function mostIndex(): int {
+  return 4294967294;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new node has room for every kind of value",
+})
+function nodeMade(layout: Raw<uint8>, kind: int): Raw<uint8> {
+  const node = objectMade(nodeSize());
+  const head = viewAt<JsonHead>(node, 0);
+
+  head.count = 1;
+  head.layout = layout;
+  head.kind = kind.toUint32();
+  head.flags = 0;
+  head.first = 0;
+  head.second = 0;
+  head.third = 0;
+  head.fourth = 0;
+
+  return node;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a node starts with its count",
+})
+function retained(node: Raw<uint8>): Raw<uint8> {
+  const head = viewAt<JsonHead>(node, 0);
+
+  head.count += 1;
+
+  return node;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a node keeps its kind after its layout",
+})
+function kindOf(node: Raw<uint8>): int {
+  if (rawBits(node) == 0) {
+    return -1;
+  }
+
+  return viewAt<JsonHead>(node, 0).kind.toInt();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a string node lies after its head",
+})
+function nodeText(node: Raw<uint8>): Raw<string> {
+  return cellsAt<string>(node, 24);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array of an array node is its first word",
+})
+function nodeArray(node: Raw<uint8>): Raw<uint8> {
+  return bitsRaw(viewAt<JsonHead>(node, 0).first);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length addresses of nodes",
+})
+function itemAt(array: Raw<uint8>, index: int): Raw<uint8> {
+  const head = viewAt<ArrayHead>(array, 0);
+  const cells = cellsAt<uint64>(head.data, 0);
+
+  return bitsRaw(unitAt(cells, index).toUint64());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array grows before the node is put after its last one",
+})
+function itemPushed(array: Raw<uint8>, node: Raw<uint8>): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const length = head.length.toInt();
+
+  arrayGrown(array, length + 1);
+
+  const cells = cellsAt<uint64>(head.data, 0);
+
+  putUnit(cells, length, rawBits(node).toInt());
+  head.length = (length + 1).toUint32();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length addresses of nodes",
+})
+function arrayLength(array: Raw<uint8>): int {
+  return viewAt<ArrayHead>(array, 0).length.toInt();
+}
+
+export function jsonNull(layout: Raw<uint8>): Raw<uint8> {
+  return nodeMade(layout, nullKind());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first word of a boolean node is 0 or 1",
+})
+export function jsonBoolean(layout: Raw<uint8>, value: boolean): Raw<uint8> {
+  const node = nodeMade(layout, booleanKind());
+
+  if (value) {
+    viewAt<JsonHead>(node, 0).first = 1;
+  }
+
+  return node;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first word of a number node holds the bits of the number",
+})
+export function jsonNumber(layout: Raw<uint8>, value: double): Raw<uint8> {
+  const node = nodeMade(layout, numberKind());
+
+  viewAt<JsonHead>(node, 0).first = doubleBits(value);
+
+  return node;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a string node lies after its head",
+})
+export function jsonText(layout: Raw<uint8>, text: Read<string>): Raw<uint8> {
+  const node = nodeMade(layout, textKind());
+
+  putAt(nodeText(node), 0, text);
+
+  return node;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the node becomes the holder of the array",
+})
+export function jsonOfArray(
+  layout: Raw<uint8>,
+  array: Raw<uint8>,
+): Raw<uint8> {
+  const node = nodeMade(layout, arrayKind());
+
+  viewAt<JsonHead>(node, 0).first = rawBits(array);
+
+  return node;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the layout of Json keeps the type of its items",
+})
+export function jsonArray(layout: Raw<uint8>, capacity: int): Raw<uint8> {
+  const type = viewAt<JsonLayoutHead>(layout, 0).itemType;
+  const array = arrayMade(type, 0, capacity);
+
+  return jsonOfArray(layout, array);
+}
+
+export function jsonObject(layout: Raw<uint8>): Raw<uint8> {
+  return nodeMade(layout, tableKind());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an entry is a key of 16 bytes and the address of a node",
+})
+function entryKey(entries: Raw<uint8>, position: int): Raw<string> {
+  return cellsAt<string>(entries, position * entrySize());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an entry is a key of 16 bytes and the address of a node",
+})
+function entryValue(entries: Raw<uint8>, position: int): Raw<uint64> {
+  return cellsAt<uint64>(entries, position * entrySize() + 16);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the table holds used entries",
+})
+function valueAt(node: Raw<uint8>, position: int): Raw<uint8> {
+  const table = viewAt<JsonTableHead>(node, 0);
+  const cell = entryValue(table.entries, position);
+
+  return bitsRaw(unitAt(cell, 0).toUint64());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the table holds used entries",
+})
+function keyAt(node: Raw<uint8>, position: int): string {
+  const table = viewAt<JsonTableHead>(node, 0);
+
+  return peekAt(entryKey(table.entries, position), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the node owns what its kind says it holds",
+})
+export function jsonDropped(node: Raw<uint8>): void {
+  const head = viewAt<JsonHead>(node, 0);
+  const kind = head.kind.toInt();
+
+  if (kind == numberKind()) {
+    if ((head.flags & numberTextFlag()) != 0) {
+      destroyAt(cellsAt<string>(node, 32), 0);
+    }
+  } else if (kind == textKind()) {
+    destroyAt(nodeText(node), 0);
+  } else if (kind == arrayKind()) {
+    arrayReleased(nodeArray(node));
+  } else if (kind == tableKind()) {
+    const table = viewAt<JsonTableHead>(node, 0);
+    const used = table.used.toInt();
+
+    for (let position = 0; position < used; position++) {
+      destroyAt(entryKey(table.entries, position), 0);
+      objectReleased(valueAt(node, position));
+    }
+
+    release(table.entries);
+    release(table.index);
+  }
+
+  objectFreed(node);
+}
+
+function keyHash(key: Read<string>): int {
+  let hash = 2166136261;
+
+  for (let index = 0; index < key.length; index++) {
+    hash = ((hash ^ key.charCodeAt(index)) * 16777619) & 4294967295;
+  }
+
+  return hash;
+}
+
+function indexOfKey(key: Read<string>): int {
+  const count = key.length;
+  if (count == 0 || count > 10) {
+    return -1;
+  }
+  if (count > 1 && key.charCodeAt(0) == 48) {
+    return -1;
+  }
+
+  let value = 0;
+
+  for (let index = 0; index < count; index++) {
+    const unit = key.charCodeAt(index);
+    if (unit < 48 || unit > 57) {
+      return -1;
+    }
+
+    value = value * 10 + (unit - 48);
+  }
+
+  if (value > mostIndex()) {
+    return -1;
+  }
+
+  return value;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the index has size cells and at least one of them is free",
+})
+function indexInserted(
+  index: Raw<uint32>,
+  size: int,
+  hash: int,
+  position: int,
+): void {
+  let at = hash & (size - 1);
+
+  while (unitAt(index, at) != 0) {
+    at = (at + 1) & (size - 1);
+  }
+
+  putUnit(index, at, position + 1);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new index has more than twice the cells the table has entries",
+})
+function indexBuilt(node: Raw<uint8>): void {
+  const table = viewAt<JsonTableHead>(node, 0);
+  const used = table.used.toInt();
+  let size = 16;
+
+  while (size < used * 2 + 2) {
+    size = size * 2;
+  }
+
+  release(table.index);
+
+  const index = allocate<uint32>(size);
+
+  for (let at = 0; at < size; at++) {
+    putUnit(index, at, 0);
+  }
+  for (let position = 0; position < used; position++) {
+    const hash = keyHash(peekAt(entryKey(table.entries, position), 0));
+
+    indexInserted(index, size, hash, position);
+  }
+
+  table.index = index;
+  table.indexSize = size.toUint32();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the table holds used entries and an index over them or none",
+})
+function tableFound(node: Raw<uint8>, key: Read<string>): int {
+  const table = viewAt<JsonTableHead>(node, 0);
+  const used = table.used.toInt();
+  const size = table.indexSize.toInt();
+
+  if (size == 0) {
+    for (let position = 0; position < used; position++) {
+      if (peekAt(entryKey(table.entries, position), 0) == key) {
+        return position;
+      }
+    }
+
+    return -1;
+  }
+
+  let at = keyHash(key) & (size - 1);
+
+  while (true) {
+    const found = unitAt(table.index, at);
+    if (found == 0) {
+      return -1;
+    }
+    if (peekAt(entryKey(table.entries, found - 1), 0) == key) {
+      return found - 1;
+    }
+
+    at = (at + 1) & (size - 1);
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entries grow before a new one is put after the last",
+})
+function tablePut(
+  node: Raw<uint8>,
+  key: Read<string>,
+  value: Raw<uint8>,
+): void {
+  const table = viewAt<JsonTableHead>(node, 0);
+  const at = tableFound(node, key);
+
+  if (at >= 0) {
+    const cell = entryValue(table.entries, at);
+    const old = bitsRaw(unitAt(cell, 0).toUint64());
+
+    putUnit(cell, 0, rawBits(value).toInt());
+    objectReleased(old);
+
+    return;
+  }
+
+  const used = table.used.toInt();
+
+  if (used == table.capacity.toInt()) {
+    const capacity = used * 2 + 4;
+    const entries = allocate<uint8>(capacity * entrySize());
+
+    if (used > 0) {
+      copyCells(table.entries, 0, entries, 0, used * entrySize());
+    }
+
+    release(table.entries);
+    table.entries = entries;
+    table.capacity = capacity.toUint32();
+  }
+
+  putAt(entryKey(table.entries, used), 0, key);
+  putUnit(entryValue(table.entries, used), 0, rawBits(value).toInt());
+  table.used = (used + 1).toUint32();
+
+  if (indexOfKey(key) >= 0) {
+    table.flags = table.flags | indexKeysFlag();
+  }
+
+  const size = table.indexSize.toInt();
+
+  if (size > 0 && (used + 1) * 2 + 2 <= size) {
+    indexInserted(table.index, size, keyHash(key), used);
+  } else if (used + 1 > indexFrom()) {
+    indexBuilt(node);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entries after the removed one move down by one",
+})
+function tableRemoved(node: Raw<uint8>, key: Read<string>): void {
+  const table = viewAt<JsonTableHead>(node, 0);
+  const at = tableFound(node, key);
+  if (at < 0) {
+    return;
+  }
+
+  const used = table.used.toInt();
+  const value = valueAt(node, at);
+  const from = (at + 1) * entrySize();
+  const count = (used - at - 1) * entrySize();
+
+  destroyAt(entryKey(table.entries, at), 0);
+  shiftCells(table.entries, from, at * entrySize(), count);
+  table.used = (used - 1).toUint32();
+
+  if (table.indexSize != 0) {
+    indexBuilt(node);
+  }
+
+  objectReleased(value);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the table holds used entries",
+})
+function tableOrder(node: Raw<uint8>): int[] {
+  const table = viewAt<JsonTableHead>(node, 0);
+  const used = table.used.toInt();
+  const order: int[] = [];
+
+  if ((table.flags & indexKeysFlag()) == 0) {
+    for (let position = 0; position < used; position++) {
+      order.push(position);
+    }
+
+    return order;
+  }
+
+  const indices: int[] = [];
+
+  for (let position = 0; position < used; position++) {
+    const index = indexOfKey(peekAt(entryKey(table.entries, position), 0));
+    if (index < 0) {
+      continue;
+    }
+
+    let at = indices.length;
+
+    while (at > 0 && (indices[at - 1] ?? 0) > index) {
+      at -= 1;
+    }
+
+    indices.splice(at, 0, index);
+    order.splice(at, 0, position);
+  }
+
+  for (let position = 0; position < used; position++) {
+    if (indexOfKey(peekAt(entryKey(table.entries, position), 0)) < 0) {
+      order.push(position);
+    }
+  }
+
+  return order;
+}

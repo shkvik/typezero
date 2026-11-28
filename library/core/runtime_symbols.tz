@@ -1,0 +1,392 @@
+function symbolSize(): int {
+  return 88;
+}
+
+function symbolName(): int {
+  return 84;
+}
+
+function lineSize(): int {
+  return 40;
+}
+
+function symbolOptions(): uint64 {
+  return 524818;
+}
+
+function systemFolderOnly(): uint32 {
+  return 2048;
+}
+
+function traceAddress(offset: int): uint64 {
+  return Trace.block + offset.toUint64();
+}
+
+function isTrue(result: uint64): boolean {
+  return (result & 4294967295) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room holds the bytes of the name and a zero after them",
+})
+function closedName(name: Read<string>): Raw<uint8> {
+  const room = traceCells<uint8>(namesAt());
+  const cells = textCells<uint8>(name);
+  const count = name.length;
+
+  if (cells != undefined && count < 64) {
+    copyCells(cells, 0, room, 0, count);
+    putUnit(room, count, 0);
+  } else {
+    putUnit(room, 0, 0);
+  }
+
+  return room;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the name ends with a zero byte",
+})
+function procFound(library: Raw<uint8>, name: Read<string>): uint64 {
+  const found = GetProcAddress(library, closedName(name));
+  if (found == undefined) {
+    return 0;
+  }
+
+  return rawBits(found);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the room holds the units of the name and a zero after them",
+})
+function symbolLibrary(): Raw<uint8> | undefined {
+  const name = "dbghelp.dll";
+  const room = traceCells<uint16>(namesAt() + 64);
+  const cells = textCells<uint8>(name);
+  if (cells == undefined) {
+    return undefined;
+  }
+
+  copyCells(cells, 0, room, 0, name.length);
+  putUnit(room, name.length, 0);
+
+  return LoadLibraryExW(room, bitsRaw(0), systemFolderOnly());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the rooms of the symbol and of the line are whole words",
+})
+function symbolReset(): void {
+  const symbol = traceCells<uint64>(symbolAt());
+  const line = traceCells<uint64>(lineAt());
+
+  for (let index = 0; index < symbolSize() / 8; index++) {
+    putUnit(symbol, index, 0);
+  }
+  for (let index = 0; index < lineSize() / 8; index++) {
+    putUnit(line, index, 0);
+  }
+
+  putUnit(traceCells<uint32>(symbolAt()), 0, symbolSize());
+  putUnit(traceCells<uint32>(symbolAt() + 80), 0, 512);
+  putUnit(traceCells<uint32>(lineAt()), 0, lineSize());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the name of the file ends with a zero unit",
+})
+function isTzFile(file: Raw<uint16>): boolean {
+  const count = wideLength(file);
+  if (count <= 3 || unitAt(file, count - 3) != 46) {
+    return false;
+  }
+
+  const first = unitAt(file, count - 2);
+  const second = unitAt(file, count - 1);
+  const isFirst = first == 116 || first == 84;
+  const isSecond = second == 122 || second == 90;
+
+  return isFirst && isSecond;
+}
+
+function repeatsFlushed(): void {
+  if (Trace.repeats == 0) {
+    return;
+  }
+
+  let at = lineText(0, "    [previous line repeated ");
+
+  at = lineNumber(at, Trace.repeats.toUint64(), 10);
+  at = lineText(at, " more times]\n");
+  linePut(at);
+  Trace.repeats = 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text room and the last room hold 1600 bytes each",
+})
+function lineShown(): void {
+  const fileAddress = unitAt(traceCells<uint64>(lineAt() + 24), 0);
+  const fileName = cellsAt<uint16>(bitsRaw(fileAddress.toUint64()), 0);
+  if (!isTzFile(fileName) || Trace.shown > maxShown()) {
+    return;
+  }
+
+  const name = traceCells<uint16>(symbolAt() + symbolName());
+  const callee = traceCells<uint8>(functionAt());
+  const file = traceCells<uint8>(fileAt());
+  const calleeLength = utf8Of(name, callee, 512);
+  const fileLength = utf8Of(fileName, file, 1024);
+  const number = unitAt(traceCells<uint32>(lineAt() + 16), 0);
+  const first = unitAt(callee, 0);
+  let at = lineText(0, "    at ");
+
+  if (first == 60 || first == 0) {
+    at = lineBytes(at, file, fileLength);
+    at = lineText(at, ":");
+    at = lineNumber(at, number.toUint64(), 10);
+    at = lineText(at, "\n");
+  } else {
+    at = lineBytes(at, callee, calleeLength);
+    at = lineText(at, " (");
+    at = lineBytes(at, file, fileLength);
+    at = lineText(at, ":");
+    at = lineNumber(at, number.toUint64(), 10);
+    at = lineText(at, ")\n");
+  }
+
+  const text = traceCells<uint8>(textAt());
+  const last = traceCells<uint8>(lastAt());
+  const isSame = at == Trace.lastLength && sameCells(text, 0, last, 0, at);
+  if (isSame) {
+    Trace.repeats += 1;
+
+    return;
+  }
+
+  copyCells(text, 0, last, 0, at);
+  Trace.lastLength = at;
+  repeatsFlushed();
+
+  if (Trace.shown == maxShown()) {
+    textToErrors("    ...\n");
+  } else {
+    streamWritten(true, last, at);
+  }
+
+  Trace.shown += 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entries came from the library of symbols",
+})
+function inlinesShown(address: uint64, count: uint64): void {
+  const process = Trace.process;
+  const context = traceAddress(scratchAt() + 40);
+  const index = traceAddress(scratchAt() + 48);
+  const shift = traceAddress(scratchAt() + 24);
+  const lineShift = traceAddress(scratchAt() + 32);
+  const symbol = traceAddress(symbolAt());
+  const line = traceAddress(lineAt());
+  const query = bitsRaw(Trace.inlineQuery);
+  const fromInline = bitsRaw(Trace.fromInline);
+  const lineFromInline = bitsRaw(Trace.lineFromInline);
+
+  putUnit(traceCells<uint64>(scratchAt() + 40), 0, 0);
+  putUnit(traceCells<uint64>(scratchAt() + 48), 0, 0);
+
+  const asked = invoked(
+    query,
+    process,
+    address,
+    0,
+    address,
+    address,
+    context,
+    index,
+  );
+  if (!isTrue(asked)) {
+    return;
+  }
+
+  let place = unitAt(traceCells<uint32>(scratchAt() + 40), 0).toUint64();
+
+  for (let done: uint64 = 0; done < count; done++) {
+    symbolReset();
+
+    const found = invoked(fromInline, process, address, place, shift, symbol);
+
+    if (isTrue(found)) {
+      const lined = invoked(
+        lineFromInline,
+        process,
+        address,
+        place,
+        0,
+        lineShift,
+        line,
+      );
+
+      if (isTrue(lined)) {
+        lineShown();
+      }
+    }
+
+    place += 1;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entries came from the library of symbols",
+})
+function addressShown(address: uint64): void {
+  const process = Trace.process;
+  const shift = traceAddress(scratchAt() + 24);
+  const lineShift = traceAddress(scratchAt() + 32);
+  const symbol = traceAddress(symbolAt());
+  const line = traceAddress(lineAt());
+
+  if (Trace.inlineCount != 0) {
+    const counter = bitsRaw(Trace.inlineCount);
+    const count = invoked(counter, process, address) & 4294967295;
+
+    if (count > 0) {
+      inlinesShown(address, count);
+    }
+  }
+
+  symbolReset();
+
+  const fromAddress = bitsRaw(Trace.fromAddress);
+  const lineFromAddress = bitsRaw(Trace.lineFromAddress);
+  const found = invoked(fromAddress, process, address, shift, symbol);
+  if (!isTrue(found)) {
+    return;
+  }
+
+  const lined = invoked(lineFromAddress, process, address, lineShift, line);
+  if (isTrue(lined)) {
+    lineShown();
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the frames hold Trace.count addresses",
+})
+function framesShown(): void {
+  const frames = traceCells<uint64>(0);
+
+  for (let index = 0; index < Trace.count; index++) {
+    if (!isOwnFrame(index)) {
+      continue;
+    }
+
+    const address = unitAt(frames, index).toUint64();
+
+    if (index == 0 && Trace.isExact) {
+      addressShown(address);
+    } else {
+      addressShown(address - 1);
+    }
+  }
+
+  repeatsFlushed();
+
+  const isCut = Trace.shown <= maxShown() && Trace.count == maxFrames();
+  if (Trace.shown > 0 && isCut) {
+    textToErrors("    ...\n");
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the rooms of the block hold a path of 260 units each",
+})
+function symbolsShown(argument: Raw<uint8>): uint32 {
+  const library = symbolLibrary();
+  if (library == undefined) {
+    return 0;
+  }
+
+  const setOptions = procFound(library, "SymSetOptions");
+  const initialize = procFound(library, "SymInitializeW");
+  const cleanup = procFound(library, "SymCleanup");
+  const loadModule = procFound(library, "SymLoadModuleExW");
+
+  Trace.fromAddress = procFound(library, "SymFromAddrW");
+  Trace.lineFromAddress = procFound(library, "SymGetLineFromAddrW64");
+  Trace.inlineCount = procFound(library, "SymAddrIncludeInlineTrace");
+  Trace.inlineQuery = procFound(library, "SymQueryInlineTrace");
+  Trace.fromInline = procFound(library, "SymFromInlineContextW");
+  Trace.lineFromInline = procFound(library, "SymGetLineFromInlineContextW");
+
+  if (Trace.inlineQuery == 0 || Trace.fromInline == 0) {
+    Trace.inlineCount = 0;
+  }
+  if (Trace.lineFromInline == 0) {
+    Trace.inlineCount = 0;
+  }
+
+  const isOpening = setOptions != 0 && initialize != 0 && cleanup != 0;
+  const isFinding = Trace.fromAddress != 0 && Trace.lineFromAddress != 0;
+  if (!isOpening || !isFinding || loadModule == 0) {
+    return 0;
+  }
+
+  const exe = traceCells<uint16>(exeAt());
+  const folder = traceCells<uint16>(folderAt());
+  const size = maxPath().toUint32();
+  const length = GetModuleFileNameW(bitsRaw(0), exe, size).toInt();
+  if (length == 0 || length == maxPath()) {
+    return 0;
+  }
+
+  copyCells(exe, 0, folder, 0, length + 1);
+
+  const slash = lastUnit(folder, length, 92);
+  if (slash >= 0) {
+    putUnit(folder, slash, 0);
+  }
+
+  const process = rawBits(GetCurrentProcess());
+  const folderAddress = traceAddress(folderAt());
+  const exeAddress = traceAddress(exeAt());
+
+  Trace.process = process;
+  invoked(bitsRaw(setOptions), symbolOptions());
+
+  const opened = invoked(bitsRaw(initialize), process, folderAddress, 0);
+  if (!isTrue(opened)) {
+    return 0;
+  }
+
+  const span = (Trace.end - Trace.base) & 4294967295;
+  const loaded = invoked(
+    bitsRaw(loadModule),
+    process,
+    0,
+    exeAddress,
+    0,
+    Trace.base,
+    span,
+    0,
+    0,
+  );
+
+  if (loaded != 0) {
+    framesShown();
+  }
+
+  invoked(bitsRaw(cleanup), process);
+
+  return 0;
+}

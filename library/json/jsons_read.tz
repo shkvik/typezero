@@ -1,0 +1,393 @@
+function digitsSkipped(reader: Mut<JsonReader>): void {
+  while (isDigit(reader.current())) {
+    reader.at += 1;
+  }
+}
+
+function numberScanned(reader: Mut<JsonReader>): void {
+  if (reader.current() == 45) {
+    reader.at += 1;
+  }
+
+  if (reader.current() == 48) {
+    reader.at += 1;
+
+    if (isDigit(reader.current())) {
+      reader.failed(numberToken(), "");
+
+      return;
+    }
+  } else {
+    if (!isDigit(reader.current())) {
+      reader.failed(otherToken(), "No number after minus sign in JSON");
+
+      return;
+    }
+
+    digitsSkipped(reader);
+  }
+
+  if (reader.current() == 46) {
+    reader.at += 1;
+
+    if (!isDigit(reader.current())) {
+      reader.failed(otherToken(), "Unterminated fractional number in JSON");
+
+      return;
+    }
+
+    digitsSkipped(reader);
+  }
+
+  if (reader.current() == 101 || reader.current() == 69) {
+    reader.at += 1;
+
+    if (reader.current() == 45 || reader.current() == 43) {
+      reader.at += 1;
+    }
+    if (!isDigit(reader.current())) {
+      const message = "Exponent part is missing a number in JSON";
+
+      reader.failed(otherToken(), message);
+
+      return;
+    }
+
+    digitsSkipped(reader);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the bytes hold the text of the number and a zero after it",
+})
+function numberRead(reader: Mut<JsonReader>): Raw<uint8> {
+  const start = reader.at;
+
+  numberScanned(reader);
+
+  if (reader.isFailed) {
+    return bitsRaw(0);
+  }
+
+  const length = reader.at - start;
+  const bytes = allocate<uint8>(length + 1);
+  let digits = 0;
+  let hasNonzero = false;
+  let isExponent = false;
+
+  for (let index = 0; index < length; index++) {
+    const unit = unitOf(reader.text, start + index);
+
+    putUnit(bytes, index, unit);
+
+    if (unit == 101 || unit == 69) {
+      isExponent = true;
+    }
+    if (!isExponent && isDigit(unit)) {
+      digits += 1;
+
+      if (unit != 48) {
+        hasNonzero = true;
+      }
+    }
+  }
+
+  putUnit(bytes, length, 0);
+
+  const value = strtod(bytes, cellsAt<uint64>(bitsRaw(0), 0));
+
+  release(bytes);
+
+  if (value > mostDouble() || value < -mostDouble()) {
+    reader.at = start;
+    reader.failed(otherToken(), "Number out of range in JSON");
+
+    return bitsRaw(0);
+  }
+
+  const node = jsonNumber(reader.layout, value);
+
+  if (digits > 15 || (value == 0.0 && hasNonzero)) {
+    const head = viewAt<JsonHead>(node, 0);
+
+    head.flags = head.flags | numberTextFlag();
+    putAt(cellsAt<string>(node, 32), 0, reader.text.slice(start, reader.at));
+  }
+
+  return node;
+}
+
+function keyRead(reader: Mut<JsonReader>, message: Read<string>): void {
+  reader.spacesSkipped();
+
+  if (reader.current() != 34) {
+    reader.failed(tokenOf(reader.current()), message);
+
+    return;
+  }
+
+  reader.at += 1;
+
+  const key = reader.textRead();
+
+  if (reader.isFailed) {
+    return;
+  }
+
+  reader.keys.pop();
+  reader.keys.push(key);
+  reader.spacesSkipped();
+
+  if (reader.current() != 58) {
+    const expected = "Expected ':' after property name in JSON";
+
+    reader.failed(tokenOf(reader.current()), expected);
+
+    return;
+  }
+
+  reader.at += 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an open container is held by the list until it is closed",
+})
+function opened(reader: Mut<JsonReader>, container: Raw<uint8>): void {
+  reader.containers.push(rawBits(container));
+  reader.keys.push("");
+}
+
+function started(reader: Mut<JsonReader>): Raw<uint8> {
+  reader.spacesSkipped();
+
+  const unit = reader.current();
+
+  if (unit == 34) {
+    reader.at += 1;
+
+    const text = reader.textRead();
+
+    if (reader.isFailed) {
+      @Unsafe({
+        uses: [UnsafeUse.Memory],
+        reason: "temporary: give the reason",
+      })
+      return bitsRaw(0);
+    }
+
+    return jsonText(reader.layout, text);
+  }
+  if (isDigit(unit) || unit == 45) {
+    return numberRead(reader);
+  }
+  if (unit == 123) {
+    reader.at += 1;
+    reader.spacesSkipped();
+
+    if (reader.current() == 125) {
+      reader.at += 1;
+
+      return jsonObject(reader.layout);
+    }
+
+    opened(reader, jsonObject(reader.layout));
+    keyRead(reader, "Expected property name or '}' in JSON");
+
+    @Unsafe({
+      uses: [UnsafeUse.Memory],
+      reason: "temporary: give the reason",
+    })
+    return bitsRaw(0);
+  }
+  if (unit == 91) {
+    reader.at += 1;
+    reader.spacesSkipped();
+
+    if (reader.current() == 93) {
+      reader.at += 1;
+
+      return jsonArray(reader.layout, 0);
+    }
+
+    opened(reader, jsonArray(reader.layout, 4));
+
+    @Unsafe({
+      uses: [UnsafeUse.Memory],
+      reason: "temporary: give the reason",
+    })
+    return bitsRaw(0);
+  }
+
+  return wordStarted(reader, unit);
+}
+
+function wordStarted(reader: Mut<JsonReader>, unit: int): Raw<uint8> {
+  if (unit == 116) {
+    reader.wordRead("true");
+
+    if (reader.isFailed) {
+      @Unsafe({
+        uses: [UnsafeUse.Memory],
+        reason: "temporary: give the reason",
+      })
+      return bitsRaw(0);
+    }
+
+    return jsonBoolean(reader.layout, true);
+  }
+  if (unit == 102) {
+    reader.wordRead("false");
+
+    if (reader.isFailed) {
+      @Unsafe({
+        uses: [UnsafeUse.Memory],
+        reason: "temporary: give the reason",
+      })
+      return bitsRaw(0);
+    }
+
+    return jsonBoolean(reader.layout, false);
+  }
+  if (unit == 110) {
+    reader.wordRead("null");
+
+    if (reader.isFailed) {
+      @Unsafe({
+        uses: [UnsafeUse.Memory],
+        reason: "temporary: give the reason",
+      })
+      return bitsRaw(0);
+    }
+
+    return jsonNull(reader.layout);
+  }
+
+  reader.failedHere();
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "temporary: give the reason",
+  })
+  return bitsRaw(0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a closed container leaves the list and goes to its own holder",
+})
+function attached(reader: Mut<JsonReader>, value: Raw<uint8>): Raw<uint8> {
+  let current = value;
+
+  while (true) {
+    const depth = reader.containers.length;
+
+    if (depth == 0) {
+      reader.spacesSkipped();
+
+      if (reader.at < reader.count) {
+        const message = "Unexpected non-whitespace character after JSON";
+
+        reader.pending = rawBits(current);
+        reader.failed(tokenOf(reader.current()), message);
+
+        return bitsRaw(0);
+      }
+
+      return current;
+    }
+
+    const container = bitsRaw(reader.containers[depth - 1] ?? 0);
+    const isTable = kindOf(container) == tableKind();
+    let closing = 93;
+    let message = "Expected ',' or ']' after array element in JSON";
+
+    if (isTable) {
+      const key = reader.keys[depth - 1] ?? "";
+
+      tablePut(container, key, current);
+      closing = 125;
+      message = "Expected ',' or '}' after property value in JSON";
+    } else {
+      itemPushed(nodeArray(container), current);
+    }
+
+    reader.spacesSkipped();
+
+    if (reader.current() == 44) {
+      reader.at += 1;
+
+      if (isTable) {
+        keyRead(reader, "Expected double-quoted property name in JSON");
+      }
+
+      return bitsRaw(0);
+    }
+
+    reader.containers.pop();
+    reader.keys.pop();
+
+    if (reader.current() != closing) {
+      reader.pending = rawBits(container);
+      reader.failed(tokenOf(reader.current()), message);
+
+      return bitsRaw(0);
+    }
+
+    reader.at += 1;
+    current = container;
+  }
+
+  return bitsRaw(0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a value that is not attached yet has this reader as its holder",
+})
+function wholeRead(reader: Mut<JsonReader>): Raw<uint8> {
+  while (true) {
+    const value = started(reader);
+
+    if (reader.isFailed) {
+      return bitsRaw(0);
+    }
+    if (rawBits(value) == 0) {
+      continue;
+    }
+
+    const whole = attached(reader, value);
+
+    if (reader.isFailed) {
+      return bitsRaw(0);
+    }
+    if (rawBits(whole) != 0) {
+      return whole;
+    }
+  }
+
+  return bitsRaw(0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the node the reader gives has no other holder",
+})
+export function jsonParsed(
+  text: Read<string>,
+  layout: Raw<uint8>,
+): Result<Json, JsonError> {
+  const reader = new JsonReader(text, layout);
+  const node = wholeRead(reader);
+
+  if (reader.isFailed) {
+    return err({
+      kind: "JSON_ERROR",
+      code: "ERR_INVALID_JSON",
+      message: reader.failure,
+    });
+  }
+
+  return ok(jsonOf(node));
+}

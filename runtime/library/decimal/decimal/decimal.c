@@ -58,8 +58,6 @@ static const uint64_t pow10_64[20] = {1ull,
                                       1000000000000000000ull,
                                       10000000000000000000ull};
 
-int64_t tz_dec_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_decimals)); }
-
 static inline int is_short(uint64_t meta) { return (meta & TZ_DEC_LONG) == 0; }
 
 static inline uint32_t scale_of(uint64_t meta) { return (uint32_t)meta; }

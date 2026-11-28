@@ -57,6 +57,9 @@ partial class Lowering {
     if (left.tz.kind == TypeKind.Undefined) {
       return this.emptyCompared(frame, expr.op, right);
     }
+    if (this.isJsonish(left.tz) || this.isJsonish(right.tz)) {
+      return this.jsonCompared(frame, expr, left, right);
+    }
     if (this.isDecimal(left.tz) || this.isDecimal(right.tz)) {
       return this.decimalsCompared(frame, expr.op, left, right);
     }
@@ -255,17 +258,6 @@ partial class Lowering {
     const predicate = this.integerPredicate(op, false);
 
     return frame.made.integerCompare(predicate, order, zero);
-  }
-
-  private readonly stringParts(frame: Read<Frame>, value: IrValue): IrValue[] {
-    const tz = this.values.types.store.integer(64, false);
-    const pointer = frame.made.extract(value.value, 0);
-    const meta = frame.made.extract(value.value, 1);
-
-    return [
-      { type: kPointerType, value: pointer, tz },
-      { type: kIntType, value: meta, tz },
-    ];
   }
 
   private readonly equalFlagPredicate(op: BinaryOp): IrIntPredicate {

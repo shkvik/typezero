@@ -208,18 +208,28 @@ partial class Lowering {
       return undefined;
     }
 
-    const inner = this.optionalInner(left.tz);
+    const isJson = this.isJsonish(left.tz);
+    let inner = this.optionalInner(left.tz);
+
+    if (isJson) {
+      inner = this.values.types.store.plain(TypeKind.Json);
+    }
     if (inner == undefined) {
       return this.converted(frame, left, result, expr.loc);
     }
 
     const isFlagged =
       isFlagWanted && left.owned != true && this.isManaged(result);
-    if (isFlagged) {
+    if (isFlagged && !isJson) {
       return this.flaggedNullish(frame, expr, left, inner, result);
     }
 
-    const has = this.hasValue(frame, left);
+    let has = this.hasValue(frame, left);
+
+    if (isJson) {
+      has = this.jsonPresent(frame, left, expr.loc) ?? has;
+    }
+
     const given = frame.made.block("nullish.given");
     const other = frame.made.block("nullish.other");
     const end = frame.made.block("nullish.end");
@@ -233,6 +243,10 @@ partial class Lowering {
 
     this.jumpTo(frame, end);
     frame.made.open(other);
+
+    if (isJson) {
+      this.dropping(frame, left);
+    }
 
     const rhs = tree.exprOf(expr.rhsId);
     const second = this.branchValue(frame, rhs, result);

@@ -18,9 +18,12 @@ import {
   kBooleanType,
   kBuffersModule,
   kByteType,
-  kCountsModule,
+  kBytesClassBase,
   kBytesDataField,
-  kBytesNames,
+  kBytesDropped,
+  kBytesLayoutFlag,
+  kBytesLayoutShift,
+  kBytesLayoutNames,
   kBytesStruct,
   kCStringCopied,
   kCStringCopy,
@@ -28,19 +31,21 @@ import {
   kCStringLayoutFlag,
   kCStringName,
   kCStringTextOffset,
-  kFfiModule,
-  kWideCells,
-  kWideName,
+  kCountsModule,
   kDoubleType,
+  kFfiModule,
+  kFlagType,
   kForeignNullText,
   kForeverCount,
-  kFlagType,
   kIntType,
   kLayoutHead,
   kObjectFree,
   kObjectFreed,
+  kPlainBytesDropped,
   kPointerType,
   kVoidType,
+  kWideCells,
+  kWideName,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
@@ -99,7 +104,7 @@ partial class Lowering {
     return (
       opened != undefined &&
       opened.source.isLibrary &&
-      kBytesNames.includes(type.name)
+      kBytesLayoutNames.includes(type.name)
     );
   }
 
@@ -389,6 +394,53 @@ partial class Lowering {
     const global = this.ir.global(name, kLayoutHead, head, true);
 
     this.cstringLayoutGlobal = global;
+
+    return global;
+  }
+
+  private bytesLayouts(): LLVMValue {
+    const known = this.bytesLayoutsGlobal;
+    if (known != undefined) {
+      return known;
+    }
+
+    const module = kBuffersModule;
+    const whole = this.runtimeHelperName(module, kBytesDropped, "");
+    const plain = this.runtimeHelperName(module, kPlainBytesDropped, "");
+    const wholeDrop = this.ir.declare(whole, kVoidType, [kPointerType]);
+    const plainDrop = this.ir.declare(plain, kVoidType, [kPointerType]);
+    const none = this.ir.zero(kPointerType);
+    const heads = [this.ir.zero(kLayoutHead)];
+
+    for (let index = 0; index < kBytesLayoutNames.length; index++) {
+      const name = kBytesLayoutNames[index] ?? "";
+      const kind = index + 1;
+      const flags = kBytesLayoutFlag + kind * kBytesLayoutShift;
+      let drop = wholeDrop.fn;
+
+      if (kind == 12 || kind >= 14) {
+        drop = plainDrop.fn;
+      }
+
+      heads.push(
+        this.ir.constStruct([
+          drop,
+          none,
+          this.ir.integer(kFlagType, "0"),
+          this.ir.integer(kFlagType, `${flags}`),
+          this.cText(name),
+          this.ir.integer(kFlagType, `${name.length}`),
+          this.ir.integer(kFlagType, `${kBytesClassBase + kind}`),
+        ]),
+      );
+    }
+
+    const table = this.ir.constArray(kLayoutHead, heads);
+    const type = `[${heads.length} x ${kLayoutHead}]`;
+    const made = this.ir.uniqueName("tz.layouts.bytes.");
+    const global = this.ir.global(made, type, table, true);
+
+    this.bytesLayoutsGlobal = global;
 
     return global;
   }
