@@ -15,6 +15,5 @@ TzJson *tz_json_array_node(uint32_t capacity);
 
 TzJson *tz_json_object_new(void);
 
-const char *tz_json_kind_name(const TzJson *j);
 
 #endif

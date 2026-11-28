@@ -1,0 +1,341 @@
+function badHandle(): uint64 {
+  return 18446744073709551615;
+}
+
+function genericRead(): uint32 {
+  return 1179785;
+}
+
+function shareAll(): uint32 {
+  return 7;
+}
+
+function openExisting(): uint32 {
+  return 3;
+}
+
+function backupFlag(): uint32 {
+  return 33554432;
+}
+
+function normalAttribute(): uint32 {
+  return 128;
+}
+
+function reparseAttribute(): uint32 {
+  return 1024;
+}
+
+function handleEnd(): uint32 {
+  return 38;
+}
+
+function brokenPipe(): uint32 {
+  return 109;
+}
+
+function readChunk(): int {
+  return 65536;
+}
+
+function shownOf(native: Read<string>): string {
+  if (native.startsWith("\\\\?\\UNC\\")) {
+    const rest = native.slice(8);
+
+    return `\\\\${rest}`;
+  }
+  if (native.startsWith("\\\\?\\")) {
+    return native.slice(4);
+  }
+
+  return native;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer grows before each read; the system writes got",
+})
+function fileBytesRead(
+  file: Raw<uint8>,
+  native: Read<string>,
+  encoding: int,
+): Result<string, ReadFileError> {
+  const size = new LargeInteger();
+  let capacity = readChunk();
+
+  if (GetFileSizeEx(file, size) != 0) {
+    const known = size.value;
+
+    if (known > 0 && known < 2147483648) {
+      capacity = known + 1 + readChunk();
+    }
+  }
+
+  let bytes = allocate<uint8>(capacity);
+  let length = 0;
+  const got = frameCells<uint32>(1);
+  const none = bitsRaw(0);
+  const chunk = readChunk().toUint32();
+
+  while (true) {
+    if (capacity - length < readChunk()) {
+      capacity = capacity * 2;
+      bytes = reallocate(bytes, capacity);
+    }
+
+    putUnit(got, 0, 0);
+
+    const into = cellsAt<uint8>(bytes, length);
+    const isRead = ReadFile(file, into, chunk, got, none) != 0;
+
+    if (!isRead) {
+      const error = GetLastError();
+      if (error == handleEnd() || error == brokenPipe()) {
+        break;
+      }
+
+      release(bytes);
+
+      const shown = shownOf(native);
+      const failure = windowsFailure(error, "read", shown, "");
+
+      return err(readFileErrorOf(failure));
+    }
+
+    const count = unitAt(got, 0);
+    if (count == 0) {
+      break;
+    }
+
+    length += count;
+  }
+
+  const text = textOfBytes(bytes, length, encoding);
+
+  release(bytes);
+
+  return ok(text);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the name ends with a zero; the handle is closed on every path",
+})
+export function readText(
+  path: Read<string>,
+  encoding: int,
+): Result<string, ReadFileError> {
+  const native = toNamespacedPath(path);
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    const failure = codeFailure("ERR_INVALID_PATH", "open", path);
+
+    return err(readFileErrorOf(failure));
+  }
+
+  const none = bitsRaw(0);
+  const flags = normalAttribute() | backupFlag();
+  const file = CreateFileW(
+    wide,
+    genericRead(),
+    shareAll(),
+    none,
+    openExisting(),
+    flags,
+    none,
+  );
+  if (rawBits(file) == badHandle()) {
+    const error = GetLastError();
+    const shown = shownOf(native);
+    const failure = windowsFailure(error, "open", shown, "");
+
+    return err(readFileErrorOf(failure));
+  }
+
+  const read = fileBytesRead(file, native, encoding);
+
+  CloseHandle(file);
+
+  return read;
+}
+
+function isPathSlash(unit: int): boolean {
+  return unit == 92 || unit == 47;
+}
+
+function rootCount(path: Read<string>): int {
+  const count = path.length;
+  let at = 0;
+
+  if (count >= 2 && path.charCodeAt(1) == 58) {
+    at = 2;
+  } else if (count >= 2 && isPathSlash(path.charCodeAt(0))) {
+    if (isPathSlash(path.charCodeAt(1))) {
+      let server = 2;
+
+      while (server < count && !isPathSlash(path.charCodeAt(server))) {
+        server += 1;
+      }
+      if (server > 2 && server < count) {
+        let share = server + 1;
+
+        while (share < count && !isPathSlash(path.charCodeAt(share))) {
+          share += 1;
+        }
+        if (share > server + 1) {
+          at = share;
+        }
+      }
+    }
+  }
+
+  while (at < count && isPathSlash(path.charCodeAt(at))) {
+    at += 1;
+  }
+
+  return at;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer has the size the call is told; the handle is closed",
+})
+function finalPath(native: Read<string>): string | undefined {
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    return undefined;
+  }
+
+  const none = bitsRaw(0);
+  const file = CreateFileW(
+    wide,
+    0,
+    shareAll(),
+    none,
+    openExisting(),
+    backupFlag(),
+    none,
+  );
+  if (rawBits(file) == badHandle()) {
+    return undefined;
+  }
+
+  let capacity: uint32 = 268;
+  let cells = allocate<uint16>(268);
+  let count = GetFinalPathNameByHandleW(file, cells, capacity, 0);
+
+  if (count >= capacity) {
+    release(cells);
+    capacity = count + 1;
+    cells = allocate<uint16>(capacity.toInt());
+    count = GetFinalPathNameByHandleW(file, cells, capacity, 0);
+  }
+
+  CloseHandle(file);
+
+  if (count == 0 || count >= capacity) {
+    release(cells);
+
+    return undefined;
+  }
+
+  const found = textOfUnits(cells, count.toInt());
+
+  release(cells);
+
+  return shownOf(found);
+}
+
+@InPlace()
+class PrefixLook {
+  public readonly attributes: uint32;
+  public readonly error: uint32;
+
+  public constructor(attributes: uint32, error: uint32) {
+    this.attributes = attributes;
+    this.error = error;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the name ends with a zero",
+})
+function prefixLook(native: Read<string>): PrefixLook {
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    return new PrefixLook(noAttributes(), 123);
+  }
+
+  const attributes = GetFileAttributesW(wide);
+  if (attributes == noAttributes()) {
+    return new PrefixLook(attributes, GetLastError());
+  }
+
+  return new PrefixLook(attributes, 0);
+}
+
+export function realPath(path: Read<string>): Result<string, RealPathError> {
+  if (path.includes("\0")) {
+    const failure = codeFailure("ERR_INVALID_PATH", "realpath", path);
+
+    return err(realPathErrorOf(failure));
+  }
+
+  let current = resolve(path);
+
+  for (let round = 0; round <= 65; round++) {
+    if (round > 64) {
+      const native = toNamespacedPath(current);
+      const failure = codeFailure("ELOOP", "lstat", shownOf(native));
+
+      return err(realPathErrorOf(failure));
+    }
+
+    let end = rootCount(current);
+    let isRestarted = false;
+    let isDone = false;
+
+    while (!isDone) {
+      const isInside = end < current.length;
+      if (isInside && !isPathSlash(current.charCodeAt(end))) {
+        end += 1;
+        continue;
+      }
+
+      const prefix = current.slice(0, end);
+      const native = toNamespacedPath(prefix);
+      const look = prefixLook(native);
+      if (look.attributes == noAttributes()) {
+        const shown = shownOf(native);
+        const failure = windowsFailure(look.error, "lstat", shown, "");
+
+        return err(realPathErrorOf(failure));
+      }
+      if ((look.attributes & reparseAttribute()) != 0) {
+        const target = finalPath(native);
+
+        if (target != undefined) {
+          let next = target;
+
+          if (end < current.length) {
+            const rest = current.slice(end + 1);
+
+            next = `${target}\\${rest}`;
+          }
+
+          current = resolve(next);
+          isRestarted = true;
+        }
+      }
+
+      isDone = isRestarted || end >= current.length;
+      end += 1;
+    }
+    if (!isRestarted) {
+      return ok(current);
+    }
+  }
+
+  return ok(current);
+}

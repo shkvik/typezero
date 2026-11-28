@@ -1,0 +1,42 @@
+type Key = "alpha" | "beta" | "gamma";
+
+interface Counts {
+  alpha: int;
+  beta: int;
+  gamma: int;
+}
+
+interface Names {
+  first: string;
+  second: string;
+}
+
+function pick(counts: Read<Counts>, key: Key): int {
+  return counts[key];
+}
+
+function main(): void {
+  const counts: Counts = { alpha: 1, beta: 20, gamma: 300 };
+  const keys: Key[] = ["gamma", "alpha", "beta", "alpha"];
+  let total = 0;
+
+  for (const key of keys) {
+    total += pick(counts, key);
+    console.log(key, counts[key]);
+  }
+
+  console.log(total);
+
+  const names: Names = { first: "один", second: "two" };
+  const which: ("first" | "second")[] = ["second", "first"];
+
+  for (const name of which) {
+    const built = `${name}`;
+
+    if (built == "first" || built == "second") {
+      console.log(names[name]);
+    }
+  }
+}
+
+main();

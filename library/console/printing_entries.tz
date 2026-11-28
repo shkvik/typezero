@@ -1,0 +1,301 @@
+
+function paddedInto(
+  line: Mut<TextBuilder>,
+  text: Read<string>,
+  suffix: Read<string>,
+  target: int,
+  isAtStart: boolean,
+): void {
+  const gap = target - text.length - suffix.length;
+
+  if (isAtStart) {
+    line.addSpaces(gap);
+  }
+
+  line.add(text);
+  line.add(suffix);
+
+  if (!isAtStart) {
+    line.addSpaces(gap);
+  }
+}
+
+function widestOf(widths: Read<int[]>, column: int, columns: int): int {
+  let widest = 0;
+
+  for (let index = column; index < widths.length; index += columns) {
+    const width = widths[index] ?? 0;
+
+    if (width > widest) {
+      widest = width;
+    }
+  }
+
+  return widest + 2;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the square root of the system library",
+})
+function columnsFor(
+  context: Read<PrintContext>,
+  widths: Read<int[]>,
+  total: int,
+  widest: int,
+  entries: int,
+): int {
+  const actual = widest + 2;
+  const fits = actual * 3 + context.indentation < breakLength();
+  const actualNumber = actual.toDouble();
+  const totalNumber = total.toDouble();
+  if (!fits || !(totalNumber / actualNumber > 5 || widest <= 6)) {
+    return 0;
+  }
+
+  const count = widths.length.toDouble();
+  const average = sqrt(actualNumber - totalNumber / entries.toDouble());
+  const biased = Math.max(actualNumber - 3 - average, 1);
+  const root = sqrt(2.5 * biased * count);
+  let columns = Math.floor(root / biased + 0.5);
+  const width = (breakLength() - context.indentation).toDouble();
+  const room = Math.floor(width / actualNumber);
+
+  columns = Math.min(columns, room);
+  columns = Math.min(columns, (compactLevel() * 4).toDouble());
+  columns = Math.min(columns, 15);
+
+  return Math.trunc(columns).toInt();
+}
+
+function groupedLine(
+  line: Mut<TextBuilder>,
+  output: Read<string[]>,
+  widths: Read<int[]>,
+  lengths: Read<int[]>,
+  from: int,
+  columns: int,
+  isPadStart: boolean,
+): string {
+  const end = Math.min(from + columns, widths.length);
+  let index = from;
+
+  while (index < end - 1) {
+    const entry = output[index] ?? "";
+    const column = lengths[index - from] ?? 0;
+    const padding = column + entry.length - (widths[index] ?? 0);
+
+    paddedInto(line, entry, ", ", padding, isPadStart);
+    index += 1;
+  }
+
+  const last = output[index] ?? "";
+
+  if (isPadStart) {
+    const column = lengths[index - from] ?? 0;
+    const padding = column + last.length - (widths[index] ?? 0) - 2;
+
+    paddedInto(line, last, "", padding, true);
+  } else {
+    line.add(last);
+  }
+
+  return line.taken();
+}
+
+function groupedEntries(
+  context: Read<PrintContext>,
+  output: Read<string[]>,
+  isPadStart: boolean,
+): string[] | undefined {
+  let count = output.length;
+
+  if (arrayLimit() < output.length) {
+    count -= 1;
+  }
+
+  const widths: int[] = [];
+  let total = 0;
+  let widest = 0;
+
+  for (let index = 0; index < count; index++) {
+    const width = textWidth(output[index] ?? "");
+
+    widths.push(width);
+    total += width + 2;
+
+    if (widest < width) {
+      widest = width;
+    }
+  }
+
+  const columns = columnsFor(context, widths, total, widest, output.length);
+  if (columns <= 1) {
+    return undefined;
+  }
+
+  const lengths: int[] = [];
+
+  for (let column = 0; column < columns; column++) {
+    lengths.push(widestOf(widths, column, columns));
+  }
+
+  const grouped: string[] = [];
+  const line = new TextBuilder();
+
+  for (let from = 0; from < count; from += columns) {
+    const made = groupedLine(
+      line,
+      output,
+      widths,
+      lengths,
+      from,
+      columns,
+      isPadStart,
+    );
+
+    grouped.push(made);
+  }
+  if (arrayLimit() < output.length) {
+    grouped.push(output[count] ?? "");
+  }
+
+  return grouped;
+}
+
+function isBelowBreak(lines: Read<string[]>, start: int): boolean {
+  let total = lines.length + start;
+
+  if (total + lines.length > breakLength()) {
+    return false;
+  }
+
+  for (const line of lines) {
+    total += line.length;
+
+    if (total > breakLength()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function joinedInto(
+  out: Mut<TextBuilder>,
+  lines: Read<string[]>,
+  separator: Read<string>,
+  indentation: int,
+): void {
+  for (let index = 0; index < lines.length; index++) {
+    if (index > 0) {
+      out.add(separator);
+      out.addSpaces(indentation);
+    }
+
+    out.add(lines[index] ?? "");
+  }
+}
+
+function hasNewline(lines: Read<string[]>): boolean {
+  for (const line of lines) {
+    if (line.includes("\n")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+class Braces {
+  public readonly open: string;
+  public readonly close: int;
+  public readonly base: string;
+  public readonly prefix: string;
+  public readonly nameBytes: int;
+  public readonly isArray: boolean;
+  public readonly isPadStart: boolean;
+
+  public constructor(
+    open: string,
+    close: int,
+    base: string,
+    prefix: string,
+    nameBytes: int,
+    isArray: boolean,
+    isPadStart: boolean,
+  ) {
+    this.open = open;
+    this.close = close;
+    this.base = base;
+    this.prefix = prefix;
+    this.nameBytes = nameBytes;
+    this.isArray = isArray;
+    this.isPadStart = isPadStart;
+  }
+}
+
+function plainBraces(open: string, close: int, base: string): Braces {
+  return new Braces(open, close, base, "", 0, false, false);
+}
+
+function arrayBraces(open: string, base: string, isPadStart: boolean): Braces {
+  return new Braces(open, 93, base, "", 0, true, isPadStart);
+}
+
+function headInto(out: Mut<TextBuilder>, braces: Read<Braces>): void {
+  if (braces.base.length > 0) {
+    out.add(braces.base);
+    out.addUnit(32);
+  }
+
+  out.add(braces.prefix);
+  out.add(braces.open);
+}
+
+function singleString(
+  context: Read<PrintContext>,
+  out: Mut<TextBuilder>,
+  output: Read<string[]>,
+  depth: int,
+  braces: Read<Braces>,
+): void {
+  const entries = output.length;
+  let braceLength = braces.open.length;
+
+  if (braces.nameBytes > 0) {
+    braceLength += braces.nameBytes + 1;
+  }
+
+  let grouped: string[] | undefined = undefined;
+
+  if (braces.isArray && entries > 6) {
+    grouped = groupedEntries(context, output, braces.isPadStart);
+  }
+
+  const lines = grouped ?? output;
+  const isCompact = context.currentDepth - depth < compactLevel();
+
+  if (isCompact && entries == lines.length) {
+    const indent = context.indentation;
+    const start = lines.length + indent + braceLength + braces.base.length + 10;
+
+    if (isBelowBreak(lines, start) && !hasNewline(lines)) {
+      headInto(out, braces);
+      out.addUnit(32);
+      joinedInto(out, lines, ", ", 0);
+      out.addUnit(32);
+      out.addUnit(braces.close);
+
+      return;
+    }
+  }
+
+  headInto(out, braces);
+  out.addUnit(10);
+  out.addSpaces(context.indentation + 2);
+  joinedInto(out, lines, ",\n", context.indentation + 2);
+  out.addUnit(10);
+  out.addSpaces(context.indentation);
+  out.addUnit(braces.close);
+}

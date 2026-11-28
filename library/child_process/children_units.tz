@@ -1,0 +1,136 @@
+
+class UnitBuffer {
+  private bytes: Raw<uint8>;
+  private capacity: int;
+  public count: int;
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the room is released by the dispose of the buffer",
+  })
+  public constructor() {
+    this.capacity = 256;
+    this.bytes = allocate<uint8>(512);
+    this.count = 0;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells start at the room of the buffer",
+  })
+  public readonly units(): Raw<uint16> {
+    return cellsAt<uint16>(this.bytes, 0);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "callers give a place below the count",
+  })
+  public readonly unitsFrom(at: int): Raw<uint16> {
+    return cellsAt<uint16>(this.bytes, at * 2);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "callers read below the count",
+  })
+  public readonly unitOf(at: int): int {
+    const cells = cellsAt<uint16>(this.bytes, 0);
+
+    return unitAt(cells, at);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the room grows before a unit is put past it",
+  })
+  public push(unit: int): void {
+    if (this.count == this.capacity) {
+      this.capacity = this.capacity * 2;
+      this.bytes = reallocate(this.bytes, this.capacity * 2);
+    }
+
+    const cells = cellsAt<uint16>(this.bytes, 0);
+
+    putUnit(cells, this.count, unit);
+    this.count += 1;
+  }
+
+  public pushText(text: Read<string>): void {
+    for (let index = 0; index < text.length; index++) {
+      this.push(text.charCodeAt(index) ?? 0);
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the range is below the count of the other buffer",
+  })
+  public pushRange(from: Read<UnitBuffer>, start: int, count: int): void {
+    const cells = from.unitsFrom(start);
+
+    for (let index = 0; index < count; index++) {
+      this.push(unitAt(cells, index));
+    }
+  }
+
+  public readonly textOf(start: int, count: int): string {
+    return textOfUnits(this.unitsFrom(start), count);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the room came from allocate and nothing else holds it",
+  })
+  public [Symbol.dispose](): void {
+    release(this.bytes);
+  }
+}
+
+class ByteStore {
+  private bytes: Raw<uint8>;
+  private capacity: int;
+  public count: int;
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the room is released by the dispose of the store",
+  })
+  public constructor() {
+    this.capacity = 4096;
+    this.bytes = allocate<uint8>(4096);
+    this.count = 0;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the room grows before the bytes are copied into it",
+  })
+  public append(from: Raw<uint8>, count: int): void {
+    if (this.count + count > this.capacity) {
+      let capacity = this.capacity * 2 + 4096;
+
+      if (capacity < this.count + count) {
+        capacity = this.count + count;
+      }
+
+      this.capacity = capacity;
+      this.bytes = reallocate(this.bytes, capacity);
+    }
+
+    copyCells(from, 0, this.bytes, this.count, count);
+    this.count += count;
+  }
+
+  public readonly textIn(encoding: int): string {
+    return textOfBytes(this.bytes, this.count, encoding);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the room came from allocate and nothing else holds it",
+  })
+  public [Symbol.dispose](): void {
+    release(this.bytes);
+  }
+}

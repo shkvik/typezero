@@ -1,0 +1,172 @@
+import { CallExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { Lowering } from "../lowering.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  kByteCell,
+  kDecimalType,
+  kFailedSlot,
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kStringType,
+  kTextModule,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private rawOfBits(frame: Frame, call: CallExpr): IrValue | undefined {
+    const bits = this.rawArgument(frame, call, 0);
+    if (bits == undefined) {
+      return undefined;
+    }
+
+    const value = frame.made.cast(IrOpcode.IntToPtr, bits, kPointerType);
+
+    return this.rawMade(call, value);
+  }
+
+  private bitsOfRaw(frame: Frame, call: CallExpr): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    if (raw == undefined) {
+      return undefined;
+    }
+
+    const bits = frame.made.cast(IrOpcode.PtrToInt, raw, kIntType);
+    const tz = this.values.types.store.integer(64, true);
+
+    return { type: kIntType, value: bits, tz };
+  }
+
+  private comparedCall(frame: Frame, call: CallExpr): IrValue | undefined {
+    const compare = this.rawArgument(frame, call, 0);
+    const context = this.rawArgument(frame, call, 1);
+    const first = this.rawArgument(frame, call, 2);
+    const second = this.rawArgument(frame, call, 3);
+    if (compare == undefined || context == undefined) {
+      return undefined;
+    }
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const params = [kPointerType, kPointerType, kPointerType];
+    const signature = this.ir.signature(kFlagType, params);
+    const args = [context, first, second];
+    const result = frame.made.indirectCall(signature, compare, args);
+    const value = frame.made.cast(IrOpcode.SExt, result, kIntType);
+    const tz = this.values.types.store.integer(64, false);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private droppedCall(frame: Frame, call: CallExpr): IrValue | undefined {
+    const drop = this.rawArgument(frame, call, 0);
+    const object = this.rawArgument(frame, call, 1);
+    if (drop == undefined || object == undefined) {
+      return undefined;
+    }
+
+    const signature = this.ir.signature(kVoidType, [kPointerType]);
+
+    frame.made.indirectCall(signature, drop, [object]);
+
+    return this.nothing();
+  }
+
+  private threadStateOf(call: CallExpr): IrValue | undefined {
+    const state = this.ir.external(kFailedSlot, "{ ptr }");
+
+    return this.rawMade(call, state);
+  }
+
+  private cellsAtMade(frame: Frame, call: CallExpr): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const offset = this.intArgument(frame, call, 1);
+    if (raw == undefined || offset == undefined) {
+      return undefined;
+    }
+
+    const value = frame.made.element(kByteCell, raw, offset);
+
+    return this.rawMade(call, value);
+  }
+
+  private textTreeMade(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const args = tree.argumentsOf(call.argsList);
+    const first = args[0];
+    const second = args[1];
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const left = this.value(frame, tree.exprOf(first.exprId));
+    const right = this.value(frame, tree.exprOf(second.exprId));
+    if (left == undefined || right == undefined) {
+      return undefined;
+    }
+    if (left.type != kStringType || right.type != kStringType) {
+      return undefined;
+    }
+
+    const name = "treeMade";
+    const target: RuntimeTarget = { module: kTextModule, name };
+    const pieces = [left, right];
+    const made = this.runtimeFunctionCall(frame, target, [], pieces, call.loc);
+
+    this.dropping(frame, left);
+    this.dropping(frame, right);
+
+    return made;
+  }
+
+  private decimalPiece(
+    frame: Frame,
+    call: CallExpr,
+    isMeta: boolean,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, tree.exprOf(argument.exprId));
+    if (given == undefined || given.type != kDecimalType) {
+      return undefined;
+    }
+
+    let index = 0;
+    let tz = this.values.types.store.integer(64, false);
+
+    if (isMeta) {
+      index = 1;
+      tz = this.values.types.store.integer(64, true);
+    }
+
+    const value = frame.made.extract(given.value, index);
+
+    this.dropping(frame, given);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private decimalJoined(frame: Frame, call: CallExpr): IrValue | undefined {
+    const coef = this.intArgument(frame, call, 0);
+    const meta = this.rawArgument(frame, call, 1);
+    if (coef == undefined || meta == undefined) {
+      return undefined;
+    }
+
+    const empty = this.ir.zero(kDecimalType);
+    const half = frame.made.insert(empty, coef, 0);
+    const value = frame.made.insert(half, meta, 1);
+    const tz = this.values.types.store.plain(TypeKind.Decimal);
+
+    return { type: kDecimalType, value, tz, owned: true };
+  }
+}

@@ -518,6 +518,12 @@ partial class Lowering {
     if (object.owned != true) {
       return loaded;
     }
+    if (this.isSingleOwner(loaded) && this.isSingleOwner(object)) {
+      frame.made.store(this.ir.zero(place.type), place.pointer);
+      this.dropping(frame, object);
+
+      return { type: loaded.type, value: loaded.value, tz: seen, owned: true };
+    }
 
     const kept = this.owning(frame, loaded);
 

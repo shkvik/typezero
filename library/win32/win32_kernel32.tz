@@ -1,0 +1,309 @@
+import { wstring } from "tz:ffi";
+import { Raw } from "tz:unsafe";
+
+@InPlace({ layout: Layout.C })
+export class FileAttributeData {
+  public attributes: uint32;
+  public createdLow: uint32;
+  public createdHigh: uint32;
+  public accessedLow: uint32;
+  public accessedHigh: uint32;
+  public writtenLow: uint32;
+  public writtenHigh: uint32;
+  public sizeHigh: uint32;
+  public sizeLow: uint32;
+}
+
+export declare function GetFileAttributesExW(
+  name: Read<wstring>,
+  level: int32,
+  data: FileAttributeData,
+): int32;
+
+export declare function GetCurrentDirectoryW(
+  size: uint32,
+  buffer: Raw<uint16>,
+): uint32;
+
+export declare function GetEnvironmentVariableW(
+  name: Read<wstring>,
+  buffer: Raw<uint16>,
+  size: uint32,
+): uint32;
+
+export declare function GetLastError(): uint32;
+
+export declare function SetLastError(code: uint32): void;
+
+@InPlace({ layout: Layout.C })
+export class LargeInteger {
+  public value: int;
+}
+
+@InPlace({ layout: Layout.C })
+export class FileTime {
+  public low: uint32;
+  public high: uint32;
+}
+
+export declare function QueryPerformanceCounter(count: LargeInteger): int32;
+
+export declare function QueryPerformanceFrequency(
+  frequency: LargeInteger,
+): int32;
+
+export declare function GetSystemTimePreciseAsFileTime(time: FileTime): void;
+
+export declare function GetModuleFileNameW(
+  module: Raw<uint8>,
+  buffer: Raw<uint16>,
+  size: uint32,
+): uint32;
+
+export declare function GetFileAttributesW(name: Read<wstring>): uint32;
+
+export declare function CreateFileW(
+  name: Read<wstring>,
+  access: uint32,
+  share: uint32,
+  security: Raw<uint8>,
+  disposition: uint32,
+  flags: uint32,
+  template: Raw<uint8>,
+): Raw<uint8>;
+
+export declare function ReadFile(
+  file: Raw<uint8>,
+  buffer: Raw<uint8>,
+  size: uint32,
+  read: Raw<uint32>,
+  overlapped: Raw<uint8>,
+): int32;
+
+export declare function GetFileSizeEx(
+  file: Raw<uint8>,
+  size: LargeInteger,
+): int32;
+
+export declare function CloseHandle(file: Raw<uint8>): int32;
+
+export declare function GetFinalPathNameByHandleW(
+  file: Raw<uint8>,
+  buffer: Raw<uint16>,
+  size: uint32,
+  flags: uint32,
+): uint32;
+
+export declare function GetFileInformationByHandle(
+  file: Raw<uint8>,
+  info: Raw<uint8>,
+): int32;
+
+export declare function GetFileInformationByHandleEx(
+  file: Raw<uint8>,
+  kind: int32,
+  info: Raw<uint8>,
+  size: uint32,
+): int32;
+
+export declare function CreateDirectoryW(
+  name: Read<wstring>,
+  security: Raw<uint8>,
+): int32;
+
+export declare function RemoveDirectoryW(name: Read<wstring>): int32;
+
+export declare function DeleteFileW(name: Read<wstring>): int32;
+
+export declare function SetFileAttributesW(
+  name: Read<wstring>,
+  attributes: uint32,
+): int32;
+
+export declare function FindFirstFileExW(
+  name: Read<wstring>,
+  level: int32,
+  data: Raw<uint8>,
+  search: int32,
+  filter: Raw<uint8>,
+  flags: uint32,
+): Raw<uint8>;
+
+export declare function FindNextFileW(
+  find: Raw<uint8>,
+  data: Raw<uint8>,
+): int32;
+
+export declare function FindClose(find: Raw<uint8>): int32;
+
+export declare function CopyFileW(
+  from: Read<wstring>,
+  to: Read<wstring>,
+  failIfExists: int32,
+): int32;
+
+export declare function GetTickCount(): uint32;
+
+@InPlace({ layout: Layout.C })
+export class StartupInfo {
+  public size: uint32;
+  public reserved: Raw<uint8>;
+  public desktop: Raw<uint8>;
+  public title: Raw<uint8>;
+  public x: uint32;
+  public y: uint32;
+  public width: uint32;
+  public height: uint32;
+  public columns: uint32;
+  public rows: uint32;
+  public fill: uint32;
+  public flags: uint32;
+  public showWindow: uint16;
+  public reservedSize: uint16;
+  public reservedBlock: Raw<uint8>;
+  public input: Raw<uint8>;
+  public output: Raw<uint8>;
+  public errors: Raw<uint8>;
+  public attributes: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+export class ProcessInformation {
+  public process: Raw<uint8>;
+  public thread: Raw<uint8>;
+  public processId: uint32;
+  public threadId: uint32;
+}
+
+export declare function CreateNamedPipeW(
+  name: Read<wstring>,
+  openMode: uint32,
+  pipeMode: uint32,
+  instances: uint32,
+  outSize: uint32,
+  inSize: uint32,
+  timeout: uint32,
+  security: Raw<uint8>,
+): Raw<uint8>;
+
+export declare function ConnectNamedPipe(
+  pipe: Raw<uint8>,
+  overlapped: Raw<uint8>,
+): int32;
+
+export declare function CreateEventW(
+  security: Raw<uint8>,
+  isManual: int32,
+  isSet: int32,
+  name: Raw<uint8>,
+): Raw<uint8>;
+
+export declare function ResetEvent(event: Raw<uint8>): int32;
+
+export declare function GetOverlappedResult(
+  file: Raw<uint8>,
+  overlapped: Raw<uint8>,
+  count: Raw<uint32>,
+  isWaiting: int32,
+): int32;
+
+export declare function CancelIoEx(
+  file: Raw<uint8>,
+  overlapped: Raw<uint8>,
+): int32;
+
+export declare function GetEnvironmentStringsW(): Raw<uint8>;
+
+export declare function FreeEnvironmentStringsW(block: Raw<uint8>): int32;
+
+export declare function CompareStringOrdinal(
+  first: Raw<uint16>,
+  firstCount: int32,
+  second: Raw<uint16>,
+  secondCount: int32,
+  isIgnoringCase: int32,
+): int32;
+
+export declare function GetShortPathNameW(
+  long: Raw<uint16>,
+  short: Raw<uint16>,
+  size: uint32,
+): uint32;
+
+export declare function NeedCurrentDirectoryForExePathW(
+  name: Read<wstring>,
+): int32;
+
+export declare function InitializeProcThreadAttributeList(
+  list: Raw<uint8>,
+  count: uint32,
+  flags: uint32,
+  size: Raw<uint64>,
+): int32;
+
+export declare function UpdateProcThreadAttribute(
+  list: Raw<uint8>,
+  flags: uint32,
+  attribute: uint64,
+  value: Raw<uint64>,
+  size: uint64,
+  previous: Raw<uint8>,
+  returned: Raw<uint8>,
+): int32;
+
+export declare function DeleteProcThreadAttributeList(list: Raw<uint8>): void;
+
+export declare function CreateProcessW(
+  application: Read<wstring>,
+  line: Raw<uint16>,
+  processSecurity: Raw<uint8>,
+  threadSecurity: Raw<uint8>,
+  isInheriting: int32,
+  flags: uint32,
+  environment: Raw<uint16>,
+  folder: Read<wstring>,
+  startup: StartupInfo,
+  info: ProcessInformation,
+): int32;
+
+export declare function CreateJobObjectW(
+  security: Raw<uint8>,
+  name: Raw<uint8>,
+): Raw<uint8>;
+
+export declare function SetInformationJobObject(
+  job: Raw<uint8>,
+  kind: int32,
+  info: Raw<uint8>,
+  size: uint32,
+): int32;
+
+export declare function AssignProcessToJobObject(
+  job: Raw<uint8>,
+  process: Raw<uint8>,
+): int32;
+
+export declare function GetCurrentProcess(): Raw<uint8>;
+
+export declare function GetCurrentProcessId(): uint32;
+
+export declare function WaitForMultipleObjects(
+  count: uint32,
+  handles: Raw<uint64>,
+  isAll: int32,
+  milliseconds: uint32,
+): uint32;
+
+export declare function TerminateProcess(
+  process: Raw<uint8>,
+  code: uint32,
+): int32;
+
+export declare function GetExitCodeProcess(
+  process: Raw<uint8>,
+  code: Raw<uint32>,
+): int32;
+
+export declare function IsDebuggerPresent(): int32;
+
+export declare function DebugBreak(): void;

@@ -1,0 +1,68 @@
+function lengths(): void {
+  const texts: string[] = [
+    "hello",
+    "héllo",
+    "日本語",
+    "a😀b",
+    "",
+    "\ud800x",
+  ];
+
+  for (const text of texts) {
+    const utf8 = Buffer.byteLength(text, "utf8");
+    const wide = Buffer.byteLength(text, "utf16le");
+    const latin = Buffer.byteLength(text, "latin1");
+
+    console.log(utf8, wide, latin);
+  }
+
+  const padded = Buffer.byteLength("aGVsbG8=", "base64");
+
+  console.log(padded, Buffer.byteLength("abcd", "hex"));
+
+  const url = Buffer.byteLength("aGVsbG8", "BASE64URL");
+
+  console.log(url, Buffer.byteLength("abc", "Hex"));
+}
+
+function texts(): void {
+  const buffer = Buffer.from("héllo wörld 日本", "utf8");
+
+  console.log(buffer.toString("utf8"), buffer.toString("hex"));
+  console.log(buffer.toString("base64"), buffer.toString("latin1", 1, 5));
+  console.log(buffer.toString("utf8", 3), buffer.toString("ascii", 0, 4));
+  console.log(buffer.toString("utf16le", 0, 6), buffer.toString("utf8", 20, 2));
+
+  const decoded = Buffer.from("aGVs bG8=", "base64");
+  const hexed = Buffer.from("48656c6c6fZZ", "hex");
+  const wide = Buffer.from("hi€", "utf16le");
+
+  console.log(decoded.toString("utf8"), hexed.toString("utf8"));
+  console.log(wide.toString("hex"), wide.toString("utf16le"));
+}
+
+function searches(): void {
+  const buffer = Buffer.from("one two three two one", "utf8");
+
+  console.log(buffer.indexOf("two"), buffer.lastIndexOf("two"));
+  console.log(buffer.indexOf("two", 5), buffer.indexOf("two", -5));
+  console.log(buffer.includes("three"), buffer.includes("four"));
+  console.log(buffer.indexOf(""), buffer.lastIndexOf("one", 10));
+
+  const hexed = buffer.indexOf("74776f", 0, "hex");
+
+  console.log(hexed, buffer.indexOf("dHdv", 0, "base64"));
+
+  const wide = Buffer.from("ab€cd", "utf16le");
+  const euro = wide.indexOf("€", 0, "utf16le");
+
+  console.log(euro, wide.includes("cd", 0, "ucs2"));
+}
+
+function main(): void {
+  lengths();
+  texts();
+  searches();
+}
+
+main();

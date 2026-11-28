@@ -86,11 +86,12 @@ partial class Lowering {
 
     const hasEnd = this.ir.integer(kFlagType, `${end.given}`);
     const result = this.slicedType(call, object);
-    const name = this.pick(
+    const picked = this.pick(
       this.isLookingArray(result),
       kArraySliceLent,
       kArraySlice,
     );
+    const name = this.countsHelper(picked);
     const slicing = this.ir.declare(name, kPointerType, [
       kPointerType,
       kIntType,
@@ -137,7 +138,8 @@ partial class Lowering {
     }
 
     const slots = frame.made.slot(kPointerType, "drain.slots");
-    const splicing = this.ir.declare(kArraySplice, kPointerType, [
+    const splicingName = this.countsHelper(kArraySplice);
+    const splicing = this.ir.declare(splicingName, kPointerType, [
       kPointerType,
       kIntType,
       kIntType,
@@ -187,11 +189,14 @@ partial class Lowering {
       return undefined;
     }
 
-    const cutting = this.ir.declare(kArraySetLength, kVoidType, [
+    const cuttingName = this.countsHelper(kArraySetLength);
+
+    const cutting = this.ir.declare(cuttingName, kVoidType, [
       kPointerType,
       kIntType,
     ]);
-    const appending = this.ir.declare(kArrayAppend, kVoidType, [
+    const appendingName = this.countsHelper(kArrayAppend);
+    const appending = this.ir.declare(appendingName, kVoidType, [
       kPointerType,
       kPointerType,
     ]);
@@ -483,7 +488,9 @@ partial class Lowering {
       return array.value;
     }
 
-    const copying = this.ir.declare(kArraySlice, kPointerType, [
+    const copyingName = this.countsHelper(kArraySlice);
+
+    const copying = this.ir.declare(copyingName, kPointerType, [
       kPointerType,
       kIntType,
       kIntType,
@@ -505,7 +512,8 @@ partial class Lowering {
     isCopy: boolean,
   ): void {
     const isMoved = !isCopy && other.owned == true;
-    const name = this.pick(isMoved, kArrayAppendTaken, kArrayAppend);
+    const picked = this.pick(isMoved, kArrayAppendTaken, kArrayAppend);
+    const name = this.countsHelper(picked);
     const appending = this.ir.declare(name, kVoidType, [
       kPointerType,
       kPointerType,

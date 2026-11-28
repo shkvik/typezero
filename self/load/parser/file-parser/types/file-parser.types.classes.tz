@@ -51,6 +51,7 @@ export type ClassDeclDraft = {
   isAbstract: boolean;
   isPartial: boolean;
   readonly isInPlace: boolean;
+  readonly isCLayout: boolean;
   readonly base?: TypeRef;
   readonly baseExpr?: Expr;
   readonly baseArgs: TypeRef[];

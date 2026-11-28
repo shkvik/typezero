@@ -1,0 +1,494 @@
+import { panic } from "tz:intrinsics";
+import {
+  Raw,
+  allocate,
+  bitsRaw,
+  cellsAt,
+  copyCells,
+  dropped,
+  peekAt,
+  putAt,
+  putUnit,
+  rawBits,
+  release,
+  threadState,
+  viewAt,
+} from "tz:unsafe";
+import {
+  ArrayHead,
+  DecimalHead,
+  FieldHead,
+  LayoutHead,
+  ObjectHead,
+  ResultTypeHead,
+  TextHead,
+  ThreadHead,
+  TypeHead,
+} from "tz:core";
+import { textFreed } from "tz:text";
+import { decimalFreed } from "tz:decimals";
+
+function arrayLengthMost(): int {
+  return 1073741823;
+}
+
+function arrayHeadSize(): int {
+  return 40;
+}
+
+function heapBit(): uint64 {
+  return 9223372036854775808;
+}
+
+function methodOffset(): uint32 {
+  return 4294967295;
+}
+
+function getterOffset(): uint32 {
+  return 4294967294;
+}
+
+function unionSlots(): int {
+  return 20;
+}
+
+function fieldSize(): int {
+  return 24;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds a pointer",
+})
+function pointerAt(place: Raw<uint8>, offset: int): Raw<uint8> {
+  const cells = cellsAt<uint64>(place, offset);
+
+  return bitsRaw(peekAt(cells, 0));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds eight bytes",
+})
+function bitsAt(place: Raw<uint8>, offset: int): uint64 {
+  const cells = cellsAt<uint64>(place, offset);
+
+  return peekAt(cells, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds four bytes",
+})
+function tagAt(place: Raw<uint8>): uint32 {
+  const cells = cellsAt<uint32>(place, 0);
+
+  return peekAt(cells, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a pointer is only compared with zero",
+})
+function rawZero(raw: Raw<uint8>): boolean {
+  return rawBits(raw) == 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description starts with its kind and size",
+})
+function sizeOf(type: Raw<uint8>): int {
+  const head = viewAt<TypeHead>(type, 0);
+
+  return head.size.toInt();
+}
+
+function slotOf(type: Raw<uint8>, slot: int): Raw<uint8> {
+  return pointerAt(type, 16 + slot * 8);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a layout keeps count fields of 24 bytes",
+})
+function fieldAt(layout: Raw<uint8>, index: int): Raw<uint8> {
+  const head = viewAt<LayoutHead>(layout, 0);
+
+  return cellsAt<uint8>(head.fields, index * fieldSize());
+}
+
+function isHeldField(offset: uint32): boolean {
+  return offset != methodOffset() && offset != getterOffset();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description is read as C wrote it",
+})
+export function isManaged(type: Raw<uint8>): boolean {
+  const head = viewAt<TypeHead>(type, 0);
+  const kind = head.kind;
+
+  if (kind == 5 || kind == 6 || kind == 9 || kind == 10) {
+    return true;
+  }
+  if (kind == 11 || kind == 13 || kind == 16) {
+    return true;
+  }
+  if (kind == 7) {
+    return isManaged(head.inner);
+  }
+  if (kind == 12) {
+    const result = viewAt<ResultTypeHead>(type, 0);
+
+    return isManaged(result.inner) || isManaged(result.error);
+  }
+  if (kind == 14) {
+    return isUnionManaged(type);
+  }
+  if (kind == 25) {
+    return isRecordManaged(head.inner);
+  }
+
+  return false;
+}
+
+function isUnionManaged(type: Raw<uint8>): boolean {
+  for (let slot = 1; slot < unionSlots(); slot++) {
+    const part = slotOf(type, slot);
+
+    if (!rawZero(part) && isManaged(part)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a layout keeps count fields",
+})
+function isRecordManaged(layout: Raw<uint8>): boolean {
+  const head = viewAt<LayoutHead>(layout, 0);
+  const count = head.count.toInt();
+
+  for (let index = 0; index < count; index++) {
+    const place = fieldAt(layout, index);
+    const field = viewAt<FieldHead>(place, 0);
+
+    if (isHeldField(field.offset) && isManaged(field.type)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a heap text starts with its count",
+})
+function textReleased(place: Raw<uint8>): void {
+  const meta = bitsAt(place, 8);
+  if ((meta & heapBit()) == 0) {
+    return;
+  }
+
+  const object = pointerAt(place, 0);
+  const head = viewAt<TextHead>(object, 0);
+
+  head.count -= 1;
+
+  if (head.count == 0) {
+    textFreed(object);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a heap decimal starts with its count",
+})
+function decimalReleased(place: Raw<uint8>): void {
+  const meta = bitsAt(place, 8);
+  if ((meta & heapBit()) == 0) {
+    return;
+  }
+
+  const object = pointerAt(place, 0);
+  const head = viewAt<DecimalHead>(object, 0);
+
+  head.count -= 1;
+
+  if (head.count == 0) {
+    decimalFreed(object);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an array starts with its count",
+})
+function arrayReleased(array: Raw<uint8>): void {
+  if (rawZero(array)) {
+    return;
+  }
+
+  const head = viewAt<ArrayHead>(array, 0);
+
+  head.count -= 1;
+
+  if (head.count == 0) {
+    arrayFreed(array);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an object starts with its count and its layout, the drop first",
+})
+function objectReleased(object: Raw<uint8>): void {
+  if (rawZero(object)) {
+    return;
+  }
+
+  const head = viewAt<ObjectHead>(object, 0);
+
+  head.count -= 1;
+
+  if (head.count == 0) {
+    const layout = viewAt<LayoutHead>(head.layout, 0);
+
+    dropped(layout.drop, object);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value has the shape its type description gives",
+})
+export function valueReleased(type: Raw<uint8>, value: Raw<uint8>): void {
+  const head = viewAt<TypeHead>(type, 0);
+  const kind = head.kind;
+
+  if (kind == 14) {
+    unionReleased(type, value);
+  } else if (kind == 5) {
+    textReleased(value);
+  } else if (kind == 6) {
+    arrayReleased(pointerAt(value, 0));
+  } else if (kind == 7) {
+    valueReleased(head.inner, value);
+  } else if (kind == 9) {
+    objectReleased(pointerAt(value, 8));
+  } else if (kind == 10 || kind == 16) {
+    objectReleased(pointerAt(value, 0));
+  } else if (kind == 11) {
+    decimalReleased(value);
+  } else if (kind == 12) {
+    resultReleased(type, value);
+  } else if (kind == 25) {
+    recordReleased(head.inner, value);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a union value keeps its tag first and the part after eight bytes",
+})
+function unionReleased(type: Raw<uint8>, value: Raw<uint8>): void {
+  const tag = tagAt(value).toInt();
+  if (tag == 0) {
+    return;
+  }
+
+  const part = slotOf(type, tag);
+  const head = viewAt<TypeHead>(part, 0);
+
+  if (head.kind != 15) {
+    valueReleased(part, cellsAt<uint8>(value, 8));
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a result keeps its value and its error at the offsets of its type",
+})
+function resultReleased(type: Raw<uint8>, value: Raw<uint8>): void {
+  const result = viewAt<ResultTypeHead>(type, 0);
+  const valueAt = result.valueOffset.toInt();
+  const errorAt = result.errorOffset.toInt();
+
+  valueReleased(result.inner, cellsAt<uint8>(value, valueAt));
+  valueReleased(result.error, cellsAt<uint8>(value, errorAt));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a record keeps its fields at the offsets of its layout",
+})
+function recordReleased(layout: Raw<uint8>, value: Raw<uint8>): void {
+  const head = viewAt<LayoutHead>(layout, 0);
+  const count = head.count.toInt();
+
+  for (let index = 0; index < count; index++) {
+    const place = fieldAt(layout, index);
+    const field = viewAt<FieldHead>(place, 0);
+
+    if (isHeldField(field.offset)) {
+      const at = field.offset.toInt();
+
+      valueReleased(field.type, cellsAt<uint8>(value, at));
+    }
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the place has room for the bytes",
+})
+export function zeroFilled(place: Raw<uint8>, bytes: int): void {
+  const words = bytes / 8;
+  const cells = cellsAt<uint64>(place, 0);
+
+  for (let index = 0; index < words; index++) {
+    putAt(cells, index, 0);
+  }
+  for (let index = words * 8; index < bytes; index++) {
+    putUnit(place, index, 0);
+  }
+}
+
+function lengthFailed(length: int): never {
+  if (length < 0) {
+    panic(`internal error: the array length ${length}`);
+  }
+
+  const most = arrayLengthMost();
+
+  panic(`array length ${length} exceeds the maximum of ${most}`);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array has the 40 bytes of ArrayHead and room for its items",
+})
+export function arrayMade(
+  type: Raw<uint8>,
+  length: int,
+  capacity: int,
+): Raw<uint8> {
+  let room = capacity;
+
+  if (room < length) {
+    room = length;
+  }
+  if (length < 0) {
+    lengthFailed(length);
+  }
+  if (room > arrayLengthMost()) {
+    lengthFailed(room);
+  }
+
+  const size = sizeOf(type);
+  const array = allocate<uint8>(arrayHeadSize() + room * size);
+  const head = viewAt<ArrayHead>(array, 0);
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  head.count = 1;
+  head.type = type;
+  head.data = cellsAt<uint8>(array, arrayHeadSize());
+  head.length = length.toUint32();
+  head.capacity = room.toUint32();
+  head.alloc = bitsRaw(0);
+
+  if (length > 0) {
+    const bytes = length * size;
+
+    zeroFilled(head.data, bytes);
+  }
+
+  thread.liveArrays += 1;
+
+  return array;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the items move to a new room of the same item size",
+})
+export function arrayGrown(array: Raw<uint8>, least: int): void {
+  if (least > arrayLengthMost()) {
+    lengthFailed(least);
+  }
+
+  const head = viewAt<ArrayHead>(array, 0);
+  const length = head.length.toInt();
+  let capacity = length + length / 2 + 8;
+
+  if (capacity < least) {
+    capacity = least;
+  }
+  if (capacity > arrayLengthMost()) {
+    capacity = arrayLengthMost();
+  }
+
+  const size = sizeOf(head.type);
+  const buffer = allocate<uint8>(capacity * size);
+
+  if (length > 0) {
+    copyCells(head.data, 0, buffer, 0, length * size);
+  }
+
+  release(head.alloc);
+  head.alloc = buffer;
+  head.data = buffer;
+  head.capacity = capacity.toUint32();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "no one counts the array any more",
+})
+export function arrayFreed(array: Raw<uint8>): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const type = head.type;
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  if (isManaged(type)) {
+    const size = sizeOf(type);
+    const count = head.length.toInt();
+
+    for (let index = 0; index < count; index++) {
+      valueReleased(type, cellsAt<uint8>(head.data, index * size));
+    }
+  }
+
+  release(head.alloc);
+  release(array);
+  thread.liveArrays -= 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the object is counted as live until it is freed",
+})
+export function objectMade(size: int): Raw<uint8> {
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  thread.liveObjects += 1;
+
+  return allocate<uint8>(size);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "no one counts the object any more",
+})
+export function objectFreed(object: Raw<uint8>): void {
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  thread.liveObjects -= 1;
+  release(object);
+}

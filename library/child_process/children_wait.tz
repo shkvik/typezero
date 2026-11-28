@@ -1,0 +1,168 @@
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the count cell is written by the system",
+})
+function readCompleted(run: Mut<ChildRun>, index: int): boolean {
+  const handle = run.serverAt(index);
+  const got = frameCells<uint32>(1);
+
+  putUnit(got, 0, 0);
+
+  const overlapped = run.overlappedAt(index);
+  const isDone = GetOverlappedResult(handle, overlapped, got, 0) != 0;
+  let error: uint32 = 0;
+
+  if (!isDone) {
+    error = GetLastError();
+  }
+
+  run.pendingSet(index, false);
+
+  if (index == 0) {
+    if (!isDone) {
+      if (error == brokenPipeError() || error == noDataError()) {
+        run.pipeErrorSet(brokenCode());
+      } else {
+        run.pipeErrorSet(codeOfWindows(error));
+      }
+    }
+
+    run.pipeClosed(index);
+
+    return false;
+  }
+  if (!isDone) {
+    if (error != brokenPipeError()) {
+      run.pipeErrorSet(codeOfWindows(error));
+    }
+
+    run.pipeClosed(index);
+
+    return false;
+  }
+
+  const count = unitAt(got, 0);
+
+  run.stored(index, count);
+  run.buffered += count;
+
+  if (run.buffered > outputLimit()) {
+    run.errorSet(noBuffersCode());
+    run.overflow = index;
+
+    return true;
+  }
+
+  run.readStarted(index);
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the code cell is written by the system",
+})
+function childStopped(run: Mut<ChildRun>, process: Raw<uint8>): void {
+  if (TerminateProcess(process, 1) != 0) {
+    run.signal = 15;
+
+    return;
+  }
+
+  const error = GetLastError();
+  const code = frameCells<uint32>(1);
+
+  putUnit(code, 0, 0);
+
+  if (error == 5 && GetExitCodeProcess(process, code) != 0) {
+    if (unitAt(code, 0) != 259) {
+      return;
+    }
+  }
+
+  run.errorSet(codeOfWindows(error));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the wait list has four places: the process and three pipes",
+})
+function childWaited(run: Mut<ChildRun>, process: Raw<uint8>): void {
+  let isExited = false;
+  let isKilled = false;
+
+  for (let index = 1; index < 3; index++) {
+    if (rawBits(run.serverAt(index)) != 0) {
+      run.readStarted(index);
+    }
+  }
+
+  run.pipeClosed(0);
+
+  const waits = frameCells<uint64>(4);
+  const which = frameCells<int>(4);
+
+  while (true) {
+    let count = 0;
+
+    if (!isExited) {
+      putAt(waits, 0, rawBits(process));
+      putUnit(which, 0, -1);
+      count = 1;
+    }
+
+    for (let index = 0; index < 3; index++) {
+      const isOpen = rawBits(run.serverAt(index)) != 0;
+
+      if (isOpen && run.isPending(index)) {
+        putAt(waits, count, rawBits(run.eventAt(index)));
+        putUnit(which, count, index);
+        count += 1;
+      }
+    }
+    if (count == 0) {
+      break;
+    }
+
+    const total = count.toUint32();
+    const result = WaitForMultipleObjects(total, waits, 0, 4294967295);
+    let isStopping = false;
+
+    if (result == 258) {
+      run.errorSet(timedOutCode());
+      isStopping = true;
+    } else if (result < total) {
+      const index = unitAt(which, result.toInt());
+      if (index < 0) {
+        isExited = true;
+
+        continue;
+      }
+
+      isStopping = readCompleted(run, index);
+    } else {
+      run.errorSet(codeOfWindows(GetLastError()));
+      isStopping = true;
+    }
+    if (isStopping && !isKilled) {
+      isKilled = true;
+
+      if (!isExited) {
+        childStopped(run, process);
+      }
+
+      for (let index = 0; index < 3; index++) {
+        run.pipeClosed(index);
+      }
+    }
+  }
+
+  const code = frameCells<uint32>(1);
+
+  putUnit(code, 0, 0);
+  GetExitCodeProcess(process, code);
+  run.status = signedOf(unitAt(code, 0));
+  CloseHandle(process);
+  run.allClosed();
+}

@@ -16,11 +16,10 @@ import {
   kFlagType,
   kIntType,
   kPointerType,
-  kStringCompare,
-  kStringEqual,
+  kTextModule,
   kWideType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private comparison(frame: Frame, expr: BinaryExpr): IrValue | undefined {
@@ -233,19 +232,26 @@ partial class Lowering {
     left: IrValue,
     right: IrValue,
   ): LLVMValue {
-    const first = this.stringParts(frame, left);
-    const second = this.stringParts(frame, right);
-    const parts = first.concat(second);
-    const zero = this.ir.zero(kFlagType);
     const isEquality = op == BinaryOp.Eq || op == BinaryOp.Ne;
+    const loc = this.statementLoc;
     if (isEquality) {
-      const equal = this.runtimeValue(frame, kStringEqual, kFlagType, parts);
-      const predicate = this.equalFlagPredicate(op);
+      const target: RuntimeTarget = { module: kTextModule, name: "equals" };
+      const args = [left, right];
+      const found = this.runtimeFunctionCall(frame, target, [], args, loc);
+      const truth = this.ir.integer(kBooleanType, "1");
+      const equal = found?.value ?? truth;
+      if (op == BinaryOp.Eq) {
+        return equal;
+      }
 
-      return frame.made.integerCompare(predicate, equal, zero);
+      return frame.made.binary(IrOpcode.Xor, equal, truth);
     }
 
-    const order = this.runtimeValue(frame, kStringCompare, kFlagType, parts);
+    const target: RuntimeTarget = { module: kTextModule, name: "compare" };
+    const args = [left, right];
+    const found = this.runtimeFunctionCall(frame, target, [], args, loc);
+    const zero = this.ir.zero(kIntType);
+    const order = found?.value ?? zero;
     const predicate = this.integerPredicate(op, false);
 
     return frame.made.integerCompare(predicate, order, zero);

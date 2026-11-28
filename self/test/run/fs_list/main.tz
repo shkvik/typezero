@@ -1,0 +1,69 @@
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+
+function cleaned(text: string, folder: string): string {
+  const here = resolve(".");
+  const inFolder = text.replaceAll(folder, "<tmp>");
+
+  return inFolder.replaceAll(here, "<here>").replaceAll(tmpdir(), "<os>");
+}
+
+function listed(label: string, path: string, folder: string): void {
+  const read = readdirSync(path);
+
+  if (read.isOk()) {
+    console.log(label, read.value.length, read.value.join(","));
+  } else {
+    const error = read.error;
+
+    console.log(label, error.kind, error.code, error.syscall);
+    console.log("  ", cleaned(error.message, folder));
+  }
+}
+
+function main(): void {
+  const nulPath = `a${String.fromCharCode(0)}b`;
+  const made = mkdtempSync(join(tmpdir(), "tz-list-"));
+  if (made.isErr()) {
+    return;
+  }
+
+  const folder = made.value;
+
+  listed("empty", folder, folder);
+
+  const names = ["b.txt", "a.txt", "Ж.txt", "с пробелом.tz", "UPPER.TXT", "z", "_x", "10", "9"];
+
+  for (const name of names) {
+    copyFileSync("main.tz", join(folder, name));
+  }
+
+  const inner = mkdtempSync(join(folder, "sub-"));
+
+  if (inner.isOk()) {
+    copyFileSync("main.tz", join(inner.value, "deep.tz"));
+  }
+
+  const read = readdirSync(folder);
+
+  if (read.isOk()) {
+    const shown = read.value.map((name) => {
+      if (name.startsWith("sub-")) {
+        return "sub-*";
+      }
+
+      return name;
+    });
+
+    console.log("full", shown.length, shown.join(","));
+  }
+
+  listed("file", join(folder, "a.txt"), folder);
+  listed("missing", join(folder, "none"), folder);
+  listed("nul", nulPath, folder);
+  rmSync(folder, { recursive: true });
+  listed("gone", folder, folder);
+}
+
+main();

@@ -1,0 +1,24 @@
+function main(): void {
+  const narrow = "abc".repeat(40) + "needle" + "xyz".repeat(30) + "needle";
+  const wide =
+    "абв".repeat(40) + "игла" + "где".repeat(30) + "игла";
+  const mixed = "ab€".repeat(50) + "z";
+
+  console.log(narrow.indexOf("needle"), narrow.indexOf("needle", 130));
+  console.log(narrow.indexOf("x"), narrow.indexOf("q"), narrow.includes("zn"));
+
+  const second = wide.indexOf("игла", 130);
+
+  console.log(wide.indexOf("игла"), second, wide.indexOf("q"));
+
+  const euro = mixed.indexOf("€", 100);
+
+  console.log(mixed.indexOf("z"), mixed.indexOf("€b"), euro);
+  console.log(narrow.split("needle").length, wide.split("игла").length);
+  console.log(narrow.replaceAll("needle", "N").length);
+  console.log(narrow.indexOf("ÿ"), narrow.indexOf("Ā"), wide.indexOf("a"));
+
+  debugger;
+}
+
+main();

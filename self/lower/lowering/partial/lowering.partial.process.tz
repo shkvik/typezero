@@ -4,21 +4,17 @@ import {
   ExprKind,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kFlagType,
-  kArrayCopy,
   kIntType,
-  kPointerType,
-  kProcessArgv,
-  kProcessExecPath,
+  kPlatformName,
+  kProcessModule,
   kProcessName,
-  kProcessPlatform,
   kProcessSetExitCode,
   kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private readonly isProcessName(frame: Read<Frame>, expr: Expr): boolean {
@@ -43,9 +39,9 @@ partial class Lowering {
       case "argv":
         return this.processArgv(frame);
       case "execPath":
-        return this.textOut(frame, kProcessExecPath, [], []);
+        return this.processCall(frame, "execPath", expr.loc);
       case "platform":
-        return this.textOut(frame, kProcessPlatform, [], []);
+        return this.stringValue(kPlatformName);
       default:
         this.notLowered(frame.module, expr.loc, "this member of process");
 
@@ -54,22 +50,17 @@ partial class Lowering {
   }
 
   private processArgv(frame: Read<Frame>): IrValue | undefined {
-    const string = this.values.types.store.plain(TypeKind.String);
-    const descriptor = this.descriptor(string);
-    if (descriptor == undefined) {
-      return undefined;
-    }
+    return this.processCall(frame, "argumentsOf", this.statementLoc);
+  }
 
-    const callee = this.ir.declare(kProcessArgv, kPointerType, [kPointerType]);
-    const cached = frame.made.call(callee, [descriptor]);
-    const tz = this.values.types.store.arrayOf(string);
-    const copying = this.ir.declare(kArrayCopy, kPointerType, [kPointerType]);
-    const value = frame.made.call(copying, [cached]);
-    const release = this.countHelperOf(tz, false);
+  private processCall(
+    frame: Read<Frame>,
+    name: string,
+    loc: int,
+  ): IrValue | undefined {
+    const target: RuntimeTarget = { module: kProcessModule, name };
 
-    frame.made.call(release, [cached]);
-
-    return { type: kPointerType, value, tz, owned: true };
+    return this.runtimeFunctionCall(frame, target, [], [], loc);
   }
 
   private processAssigned(

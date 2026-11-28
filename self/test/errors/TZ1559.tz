@@ -1,0 +1,4 @@
+@InPlace({ layout: Layout.D })
+class Point {
+  public x: int32;
+}

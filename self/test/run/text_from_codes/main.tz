@@ -1,0 +1,53 @@
+function units(text: string): string {
+  const codes: string[] = [];
+
+  for (let index = 0; index < text.length; index++) {
+    codes.push(`${text.charCodeAt(index)}`);
+  }
+
+  return `${text.length}:${codes.join(".")}`;
+}
+
+function main(): void {
+  console.log(units(String.fromCharCode()));
+  console.log(units(String.fromCharCode(65)));
+  console.log(units(String.fromCharCode(72, 105)));
+  console.log(String.fromCharCode(104, 101, 108, 108, 111, 32, 119, 111));
+  console.log(String.fromCharCode(104, 101, 108, 108, 111, 32, 119, 111, 114));
+  console.log(units(String.fromCharCode(233, 255, 128, 200, 100, 50, 60, 70, 80)));
+  console.log(units(String.fromCharCode(1055, 1088, 1080, 1074, 1077, 1090)));
+  console.log(units(String.fromCharCode(65536 + 66, 65535, 131072 + 7)));
+  console.log(units(String.fromCharCode(55357, 56832)));
+  console.log(String.fromCharCode(55357, 56832));
+  console.log(units(String.fromCodePoint()));
+  console.log(units(String.fromCodePoint(66)));
+  console.log(String.fromCodePoint(128512, 32, 1055, 33));
+  console.log(units(String.fromCodePoint(128512, 65, 66, 67, 68, 69, 70, 71)));
+  console.log(units(String.fromCodePoint(233, 240, 250, 251, 252, 253, 254, 255, 66)));
+  console.log(units(String.fromCodePoint(1114111, 65536, 0)));
+
+  let text = "";
+
+  for (let code = 32; code < 400; code += 7) {
+    text += String.fromCharCode(code, code + 1);
+  }
+
+  console.log(units(text));
+
+  const big: uint64 = 18446744073709551615;
+  const small: uint64 = 0;
+  const middle: uint64 = 12345678901234567890;
+  const short: uint64 = 42;
+
+  console.log(big.toString(), small.toString(), middle.toString());
+  console.log(`[${big}] [${small}] [${middle}] [${short}]`);
+  console.log(short.toString().length, `${short}${short}`);
+
+  const values: uint64[] = [1, 9, 10, 99, 100, 12345678, 123456789];
+
+  for (const value of values) {
+    console.log(`${value}`, value.toString());
+  }
+}
+
+main();

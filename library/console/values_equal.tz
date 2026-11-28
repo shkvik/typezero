@@ -1,0 +1,168 @@
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds an integer of the kind",
+})
+function integerBits(kind: uint32, value: Raw<uint8>): int {
+  if (kind == 18 || kind == 20) {
+    return byteAt(value, 0);
+  }
+  if (kind == 19 || kind == 21) {
+    return unitAt(cellsAt<uint16>(value, 0), 0);
+  }
+  if (kind == 1 || kind == 22) {
+    return wordAt(value, 0);
+  }
+
+  return unitAt(cellsAt<uint64>(value, 0), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both objects are C strings: a length and the bytes after the head",
+})
+function isSameCText(first: Raw<uint8>, second: Raw<uint8>): boolean {
+  if (rawBits(first) == rawBits(second)) {
+    return true;
+  }
+  if (rawBits(second) == 0) {
+    return false;
+  }
+
+  const count = viewAt<CStringHead>(first, 0).length;
+  if (count != viewAt<CStringHead>(second, 0).length) {
+    return false;
+  }
+
+  const left = placeAt(first, 24);
+  const right = placeAt(second, 24);
+
+  return sameCells(left, 0, right, 0, count);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both records hold the fields their layout lists",
+})
+function isSameRecord(
+  layout: Raw<uint8>,
+  first: Raw<uint8>,
+  second: Raw<uint8>,
+  isZeroSame: boolean,
+): boolean {
+  const count = viewAt<LayoutHead>(layout, 0).count.toInt();
+
+  for (let index = 0; index < count; index++) {
+    const field = viewAt<FieldHead>(fieldAt(layout, index), 0);
+    const offset = field.offset;
+
+    if (offset != fieldMethod() && offset != fieldGetter()) {
+      const left = placeAt(first, offset.toInt());
+      const right = placeAt(second, offset.toInt());
+
+      if (!isSameValue(field.type, left, right, isZeroSame)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both values hold what the type says",
+})
+function isSameValue(
+  type: Raw<uint8>,
+  first: Raw<uint8>,
+  second: Raw<uint8>,
+  isZeroSame: boolean,
+): boolean {
+  const kind = kindOf(type);
+
+  if (isIntegerKind(kind)) {
+    return integerBits(kind, first) == integerBits(kind, second);
+  }
+
+  switch (kind) {
+    case 3: {
+      const left = doubleAt(first, 0);
+      const right = doubleAt(second, 0);
+
+      return left == right || (isZeroSame && left != left && right != right);
+    }
+    case 4:
+      return (byteAt(first, 0) != 0) == (byteAt(second, 0) != 0);
+    case 5:
+      return stringAt(first) == stringAt(second);
+    case 10: {
+      const left = pointerAt(first, 0);
+
+      if (isCText(left)) {
+        return isSameCText(left, pointerAt(second, 0));
+      }
+
+      return rawBits(left) == rawBits(pointerAt(second, 0));
+    }
+    case 6:
+    case 24:
+      return rawBits(pointerAt(first, 0)) == rawBits(pointerAt(second, 0));
+    case 11:
+      return decimalAt(first) == decimalAt(second);
+    case 7: {
+      const hasFirst = isPresent(type, first);
+      const hasSecond = isPresent(type, second);
+      if (!hasFirst || !hasSecond) {
+        return hasFirst == hasSecond;
+      }
+
+      return isSameValue(innerOf(type), first, second, isZeroSame);
+    }
+    case 25:
+      return isSameRecord(innerOf(type), first, second, isZeroSame);
+    default:
+      return false;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length cells of its element type",
+})
+export function indexOfValue(
+  array: Raw<uint8>,
+  value: Raw<uint8>,
+  mode: int,
+): int {
+  const head = viewAt<ArrayHead>(array, 0);
+  const type = head.type;
+  const data = head.data;
+  const length = head.length.toInt();
+  const size = sizeOf(type);
+
+  if (mode == 1) {
+    for (let index = length - 1; index >= 0; index--) {
+      if (isSameValue(type, placeAt(data, index * size), value, false)) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  for (let index = 0; index < length; index++) {
+    if (isSameValue(type, placeAt(data, index * size), value, mode == 2)) {
+      if (mode == 2) {
+        return 1;
+      }
+
+      return index;
+    }
+  }
+  if (mode == 2) {
+    return 0;
+  }
+
+  return -1;
+}

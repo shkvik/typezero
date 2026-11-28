@@ -1,0 +1,24 @@
+function shown(text: string, separator: string): void {
+  const all = text.split(separator);
+  const two = text.split(separator, 2);
+  const none = text.split(separator, 0);
+
+  console.log(all.map((part) => `[${part}]`).join(""), all.length, two.length, none.length);
+}
+
+function main(): void {
+  shown("a,b,,c", ",");
+  shown(",a,", ",");
+  shown("", ",");
+  shown("", "");
+  shown("abc", "");
+  shown("привет мир", "");
+  shown("one -- two -- three", " -- ");
+  shown("привет, мир, ok", ", ");
+  shown("no separator here", "|");
+  shown("a long enough line, with pieces, that are shared, by the split", ", ");
+  shown("x" + "," + "y" + "," + "z", ",");
+  console.log("a b c".split().length, "a b c".split(" ", -1).length, "ab".split("ab").length);
+}
+
+main();

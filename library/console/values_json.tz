@@ -1,0 +1,588 @@
+
+class JsonWriter {
+  public readonly gap: string;
+  public readonly open: int[];
+
+  public constructor(gap: string) {
+    this.gap = gap;
+    this.open = [];
+  }
+
+  public entered(key: int): void {
+    if (this.open.includes(key)) {
+      panic("TypeError: Converting circular structure to JSON");
+    }
+
+    this.open.push(key);
+  }
+
+  public left(): void {
+    this.open.pop();
+  }
+
+  public readonly indented(out: Mut<TextBuilder>): void {
+    out.addUnit(10);
+
+    for (let level = 0; level < this.open.length; level++) {
+      out.add(this.gap);
+    }
+  }
+
+  public readonly separated(out: Mut<TextBuilder>, written: int): void {
+    if (written > 0) {
+      out.addUnit(44);
+    }
+    if (this.gap.length > 0) {
+      this.indented(out);
+    }
+  }
+
+  public readonly colon(out: Mut<TextBuilder>): void {
+    if (this.gap.length > 0) {
+      out.add(": ");
+    } else {
+      out.addUnit(58);
+    }
+  }
+
+  public readonly closed(
+    out: Mut<TextBuilder>,
+    written: int,
+    close: int,
+  ): void {
+    if (written > 0 && this.gap.length > 0) {
+      this.indented(out);
+    }
+
+    out.addUnit(close);
+  }
+}
+
+function jsonEscape(out: Mut<TextBuilder>, unit: int): void {
+  out.addUnit(92);
+
+  switch (unit) {
+    case 34:
+      return out.addUnit(34);
+    case 92:
+      return out.addUnit(92);
+    case 8:
+      return out.addUnit(98);
+    case 12:
+      return out.addUnit(102);
+    case 10:
+      return out.addUnit(110);
+    case 13:
+      return out.addUnit(114);
+    case 9:
+      return out.addUnit(116);
+    default:
+      out.addUnit(117);
+      out.addUnit(hexUnit(kLowerDigits, unit, 12));
+      out.addUnit(hexUnit(kLowerDigits, unit, 8));
+      out.addUnit(hexUnit(kLowerDigits, unit, 4));
+      out.addUnit(hexUnit(kLowerDigits, unit, 0));
+  }
+}
+
+function isJsonPlain(unit: int): boolean {
+  return unit >= 32 && unit != 34 && unit != 92;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the narrow cells hold count units",
+})
+function narrowQuoted(
+  out: Mut<TextBuilder>,
+  text: Read<string>,
+  narrow: Raw<uint8>,
+  count: int,
+): void {
+  let run = 0;
+
+  for (let index = 0; index < count; index++) {
+    const unit = unitAt(narrow, index);
+
+    if (!isJsonPlain(unit)) {
+      out.addPart(text, run, index);
+      jsonEscape(out, unit);
+      run = index + 1;
+    }
+  }
+
+  out.addPart(text, run, count);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of the text hold its length units",
+})
+function jsonQuoted(out: Mut<TextBuilder>, text: Read<string>): void {
+  const narrow = textCells<uint8>(text);
+  const count = text.length;
+
+  out.addUnit(34);
+
+  if (narrow != undefined) {
+    narrowQuoted(out, text, narrow, count);
+    out.addUnit(34);
+
+    return;
+  }
+
+  const wide = textCells<uint16>(text);
+  let run = 0;
+  let index = 0;
+
+  while (index < count) {
+    const unit = unitIn(narrow, wide, index);
+    const isPlain = unit >= 32 && unit != 34 && unit != 92;
+
+    if (!isPlain) {
+      out.addPart(text, run, index);
+      jsonEscape(out, unit);
+      run = index + 1;
+    } else if (unit >= 55296 && unit <= 57343) {
+      const isPair = isHighSurrogate(unit) && index + 1 < count;
+
+      if (isPair && isLowSurrogate(unitIn(narrow, wide, index + 1))) {
+        index += 1;
+      } else {
+        out.addPart(text, run, index);
+        jsonEscape(out, unit);
+        run = index + 1;
+      }
+    }
+
+    index += 1;
+  }
+
+  out.addPart(text, run, count);
+  out.addUnit(34);
+}
+
+function isPlainJsonName(name: Raw<uint8>, count: int): boolean {
+  for (let index = 0; index < count; index++) {
+    const byte = byteAt(name, index);
+
+    if (byte >= 128 || !isJsonPlain(byte)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the field record has its name and length",
+})
+function jsonKey(
+  writer: Read<JsonWriter>,
+  out: Mut<TextBuilder>,
+  written: int,
+  field: Raw<uint8>,
+): void {
+  const head = viewAt<FieldHead>(field, 0);
+  const count = head.nameLength.toInt();
+
+  writer.separated(out, written);
+
+  if (isPlainJsonName(head.name, count)) {
+    out.addUnit(34);
+    out.addAscii(head.name, count);
+    out.addUnit(34);
+  } else {
+    jsonQuoted(out, fieldName(field));
+  }
+
+  writer.colon(out);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds what the type says",
+})
+function hasJson(type: Raw<uint8>, value: Raw<uint8>): boolean {
+  const kind = kindOf(type);
+
+  if (kind == 8 || kind == 9) {
+    return false;
+  }
+  if (kind == 7) {
+    return isPresent(type, value) && hasJson(innerOf(type), value);
+  }
+  if (kind == 13 || kind == 16) {
+    return rawBits(pointerAt(value, 0)) != 0;
+  }
+
+  return true;
+}
+
+function jsonNumber(out: Mut<TextBuilder>, number: double): void {
+  if (number != number || number - number != 0) {
+    out.add("null");
+  } else if (number == 0) {
+    out.addDouble(0);
+  } else {
+    out.addDouble(number);
+  }
+}
+
+function jsonElements(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  type: Raw<uint8>,
+  data: Raw<uint8>,
+  count: int,
+): void {
+  const size = sizeOf(type);
+
+  for (let index = 0; index < count; index++) {
+    writer.separated(out, index);
+
+    if (!jsonValue(writer, out, type, placeAt(data, index * size))) {
+      out.add("null");
+    }
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the result holds its flag, value and error at the offsets",
+})
+function jsonResult(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  type: Raw<uint8>,
+  value: Raw<uint8>,
+): boolean {
+  const head = viewAt<ResultTypeHead>(type, 0);
+  const isOk = byteAt(value, head.okOffset.toInt()) != 0;
+  let half = head.error;
+  let held = placeAt(value, head.errorOffset.toInt());
+  let name = "\"error\"";
+
+  if (isOk) {
+    half = head.inner;
+    held = placeAt(value, head.valueOffset.toInt());
+    name = "\"value\"";
+  }
+
+  writer.entered(keyOf(value));
+  out.addUnit(123);
+
+  let written = 0;
+
+  if (hasJson(half, held)) {
+    writer.separated(out, written);
+    written += 1;
+    out.add(name);
+    writer.colon(out);
+    jsonValue(writer, out, half, held);
+  }
+
+  writer.left();
+  writer.closed(out, written, 125);
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bytes hold length elements of their kind",
+})
+function jsonBytes(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  kind: int,
+): boolean {
+  const head = viewAt<BytesHead>(object, 0);
+  const length = head.length.toInt();
+  const isBuffer = kind == 11;
+
+  writer.entered(keyOf(object));
+  out.addUnit(123);
+
+  if (isBuffer) {
+    writer.separated(out, 0);
+    out.add("\"type\"");
+    writer.colon(out);
+    out.add("\"Buffer\"");
+    writer.separated(out, 1);
+    out.add("\"data\"");
+    writer.colon(out);
+    writer.entered(keyOf(object) + 16);
+    out.addUnit(91);
+  }
+
+  for (let index = 0; index < length; index++) {
+    writer.separated(out, index);
+
+    if (!isBuffer) {
+      out.add(`"${index}"`);
+      writer.colon(out);
+    }
+
+    jsonNumber(out, bytesElement(head.data, kind, index));
+  }
+  if (isBuffer) {
+    writer.left();
+    writer.closed(out, length, 93);
+  }
+
+  writer.left();
+
+  if (isBuffer) {
+    writer.closed(out, 2, 125);
+  } else {
+    writer.closed(out, length, 125);
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the map holds entries of the size its layout says",
+})
+function jsonDict(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  map: Raw<uint8>,
+): boolean {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const size = layout.entrySize.toInt();
+  let written = 0;
+  let at = 0;
+
+  writer.entered(keyOf(map));
+  out.addUnit(123);
+
+  while (layout.kind == 0) {
+    const place = nextEntry(map, at);
+    if (place < 0) {
+      break;
+    }
+
+    const entry = placeAt(head.entries, place * size);
+    const value = placeAt(entry, layout.valueOffset.toInt());
+
+    at = place + 1;
+
+    if (hasJson(layout.value, value)) {
+      writer.separated(out, written);
+      written += 1;
+      jsonQuoted(out, stringAt(placeAt(entry, layout.keyOffset.toInt())));
+      writer.colon(out);
+      jsonValue(writer, out, layout.value, value);
+    }
+  }
+
+  writer.left();
+  writer.closed(out, written, 125);
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the tuple holds the fields its layout lists",
+})
+function jsonTuple(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  layout: Raw<uint8>,
+): boolean {
+  const count = viewAt<LayoutHead>(layout, 0).count.toInt();
+
+  writer.entered(keyOf(object));
+  out.addUnit(91);
+
+  for (let index = 0; index < count; index++) {
+    const field = viewAt<FieldHead>(fieldAt(layout, index), 0);
+    const value = placeAt(object, field.offset.toInt());
+
+    writer.separated(out, index);
+
+    if (!jsonValue(writer, out, field.type, value)) {
+      out.add("null");
+    }
+  }
+
+  writer.left();
+  writer.closed(out, count, 93);
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the fields are where the layout says",
+})
+function jsonFields(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  layout: Raw<uint8>,
+): boolean {
+  const count = viewAt<LayoutHead>(layout, 0).count.toInt();
+  let written = 0;
+
+  writer.entered(keyOf(object));
+  out.addUnit(123);
+
+  for (let index = 0; index < count; index++) {
+    const field = fieldAt(layout, index);
+    const head = viewAt<FieldHead>(field, 0);
+    const offset = head.offset;
+    const isHidden = offset == fieldMethod() || offset == fieldGetter();
+
+    if (!isHidden && !isSymbolField(layout, field)) {
+      const value = placeAt(object, offset.toInt());
+
+      if (kindOf(head.type) == 5) {
+        jsonKey(writer, out, written, field);
+        written += 1;
+        jsonQuoted(out, stringAt(value));
+      } else if (hasJson(head.type, value)) {
+        jsonKey(writer, out, written, field);
+        written += 1;
+        jsonValue(writer, out, head.type, value);
+      }
+    }
+  }
+
+  writer.left();
+  writer.closed(out, written, 125);
+
+  return true;
+}
+
+function jsonObject(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+): boolean {
+  const layout = layoutOfObject(object);
+  const flags = flagsOf(layout);
+  const kind = (flags >> 24).toInt();
+
+  if ((flags & 2097152) != 0) {
+    return false;
+  }
+  if ((flags & 524288) != 0 && kind <= 11) {
+    return jsonBytes(writer, out, object, kind);
+  }
+  if ((flags & 4096) != 0) {
+    return jsonDict(writer, out, object);
+  }
+  if ((flags & 1) != 0) {
+    return jsonTuple(writer, out, object, layout);
+  }
+
+  return jsonFields(writer, out, object, layout);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds what the type says",
+})
+function jsonValue(
+  writer: Mut<JsonWriter>,
+  out: Mut<TextBuilder>,
+  type: Raw<uint8>,
+  value: Raw<uint8>,
+): boolean {
+  const kind = kindOf(type);
+
+  if (kind == 5) {
+    jsonQuoted(out, stringAt(value));
+
+    return true;
+  }
+  if (isIntegerKind(kind)) {
+    integerInto(out, kind, value);
+
+    return true;
+  }
+
+  switch (kind) {
+    case 3:
+      jsonNumber(out, doubleAt(value, 0));
+
+      return true;
+    case 4:
+      if (byteAt(value, 0) != 0) {
+        out.add("true");
+      } else {
+        out.add("false");
+      }
+
+      return true;
+    case 11:
+      jsonQuoted(out, decimalAt(value).toString());
+
+      return true;
+    case 7:
+      if (!isPresent(type, value)) {
+        return false;
+      }
+
+      return jsonValue(writer, out, innerOf(type), value);
+    case 6: {
+      const array = pointerAt(value, 0);
+      const head = viewAt<ArrayHead>(array, 0);
+      const count = head.length.toInt();
+
+      writer.entered(keyOf(array));
+      out.addUnit(91);
+      jsonElements(writer, out, head.type, head.data, count);
+      writer.left();
+      writer.closed(out, count, 93);
+
+      return true;
+    }
+    case 12:
+      return jsonResult(writer, out, type, value);
+    case 10:
+      return jsonObject(writer, out, pointerAt(value, 0));
+    default:
+      return false;
+  }
+}
+
+export function jsonText(
+  type: Raw<uint8>,
+  value: Raw<uint8>,
+  spaceKind: int,
+  spaceNumber: double,
+  space: Read<string>,
+): string {
+  let gap = "";
+
+  if (spaceKind == 1) {
+    let count = 10;
+
+    if (spaceNumber < 10) {
+      count = Math.trunc(Math.floor(spaceNumber)).toInt();
+    }
+
+    gap = spaces(count);
+  } else if (spaceKind == 2) {
+    gap = space.slice(0, 10);
+  }
+
+  const writer = new JsonWriter(gap);
+  const out = new TextBuilder();
+
+  if (!jsonValue(writer, out, type, value)) {
+    return "";
+  }
+
+  return out.taken();
+}

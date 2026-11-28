@@ -1,0 +1,239 @@
+
+function isSlashCode(unit: int): boolean {
+  return unit == 92 || unit == 47;
+}
+
+function isEndingCode(unit: int): boolean {
+  return unit == 92 || unit == 47 || unit == 58;
+}
+
+function lowerCode(unit: int): int {
+  if (unit >= 65 && unit <= 90) {
+    return unit + 32;
+  }
+
+  return unit;
+}
+
+function isSameDrive(cwd: Read<string>, dir: Read<string>): boolean {
+  for (let index = 0; index < 2; index++) {
+    const left = lowerCode(cwd.charCodeAt(index) ?? 0);
+    const right = lowerCode(dir.charCodeAt(index) ?? 0);
+    if (left != right) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function lastCode(text: Read<string>): int {
+  return text.charCodeAt(text.length - 1) ?? 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the name ends with a zero",
+})
+function isPlainFile(path: Read<string>): boolean {
+  const wide = wideOf(path);
+  if (wide == undefined) {
+    return false;
+  }
+
+  const attributes = GetFileAttributesW(wide);
+
+  return attributes != 4294967295 && (attributes & 16) == 0;
+}
+
+function cwdCountFor(cwd: Read<string>, dir: Read<string>): int {
+  const count = dir.length;
+  const first = dir.charCodeAt(0) ?? 0;
+  const second = dir.charCodeAt(1) ?? 0;
+  const third = dir.charCodeAt(2) ?? 0;
+
+  if (count > 2 && isSlashCode(first) && isSlashCode(second)) {
+    return 0;
+  }
+  if (count >= 1 && isSlashCode(first)) {
+    return 2;
+  }
+  if (count >= 2 && second == 58 && (count < 3 || !isSlashCode(third))) {
+    if (cwd.length < 2 || !isSameDrive(cwd, dir)) {
+      return 0;
+    }
+
+    return -1;
+  }
+  if (count > 2 && second == 58) {
+    return 0;
+  }
+
+  return cwd.length;
+}
+
+function joinedTested(
+  given: Read<string>,
+  name: Read<string>,
+  extension: Read<string>,
+  cwd: Read<string>,
+): string | undefined {
+  let cwdCount = cwdCountFor(cwd, given);
+  let dir = given.slice(0);
+
+  if (cwdCount < 0) {
+    cwdCount = cwd.length;
+    dir = given.slice(2);
+  }
+
+  let result = cwd.slice(0, cwdCount);
+
+  if (result.length > 0 && !isEndingCode(lastCode(result))) {
+    result += "\\";
+  }
+
+  result += dir;
+
+  if (dir.length > 0 && !isEndingCode(lastCode(result))) {
+    result += "\\";
+  }
+
+  result += name;
+
+  if (extension.length > 0) {
+    if (name.length > 0 && lastCode(result) != 46) {
+      result += ".";
+    }
+
+    result += extension;
+  }
+  if (isPlainFile(result)) {
+    return result;
+  }
+
+  return undefined;
+}
+
+function extensionsWalked(
+  dir: Read<string>,
+  name: Read<string>,
+  cwd: Read<string>,
+  hasExtension: boolean,
+): string | undefined {
+  if (hasExtension) {
+    const plain = joinedTested(dir, name, "", cwd);
+    if (plain != undefined) {
+      return plain;
+    }
+  }
+
+  const com = joinedTested(dir, name, "com", cwd);
+  if (com != undefined) {
+    return com;
+  }
+
+  return joinedTested(dir, name, "exe", cwd);
+}
+
+function isQuoteCode(unit: int): boolean {
+  return unit == 34 || unit == 39;
+}
+
+function entryEnd(path: Read<string>, start: int): int {
+  let stop = start;
+  const first = path.charCodeAt(start) ?? 0;
+
+  if (first == 34) {
+    stop = path.indexOf("\"", start + 1);
+  }
+  if (first == 39) {
+    stop = path.indexOf("'", start + 1);
+  }
+  if (stop < 0) {
+    stop = path.length;
+  }
+
+  const semicolon = path.indexOf(";", stop);
+  if (semicolon < 0) {
+    return path.length;
+  }
+
+  return semicolon;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the name ends with a zero",
+})
+function isCurrentSearched(): boolean {
+  const empty = wideOf("");
+  if (empty == undefined) {
+    return false;
+  }
+
+  return NeedCurrentDirectoryForExePathW(empty) != 0;
+}
+
+function pathSearched(
+  file: Read<string>,
+  cwd: Read<string>,
+  path: Read<string>,
+): string | undefined {
+  const count = file.length;
+  if (count == 0 || file == ".") {
+    return undefined;
+  }
+
+  let nameStart = count;
+
+  while (nameStart > 0 && !isEndingCode(file.charCodeAt(nameStart - 1) ?? 0)) {
+    nameStart -= 1;
+  }
+
+  const name = file.slice(nameStart);
+  const dot = name.indexOf(".");
+  const hasExtension = dot >= 0 && dot + 1 < name.length;
+
+  if (nameStart > 0) {
+    const dir = file.slice(0, nameStart);
+
+    return extensionsWalked(dir, name, cwd, hasExtension);
+  }
+
+  let result: string | undefined = undefined;
+
+  if (isCurrentSearched()) {
+    result = extensionsWalked("", file, cwd, hasExtension);
+  }
+
+  let end = 0;
+
+  while (result == undefined && end < path.length) {
+    if (end != 0 || path.charCodeAt(0) == 59) {
+      end += 1;
+    }
+
+    const start = end;
+
+    end = entryEnd(path, start);
+
+    if (end != start) {
+      let from = start;
+      let size = end - start;
+
+      if (isQuoteCode(path.charCodeAt(from) ?? 0)) {
+        from += 1;
+        size -= 1;
+      }
+      if (size > 0 && isQuoteCode(path.charCodeAt(from + size - 1) ?? 0)) {
+        size -= 1;
+      }
+
+      const dir = path.slice(from, from + size);
+
+      result = extensionsWalked(dir, file, cwd, hasExtension);
+    }
+  }
+
+  return result;
+}

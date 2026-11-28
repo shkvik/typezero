@@ -28,7 +28,9 @@ import {
   kLendingResults,
   kLentName,
   kOkName,
+  kPointerType,
   kRuntimeModules,
+  kSystemModulePrefix,
   kVoidType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
@@ -89,7 +91,9 @@ partial class Lowering {
     if (callee.name == kErrName && !isOwn) {
       return this.resultMade(frame, call, false);
     }
-    if (target != undefined && !isOwn) {
+    const isSystem =
+      opened != undefined && opened.name.startsWith(kSystemModulePrefix);
+    if (target != undefined && !isOwn && !isSystem) {
       return this.libraryCall(frame, call, callee, target.module);
     }
     if (target == undefined) {
@@ -106,7 +110,9 @@ partial class Lowering {
     }
 
     const foreign = this.declaredFunction(target.module, target.loc);
-    if (foreign != undefined && foreign.bodySource == BodySource.Foreign) {
+    const isBodiless =
+      foreign != undefined && foreign.bodySource != BodySource.Written;
+    if (foreign != undefined && (isSystem || isBodiless)) {
       return this.foreignCall(frame, call, foreign, shape);
     }
     if (
@@ -270,9 +276,15 @@ partial class Lowering {
     const types: string[] = [];
 
     for (const param of shape.params) {
-      const type = this.irType(this.passedType(param));
+      const passed = this.passedType(param);
+      const type = this.irType(passed);
       if (type == undefined) {
         return undefined;
+      }
+      if (this.isMovedRecord(passed)) {
+        types.push(kPointerType);
+
+        continue;
       }
 
       types.push(type);
@@ -323,6 +335,23 @@ partial class Lowering {
       }
 
       const declared = tree.paramsOf(callee?.paramsList)[index];
+      if (this.isMovedRecord(wanted)) {
+        const address = this.recordArgument(
+          frame,
+          tree.exprOf(arg.exprId),
+          wanted,
+          declared,
+          kept,
+        );
+        if (address == undefined) {
+          return undefined;
+        }
+
+        args.push(address);
+
+        continue;
+      }
+
       const isLent =
         declared != undefined &&
         this.isBorrowedParam(declared) &&
@@ -418,6 +447,9 @@ partial class Lowering {
       }
       if (object != undefined && this.isFileKindCall(object, callee)) {
         return this.fileKindCall(frame, callee);
+      }
+      if (object != undefined && this.isFixed(object)) {
+        return this.fixedCall(frame, call, callee, object);
       }
       if (object != undefined && object.kind == TypeKind.Instance) {
         return this.methodCall(frame, call, callee, object);

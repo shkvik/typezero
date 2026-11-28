@@ -1,0 +1,586 @@
+function limbBase(): int {
+  return 1000000000;
+}
+
+const kTenPowers: int[] = [
+  1,
+  10,
+  100,
+  1000,
+  10000,
+  100000,
+  1000000,
+  10000000,
+  100000000,
+  1000000000,
+  10000000000,
+  100000000000,
+  1000000000000,
+  10000000000000,
+  100000000000000,
+  1000000000000000,
+  10000000000000000,
+  100000000000000000,
+  1000000000000000000,
+];
+
+function tenPowerOf(exponent: int): int {
+  return kTenPowers[exponent] ?? 1;
+}
+
+class Natural {
+  public cells: Raw<uint32>;
+  public count: int;
+  public capacity: int;
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "a new natural owns its cells",
+  })
+  public constructor(capacity: int) {
+    let room = capacity;
+
+    if (room < 4) {
+      room = 4;
+    }
+
+    this.cells = allocate<uint32>(room);
+    this.count = 0;
+    this.capacity = room;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "index < capacity",
+  })
+  public readonly at(index: int): int {
+    if (index >= this.count) {
+      return 0;
+    }
+
+    return unitAt(this.cells, index);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells grow before the write",
+  })
+  public reserve(capacity: int): void {
+    if (capacity <= this.capacity) {
+      return;
+    }
+    if (capacity > 268435456) {
+      panic("Maximum decimal size exceeded");
+    }
+
+    let room = this.capacity * 2;
+
+    if (room < capacity) {
+      room = capacity;
+    }
+
+    this.cells = reallocate(this.cells, room);
+    this.capacity = room;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "index < capacity after reserve",
+  })
+  public put(index: int, value: int): void {
+    this.reserve(index + 1);
+    putUnit(this.cells, index, value);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "count <= capacity",
+  })
+  public trim(): void {
+    while (this.count > 0 && unitAt(this.cells, this.count - 1) == 0) {
+      this.count -= 1;
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells came from allocate and nothing else holds them",
+  })
+  public [Symbol.dispose](): void {
+    release(this.cells);
+  }
+}
+
+function naturalOf(value: uint64): Natural {
+  const made = new Natural(3);
+  let rest = value;
+  const base = limbBase().toUint64();
+
+  while (rest != 0) {
+    made.put(made.count, (rest % base).toInt());
+    made.count += 1;
+    rest = rest / base;
+  }
+
+  return made;
+}
+
+function naturalCopy(from: Read<Natural>): Natural {
+  const made = new Natural(from.count);
+
+  for (let index = 0; index < from.count; index++) {
+    made.put(index, from.at(index));
+  }
+
+  made.count = from.count;
+
+  return made;
+}
+
+function naturalCompare(first: Read<Natural>, second: Read<Natural>): int {
+  if (first.count != second.count) {
+    if (first.count < second.count) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  for (let index = first.count - 1; index >= 0; index--) {
+    const left = first.at(index);
+    const right = second.at(index);
+    if (left != right) {
+      if (left < right) {
+        return -1;
+      }
+
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+function naturalSum(first: Read<Natural>, second: Read<Natural>): Natural {
+  let count = first.count;
+
+  if (second.count > count) {
+    count = second.count;
+  }
+
+  const made = new Natural(count + 1);
+  let carry = 0;
+
+  for (let index = 0; index < count; index++) {
+    let sum = first.at(index) + second.at(index) + carry;
+
+    carry = 0;
+
+    if (sum >= limbBase()) {
+      sum -= limbBase();
+      carry = 1;
+    }
+
+    made.put(index, sum);
+  }
+
+  made.count = count;
+
+  if (carry != 0) {
+    made.put(count, 1);
+    made.count = count + 1;
+  }
+
+  return made;
+}
+
+function naturalDifference(
+  first: Read<Natural>,
+  second: Read<Natural>,
+): Natural {
+  const count = first.count;
+  const made = new Natural(count);
+  let borrow = 0;
+
+  for (let index = 0; index < count; index++) {
+    let part = first.at(index) - second.at(index) - borrow;
+
+    borrow = 0;
+
+    if (part < 0) {
+      part += limbBase();
+      borrow = 1;
+    }
+
+    made.put(index, part);
+  }
+
+  made.count = count;
+  made.trim();
+
+  return made;
+}
+
+function naturalProduct(first: Read<Natural>, second: Read<Natural>): Natural {
+  if (first.count == 0 || second.count == 0) {
+    return new Natural(0);
+  }
+
+  const count = first.count + second.count;
+  const made = new Natural(count);
+
+  for (let index = 0; index < count; index++) {
+    made.put(index, 0);
+  }
+
+  made.count = count;
+
+  for (let low = 0; low < first.count; low++) {
+    const factor = first.at(low);
+    let carry = 0;
+
+    if (factor == 0) {
+      continue;
+    }
+
+    for (let high = 0; high < second.count; high++) {
+      const part = factor * second.at(high) + made.at(low + high) + carry;
+
+      carry = part / limbBase();
+      made.put(low + high, part % limbBase());
+    }
+
+    made.put(low + second.count, carry);
+  }
+
+  made.trim();
+
+  return made;
+}
+
+function naturalScaled(value: Mut<Natural>, factor: int, add: int): void {
+  let carry = add;
+
+  for (let index = 0; index < value.count; index++) {
+    const part = value.at(index) * factor + carry;
+
+    value.put(index, part % limbBase());
+    carry = part / limbBase();
+  }
+  while (carry != 0) {
+    value.put(value.count, carry % limbBase());
+    value.count += 1;
+    carry = carry / limbBase();
+  }
+
+  value.trim();
+}
+
+function naturalHalved(value: Read<Natural>, divisor: int): Natural {
+  const made = new Natural(value.count);
+  let rest = 0;
+
+  made.count = value.count;
+
+  for (let index = value.count - 1; index >= 0; index--) {
+    const part = rest * limbBase() + value.at(index);
+
+    made.put(index, part / divisor);
+    rest = part % divisor;
+  }
+
+  made.trim();
+
+  return made;
+}
+
+function naturalRest(value: Read<Natural>, divisor: int): int {
+  let rest = 0;
+
+  for (let index = value.count - 1; index >= 0; index--) {
+    const part = rest * limbBase() + value.at(index);
+
+    rest = part % divisor;
+  }
+
+  return rest;
+}
+
+function limbDigits(value: int): int {
+  let count = 1;
+
+  while (count < 10 && value >= tenPowerOf(count)) {
+    count += 1;
+  }
+
+  return count;
+}
+
+function naturalDigits(value: Read<Natural>): int {
+  if (value.count == 0) {
+    return 0;
+  }
+
+  const top = limbDigits(value.at(value.count - 1));
+
+  return (value.count - 1) * 9 + top;
+}
+
+function naturalDigit(value: Read<Natural>, place: int): int {
+  const index = place / 9;
+  if (index >= value.count) {
+    return 0;
+  }
+
+  return value.at(index) / tenPowerOf(place % 9) % 10;
+}
+
+function naturalAnyBelow(value: Read<Natural>, place: int): boolean {
+  const index = place / 9;
+  let whole = index;
+
+  if (whole > value.count) {
+    whole = value.count;
+  }
+
+  for (let at = 0; at < whole; at++) {
+    if (value.at(at) != 0) {
+      return true;
+    }
+  }
+
+  return index < value.count && value.at(index) % tenPowerOf(place % 9) != 0;
+}
+
+function naturalTrailingZeros(value: Read<Natural>): int {
+  let zeros = 0;
+  let index = 0;
+
+  while (index < value.count && value.at(index) == 0) {
+    zeros += 9;
+    index += 1;
+  }
+  if (index < value.count) {
+    let limb = value.at(index);
+
+    while (limb % 10 == 0) {
+      limb = limb / 10;
+      zeros += 1;
+    }
+  }
+
+  return zeros;
+}
+
+function naturalDropped(value: Read<Natural>, places: int): Natural {
+  const limbs = places / 9;
+  const rest = places % 9;
+  if (limbs >= value.count) {
+    return new Natural(0);
+  }
+
+  const count = value.count - limbs;
+  const made = new Natural(count);
+
+  for (let index = 0; index < count; index++) {
+    if (rest == 0) {
+      made.put(index, value.at(limbs + index));
+    } else {
+      const low = value.at(limbs + index) / tenPowerOf(rest);
+      const high = value.at(limbs + index + 1) % tenPowerOf(rest);
+
+      made.put(index, low + high * tenPowerOf(9 - rest));
+    }
+  }
+
+  made.count = count;
+  made.trim();
+
+  return made;
+}
+
+function naturalDropInPlace(value: Mut<Natural>, places: int): void {
+  const limbs = places / 9;
+  const rest = places % 9;
+  if (limbs >= value.count) {
+    value.count = 0;
+
+    return;
+  }
+
+  const count = value.count - limbs;
+
+  for (let index = 0; index < count; index++) {
+    if (rest == 0) {
+      value.put(index, value.at(limbs + index));
+    } else {
+      const low = value.at(limbs + index) / tenPowerOf(rest);
+      const high = value.at(limbs + index + 1) % tenPowerOf(rest);
+
+      value.put(index, low + high * tenPowerOf(9 - rest));
+    }
+  }
+
+  value.count = count;
+  value.trim();
+}
+
+function naturalShifted(value: Read<Natural>, places: int): Natural {
+  const made = naturalCopy(value);
+  if (made.count == 0 || places == 0) {
+    return made;
+  }
+
+  const rest = places % 9;
+  const limbs = places / 9;
+
+  if (rest != 0) {
+    naturalScaled(made, tenPowerOf(rest), 0);
+  }
+  if (limbs == 0) {
+    return made;
+  }
+
+  const moved = new Natural(made.count + limbs);
+
+  for (let index = 0; index < limbs; index++) {
+    moved.put(index, 0);
+  }
+  for (let index = 0; index < made.count; index++) {
+    moved.put(limbs + index, made.at(index));
+  }
+
+  moved.count = made.count + limbs;
+
+  return moved;
+}
+
+function isGuessHigh(guess: int, next: int, rest: int, low: int): boolean {
+  if (guess >= limbBase()) {
+    return true;
+  }
+
+  return guess * next > rest * limbBase() + low;
+}
+
+class Division {
+  public quotient: Natural;
+  public rest: Natural;
+
+  public constructor(quotient: Own<Natural>, rest: Own<Natural>) {
+    this.quotient = quotient;
+    this.rest = rest;
+  }
+}
+
+function smallDivision(first: Read<Natural>, divisor: int): Division {
+  const quotient = naturalHalved(first, divisor);
+  const rest = naturalOf(naturalRest(first, divisor).toUint64());
+
+  return new Division(quotient, rest);
+}
+
+function naturalDivided(first: Read<Natural>, second: Read<Natural>): Division {
+  if (naturalCompare(first, second) < 0) {
+    return new Division(new Natural(0), naturalCopy(first));
+  }
+  if (second.count == 1) {
+    return smallDivision(first, second.at(0));
+  }
+
+  const size = second.count;
+  const spread = first.count - second.count;
+  const factor = limbBase() / (second.at(size - 1) + 1);
+  const top = naturalCopy(first);
+  const bottom = naturalCopy(second);
+
+  naturalScaled(top, factor, 0);
+  naturalScaled(bottom, factor, 0);
+
+  while (top.count < first.count + 1) {
+    top.put(top.count, 0);
+    top.count += 1;
+  }
+
+  const quotient = new Natural(spread + 1);
+
+  for (let index = 0; index <= spread; index++) {
+    quotient.put(index, 0);
+  }
+
+  quotient.count = spread + 1;
+
+  const lead = bottom.at(size - 1);
+  const next = bottom.at(size - 2);
+
+  for (let step = spread; step >= 0; step--) {
+    const number = top.at(step + size) * limbBase() + top.at(step + size - 1);
+    let guess = number / lead;
+    let remainder = number % lead;
+
+    while (isGuessHigh(guess, next, remainder, top.at(step + size - 2))) {
+      guess -= 1;
+      remainder += lead;
+
+      if (remainder >= limbBase()) {
+        break;
+      }
+    }
+
+    let borrow = 0;
+    let carry = 0;
+
+    for (let index = 0; index < size; index++) {
+      const part = guess * bottom.at(index) + carry;
+
+      carry = part / limbBase();
+
+      let cell = top.at(index + step) - part % limbBase() - borrow;
+
+      borrow = 0;
+
+      if (cell < 0) {
+        cell += limbBase();
+        borrow = 1;
+      }
+
+      top.put(index + step, cell);
+    }
+
+    const last = top.at(step + size) - carry - borrow;
+
+    if (last < 0) {
+      top.put(step + size, last + limbBase());
+      guess -= 1;
+
+      let back = 0;
+
+      for (let index = 0; index < size; index++) {
+        let sum = top.at(index + step) + bottom.at(index) + back;
+
+        back = 0;
+
+        if (sum >= limbBase()) {
+          sum -= limbBase();
+          back = 1;
+        }
+
+        top.put(index + step, sum);
+      }
+
+      top.put(step + size, (top.at(step + size) + back) % limbBase());
+    } else {
+      top.put(step + size, last);
+    }
+
+    quotient.put(step, guess);
+  }
+
+  quotient.trim();
+  top.count = size;
+  top.trim();
+
+  const rest = naturalHalved(top, factor);
+
+  return new Division(quotient, rest);
+}

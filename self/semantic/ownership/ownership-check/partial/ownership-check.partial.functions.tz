@@ -6,6 +6,7 @@ import {
   MethodKind,
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
+  BodySource,
   FunctionDecl,
   FunctionPlace,
   Param,
@@ -177,6 +178,9 @@ partial class OwnershipCheck {
 
     const fn = frame.fn;
     if (fn == undefined || fn.isArrow) {
+      return;
+    }
+    if (fn.bodySource == BodySource.Foreign) {
       return;
     }
 

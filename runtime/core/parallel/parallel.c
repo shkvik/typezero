@@ -13,8 +13,6 @@
 
 TZ_THREAD_LOCAL TzThread tz_thread;
 
-int32_t tz_thread_index(void) { return tz_thread.index; }
-
 #if TZ_PARALLEL
 
 #ifdef _WIN32

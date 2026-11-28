@@ -1,0 +1,733 @@
+const kFailureCodes: string[] = [
+  "UNKNOWN",
+  "ENOENT",
+  "EEXIST",
+  "EACCES",
+  "EPERM",
+  "EISDIR",
+  "ENOTDIR",
+  "ENOTEMPTY",
+  "EBUSY",
+  "EINVAL",
+  "EXDEV",
+  "EMFILE",
+  "ENFILE",
+  "ENAMETOOLONG",
+  "ENOSPC",
+  "EBADF",
+  "ELOOP",
+  "EIO",
+  "EROFS",
+  "ENOMEM",
+  "EOF",
+  "EPIPE",
+  "ENOTSUP",
+  "ECANCELED",
+  "ETIMEDOUT",
+  "E2BIG",
+  "EFAULT",
+  "ENOSYS",
+  "ECHARSET",
+  "EAGAIN",
+  "EFBIG",
+  "ESPIPE",
+  "EMLINK",
+  "ETXTBSY",
+  "ENXIO",
+  "EINTR",
+  "ENODEV",
+  "ERR_INVALID_PATH",
+];
+
+const kFailureTexts: string[] = [
+  "unknown error",
+  "no such file or directory",
+  "file already exists",
+  "permission denied",
+  "operation not permitted",
+  "illegal operation on a directory",
+  "not a directory",
+  "directory not empty",
+  "resource busy or locked",
+  "invalid argument",
+  "cross-device link not permitted",
+  "too many open files",
+  "file table overflow",
+  "name too long",
+  "no space left on device",
+  "bad file descriptor",
+  "too many symbolic links encountered",
+  "i/o error",
+  "read-only file system",
+  "not enough memory",
+  "end of file",
+  "broken pipe",
+  "operation not supported on socket",
+  "operation canceled",
+  "connection timed out",
+  "argument list too long",
+  "bad address in system call argument",
+  "function not implemented",
+  "invalid Unicode character",
+  "resource temporarily unavailable",
+  "file too large",
+  "invalid seek",
+  "too many links",
+  "text file is busy",
+  "no such device or address",
+  "interrupted system call",
+  "no such device",
+  "the path has a zero character in it",
+];
+
+const kWindowsErrors: int[] = [
+  1, 2, 3, 4, 5, 6, 8, 13, 14, 15, 17, 19, 23, 31, 32, 33, 39, 50, 80, 82, 87,
+  109, 110, 111, 112, 121, 122, 123, 126, 145, 156, 161, 183, 203, 205, 206,
+  208, 230, 231, 232, 233, 267, 277, 740, 995, 998, 1004, 1100, 1101, 1102,
+  1103, 1104, 1106, 1111, 1113, 1117, 1129, 1165, 1166, 1314, 1393, 1464, 1920,
+  1921, 4392,
+];
+
+const kWindowsFailures: int[] = [
+  5, 1, 1, 11, 4, 15, 19, 9, 19, 1, 10, 18, 17, 17, 8, 8, 14, 22, 2, 14, 9, 20,
+  17, 26, 14, 24, 9, 9, 1, 7, 17, 1, 2, 1, 17, 13, 25, 21, 8, 21, 21, 6, 14, 3,
+  23, 3, 15, 14, 17, 17, 17, 17, 17, 17, 28, 17, 17, 17, 17, 4, 17, 9, 3, 16, 1,
+];
+
+const kReadFileErrorCodes: string[] = [
+  "ENOENT",
+  "EISDIR",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EBUSY",
+  "EAGAIN",
+  "EMFILE",
+  "ENFILE",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "EBADF",
+  "UNKNOWN",
+];
+
+function readFileErrorOf(failure: Read<FsFailure>): ReadFileError {
+  const isKnown = kReadFileErrorCodes.includes(failure.code);
+  const verb = "read";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOENT":
+      return {
+        kind: "READ_FILE_ERROR_NOT_FOUND",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EISDIR":
+    case "ENOTDIR":
+      return {
+        kind: "READ_FILE_ERROR_WRONG_TYPE",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EACCES":
+    case "EPERM":
+      return {
+        kind: "READ_FILE_ERROR_PERMISSION",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EBUSY":
+    case "EAGAIN":
+    case "EMFILE":
+    case "ENFILE":
+      return { kind: "READ_FILE_ERROR_BUSY", code, message, syscall, path };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+      return { kind: "READ_FILE_ERROR_PATH", code, message, syscall, path };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+    case "EBADF":
+      return { kind: "READ_FILE_ERROR_SYSTEM", code, message, syscall, path };
+    default:
+      return {
+        kind: "READ_FILE_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+      };
+  }
+}
+
+const kRealPathErrorCodes: string[] = [
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EBUSY",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "ECHARSET",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "UNKNOWN",
+];
+
+function realPathErrorOf(failure: Read<FsFailure>): RealPathError {
+  const isKnown = kRealPathErrorCodes.includes(failure.code);
+  const verb = "resolve";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOENT":
+      return {
+        kind: "REAL_PATH_ERROR_NOT_FOUND",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "ENOTDIR":
+      return {
+        kind: "REAL_PATH_ERROR_WRONG_TYPE",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EACCES":
+    case "EPERM":
+      return {
+        kind: "REAL_PATH_ERROR_PERMISSION",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EBUSY":
+      return { kind: "REAL_PATH_ERROR_BUSY", code, message, syscall, path };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+    case "ECHARSET":
+      return { kind: "REAL_PATH_ERROR_PATH", code, message, syscall, path };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+      return { kind: "REAL_PATH_ERROR_SYSTEM", code, message, syscall, path };
+    default:
+      return {
+        kind: "REAL_PATH_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+      };
+  }
+}
+
+const kMakeTemporaryDirectoryErrorCodes: string[] = [
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EROFS",
+  "ENOSPC",
+  "EMLINK",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "UNKNOWN",
+];
+
+function makeTemporaryDirectoryErrorOf(
+  failure: Read<FsFailure>,
+): MakeTemporaryDirectoryError {
+  const isKnown = kMakeTemporaryDirectoryErrorCodes.includes(failure.code);
+  const verb = "create a temporary folder at";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOENT":
+      return {
+        kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_NOT_FOUND",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "ENOTDIR":
+      return {
+        kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_WRONG_TYPE",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EACCES":
+    case "EPERM":
+    case "EROFS":
+      return {
+        kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_PERMISSION",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "ENOSPC":
+    case "EMLINK":
+      return {
+        kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_FULL",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+      return {
+        kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_PATH",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+      return {
+        kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_SYSTEM",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    default:
+      return {
+        kind: "MAKE_TEMPORARY_DIRECTORY_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+      };
+  }
+}
+
+const kRemoveErrorCodes: string[] = [
+  "ENOENT",
+  "ENOTEMPTY",
+  "EISDIR",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EROFS",
+  "EBUSY",
+  "EMFILE",
+  "ENFILE",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "ECHARSET",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "UNKNOWN",
+];
+
+function removeErrorOf(failure: Read<FsFailure>): RemoveError {
+  const isKnown = kRemoveErrorCodes.includes(failure.code);
+  const verb = "remove";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOENT":
+      return { kind: "REMOVE_ERROR_NOT_FOUND", code, message, syscall, path };
+    case "ENOTEMPTY":
+      return { kind: "REMOVE_ERROR_NOT_EMPTY", code, message, syscall, path };
+    case "EISDIR":
+    case "ENOTDIR":
+      return { kind: "REMOVE_ERROR_WRONG_TYPE", code, message, syscall, path };
+    case "EACCES":
+    case "EPERM":
+    case "EROFS":
+      return { kind: "REMOVE_ERROR_PERMISSION", code, message, syscall, path };
+    case "EBUSY":
+    case "EMFILE":
+    case "ENFILE":
+      return { kind: "REMOVE_ERROR_BUSY", code, message, syscall, path };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+    case "ECHARSET":
+      return { kind: "REMOVE_ERROR_PATH", code, message, syscall, path };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+      return { kind: "REMOVE_ERROR_SYSTEM", code, message, syscall, path };
+    default:
+      return {
+        kind: "REMOVE_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+      };
+  }
+}
+
+const kForceRemoveErrorCodes: string[] = [
+  "ENOTEMPTY",
+  "EISDIR",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EROFS",
+  "EBUSY",
+  "EMFILE",
+  "ENFILE",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "ECHARSET",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "UNKNOWN",
+];
+
+function forceRemoveErrorOf(failure: Read<FsFailure>): ForceRemoveError {
+  const isKnown = kForceRemoveErrorCodes.includes(failure.code);
+  const verb = "remove";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOTEMPTY":
+      return {
+        kind: "FORCE_REMOVE_ERROR_NOT_EMPTY",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EISDIR":
+    case "ENOTDIR":
+      return {
+        kind: "FORCE_REMOVE_ERROR_WRONG_TYPE",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EACCES":
+    case "EPERM":
+    case "EROFS":
+      return {
+        kind: "FORCE_REMOVE_ERROR_PERMISSION",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EBUSY":
+    case "EMFILE":
+    case "ENFILE":
+      return { kind: "FORCE_REMOVE_ERROR_BUSY", code, message, syscall, path };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+    case "ECHARSET":
+      return { kind: "FORCE_REMOVE_ERROR_PATH", code, message, syscall, path };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+      return {
+        kind: "FORCE_REMOVE_ERROR_SYSTEM",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    default:
+      return {
+        kind: "FORCE_REMOVE_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+      };
+  }
+}
+
+const kCopyFileErrorCodes: string[] = [
+  "ENOENT",
+  "EEXIST",
+  "EISDIR",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EROFS",
+  "EBUSY",
+  "ETXTBSY",
+  "EMFILE",
+  "ENFILE",
+  "ENOSPC",
+  "EFBIG",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "UNKNOWN",
+];
+
+function copyFileErrorOf(failure: Read<FsFailure>): CopyFileError {
+  const isKnown = kCopyFileErrorCodes.includes(failure.code);
+  const verb = "copy";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+  const dest = failure.dest;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOENT":
+      return {
+        kind: "COPY_FILE_ERROR_NOT_FOUND",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    case "EEXIST":
+      return {
+        kind: "COPY_FILE_ERROR_EXISTS",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    case "EISDIR":
+    case "ENOTDIR":
+      return {
+        kind: "COPY_FILE_ERROR_WRONG_TYPE",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    case "EACCES":
+    case "EPERM":
+    case "EROFS":
+      return {
+        kind: "COPY_FILE_ERROR_PERMISSION",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    case "EBUSY":
+    case "ETXTBSY":
+    case "EMFILE":
+    case "ENFILE":
+      return {
+        kind: "COPY_FILE_ERROR_BUSY",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    case "ENOSPC":
+    case "EFBIG":
+      return {
+        kind: "COPY_FILE_ERROR_FULL",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+      return {
+        kind: "COPY_FILE_ERROR_PATH",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+      return {
+        kind: "COPY_FILE_ERROR_SYSTEM",
+        code,
+        message,
+        syscall,
+        path,
+        dest,
+      };
+    default:
+      return {
+        kind: "COPY_FILE_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+        dest,
+      };
+  }
+}
+
+const kReadDirectoryErrorCodes: string[] = [
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "EMFILE",
+  "ENFILE",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "ECHARSET",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "UNKNOWN",
+];
+
+function readDirectoryErrorOf(failure: Read<FsFailure>): ReadDirectoryError {
+  const isKnown = kReadDirectoryErrorCodes.includes(failure.code);
+  const verb = "list";
+  const message = failureMessage(failure, verb, isKnown);
+  const syscall = failure.syscall;
+  const path = failure.path;
+
+  const code = failure.code;
+
+  switch (code) {
+    case "ENOENT":
+      return {
+        kind: "READ_DIRECTORY_ERROR_NOT_FOUND",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "ENOTDIR":
+      return {
+        kind: "READ_DIRECTORY_ERROR_WRONG_TYPE",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EACCES":
+    case "EPERM":
+      return {
+        kind: "READ_DIRECTORY_ERROR_PERMISSION",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EMFILE":
+    case "ENFILE":
+      return {
+        kind: "READ_DIRECTORY_ERROR_BUSY",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "ERR_INVALID_PATH":
+    case "ENAMETOOLONG":
+    case "ELOOP":
+    case "EINVAL":
+    case "ECHARSET":
+      return {
+        kind: "READ_DIRECTORY_ERROR_PATH",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    case "EIO":
+    case "ENOMEM":
+    case "ETIMEDOUT":
+      return {
+        kind: "READ_DIRECTORY_ERROR_SYSTEM",
+        code,
+        message,
+        syscall,
+        path,
+      };
+    default:
+      return {
+        kind: "READ_DIRECTORY_ERROR_SYSTEM",
+        code: "UNKNOWN",
+        message,
+        syscall,
+        path,
+      };
+  }
+}

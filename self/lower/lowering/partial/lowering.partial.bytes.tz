@@ -14,11 +14,10 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kBufferAlloc,
-  kBufferEncoding,
   kBufferFromText,
   kBufferKindCode,
   kBufferName,
-  kBufferToText,
+  kBuffersModule,
   kByteType,
   kBytesDataField,
   kBytesFromBytes,
@@ -33,7 +32,7 @@ import {
   kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private readonly bytesLength(
@@ -173,13 +172,17 @@ partial class Lowering {
       return this.ir.zero(kFlagType);
     }
 
-    const params = [kPointerType, kIntType];
-    const callee = this.ir.declare(kBufferEncoding, kFlagType, params);
-    const code = frame.made.call(callee, this.textParts(frame, given));
+    const name = "encodingOf";
+    const target: RuntimeTarget = { module: kBuffersModule, name };
+    const found = this.runtimeFunctionCall(frame, target, [], [given], 0);
 
     this.dropping(frame, given);
 
-    return code;
+    if (found == undefined) {
+      return this.ir.zero(kFlagType);
+    }
+
+    return frame.made.cast(IrOpcode.Trunc, found.value, kFlagType);
   }
 
   private readonly encodingSource(expr: Expr | undefined): Expr | undefined {
@@ -251,9 +254,22 @@ partial class Lowering {
       return undefined;
     }
 
-    const args = [bytes.value, encoding].concat(positions);
-    const params = [kPointerType, kFlagType, kIntType, kIntType, kFlagType];
-    const text = this.textOut(frame, kBufferToText, params, args);
+    const int = this.values.types.store.integer(64, false);
+    const code = frame.made.cast(IrOpcode.SExt, encoding, kIntType);
+    const start = positions[0] ?? this.ir.zero(kIntType);
+    const end = positions[1] ?? this.ir.zero(kIntType);
+    const has = positions[2] ?? this.ir.zero(kFlagType);
+    const flags = frame.made.cast(IrOpcode.SExt, has, kIntType);
+    const given: IrValue[] = [
+      { type: kPointerType, value: bytes.value, tz: int },
+      { type: kIntType, value: code, tz: int },
+      { type: kIntType, value: start, tz: int },
+      { type: kIntType, value: end, tz: int },
+      { type: kIntType, value: flags, tz: int },
+    ];
+    const name = "bufferText";
+    const target: RuntimeTarget = { module: kBuffersModule, name };
+    const text = this.runtimeFunctionCall(frame, target, [], given, call.loc);
 
     this.dropping(frame, bytes);
 
@@ -279,8 +295,11 @@ partial class Lowering {
     }
 
     const params = [kPointerType, kIntType, kIntType, kFlagType];
-    const callee = this.ir.declare(kBytesSubarray, kPointerType, params);
-    const value = frame.made.call(callee, [bytes.value].concat(positions));
+    const args = [bytes.value].concat(positions);
+    const value = this.bytesMade(frame, kBytesSubarray, "bytesViewed", {
+      params,
+      args,
+    });
 
     this.dropping(frame, bytes);
 
@@ -372,9 +391,11 @@ partial class Lowering {
     if (member.name == "alloc") {
       const size = this.toLong(frame, given).value;
       const params = [kIntType, kFlagType];
-      const callee = this.ir.declare(kBufferAlloc, kPointerType, params);
       const zeroed = this.ir.integer(kFlagType, "1");
-      const value = frame.made.call(callee, [size, zeroed]);
+      const value = this.bytesMade(frame, kBufferAlloc, "bufferMade", {
+        params,
+        args: [size, zeroed],
+      });
 
       return { type: kPointerType, value, tz: result, owned: true };
     }
@@ -383,10 +404,7 @@ partial class Lowering {
         frame,
         tree.exprAt(tree.argumentsOf(call.argsList)[1]?.exprId),
       );
-      const params = [kPointerType, kIntType, kFlagType];
-      const callee = this.ir.declare(kBufferFromText, kPointerType, params);
-      const args = this.textParts(frame, given).concat([encoding]);
-      const value = frame.made.call(callee, args);
+      const value = this.bufferOfTextMade(frame, given, encoding);
 
       this.dropping(frame, given);
 
@@ -394,9 +412,11 @@ partial class Lowering {
     }
     if (member.name == "from" && this.isBytesType(given.tz)) {
       const params = [kFlagType, kPointerType];
-      const callee = this.ir.declare(kBytesFromBytes, kPointerType, params);
       const kind = this.ir.integer(kFlagType, kBufferKindCode);
-      const value = frame.made.call(callee, [kind, given.value]);
+      const value = this.bytesMade(frame, kBytesFromBytes, "bytesCopied", {
+        params,
+        args: [kind, given.value],
+      });
 
       this.dropping(frame, given);
 

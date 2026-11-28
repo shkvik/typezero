@@ -1,0 +1,496 @@
+@InPlace()
+class RyuState {
+  public readonly vr: uint64;
+  public readonly vp: uint64;
+  public readonly vm: uint64;
+  public readonly vmZeros: boolean;
+  public readonly vrZeros: boolean;
+  public readonly exponent: int;
+
+  public constructor(
+    vr: uint64,
+    vp: uint64,
+    vm: uint64,
+    vmZeros: boolean,
+    vrZeros: boolean,
+    exponent: int,
+  ) {
+    this.vr = vr;
+    this.vp = vp;
+    this.vm = vm;
+    this.vmZeros = vmZeros;
+    this.vrZeros = vrZeros;
+    this.exponent = exponent;
+  }
+}
+
+@InPlace()
+class RyuDigits {
+  public readonly output: uint64;
+  public readonly exponent: int;
+
+  public constructor(output: uint64, exponent: int) {
+    this.output = output;
+    this.exponent = exponent;
+  }
+}
+
+function mantissaBits(): uint64 {
+  return 4503599627370495;
+}
+
+function hiddenBit(): uint64 {
+  return 4503599627370496;
+}
+
+function exponentBits(): uint64 {
+  return 2047;
+}
+
+function magnitudeBits(): uint64 {
+  return 9223372036854775807;
+}
+
+function powFiveBits(): int {
+  return 125;
+}
+
+function powFiveBitsOf(exponent: int): int {
+  return ((exponent * 1217359) >> 19) + 1;
+}
+
+function logTenOfTwo(exponent: int): int {
+  return (exponent * 78913) >> 18;
+}
+
+function logTenOfFive(exponent: int): int {
+  return (exponent * 732923) >> 20;
+}
+
+function isPowFiveDivided(value: uint64, power: int): boolean {
+  let rest = value;
+  let count = 0;
+
+  while (rest % 5 == 0) {
+    rest = rest / 5;
+    count += 1;
+  }
+
+  return count >= power;
+}
+
+function isPowTwoDivided(value: uint64, power: int): boolean {
+  const one: uint64 = 1;
+  const mask = (one << power.toUint64()) - one;
+
+  return (value & mask) == 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "index * 2 + 1 is inside the table of the Ryu powers",
+})
+function powerShifted(
+  table: Read<uint64[]>,
+  index: int,
+  value: uint64,
+  shift: int,
+): uint64 {
+  const cells = arrayCells(table);
+  const low = peekAt(cells, index * 2);
+  const high = peekAt(cells, index * 2 + 1);
+
+  return productShifted(value, low, high, shift - 64);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an uint64 has at most 20 digits; the cells hold 24",
+})
+function digitsWritten(output: uint64, digits: Raw<uint8>): int {
+  const reversed = frameCells<uint8>(24);
+  let rest = output;
+  let count = 0;
+  let isFirst = true;
+
+  while (isFirst || rest != 0) {
+    const digit = rest % 10;
+
+    putUnit(reversed, count, 48 + digit.toInt());
+    rest = rest / 10;
+    count += 1;
+    isFirst = false;
+  }
+
+  for (let index = 0; index < count; index++) {
+    putUnit(digits, index, unitAt(reversed, count - 1 - index));
+  }
+
+  return count;
+}
+
+function roundedDigits(
+  given: Read<RyuState>,
+  even: boolean,
+): RyuDigits {
+  let vr = given.vr;
+  let vp = given.vp;
+  let vm = given.vm;
+  let vmZeros = given.vmZeros;
+  let vrZeros = given.vrZeros;
+  let removed = 0;
+  let last: uint64 = 0;
+
+  if (vmZeros || vrZeros) {
+    while (vp / 10 > vm / 10) {
+      vmZeros = vmZeros && vm % 10 == 0;
+      vrZeros = vrZeros && last == 0;
+      last = vr % 10;
+      vr = vr / 10;
+      vp = vp / 10;
+      vm = vm / 10;
+      removed += 1;
+    }
+    if (vmZeros) {
+      while (vm % 10 == 0) {
+        vrZeros = vrZeros && last == 0;
+        last = vr % 10;
+        vr = vr / 10;
+        vp = vp / 10;
+        vm = vm / 10;
+        removed += 1;
+      }
+    }
+    if (vrZeros && last == 5 && vr % 2 == 0) {
+      last = 4;
+    }
+
+    let output = vr;
+
+    if ((vr == vm && (!even || !vmZeros)) || last >= 5) {
+      output += 1;
+    }
+
+    return new RyuDigits(output, given.exponent + removed);
+  }
+
+  let isUp = false;
+
+  if (vp / 100 > vm / 100) {
+    isUp = vr % 100 >= 50;
+    vr = vr / 100;
+    vp = vp / 100;
+    vm = vm / 100;
+    removed += 2;
+  }
+
+  while (vp / 10 > vm / 10) {
+    isUp = vr % 10 >= 5;
+    vr = vr / 10;
+    vp = vp / 10;
+    vm = vm / 10;
+    removed += 1;
+  }
+
+  let output = vr;
+
+  if (vr == vm || isUp) {
+    output += 1;
+  }
+
+  return new RyuDigits(output, given.exponent + removed);
+}
+
+function positiveState(
+  m2: uint64,
+  e2: int,
+  mmShift: uint64,
+  even: boolean,
+): RyuState {
+  const mv = 4 * m2;
+  const q = logTenOfTwo(e2) - choose(e2 > 3, 1, 0);
+  const k = powFiveBits() + powFiveBitsOf(q) - 1;
+  const shift = q - e2 + k;
+  const vr = powerShifted(kPowFiveInverse, q, mv, shift);
+  let vp = powerShifted(kPowFiveInverse, q, mv + 2, shift);
+  const vm = powerShifted(kPowFiveInverse, q, mv - 1 - mmShift, shift);
+  let vmZeros = false;
+  let vrZeros = false;
+
+  if (q <= 21) {
+    if (mv % 5 == 0) {
+      vrZeros = isPowFiveDivided(mv, q);
+    } else if (even) {
+      vmZeros = isPowFiveDivided(mv - 1 - mmShift, q);
+    } else if (isPowFiveDivided(mv + 2, q)) {
+      vp -= 1;
+    }
+  }
+
+  return new RyuState(vr, vp, vm, vmZeros, vrZeros, q);
+}
+
+function negativeState(
+  m2: uint64,
+  e2: int,
+  mmShift: uint64,
+  even: boolean,
+): RyuState {
+  const mv = 4 * m2;
+  const q = logTenOfFive(0 - e2) - choose(0 - e2 > 1, 1, 0);
+  const index = 0 - e2 - q;
+  const k = powFiveBitsOf(index) - powFiveBits();
+  const shift = q - k;
+  const vr = powerShifted(kPowFive, index, mv, shift);
+  let vp = powerShifted(kPowFive, index, mv + 2, shift);
+  const vm = powerShifted(kPowFive, index, mv - 1 - mmShift, shift);
+  let vmZeros = false;
+  let vrZeros = false;
+
+  if (q <= 1) {
+    vrZeros = true;
+
+    if (even) {
+      vmZeros = mmShift == 1;
+    } else {
+      vp -= 1;
+    }
+  } else if (q < 63) {
+    vrZeros = isPowTwoDivided(mv, q);
+  }
+
+  return new RyuState(vr, vp, vm, vmZeros, vrZeros, q + e2);
+}
+
+function choose(isFirst: boolean, first: int, second: int): int {
+  if (isFirst) {
+    return first;
+  }
+
+  return second;
+}
+
+function shortestDigits(bits: uint64): RyuDigits {
+  const mantissa = bits & mantissaBits();
+  const biased = ((bits >> 52) & exponentBits()).toInt();
+  const exact = biased - 1075;
+  const isWhole = biased != 0 && exact <= 0 && exact >= -52;
+
+  if (isWhole && isPowTwoDivided(mantissa, 0 - exact)) {
+    let output = (hiddenBit() | mantissa) >> (0 - exact).toUint64();
+    let exponent = 0;
+
+    while (output % 10 == 0) {
+      output = output / 10;
+      exponent += 1;
+    }
+
+    return new RyuDigits(output, exponent);
+  }
+
+  let e2 = biased - 1023 - 52 - 2;
+  let m2 = hiddenBit() | mantissa;
+
+  if (biased == 0) {
+    e2 = 1 - 1023 - 52 - 2;
+    m2 = mantissa;
+  }
+
+  const even = (m2 & 1) == 0;
+  let mmShift: uint64 = 0;
+
+  if (mantissa != 0 || biased <= 1) {
+    mmShift = 1;
+  }
+  if (e2 >= 0) {
+    return roundedDigits(positiveState(m2, e2, mmShift, even), even);
+  }
+
+  return roundedDigits(negativeState(m2, e2, mmShift, even), even);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a double has at most 26 cells; out holds 32",
+})
+function placedDigits(
+  digits: Raw<uint8>,
+  count: int,
+  exponent: int,
+  out: Raw<uint8>,
+  start: int,
+): int {
+  const n = exponent + count;
+  let at = start;
+
+  if (count <= n && n <= 21) {
+    copyCells(digits, 0, out, at, count);
+    at += count;
+
+    for (let index = count; index < n; index++) {
+      putUnit(out, at, 48);
+      at += 1;
+    }
+
+    return at;
+  }
+  if (0 < n && n <= 21) {
+    copyCells(digits, 0, out, at, n);
+    at += n;
+    putUnit(out, at, 46);
+    copyCells(digits, n, out, at + 1, count - n);
+
+    return at + 1 + count - n;
+  }
+  if (-6 < n && n <= 0) {
+    putUnit(out, at, 48);
+    putUnit(out, at + 1, 46);
+    at += 2;
+
+    for (let index = n; index < 0; index++) {
+      putUnit(out, at, 48);
+      at += 1;
+    }
+
+    copyCells(digits, 0, out, at, count);
+
+    return at + count;
+  }
+
+  return exponentWritten(digits, count, n - 1, out, at);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a double has at most 26 cells; out holds 32",
+})
+function exponentWritten(
+  digits: Raw<uint8>,
+  count: int,
+  power: int,
+  out: Raw<uint8>,
+  start: int,
+): int {
+  let at = start;
+
+  putUnit(out, at, unitAt(digits, 0));
+  at += 1;
+
+  if (count > 1) {
+    putUnit(out, at, 46);
+    copyCells(digits, 1, out, at + 1, count - 1);
+    at += count;
+  }
+
+  putUnit(out, at, 101);
+
+  let size = power;
+
+  if (power < 0) {
+    putUnit(out, at + 1, 45);
+    size = 0 - power;
+  } else {
+    putUnit(out, at + 1, 43);
+  }
+
+  at += 2;
+
+  if (size >= 100) {
+    putUnit(out, at, 48 + size / 100);
+    at += 1;
+  }
+  if (size >= 10) {
+    putUnit(out, at, 48 + (size / 10) % 10);
+    at += 1;
+  }
+
+  putUnit(out, at, 48 + size % 10);
+
+  return at + 1;
+}
+
+const kNaNUnits: int[] = [78, 97, 78];
+const kInfinityUnits: int[] = [73, 110, 102, 105, 110, 105, 116, 121];
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "out has room for the units after at",
+})
+function unitsWritten(units: Read<int[]>, out: Raw<uint8>, at: int): int {
+  let used = at;
+
+  for (const unit of units) {
+    putUnit(out, used, unit);
+    used += 1;
+  }
+
+  return used;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a double has at most 26 cells; out has them after at",
+})
+function doubleWritten(value: double, out: Raw<uint8>, at: int): int {
+  const bits = doubleBits(value);
+  const isNegative = (bits >> 63) != 0;
+  const biased = (bits >> 52) & exponentBits();
+  if (biased == exponentBits() && (bits & mantissaBits()) != 0) {
+    return unitsWritten(kNaNUnits, out, at);
+  }
+
+  let start = at;
+
+  if (isNegative && (bits & magnitudeBits()) != 0) {
+    putUnit(out, at, 45);
+    start += 1;
+  }
+  if (biased == exponentBits()) {
+    return unitsWritten(kInfinityUnits, out, start);
+  }
+  if ((bits & magnitudeBits()) == 0) {
+    putUnit(out, start, 48);
+
+    return start + 1;
+  }
+
+  const found = shortestDigits(bits & magnitudeBits());
+  const digits = frameCells<uint8>(24);
+  const count = digitsWritten(found.output, digits);
+
+  return placedDigits(digits, count, found.exponent, out, start);
+}
+
+export function doubleText(value: double, out: Raw<uint8>, at: int): int {
+  return doubleWritten(value, out, at);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the cells the frame cells hold",
+})
+export function fromDouble(value: double): string {
+  const bits = doubleBits(value);
+  const isNegative = (bits >> 63) != 0;
+  const biased = (bits >> 52) & exponentBits();
+  if (biased == exponentBits() && (bits & mantissaBits()) != 0) {
+    return "NaN";
+  }
+  if (biased == exponentBits() && isNegative) {
+    return "-Infinity";
+  }
+  if (biased == exponentBits()) {
+    return "Infinity";
+  }
+  if ((bits & magnitudeBits()) == 0) {
+    return "0";
+  }
+
+  const out = frameCells<uint8>(32);
+  const total = doubleWritten(value, out, 0);
+  const room = textRoom<uint8>(total);
+
+  copyCells(out, 0, room, 0, total);
+
+  return textClosed(room, total, true);
+}

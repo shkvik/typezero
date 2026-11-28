@@ -1,0 +1,406 @@
+class FsFailure {
+  public readonly index: int;
+  public readonly code: string;
+  public readonly system: uint32;
+  public readonly syscall: string;
+  public readonly path: string;
+  public readonly dest: string;
+
+  public constructor(
+    index: int,
+    system: uint32,
+    syscall: string,
+    path: string,
+    dest: string,
+  ) {
+    this.index = index;
+    this.code = kFailureCodes[index] ?? "UNKNOWN";
+    this.system = system;
+    this.syscall = syscall;
+    this.path = path;
+    this.dest = dest;
+  }
+}
+
+function missingKind(): int {
+  return 0;
+}
+
+function fileKind(): int {
+  return 1;
+}
+
+function folderKind(): int {
+  return 2;
+}
+
+function folderAttribute(): uint32 {
+  return 16;
+}
+
+function noAttributes(): uint32 {
+  return 4294967295;
+}
+
+function windowsIndex(error: uint32): int {
+  const wanted = error.toInt();
+
+  for (let at = 0; at < kWindowsErrors.length; at++) {
+    if (kWindowsErrors[at] == wanted) {
+      return kWindowsFailures[at] ?? 0;
+    }
+  }
+
+  return 0;
+}
+
+function failureIndex(code: string): int {
+  for (let at = 0; at < kFailureCodes.length; at++) {
+    if (kFailureCodes[at] == code) {
+      return at;
+    }
+  }
+
+  return 0;
+}
+
+function windowsFailure(
+  error: uint32,
+  syscall: string,
+  path: string,
+  dest: string,
+): FsFailure {
+  return new FsFailure(windowsIndex(error), error, syscall, path, dest);
+}
+
+function codeFailure(code: string, syscall: string, path: string): FsFailure {
+  return new FsFailure(failureIndex(code), 0, syscall, path, "");
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the name ends with a zero",
+})
+function kindOf(path: Read<string>): int {
+  if (path.length == 0) {
+    return missingKind();
+  }
+
+  const name = wideOf(path);
+  if (name == undefined) {
+    return missingKind();
+  }
+
+  const attributes = GetFileAttributesW(name);
+  if (attributes == noAttributes()) {
+    return missingKind();
+  }
+  if ((attributes & folderAttribute()) != 0) {
+    return folderKind();
+  }
+
+  return fileKind();
+}
+
+function isSlash(unit: int): boolean {
+  return unit == 92 || unit == 47;
+}
+
+function parentCount(path: Read<string>): int {
+  let count = path.length;
+
+  while (count > 0 && !isSlash(path.charCodeAt(count - 1))) {
+    count -= 1;
+  }
+  while (count > 1 && isSlash(path.charCodeAt(count - 1))) {
+    if (path.charCodeAt(count - 2) == 58) {
+      break;
+    }
+
+    count -= 1;
+  }
+
+  return count;
+}
+
+function shownPath(path: Read<string>): string {
+  if (path.length > 0 && !path.includes("\0")) {
+    return path;
+  }
+
+  const escaped = path.replaceAll("\0", "\\0");
+
+  return `"${escaped}"`;
+}
+
+function nameOf(path: Read<string>): string {
+  let start = parentCount(path);
+
+  if (start > 0 && start < path.length && isSlash(path.charCodeAt(start))) {
+    start += 1;
+  }
+  if (start >= path.length) {
+    start = 0;
+  }
+
+  return path.slice(start);
+}
+
+function missingParent(path: Read<string>, advice: string): string {
+  const count = parentCount(path);
+  if (count == 0) {
+    return "";
+  }
+
+  const parent = path.slice(0, count);
+  if (kindOf(parent) != missingKind()) {
+    return "";
+  }
+
+  return `the folder ${parent} does not exist${advice}`;
+}
+
+function isMoving(verb: string): boolean {
+  return verb == "move" || verb == "copy";
+}
+
+function isWriting(verb: string): boolean {
+  return verb == "write" || verb == "append to";
+}
+
+function recursiveAdvice(): string {
+  return "; create it with mkdirSync(path, { recursive: true })";
+}
+
+function missingReason(
+  verb: string,
+  path: Read<string>,
+  dest: Read<string>,
+): string {
+  if (isMoving(verb) && dest.length > 0 && kindOf(path) != missingKind()) {
+    const found = missingParent(dest, recursiveAdvice());
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  if (isWriting(verb)) {
+    const found = missingParent(path, recursiveAdvice());
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  if (verb == "create the folder") {
+    const advice = "; pass { recursive: true } to create it too";
+    const found = missingParent(path, advice);
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  if (verb == "create a temporary folder at") {
+    const found = missingParent(path, "");
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  if (verb == "list" || verb == "remove the folder") {
+    return "there is no such folder";
+  }
+  if (verb == "read" || isWriting(verb) || isMoving(verb)) {
+    return "there is no such file";
+  }
+  if (verb == "truncate") {
+    return "there is no such file";
+  }
+
+  return "there is no such file or folder";
+}
+
+function existsReason(verb: string, dest: Read<string>): string {
+  if (verb == "move" && dest.length > 0) {
+    const name = nameOf(dest);
+    const advice = 'to replace it on purpose, use replaceSync from "tz:fs"';
+
+    return `${name} already exists; ${advice}`;
+  }
+  if (verb == "copy" && dest.length > 0) {
+    const name = nameOf(dest);
+    const first = "to replace it on purpose, copy to a temporary name and ";
+    const second = 'move that over it with replaceSync from "tz:fs"';
+
+    return `${name} already exists; ${first}${second}`;
+  }
+
+  return "it already exists";
+}
+
+function emptyReason(verb: string, dest: Read<string>): string {
+  if (verb == "move") {
+    return `the folder ${dest} is not empty`;
+  }
+  if (verb == "remove") {
+    const tail = "while it was being removed; try again";
+
+    return `a file appeared in the folder ${tail}`;
+  }
+
+  const advice = "pass { recursive: true } to rmSync to remove it with its";
+
+  return `it is not empty; ${advice} contents`;
+}
+
+function folderReason(verb: string, dest: Read<string>): string {
+  if (verb == "remove") {
+    const advice = "pass { recursive: true } to rmSync to remove it with its";
+
+    return `it is a folder; ${advice} contents`;
+  }
+  if (verb == "move" && dest.length > 0) {
+    return `${dest} is a folder`;
+  }
+
+  return "it is a folder, not a file";
+}
+
+function deniedReason(
+  verb: string,
+  path: Read<string>,
+  dest: Read<string>,
+): string {
+  if (verb == "remove" && kindOf(path) == folderKind()) {
+    const first = "it is a folder; remove it with rmdirSync, or with its ";
+    const second = "contents with rmSync(path, { recursive: true })";
+
+    return `${first}${second}`;
+  }
+  if (isMoving(verb) && dest.length > 0 && kindOf(dest) == folderKind()) {
+    return `${dest} is a folder`;
+  }
+
+  const isFolder = kindOf(path) == folderKind();
+  if (isMoving(verb) && isFolder && verb == "copy") {
+    return "it is a folder, not a file";
+  }
+
+  return "no permission";
+}
+
+const kReasonCodes: string[] = [
+  "EROFS",
+  "EBUSY",
+  "ETXTBSY",
+  "EAGAIN",
+  "EMFILE",
+  "ENFILE",
+  "ENOSPC",
+  "EFBIG",
+  "EMLINK",
+  "ERR_INVALID_PATH",
+  "ENAMETOOLONG",
+  "ELOOP",
+  "EINVAL",
+  "ECHARSET",
+  "EXDEV",
+  "EIO",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "EBADF",
+  "EPIPE",
+  "EOF",
+];
+
+const kReasonTexts: string[] = [
+  "the disk is read-only",
+  "another program holds it open; close it and try again",
+  "the program is running; stop it and try again",
+  "it has no data ready yet; try again",
+  "too many files are open; close some and try again",
+  "too many files are open; close some and try again",
+  "the disk is full",
+  "the file would be larger than the disk allows",
+  "the folder has too many links",
+  "the path has a zero character in it",
+  "the path is too long",
+  "the links in the path go round in a loop",
+  "the name has characters the system does not allow, such as ? or *",
+  "a name on the disk is not valid text",
+  "",
+  "the disk failed",
+  "there is not enough memory",
+  "the disk did not answer in time",
+  "it is not an open file",
+  "the reader is gone",
+  "the reader is gone",
+];
+
+function reasonOf(
+  code: string,
+  verb: string,
+  path: Read<string>,
+  dest: Read<string>,
+): string {
+  if (code == "ENOENT") {
+    return missingReason(verb, path, dest);
+  }
+  if (code == "EEXIST") {
+    return existsReason(verb, dest);
+  }
+  if (code == "ENOTEMPTY") {
+    return emptyReason(verb, dest);
+  }
+  if (code == "EISDIR") {
+    return folderReason(verb, dest);
+  }
+  if (code == "ENOTDIR" && kindOf(path) == fileKind()) {
+    return "it is a file, not a folder";
+  }
+  if (code == "ENOTDIR") {
+    return "a part of the path is a file, not a folder";
+  }
+  if (code == "EACCES" || code == "EPERM") {
+    return deniedReason(verb, path, dest);
+  }
+
+  if (code == "EXDEV") {
+    const advice = "copy it with copyFileSync and remove the original";
+
+    return `they are on different disks; ${advice}`;
+  }
+
+  for (let at = 0; at < kReasonCodes.length; at++) {
+    if (kReasonCodes[at] == code) {
+      return kReasonTexts[at] ?? "the system failed";
+    }
+  }
+
+  return "the system failed";
+}
+
+function failureMessage(
+  failure: Read<FsFailure>,
+  verb: string,
+  isKnown: boolean,
+): string {
+  const shown = shownPath(failure.path);
+  let head = `could not ${verb} ${shown}`;
+
+  if (failure.dest.length > 0 && isMoving(verb)) {
+    const target = shownPath(failure.dest);
+
+    head = `${head} to ${target}`;
+  }
+  if (isKnown) {
+    const path = failure.path;
+    const reason = reasonOf(failure.code, verb, path, failure.dest);
+
+    return `${head}: ${reason}`;
+  }
+  if (failure.index == 0) {
+    const system = failure.system;
+
+    return `${head}: the system failed with Windows error ${system}`;
+  }
+
+  const text = kFailureTexts[failure.index] ?? "";
+
+  return `${head}: the system failed with ${failure.code} (${text})`;
+}

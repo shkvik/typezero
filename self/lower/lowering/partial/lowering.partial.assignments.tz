@@ -129,7 +129,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const setting = this.ir.declare(kArraySetLength, kVoidType, [
+    const settingName = this.countsHelper(kArraySetLength);
+
+    const setting = this.ir.declare(settingName, kVoidType, [
       kPointerType,
       kIntType,
     ]);
@@ -240,6 +242,12 @@ partial class Lowering {
   }
 
   private readonly loaded(frame: Read<Frame>, place: Place): IrValue {
+    const view = place.view;
+    const record = place.record;
+    if (view != undefined && record != undefined) {
+      return this.loadedThrough(frame, place, view, record);
+    }
+
     const value = frame.made.load(place.type, place.pointer);
 
     return { type: place.type, value, tz: place.tz };

@@ -17,10 +17,9 @@ import {
   kIntType,
   kPanic,
   kPointerType,
-  kPowDouble,
-  kPowInt,
+  kMathsModule,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private binary(frame: Frame, expr: BinaryExpr): IrValue | undefined {
@@ -297,21 +296,27 @@ partial class Lowering {
   }
 
   private power(frame: Read<Frame>, left: IrValue, right: IrValue): IrValue {
+    const loc = this.statementLoc;
     if (left.type == kDoubleType) {
-      const value = this.runtimeValue(frame, kPowDouble, kDoubleType, [
-        left,
-        right,
-      ]);
+      const target: RuntimeTarget = { module: kMathsModule, name: "power" };
+      const found = this.runtimeFunctionCall(
+        frame,
+        target,
+        [],
+        [left, right],
+        loc,
+      );
+      const value = found?.value ?? left.value;
 
       return { type: kDoubleType, value, tz: left.tz };
     }
 
     const wideLeft = this.toLong(frame, left);
     const wideRight = this.toLong(frame, right);
-    const long = this.runtimeValue(frame, kPowInt, kIntType, [
-      wideLeft,
-      wideRight,
-    ]);
+    const target: RuntimeTarget = { module: kMathsModule, name: "powerOf" };
+    const args = [wideLeft, wideRight];
+    const found = this.runtimeFunctionCall(frame, target, [], args, loc);
+    const long = found?.value ?? wideLeft.value;
     if (left.type == kIntType) {
       return { type: kIntType, value: long, tz: left.tz };
     }

@@ -1,6 +1,7 @@
 import { dirname, relative, resolve } from "node:path";
 import {
   CallExpr,
+  Expr,
   ExprKind,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
@@ -242,12 +243,35 @@ partial class Lowering {
       this.values.types.store.errorOf(type),
     );
     const expr = tree.exprOf(argument.exprId);
-    const given = this.wantedValue(frame, expr, half);
+    const taken = this.takenOwnLocal(frame, expr);
+    const given = taken ?? this.wantedValue(frame, expr, half);
     if (given == undefined) {
       return undefined;
     }
 
     return this.madeResult(frame, type, isOk, given, call.loc);
+  }
+
+  private takenOwnLocal(frame: Read<Frame>, expr: Expr): IrValue | undefined {
+    if (expr.kind != ExprKind.Name || frame.inline != undefined) {
+      return undefined;
+    }
+
+    const place = this.ownLocalPlace(frame, expr);
+    if (place == undefined || place.view != undefined) {
+      return undefined;
+    }
+
+    const probe: IrValue = {
+      type: place.type,
+      value: this.ir.zero(place.type),
+      tz: place.tz,
+    };
+    if (!this.isSingleOwner(probe)) {
+      return undefined;
+    }
+
+    return this.movedLocal(frame, expr);
   }
 
   private sitedResult(

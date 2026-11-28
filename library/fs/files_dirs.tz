@@ -1,0 +1,438 @@
+@InPlace()
+class StatLook {
+  public readonly error: uint32;
+  public readonly isFolder: boolean;
+
+  public constructor(error: uint32, isFolder: boolean) {
+    this.error = error;
+    this.isFolder = isFolder;
+  }
+}
+
+function readOnlyAttribute(): uint32 {
+  return 1;
+}
+
+function readAttributes(): uint32 {
+  return 128;
+}
+
+function reparseFlag(): uint32 {
+  return 2097152;
+}
+
+function accessDenied(): uint32 {
+  return 5;
+}
+
+function alreadyExists(): uint32 {
+  return 183;
+}
+
+function fileExists(): uint32 {
+  return 80;
+}
+
+function invalidName(): uint32 {
+  return 123;
+}
+
+function notFolder(): uint32 {
+  return 267;
+}
+
+function invalidParameter(): uint32 {
+  return 87;
+}
+
+function symlinkTag(): uint32 {
+  return 2684354572;
+}
+
+function mountTag(): uint32 {
+  return 2684354563;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the tag record has 8 bytes",
+})
+function isLinkTag(file: Raw<uint8>): boolean {
+  const bytes = frameCells<uint8>(8);
+  if (GetFileInformationByHandleEx(file, 9, bytes, 8) == 0) {
+    return false;
+  }
+
+  const kind = unitAt(cellsAt<uint32>(bytes, 4), 0).toUint32();
+
+  return kind == symlinkTag() || kind == mountTag();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the name ends with a zero; the handle is closed on every path",
+})
+function statLook(native: Read<string>, isFollowing: boolean): StatLook {
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    return new StatLook(invalidName(), false);
+  }
+
+  const none = bitsRaw(0);
+  let flags = backupFlag();
+
+  if (!isFollowing) {
+    flags = flags | reparseFlag();
+  }
+
+  const file = CreateFileW(
+    wide,
+    readAttributes(),
+    shareAll(),
+    none,
+    openExisting(),
+    flags,
+    none,
+  );
+  if (rawBits(file) == badHandle()) {
+    return new StatLook(GetLastError(), false);
+  }
+
+  const bytes = frameCells<uint8>(52);
+  if (GetFileInformationByHandle(file, bytes) == 0) {
+    const error = GetLastError();
+
+    CloseHandle(file);
+
+    return new StatLook(error, false);
+  }
+
+  const attributes = unitAt(cellsAt<uint32>(bytes, 0), 0).toUint32();
+  const isReparse = (attributes & reparseAttribute()) != 0;
+  let isLink = false;
+
+  if (!isFollowing && isReparse) {
+    isLink = isLinkTag(file);
+  }
+
+  CloseHandle(file);
+
+  const isFolder = !isLink && (attributes & folderAttribute()) != 0;
+
+  return new StatLook(0, isFolder);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the name ends with a zero",
+})
+function unlinkPath(wide: Read<wstring>): uint32 {
+  const attributes = GetFileAttributesW(wide);
+  if (attributes == noAttributes()) {
+    return GetLastError();
+  }
+  if ((attributes & folderAttribute()) != 0) {
+    if ((attributes & reparseAttribute()) == 0) {
+      return accessDenied();
+    }
+    if (RemoveDirectoryW(wide) != 0) {
+      return 0;
+    }
+
+    return GetLastError();
+  }
+
+  const isReadOnly = (attributes & readOnlyAttribute()) != 0;
+  if (isReadOnly) {
+    const writable = attributes - readOnlyAttribute();
+
+    if (SetFileAttributesW(wide, writable) == 0) {
+      return GetLastError();
+    }
+  }
+  if (DeleteFileW(wide) != 0) {
+    return 0;
+  }
+
+  const error = GetLastError();
+
+  if (isReadOnly) {
+    SetFileAttributesW(wide, attributes);
+  }
+
+  return error;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the name of a found entry ends with a zero within 260 cells",
+})
+function foundName(data: Raw<uint8>): string {
+  const cells = cellsAt<uint16>(data, 44);
+  let count = 0;
+
+  while (count < 260 && unitAt(cells, count) != 0) {
+    count += 1;
+  }
+
+  return textOfUnits(cells, count);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the find record has 592 bytes; the find handle is closed",
+})
+function removedTree(native: Read<string>): uint32 {
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    return invalidName();
+  }
+
+  const attributes = GetFileAttributesW(wide);
+  if (attributes == noAttributes()) {
+    return GetLastError();
+  }
+
+  const isFolder = (attributes & folderAttribute()) != 0;
+  if (!isFolder || (attributes & reparseAttribute()) != 0) {
+    return unlinkPath(wide);
+  }
+
+  const pattern = wideOf(`${native}\\*`);
+  if (pattern == undefined) {
+    return invalidName();
+  }
+
+  const data = frameCells<uint8>(592);
+  const none = bitsRaw(0);
+  const find = FindFirstFileExW(pattern, 1, data, 0, none, 2);
+  let error: uint32 = 0;
+  let isMore = rawBits(find) != badHandle();
+  const isOpen = isMore;
+
+  while (isMore) {
+    const name = foundName(data);
+
+    if (name != "." && name != "..") {
+      error = removedTree(`${native}\\${name}`);
+    }
+
+    isMore = error == 0 && FindNextFileW(find, data) != 0;
+  }
+  if (isOpen) {
+    FindClose(find);
+  }
+  if (error != 0) {
+    return error;
+  }
+  if ((attributes & readOnlyAttribute()) != 0) {
+    SetFileAttributesW(wide, attributes - readOnlyAttribute());
+  }
+  if (RemoveDirectoryW(wide) == 0) {
+    return GetLastError();
+  }
+
+  return 0;
+}
+
+function removeFailure(
+  path: Read<string>,
+  isRecursive: boolean,
+  isForced: boolean,
+): FsFailure | undefined {
+  if (path.includes("\0")) {
+    return codeFailure("ERR_INVALID_PATH", "rm", path);
+  }
+
+  const native = toNamespacedPath(path);
+  const look = statLook(native, false);
+  if (look.error != 0) {
+    const code = kFailureCodes[windowsIndex(look.error)] ?? "UNKNOWN";
+    if (isForced && (code == "ENOENT" || code == "ENOTDIR")) {
+      return undefined;
+    }
+
+    return windowsFailure(look.error, "lstat", shownOf(native), "");
+  }
+  if (look.isFolder && !isRecursive) {
+    return codeFailure("EISDIR", "rm", shownOf(native));
+  }
+
+  const error = removedTree(native);
+  if (error == 0) {
+    return undefined;
+  }
+
+  const code = kFailureCodes[windowsIndex(error)] ?? "UNKNOWN";
+  if (isForced && code == "ENOENT") {
+    return undefined;
+  }
+
+  return windowsFailure(error, "rm", shownOf(native), "");
+}
+
+export function remove(
+  path: Read<string>,
+  isRecursive: boolean,
+): Result<void, RemoveError> {
+  const failure = removeFailure(path, isRecursive, false);
+  if (failure != undefined) {
+    return err(removeErrorOf(failure));
+  }
+
+  return ok();
+}
+
+export function forceRemove(
+  path: Read<string>,
+  isRecursive: boolean,
+): Result<void, ForceRemoveError> {
+  const failure = removeFailure(path, isRecursive, true);
+  if (failure != undefined) {
+    return err(forceRemoveErrorOf(failure));
+  }
+
+  return ok();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the name ends with a zero",
+})
+function madeFolder(wide: Read<wstring>): uint32 {
+  if (CreateDirectoryW(wide, bitsRaw(0)) != 0) {
+    return 0;
+  }
+
+  const error = GetLastError();
+  if (error == invalidName() || error == notFolder()) {
+    return invalidParameter();
+  }
+
+  return error;
+}
+
+const kTemporaryLetters =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the system writes one cell",
+})
+function randomLetter(index: int): int {
+  const cell = frameCells<uint32>(1);
+  let value: uint64 = 0;
+
+  if (rand_s(cell) == 0) {
+    value = unitAt(cell, 0).toUint64();
+  } else {
+    const ticks = GetTickCount().toUint64();
+    const mixed = ticks * 2654435761 + index.toUint64();
+
+    value = mixed & 4294967295;
+  }
+
+  const at = (value % 62).toInt();
+
+  return kTemporaryLetters.charCodeAt(at) ?? 97;
+}
+
+export function makeTemporary(
+  prefix: Read<string>,
+): Result<string, MakeTemporaryDirectoryError> {
+  if (prefix.includes("\0")) {
+    const failure = codeFailure("ERR_INVALID_PATH", "mkdtemp", prefix);
+
+    return err(makeTemporaryDirectoryErrorOf(failure));
+  }
+
+  for (let attempt = 0; attempt <= 100; attempt++) {
+    const tail = String.fromCharCode(
+      randomLetter(0),
+      randomLetter(1),
+      randomLetter(2),
+      randomLetter(3),
+      randomLetter(4),
+      randomLetter(5),
+    );
+    const name = `${prefix}${tail}`;
+    const wide = wideOf(toNamespacedPath(name));
+    let error = invalidName();
+
+    if (wide != undefined) {
+      error = madeFolder(wide);
+    }
+    if (error == 0) {
+      return ok(name);
+    }
+
+    const isTaken = error == alreadyExists() || error == fileExists();
+    if (!isTaken || attempt >= 100) {
+      const shown = `${prefix}XXXXXX`;
+      const failure = windowsFailure(error, "mkdtemp", shown, "");
+
+      return err(makeTemporaryDirectoryErrorOf(failure));
+    }
+  }
+
+  const failure = codeFailure("EEXIST", "mkdtemp", `${prefix}XXXXXX`);
+
+  return err(makeTemporaryDirectoryErrorOf(failure));
+}
+
+export function copyFile(
+  from: Read<string>,
+  to: Read<string>,
+): Result<void, CopyFileError> {
+  if (from.includes("\0")) {
+    const failure = codeFailure("ERR_INVALID_PATH", "copyfile", from);
+
+    return err(copyFileErrorOf(failure));
+  }
+  if (to.includes("\0")) {
+    const failure = codeFailure("ERR_INVALID_PATH", "copyfile", to);
+
+    return err(copyFileErrorOf(failure));
+  }
+
+  const fromNative = toNamespacedPath(from);
+  const toNative = toNamespacedPath(to);
+  const error = copiedFile(fromNative, toNative);
+  if (error == 0) {
+    return ok();
+  }
+
+  const shownFrom = shownOf(fromNative);
+  const shownTo = shownOf(toNative);
+  let index = windowsIndex(error);
+  const code = kFailureCodes[index] ?? "UNKNOWN";
+
+  if (code == "EPERM" || code == "EACCES") {
+    const look = statLook(fromNative, true);
+
+    if (look.error == 0 && look.isFolder) {
+      index = failureIndex("EISDIR");
+    }
+  }
+
+  const failure = new FsFailure(index, error, "copyfile", shownFrom, shownTo);
+
+  return err(copyFileErrorOf(failure));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "both names end with a zero",
+})
+function copiedFile(from: Read<string>, to: Read<string>): uint32 {
+  const fromWide = wideOf(from);
+  const toWide = wideOf(to);
+  if (fromWide == undefined || toWide == undefined) {
+    return invalidName();
+  }
+  if (CopyFileW(fromWide, toWide, 1) != 0) {
+    return 0;
+  }
+
+  return GetLastError();
+}

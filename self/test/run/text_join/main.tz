@@ -1,0 +1,31 @@
+function main(): void {
+  const numbers = [0, 7, -7, 10, -10, 12345678, 123456789, -123456789, 9007199254740993];
+  const texts: string[] = [];
+
+  for (const number of numbers) {
+    texts.push(String(number));
+    texts.push(number.toString());
+  }
+
+  const big = 9223372036854775807;
+  const small = -9223372036854775807 - 1;
+
+  texts.push(String(big));
+  texts.push(String(small));
+  console.log(texts.join(" "));
+  const empty: string[] = [];
+
+  console.log(empty.join(","), ["a"].join(), ["a", "b"].join(), ["a", "b", "c"].join(""));
+  console.log(["привет", "мир"].join(", "), ["", ""].join(""), ["", "", ""].join("-"));
+  console.log(["x".repeat(20), "y"].join("·"), ["ab", "cd"].join("ё"));
+
+  const lines: string[] = [];
+
+  for (let index = 0; index < 30; index++) {
+    lines.push(`line ${index}`);
+  }
+
+  console.log(lines.join("\n").length, lines.join(" | ").slice(0, 40));
+}
+
+main();

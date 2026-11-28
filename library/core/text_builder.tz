@@ -1,0 +1,223 @@
+
+export class TextBuilder {
+  private bytes: Raw<uint8>;
+  private units: Raw<uint16>;
+  private isWide: boolean;
+  private isPlain: boolean;
+  private capacity: int;
+  private count: int;
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells are released by the dispose of the builder",
+  })
+  public constructor() {
+    this.bytes = allocate<uint8>(64);
+    this.units = cellsAt<uint16>(bitsRaw(0), 0);
+    this.isWide = false;
+    this.isPlain = true;
+    this.capacity = 64;
+    this.count = 0;
+  }
+
+  public readonly length(): int {
+    return this.count;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells grow before units are put past them",
+  })
+  private roomFor(extra: int): void {
+    const wanted = this.count + extra;
+    if (wanted <= this.capacity) {
+      return;
+    }
+
+    let capacity = this.capacity * 2;
+
+    if (capacity < wanted) {
+      capacity = wanted;
+    }
+
+    this.capacity = capacity;
+
+    if (this.isWide) {
+      this.units = reallocate(this.units, capacity);
+    } else {
+      this.bytes = reallocate(this.bytes, capacity);
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the narrow cells are copied into wide ones and released",
+  })
+  private widened(): void {
+    if (this.isWide) {
+      return;
+    }
+
+    const units = allocate<uint16>(this.capacity);
+
+    copyCells(this.bytes, 0, units, 0, this.count);
+    release(this.bytes);
+    this.bytes = bitsRaw(0);
+    this.units = units;
+    this.isWide = true;
+  }
+
+  public add(text: Read<string>): void {
+    this.addPart(text, 0, text.length);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "from and to are inside the text, so its cells hold them",
+  })
+  public addPart(text: Read<string>, from: int, to: int): void {
+    const count = to - from;
+    if (count <= 0) {
+      return;
+    }
+
+    const narrow = textCells<uint8>(text);
+
+    if (narrow != undefined) {
+      this.roomFor(count);
+
+      if (this.isWide) {
+        copyCells(narrow, from, this.units, this.count, count);
+      } else {
+        copyCells(narrow, from, this.bytes, this.count, count);
+      }
+      if (!isAscii(text)) {
+        this.isPlain = false;
+      }
+
+      this.count += count;
+
+      return;
+    }
+
+    const wide = textCells<uint16>(text);
+    if (wide == undefined) {
+      return;
+    }
+
+    this.widened();
+    this.roomFor(count);
+    copyCells(wide, from, this.units, this.count, count);
+    this.isPlain = false;
+    this.count += count;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells grow before the unit is put",
+  })
+  public addUnit(unit: int): void {
+    if (unit > 255) {
+      this.widened();
+    }
+
+    this.roomFor(1);
+
+    if (this.isWide) {
+      putUnit(this.units, this.count, unit);
+    } else {
+      putUnit(this.bytes, this.count, unit);
+    }
+    if (unit > 127) {
+      this.isPlain = false;
+    }
+
+    this.count += 1;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "a number has at most 32 units; the cells grow first",
+  })
+  private addWritten(digits: Raw<uint8>, count: int): void {
+    this.roomFor(count);
+
+    if (this.isWide) {
+      copyCells(digits, 0, this.units, this.count, count);
+    } else {
+      copyCells(digits, 0, this.bytes, this.count, count);
+    }
+
+    this.count += count;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "an int has at most 20 units and the frame has 32",
+  })
+  public addSigned(value: int): void {
+    const digits = frameCells<uint8>(32);
+    const count = signedWritten(value, digits, 0);
+
+    this.addWritten(digits, count);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "a double has at most 25 units and the frame has 32",
+  })
+  public addDouble(value: double): void {
+    const digits = frameCells<uint8>(32);
+    const count = doubleWritten(value, digits, 0);
+
+    this.addWritten(digits, count);
+  }
+
+  public addAscii(bytes: Raw<uint8>, count: int): void {
+    this.addWritten(bytes, count);
+  }
+
+  public addSpaces(count: int): void {
+    for (let index = 0; index < count; index++) {
+      this.addUnit(32);
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the room has count cells, all of them copied",
+  })
+  public taken(): string {
+    const count = this.count;
+
+    this.count = 0;
+
+    if (this.isWide) {
+      const room = textRoom<uint16>(count);
+
+      copyCells(this.units, 0, room, 0, count);
+
+      return textClosed(room, count, false);
+    }
+
+    const room = textRoom<uint8>(count);
+    const isPlain = this.isPlain;
+
+    this.isPlain = true;
+    copyCells(this.bytes, 0, room, 0, count);
+
+    return textClosed(room, count, isPlain);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells came from allocate and nothing else holds them",
+  })
+  public [Symbol.dispose](): void {
+    if (this.isWide) {
+      release(this.units);
+    } else {
+      release(this.bytes);
+    }
+  }
+}

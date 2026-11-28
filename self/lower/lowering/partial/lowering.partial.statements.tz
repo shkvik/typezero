@@ -19,8 +19,19 @@ import { Module } from "../../../program/module/types/module.types.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
-import { kBooleanType, kDebugger, kNoOwner } from "../const/lowering.const.tz";
-import { Frame, IrValue, LoopTarget, Place } from "../types/lowering.types.tz";
+import {
+  kBooleanType,
+  kNoOwner,
+  kPointerType,
+  kProcessModule,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  LoopTarget,
+  Place,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private statement(frame: Frame, statement: Stmt): void {
@@ -63,8 +74,14 @@ partial class Lowering {
       case StmtKind.Class:
         this.classDeclared(frame, statement);
         return this.staticsInitialized(frame, statement);
-      case StmtKind.Debugger:
-        return this.runtimeCall(frame.made, kDebugger, []);
+      case StmtKind.Debugger: {
+        const name = "debuggerStopped";
+        const target: RuntimeTarget = { module: kProcessModule, name };
+
+        this.runtimeFunctionCall(frame, target, [], [], statement.loc);
+
+        return;
+      }
       case StmtKind.Empty:
       case StmtKind.Enum:
       case StmtKind.TypeAlias:
@@ -124,9 +141,20 @@ partial class Lowering {
     }
 
     const name = `tz.g${module}.${decl.loc}`;
+    const key = this.placeKey(module, decl.loc);
+    const table = this.staticTable(module, decl, tz);
+    if (table != undefined) {
+      const pointer = this.ir.global(name, type, table, false);
+      const place: Place = { pointer, type, tz, owner: kNoOwner };
+
+      this.places.set(key, place);
+      this.staticTables.add(key);
+
+      return;
+    }
+
     const zero = this.ir.zero(type);
     const pointer = this.ir.global(name, type, zero, false);
-    const key = this.placeKey(module, decl.loc);
     const place: Place = { pointer, type, tz, owner: kNoOwner };
 
     this.places.set(key, place);
@@ -135,7 +163,8 @@ partial class Lowering {
       this.managedGlobals.push(place);
     }
     const isChanged = this.changedGlobals.has(key);
-    if (isConst && !isChanged && this.isImmortalKind(tz)) {
+    const isRuntime = this.isRuntimeModule(module);
+    if (isConst && !isChanged && !isRuntime && this.isImmortalKind(tz)) {
       this.immortalGlobals.add(key);
     }
   }
@@ -209,6 +238,10 @@ partial class Lowering {
     const tree = this.values.types.program.tree;
 
     const key = this.placeKey(frame.module, decl.loc);
+    if (this.staticTables.has(key)) {
+      return;
+    }
+
     const known = this.places.get(key);
     const place = this.globalOrNone(known) ?? this.localPlace(frame, decl);
     if (place == undefined) {
@@ -218,6 +251,9 @@ partial class Lowering {
     const init = tree.exprAt(decl.initId);
     if (init == undefined) {
       return frame.made.store(this.ir.zero(place.type), place.pointer);
+    }
+    if (place.view != undefined) {
+      return this.recordBorrowed(frame, place, init);
     }
     if (
       place.flag != undefined &&
@@ -328,13 +364,40 @@ partial class Lowering {
       return undefined;
     }
 
-    const pointer = frame.made.slot(type, decl.name);
     const key = this.placeKey(frame.module, decl.loc);
+    if (this.borrows.has(key) && this.isRecordView(tz)) {
+      return this.viewLocal(frame, decl, tz, key);
+    }
+    if (this.isViewInit(frame, decl) && this.isInPlace(tz)) {
+      return this.viewLocal(frame, decl, tz, key);
+    }
+
+    const pointer = frame.made.slot(type, decl.name);
     const isBorrow = this.borrows.has(key) && this.isManaged(tz);
     const flag = this.dropFlag(frame, isBorrow);
     const place: Place = { pointer, type, tz, owner: frame.id, flag };
 
     frame.made.entryStore(this.ir.zero(type), pointer);
+    this.places.set(key, place);
+    this.keepPlace(frame, place);
+
+    return place;
+  }
+
+  private viewLocal(
+    frame: Frame,
+    decl: VarDeclarator,
+    tz: Type,
+    key: string,
+  ): Place | undefined {
+    const pointer = frame.made.slot(kPointerType, decl.name);
+    const flag = this.dropFlag(frame, true);
+    const place = this.viewPlace(frame, pointer, tz, flag);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    frame.made.entryStore(this.ir.zero(kPointerType), pointer);
     this.places.set(key, place);
     this.keepPlace(frame, place);
 
@@ -530,6 +593,16 @@ partial class Lowering {
     const place = this.ownLocalPlace(frame, given);
     if (place == undefined) {
       return undefined;
+    }
+
+    const record = place.record;
+    if (place.view != undefined && record != undefined) {
+      const address = frame.made.load(kPointerType, place.pointer);
+      const whole = frame.made.load(record, address);
+
+      frame.made.store(this.ir.zero(record), address);
+
+      return { type: record, value: whole, tz: place.tz, owned: true };
     }
 
     const value = frame.made.load(place.type, place.pointer);

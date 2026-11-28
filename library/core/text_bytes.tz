@@ -1,0 +1,416 @@
+@InPlace()
+class Utf8Point {
+  public readonly point: int;
+  public readonly next: int;
+
+  public constructor(point: int, next: int) {
+    this.point = point;
+    this.next = next;
+  }
+}
+
+function replacementPoint(): int {
+  return 65533;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "at < count; the reads stay below count",
+})
+function utf8Point(bytes: Raw<uint8>, at: int, count: int): Utf8Point {
+  const lead = unitAt(bytes, at);
+  if (lead < 128) {
+    return new Utf8Point(lead, at + 1);
+  }
+
+  let need = 0;
+  let point = 0;
+  let lower = 128;
+  let upper = 191;
+
+  if (lead >= 194 && lead <= 223) {
+    need = 1;
+    point = lead & 31;
+  } else if (lead >= 224 && lead <= 239) {
+    need = 2;
+    point = lead & 15;
+
+    if (lead == 224) {
+      lower = 160;
+    }
+    if (lead == 237) {
+      upper = 159;
+    }
+  } else if (lead >= 240 && lead <= 244) {
+    need = 3;
+    point = lead & 7;
+
+    if (lead == 240) {
+      lower = 144;
+    }
+    if (lead == 244) {
+      upper = 143;
+    }
+  } else {
+    return new Utf8Point(replacementPoint(), at + 1);
+  }
+
+  let next = at + 1;
+  let taken = 0;
+
+  while (taken < need && next < count) {
+    const unit = unitAt(bytes, next);
+    if (unit < lower || unit > upper) {
+      break;
+    }
+
+    lower = 128;
+    upper = 191;
+    point = (point << 6) | (unit & 63);
+    taken += 1;
+    next += 1;
+  }
+  if (taken < need) {
+    return new Utf8Point(replacementPoint(), next);
+  }
+
+  return new Utf8Point(point, next);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bytes hold count cells",
+})
+function asciiPrefix(bytes: Raw<uint8>, count: int): int {
+  let at = 0;
+
+  while (at < count && unitAt(bytes, at) < 128) {
+    at += 1;
+  }
+
+  return at;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "at + 1 < count is checked before the second byte is read",
+})
+function pairPoint(bytes: Raw<uint8>, at: int, count: int): int {
+  const lead = unitAt(bytes, at);
+  if (lead < 194 || lead > 223 || at + 1 >= count) {
+    return -1;
+  }
+
+  const next = unitAt(bytes, at + 1);
+  if (next < 128 || next > 191) {
+    return -1;
+  }
+
+  return ((lead & 31) << 6) | (next & 63);
+}
+
+class Utf8Count {
+  public total: int;
+  public widest: int;
+
+  public constructor(total: int) {
+    this.total = total;
+    this.widest = 0;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every read is below count",
+})
+function utf8Counted(bytes: Raw<uint8>, from: int, count: int): Utf8Count {
+  const counted = new Utf8Count(from);
+  let at = from;
+
+  while (at < count) {
+    const lead = unitAt(bytes, at);
+
+    if (lead < 128) {
+      counted.total += 1;
+      at += 1;
+    } else {
+      let point = pairPoint(bytes, at, count);
+      let next = at + 2;
+
+      if (point < 0) {
+        const found = utf8Point(bytes, at, count);
+
+        point = found.point;
+        next = found.next;
+      }
+      if (point >= 65536) {
+        counted.total += 1;
+      }
+
+      counted.total += 1;
+      counted.widest = Math.max(counted.widest, point);
+      at = next;
+    }
+  }
+
+  return counted;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the count pass found every point below 256",
+})
+function narrowDecoded(
+  bytes: Raw<uint8>,
+  plain: int,
+  count: int,
+  total: int,
+): string {
+  const room = textRoom<uint8>(total);
+  let used = plain;
+  let at = plain;
+
+  copyCells(bytes, 0, room, 0, plain);
+
+  while (at < count) {
+    const lead = unitAt(bytes, at);
+
+    if (lead < 128) {
+      putUnit(room, used, lead);
+      at += 1;
+    } else {
+      let point = pairPoint(bytes, at, count);
+      let next = at + 2;
+
+      if (point < 0) {
+        const found = utf8Point(bytes, at, count);
+
+        point = found.point;
+        next = found.next;
+      }
+
+      putUnit(room, used, point);
+      at = next;
+    }
+
+    used += 1;
+  }
+
+  return textClosed(room, total, false);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the count pass counted the units this pass writes",
+})
+function wideDecoded(
+  bytes: Raw<uint8>,
+  plain: int,
+  count: int,
+  total: int,
+): string {
+  const room = textRoom<uint16>(total);
+  let used = plain;
+  let at = plain;
+
+  copyCells(bytes, 0, room, 0, plain);
+
+  while (at < count) {
+    let point = pairPoint(bytes, at, count);
+    let next = at + 2;
+
+    if (point < 0) {
+      const found = utf8Point(bytes, at, count);
+
+      point = found.point;
+      next = found.next;
+    }
+    if (point >= 65536) {
+      const rest = point - 65536;
+
+      putUnit(room, used, 55296 + (rest >> 10));
+      putUnit(room, used + 1, 56320 + (rest & 1023));
+      used += 2;
+    } else {
+      putUnit(room, used, point);
+      used += 1;
+    }
+
+    at = next;
+  }
+
+  return textClosed(room, total, false);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first pass counted the units the second pass writes",
+})
+export function fromUtf8(bytes: Raw<uint8>, count: int): string {
+  const plain = asciiPrefix(bytes, count);
+  if (plain == count) {
+    const room = textRoom<uint8>(count);
+
+    copyCells(bytes, 0, room, 0, count);
+
+    return textClosed(room, count, true);
+  }
+
+  const counted = utf8Counted(bytes, plain, count);
+  if (counted.widest < 256) {
+    return narrowDecoded(bytes, plain, count, counted.total);
+  }
+
+  return wideDecoded(bytes, plain, count, counted.total);
+}
+
+const kBase64Units: int[] = [
+  65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83,
+  84, 85, 86, 87, 88, 89, 90, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106,
+  107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+  122, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 43, 47,
+];
+
+function hexUnit(digit: int): int {
+  if (digit < 10) {
+    return 48 + digit;
+  }
+
+  return 87 + digit;
+}
+
+function base64Unit(digit: int, isUrl: boolean): int {
+  if (isUrl && digit == 62) {
+    return 45;
+  }
+  if (isUrl && digit == 63) {
+    return 95;
+  }
+
+  return kBase64Units[digit] ?? 61;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has two cells for each byte",
+})
+function hexText(bytes: Raw<uint8>, count: int): string {
+  const total = count * 2;
+  const room = textRoom<uint8>(total);
+
+  for (let index = 0; index < count; index++) {
+    const unit = unitAt(bytes, index);
+
+    putUnit(room, 2 * index, hexUnit(unit >> 4));
+    putUnit(room, 2 * index + 1, hexUnit(unit & 15));
+  }
+
+  return textClosed(room, total, true);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the cells counted before the loop",
+})
+function base64Text(bytes: Raw<uint8>, count: int, isUrl: boolean): string {
+  const rest = count % 3;
+  let total = count / 3 * 4;
+
+  if (rest != 0 && isUrl) {
+    total += rest + 1;
+  } else if (rest != 0) {
+    total += 4;
+  }
+
+  const room = textRoom<uint8>(total);
+  let used = 0;
+  let at = 0;
+
+  while (at + 2 < count) {
+    const first = unitAt(bytes, at) << 16;
+    const second = unitAt(bytes, at + 1) << 8;
+    const value = first | second | unitAt(bytes, at + 2);
+
+    putUnit(room, used, base64Unit(value >> 18, isUrl));
+    putUnit(room, used + 1, base64Unit((value >> 12) & 63, isUrl));
+    putUnit(room, used + 2, base64Unit((value >> 6) & 63, isUrl));
+    putUnit(room, used + 3, base64Unit(value & 63, isUrl));
+    used += 4;
+    at += 3;
+  }
+  if (at < count) {
+    let value = unitAt(bytes, at) << 16;
+
+    if (at + 1 < count) {
+      value = value | (unitAt(bytes, at + 1) << 8);
+    }
+
+    putUnit(room, used, base64Unit(value >> 18, isUrl));
+    putUnit(room, used + 1, base64Unit((value >> 12) & 63, isUrl));
+    used += 2;
+
+    if (at + 1 < count) {
+      putUnit(room, used, base64Unit((value >> 6) & 63, isUrl));
+      used += 1;
+    } else if (!isUrl) {
+      putUnit(room, used, 61);
+      used += 1;
+    }
+    if (!isUrl) {
+      putUnit(room, used, 61);
+    }
+  }
+
+  return textClosed(room, total, true);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has one cell for each byte or pair of bytes",
+})
+export function textOfBytes(
+  bytes: Raw<uint8>,
+  count: int,
+  encoding: int,
+): string {
+  if (count == 0) {
+    return "";
+  }
+  if (encoding == 0) {
+    return fromUtf8(bytes, count);
+  }
+  if (encoding == 2) {
+    const room = textRoom<uint8>(count);
+
+    copyCells(bytes, 0, room, 0, count);
+
+    return textClosed(room, count, false);
+  }
+  if (encoding == 3) {
+    const room = textRoom<uint8>(count);
+
+    for (let index = 0; index < count; index++) {
+      putUnit(room, index, unitAt(bytes, index) & 127);
+    }
+
+    return textClosed(room, count, true);
+  }
+  if (encoding == 1) {
+    const total = count / 2;
+    const room = textRoom<uint16>(total);
+
+    for (let index = 0; index < total; index++) {
+      const low = unitAt(bytes, 2 * index);
+      const high = unitAt(bytes, 2 * index + 1) << 8;
+
+      putUnit(room, index, low | high);
+    }
+
+    return textClosed(room, total, false);
+  }
+  if (encoding == 6) {
+    return hexText(bytes, count);
+  }
+
+  return base64Text(bytes, count, encoding == 5);
+}

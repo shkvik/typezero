@@ -5,7 +5,6 @@ import {
   ExprKind,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { TypeKind } from "../../../program/type/types/type.types.tz";
-import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kBooleanType,
@@ -13,18 +12,15 @@ import {
   kConsoleName,
   kErrorBegin,
   kErrorEnd,
+  kIntType,
   kMapModule,
   kMapPrintName,
   kNewlineCode,
   kPointerType,
-  kPrintBoolean,
   kPrintChar,
-  kPrintDouble,
-  kPrintInt,
   kPrintNestedName,
   kPrintString,
-  kPrintUnsigned,
-  kPrintValue,
+  kValuesModule,
   kQuoteCode,
   kSpaceCode,
   kStderrPrints,
@@ -145,7 +141,7 @@ partial class Lowering {
       return this.runtimeCall(frame.made, kPrintString, parts);
     }
     if (this.isDouble(value.tz)) {
-      return this.runtimeCall(frame.made, kPrintDouble, [value]);
+      return this.numberPrinted(frame, "printDouble", value);
     }
     const isWhole =
       this.isReferenceLike(value.tz) ||
@@ -157,20 +153,28 @@ partial class Lowering {
       return this.printedWhole(frame, value);
     }
     if (this.isBoolean(value.tz)) {
-      const widened = frame.made.cast(IrOpcode.ZExt, value.value, kCharType);
-      const flag: IrValue = { type: kCharType, value: widened, tz };
-
-      return this.runtimeCall(frame.made, kPrintBoolean, [flag]);
+      return this.numberPrinted(frame, "printBoolean", value);
     }
 
     const isLong = this.bitsOf(value.tz) == 64;
     if (isLong && this.isUnsigned(value.tz)) {
-      return this.runtimeCall(frame.made, kPrintUnsigned, [value]);
+      return this.numberPrinted(frame, "printUnsigned", value);
     }
 
     const long = this.toLong(frame, value);
+    const signed: IrValue = { type: kIntType, value: long.value, tz };
 
-    this.runtimeCall(frame.made, kPrintInt, [long]);
+    this.numberPrinted(frame, "printSigned", signed);
+  }
+
+  private numberPrinted(
+    frame: Read<Frame>,
+    name: string,
+    value: IrValue,
+  ): void {
+    const target: RuntimeTarget = { module: kValuesModule, name };
+
+    this.runtimeFunctionCall(frame, target, [], [value], 0);
   }
 
   private mapPrinted(frame: Read<Frame>, value: IrValue): void {
@@ -240,7 +244,11 @@ partial class Lowering {
     ];
 
     frame.made.store(value.value, spill);
-    this.runtimeCall(frame.made, kPrintValue, args);
+
+    const name = "printValue";
+    const target: RuntimeTarget = { module: kValuesModule, name };
+
+    this.runtimeFunctionCall(frame, target, [], args, 0);
   }
 
   private printCode(frame: Read<Frame>, code: int): void {

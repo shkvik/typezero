@@ -1,19 +1,21 @@
 import { IndexExpr } from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
-import {
-  IrCallee,
-  IrIntPredicate,
-} from "../../ir-function/types/ir-function.types.tz";
+import { IrCallee } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kFlagType,
   kIntType,
   kPointerType,
-  kStringEqual,
+  kStringType,
+  kTextModule,
 } from "../const/lowering.const.tz";
-import { ClassLayout, Frame, IrValue } from "../types/lowering.types.tz";
+import {
+  ClassLayout,
+  Frame,
+  IrValue,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private keyedIndexed(
@@ -51,7 +53,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const finder = this.keyedFinder(layout, names);
+    const finder = this.keyedFinder(frame.module, layout, names);
     const text = frame.made.extract(key.value, 0);
     const meta = frame.made.extract(key.value, 1);
     const address = this.recordAddress(frame, holder);
@@ -61,9 +63,23 @@ partial class Lowering {
       value: frame.made.load(first.ir, pointer),
       tz: first.type,
     };
-    const kept = this.owning(frame, loaded);
 
     this.dropping(frame, key);
+
+    if (holder.owned != true || !this.isManaged(holder.tz)) {
+      return loaded;
+    }
+    if (this.isSingleOwner(loaded) && this.isSingleOwner(holder)) {
+      frame.made.store(this.ir.zero(first.ir), pointer);
+      this.dropping(frame, holder);
+
+      const type = first.ir;
+
+      return { type, value: loaded.value, tz: first.type, owned: true };
+    }
+
+    const kept = this.owning(frame, loaded);
+
     this.dropping(frame, holder);
 
     return kept;
@@ -78,6 +94,7 @@ partial class Lowering {
   }
 
   private keyedFinder(
+    module: int,
     layout: Read<ClassLayout>,
     names: Read<string[]>,
   ): IrCallee {
@@ -93,13 +110,18 @@ partial class Lowering {
     const object = made.param(0);
     const text = made.param(1);
     const meta = made.param(2);
-    const equal = this.ir.declare(kStringEqual, kFlagType, [
-      kPointerType,
-      kIntType,
-      kPointerType,
-      kIntType,
-    ]);
-    const zero = this.ir.zero(kFlagType);
+    const inner: Frame = {
+      made,
+      id: this.frameId(),
+      module,
+      loops: [],
+      scopes: [],
+    };
+    const string = this.values.types.store.plain(TypeKind.String);
+    const half = made.insert(this.ir.zero(kStringType), text, 0);
+    const joined = made.insert(half, meta, 1);
+    const given: IrValue = { type: kStringType, value: joined, tz: string };
+    const target: RuntimeTarget = { module: kTextModule, name: "equals" };
     let fallback: LLVMValue = made.field(layout.struct, object, 0);
 
     for (const one of names) {
@@ -108,15 +130,17 @@ partial class Lowering {
         continue;
       }
 
-      const literal = this.stringValue(one).value;
-      const literalText = made.extract(literal, 0);
-      const literalMeta = made.extract(literal, 1);
-      const same = made.call(equal, [text, meta, literalText, literalMeta]);
-      const isSame = made.integerCompare(IrIntPredicate.NotEqual, same, zero);
+      const literal = this.stringValue(one);
+      const args = [given, literal];
+      const same = this.runtimeFunctionCall(inner, target, [], args, 0);
+      if (same == undefined) {
+        continue;
+      }
+
       const found = made.block("keyed.found");
       const next = made.block("keyed.next");
 
-      made.conditionalBranch(isSame, found, next);
+      made.conditionalBranch(same.value, found, next);
       made.open(found);
       made.returned(made.field(layout.struct, object, field.index));
       made.open(next);

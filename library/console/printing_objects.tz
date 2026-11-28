@@ -1,0 +1,482 @@
+
+function fieldMethod(): uint32 {
+  return 4294967295;
+}
+
+function fieldGetter(): uint32 {
+  return 4294967294;
+}
+
+function libraryFlag(): uint32 {
+  return 1073741824;
+}
+
+function isPlainName(name: Raw<uint8>, count: int): boolean {
+  if (count == 0) {
+    return false;
+  }
+
+  for (let index = 0; index < count; index++) {
+    const unit = byteAt(name, index);
+    const isLetter =
+      (unit >= 97 && unit <= 122) || (unit >= 65 && unit <= 90) || unit == 95;
+
+    if (!isLetter && !(index > 0 && unit >= 48 && unit <= 57)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the field record has its name and length",
+})
+function keyInto(out: Mut<TextBuilder>, field: Raw<uint8>): void {
+  const head = viewAt<FieldHead>(field, 0);
+  const name = utf8Text(head.name, head.nameLength);
+
+  if (isPlainName(head.name, head.nameLength.toInt())) {
+    out.add(name);
+  } else {
+    escapedRange(out, name, 0, name.length);
+  }
+
+  out.add(": ");
+}
+
+function isPlainKey(key: Read<string>): boolean {
+  if (key.length == 0) {
+    return false;
+  }
+
+  for (let index = 0; index < key.length; index++) {
+    const unit = key.charCodeAt(index) ?? 0;
+    const isLetter =
+      (unit >= 97 && unit <= 122) || (unit >= 65 && unit <= 90) || unit == 95;
+
+    if (!isLetter && !(index > 0 && unit >= 48 && unit <= 57)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function recordKeyInto(out: Mut<TextBuilder>, key: Read<string>): void {
+  if (key == "__proto__") {
+    out.add("['__proto__']");
+  } else if (isPlainKey(key)) {
+    out.add(key);
+  } else {
+    escapedRange(out, key, 0, key.length);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the layout has its name and length",
+})
+function layoutName(layout: Raw<uint8>): string {
+  const head = viewAt<LayoutHead>(layout, 0);
+
+  return utf8Text(head.name, head.nameLength);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the layout has its name length",
+})
+function nameBytesOf(layout: Raw<uint8>): int {
+  const head = viewAt<LayoutHead>(layout, 0);
+
+  return head.nameLength.toInt();
+}
+
+function classPrefix(layout: Raw<uint8>): string {
+  if (nameBytesOf(layout) == 0) {
+    return "";
+  }
+
+  return `${layoutName(layout)} `;
+}
+
+function isNamed(layout: Raw<uint8>, name: Read<string>): boolean {
+  return layoutName(layout) == name;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the field record has its name and length",
+})
+function fieldName(field: Raw<uint8>): string {
+  const head = viewAt<FieldHead>(field, 0);
+
+  return utf8Text(head.name, head.nameLength);
+}
+
+function isSymbolField(layout: Raw<uint8>, field: Raw<uint8>): boolean {
+  if ((flagsOf(layout) & libraryFlag()) == 0) {
+    return false;
+  }
+
+  return fieldName(field).startsWith("Symbol(");
+}
+
+function isUndefinedShown(layout: Raw<uint8>, field: Raw<uint8>): boolean {
+  if ((flagsOf(layout) & libraryFlag()) == 0) {
+    return false;
+  }
+
+  return fieldName(field) == "maxListeners";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the field record has its offset and type",
+})
+function isFieldShown(
+  layout: Raw<uint8>,
+  field: Raw<uint8>,
+  fields: Raw<uint8>,
+  isGroups: boolean,
+): boolean {
+  const head = viewAt<FieldHead>(field, 0);
+  const offset = head.offset;
+
+  if (isGroups || offset == fieldMethod() || kindOf(head.type) != 7) {
+    return true;
+  }
+  if (isPresent(head.type, placeAt(fields, offset.toInt()))) {
+    return true;
+  }
+
+  return isUndefinedShown(layout, field);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the field record has its offset and type",
+})
+function shownFields(
+  layout: Raw<uint8>,
+  fields: Raw<uint8>,
+  isGroups: boolean,
+): int {
+  const count = viewAt<LayoutHead>(layout, 0).count.toInt();
+  let shown = 0;
+
+  for (let index = 0; index < count; index++) {
+    const field = fieldAt(layout, index);
+    const offset = viewAt<FieldHead>(field, 0).offset;
+
+    if (offset != fieldGetter()) {
+      if (isFieldShown(layout, field, fields, isGroups)) {
+        shown += 1;
+      }
+    }
+  }
+
+  return shown;
+}
+
+function deepFields(
+  out: Mut<TextBuilder>,
+  layout: Raw<uint8>,
+  isGroups: boolean,
+): void {
+  if (isGroups) {
+    out.add("[Object: null prototype]");
+  } else if (nameBytesOf(layout) > 0) {
+    out.addUnit(91);
+    out.add(layoutName(layout));
+    out.addUnit(93);
+  } else {
+    out.add("[Object]");
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the fields are where the layout says",
+})
+function fieldsFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  fields: Raw<uint8>,
+  layout: Raw<uint8>,
+  depth: int,
+): void {
+  const head = viewAt<LayoutHead>(layout, 0);
+  const count = head.count.toInt();
+  const isGroups = (head.flags & 128) != 0;
+  let open = "{";
+
+  if (isGroups) {
+    open = "[Object: null prototype] {";
+  }
+  if (shownFields(layout, fields, isGroups) == 0) {
+    out.add(classPrefix(layout));
+    out.add(open);
+    out.addUnit(125);
+
+    return;
+  }
+  if (depth > depthLimit()) {
+    deepFields(out, layout, isGroups);
+
+    return;
+  }
+
+  let next = depth + 1;
+
+  if ((head.flags & libraryFlag()) != 0 && isNamed(layout, "CryptoKey")) {
+    next += 1;
+  }
+
+  const key = keyOf(fields);
+  const output: string[] = [];
+  const entry = new TextBuilder();
+
+  context.seen.push(key);
+  context.currentDepth = next;
+
+  for (let index = 0; index < count; index++) {
+    const field = fieldAt(layout, index);
+
+    if (fieldEntry(context, entry, layout, field, fields, isGroups, next)) {
+      output.push(entry.taken());
+    }
+  }
+
+  context.seen.pop();
+
+  const base = context.baseOf(key);
+  const prefix = classPrefix(layout);
+  const nameBytes = nameBytesOf(layout);
+  const braces = new Braces(open, 125, base, prefix, nameBytes, false, false);
+
+  singleString(context, out, output, next, braces);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the field record has its offset and type",
+})
+function fieldEntry(
+  context: Mut<PrintContext>,
+  entry: Mut<TextBuilder>,
+  layout: Raw<uint8>,
+  field: Raw<uint8>,
+  fields: Raw<uint8>,
+  isGroups: boolean,
+  depth: int,
+): boolean {
+  const head = viewAt<FieldHead>(field, 0);
+  const offset = head.offset;
+  if (offset == fieldGetter()) {
+    return false;
+  }
+
+  const isMethod = offset == fieldMethod();
+  const isPlain = !isGroups && !isMethod && kindOf(head.type) == 7;
+
+  if (isPlain && !isFieldShown(layout, field, fields, isGroups)) {
+    return false;
+  }
+  if (isSymbolField(layout, field)) {
+    entry.add(fieldName(field));
+    entry.add(": ");
+  } else {
+    keyInto(entry, field);
+  }
+  if (isMethod) {
+    entry.add("[Function: ");
+    entry.add(fieldName(field));
+    entry.addUnit(93);
+
+    return true;
+  }
+
+  const value = placeAt(fields, offset.toInt());
+
+  context.indentation += 2;
+  formatted(context, entry, head.type, value, depth);
+  context.indentation -= 2;
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an entry is live when its header says so",
+})
+function nextEntry(map: Raw<uint8>, at: int): int {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const size = layout.entrySize.toInt();
+  const used = head.used.toInt();
+  let place = at;
+
+  while (place < used) {
+    const entry = placeAt(head.entries, place * size);
+
+    if (wordAt(entry, 4) != 0) {
+      return place;
+    }
+
+    place += 1;
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the map head has its count and flags",
+})
+function dictOpen(map: Raw<uint8>): string {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const isBare = (head.flags & 4) != 0;
+
+  if (layout.kind == 0) {
+    if (isBare) {
+      return "[Object: null prototype] {";
+    }
+
+    return "{";
+  }
+  if (layout.kind == 1) {
+    return `Map(${head.size}) {`;
+  }
+
+  return `Set(${head.size}) {`;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the map head has its flags",
+})
+function dictDeep(map: Raw<uint8>): string {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+
+  if (layout.kind == 0) {
+    if ((head.flags & 4) != 0) {
+      return "[Object: null prototype]";
+    }
+
+    return "[Object]";
+  }
+  if (layout.kind == 1) {
+    return "[Map]";
+  }
+
+  return "[Set]";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entry holds a key and a value at the offsets of the layout",
+})
+function dictEntry(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  layoutRaw: Raw<uint8>,
+  entry: Raw<uint8>,
+  depth: int,
+): void {
+  const layout = viewAt<MapLayoutHead>(layoutRaw, 0);
+  const key = placeAt(entry, layout.keyOffset.toInt());
+
+  if (layout.kind == 0) {
+    recordKeyInto(out, stringAt(key));
+    out.add(": ");
+  } else {
+    formatted(context, out, layout.key, key, depth);
+
+    if (layout.kind == 1) {
+      out.add(" => ");
+    }
+  }
+  if (layout.kind != 2) {
+    const value = placeAt(entry, layout.valueOffset.toInt());
+
+    formatted(context, out, layout.value, value, depth);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the map holds entries of the size its layout says",
+})
+function dictFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  map: Raw<uint8>,
+  depth: int,
+): void {
+  const head = viewAt<MapHead>(map, 0);
+  const layoutRaw = head.layout;
+  const layout = viewAt<MapLayoutHead>(layoutRaw, 0);
+  const count = head.size.toInt();
+  const open = dictOpen(map);
+
+  if (count == 0) {
+    out.add(open);
+    out.addUnit(125);
+
+    return;
+  }
+  if (depth > depthLimit()) {
+    out.add(dictDeep(map));
+
+    return;
+  }
+
+  const next = depth + 1;
+  const key = keyOf(map);
+  const size = layout.entrySize.toInt();
+  let limit = arrayLimit();
+
+  if (layout.kind == 0) {
+    limit = count;
+  }
+
+  const output: string[] = [];
+  const builder = new TextBuilder();
+  let at = 0;
+  let shown = 0;
+
+  context.seen.push(key);
+  context.currentDepth = next;
+  context.indentation += 2;
+
+  while (shown < limit) {
+    const place = nextEntry(map, at);
+    if (place < 0) {
+      break;
+    }
+
+    const entry = placeAt(head.entries, place * size);
+
+    dictEntry(context, builder, layoutRaw, entry, next);
+    output.push(builder.taken());
+    at = place + 1;
+    shown += 1;
+  }
+
+  context.indentation -= 2;
+
+  if (count > shown) {
+    output.push(moreItems(count - shown));
+  }
+
+  context.seen.pop();
+
+  const braces = plainBraces(open, 125, context.baseOf(key));
+
+  singleString(context, out, output, next, braces);
+}

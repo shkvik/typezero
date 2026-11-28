@@ -63,6 +63,12 @@ import "./partial/lowering.partial.map-loops.tz";
 import "./partial/lowering.partial.class-statics.tz";
 import "./partial/lowering.partial.immortal-unions.tz";
 import "./partial/lowering.partial.records.tz";
+import "./partial/lowering.partial.record-places.tz";
+import "./partial/lowering.partial.fixed.tz";
+import "./partial/lowering.partial.tables.tz";
+import "./partial/lowering.partial.number-bits.tz";
+import "./partial/lowering.partial.raw-bits.tz";
+import "./partial/lowering.partial.json.tz";
 import "./partial/lowering.partial.cells.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
@@ -73,6 +79,7 @@ import { IrCallee } from "../ir-function/types/ir-function.types.tz";
 import { IrModule } from "../ir-module/ir-module.tz";
 import { LLVMBlock, LLVMValue } from "../llvm-api/llvm-api.tz";
 import { Expr } from "../../program/ast/types/ast.types.expressions.tz";
+import { StmtKind } from "../../program/ast/types/ast.types.statements.tz";
 import { Type } from "../../program/type/types/type.types.tz";
 import { SourceLines } from "../../program/source-lines/source-lines.tz";
 import {
@@ -82,6 +89,7 @@ import {
   kMainName,
   kRuntimeInit,
   kRuntimeMainDone,
+  kRuntimeModules,
   kRuntimeShutdown,
 } from "./const/lowering.const.tz";
 import {
@@ -119,6 +127,7 @@ export class Lowering {
   private readonly lines: Map<int, SourceLines>;
   private readonly handles: Map<int, boolean>;
   private readonly cstrings: Map<string, LLVMValue>;
+  private cstringLayoutGlobal: LLVMValue | undefined;
   private readonly makers: Map<int, LLVMValue>;
   private readonly orderedDescriptors: Map<string, LLVMValue>;
   private readonly orderMakers: Map<string, LLVMValue>;
@@ -150,6 +159,7 @@ export class Lowering {
   private readonly inPlaceTypes: Map<int, boolean>;
   private readonly unionParts: Set<int>;
   private readonly recordBoxes: Map<int, ClassLayout>;
+  private readonly staticTables: Set<string>;
   private areUnionsScanned: boolean;
 
   public constructor(
@@ -180,6 +190,7 @@ export class Lowering {
     this.lines = new Map<int, SourceLines>();
     this.handles = new Map<int, boolean>();
     this.cstrings = new Map<string, LLVMValue>();
+    this.cstringLayoutGlobal = undefined;
     this.makers = new Map<int, LLVMValue>();
     this.orderedDescriptors = new Map<string, LLVMValue>();
     this.orderMakers = new Map<string, LLVMValue>();
@@ -211,6 +222,7 @@ export class Lowering {
     this.inPlaceTypes = new Map<int, boolean>();
     this.unionParts = new Set<int>();
     this.recordBoxes = new Map<int, ClassLayout>();
+    this.staticTables = new Set<string>();
     this.areUnionsScanned = false;
   }
 
@@ -245,11 +257,20 @@ export class Lowering {
     const modules = this.values.types.program.order.filter((module) =>
       this.isProgramModule(module),
     );
+    const runtime = this.values.types.program.order.filter((module) =>
+      this.isRuntimeModule(module),
+    );
 
     this.runtimeCall(main, kRuntimeInit, []);
 
+    for (const module of runtime) {
+      this.moduleGlobals(module);
+    }
     for (const module of modules) {
       this.moduleGlobals(module);
+    }
+    for (const module of runtime) {
+      this.runtimeGlobalsMade(main, module);
     }
 
     for (const module of modules) {
@@ -292,6 +313,37 @@ export class Lowering {
     };
 
     this.cleanupsTo(frame, 0);
+  }
+
+  private runtimeGlobalsMade(main: IrFunction, module: int): void {
+    const tree = this.values.types.program.tree;
+
+    const frame: Frame = {
+      made: main,
+      id: kMainFrame,
+      module,
+      loops: [],
+      scopes: [],
+    };
+    const items = this.values.types.program.modules[module]?.file.itemsList;
+
+    for (const statement of tree.stmtsOf(items)) {
+      if (statement.kind == StmtKind.VarDecl) {
+        this.statement(frame, statement);
+      }
+      if (statement.kind == StmtKind.Class) {
+        this.staticsInitialized(frame, statement);
+      }
+    }
+  }
+
+  private readonly isRuntimeModule(id: int): boolean {
+    const module = this.values.types.program.modules[id];
+    if (module == undefined || !module.source.isLibrary) {
+      return false;
+    }
+
+    return kRuntimeModules.includes(module.name);
   }
 
   private readonly isProgramModule(id: int): boolean {

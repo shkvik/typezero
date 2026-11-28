@@ -1,0 +1,467 @@
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a heap text starts with its count",
+})
+function textRetained(place: Raw<uint8>): void {
+  const meta = bitsAt(place, 8);
+  if ((meta & heapBit()) == 0) {
+    return;
+  }
+
+  const object = pointerAt(place, 0);
+  const head = viewAt<TextHead>(object, 0);
+
+  head.count += 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a heap decimal starts with its count",
+})
+function decimalRetained(place: Raw<uint8>): void {
+  const meta = bitsAt(place, 8);
+  if ((meta & heapBit()) == 0) {
+    return;
+  }
+
+  const object = pointerAt(place, 0);
+  const head = viewAt<DecimalHead>(object, 0);
+
+  head.count += 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an object or an array starts with its count",
+})
+function countRetained(object: Raw<uint8>): void {
+  if (rawZero(object)) {
+    return;
+  }
+
+  const head = viewAt<ObjectHead>(object, 0);
+
+  if (head.count >= 0) {
+    head.count += 1;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value has the shape its type description gives",
+})
+export function valueRetained(type: Raw<uint8>, value: Raw<uint8>): void {
+  const head = viewAt<TypeHead>(type, 0);
+  const kind = head.kind;
+
+  if (kind == 14) {
+    unionRetained(type, value);
+  } else if (kind == 5) {
+    textRetained(value);
+  } else if (kind == 6 || kind == 10 || kind == 16) {
+    countRetained(pointerAt(value, 0));
+  } else if (kind == 7) {
+    valueRetained(head.inner, value);
+  } else if (kind == 9) {
+    countRetained(pointerAt(value, 8));
+  } else if (kind == 11) {
+    decimalRetained(value);
+  } else if (kind == 12) {
+    resultRetained(type, value);
+  } else if (kind == 25) {
+    recordRetained(head.inner, value);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a union value keeps its tag first and the part after eight bytes",
+})
+function unionRetained(type: Raw<uint8>, value: Raw<uint8>): void {
+  const tag = tagAt(value).toInt();
+  if (tag == 0) {
+    return;
+  }
+
+  const part = slotOf(type, tag);
+  const head = viewAt<TypeHead>(part, 0);
+
+  if (head.kind != 15) {
+    valueRetained(part, cellsAt<uint8>(value, 8));
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a result keeps its value and its error at the offsets of its type",
+})
+function resultRetained(type: Raw<uint8>, value: Raw<uint8>): void {
+  const result = viewAt<ResultTypeHead>(type, 0);
+  const valueAt = result.valueOffset.toInt();
+  const errorAt = result.errorOffset.toInt();
+
+  valueRetained(result.inner, cellsAt<uint8>(value, valueAt));
+  valueRetained(result.error, cellsAt<uint8>(value, errorAt));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a record keeps its fields at the offsets of its layout",
+})
+function recordRetained(layout: Raw<uint8>, value: Raw<uint8>): void {
+  const head = viewAt<LayoutHead>(layout, 0);
+  const count = head.count.toInt();
+
+  for (let index = 0; index < count; index++) {
+    const place = fieldAt(layout, index);
+    const field = viewAt<FieldHead>(place, 0);
+
+    if (isHeldField(field.offset)) {
+      const at = field.offset.toInt();
+
+      valueRetained(field.type, cellsAt<uint8>(value, at));
+    }
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the items from first to end are in the array",
+})
+function itemsRetained(array: Raw<uint8>, first: int, end: int): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const type = head.type;
+  if (!isManaged(type)) {
+    return;
+  }
+
+  const size = sizeOf(type);
+
+  for (let index = first; index < end; index++) {
+    valueRetained(type, cellsAt<uint8>(head.data, index * size));
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the items from first to end are in the array",
+})
+function itemsReleased(array: Raw<uint8>, first: int, end: int): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const type = head.type;
+  if (!isManaged(type)) {
+    return;
+  }
+
+  const size = sizeOf(type);
+
+  for (let index = first; index < end; index++) {
+    valueReleased(type, cellsAt<uint8>(head.data, index * size));
+  }
+}
+
+function relativeAt(position: int, length: int): int {
+  if (position < 0) {
+    const counted = position + length;
+
+    if (counted < 0) {
+      return 0;
+    }
+
+    return counted;
+  }
+  if (position > length) {
+    return length;
+  }
+
+  return position;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new array gets a copy of the bytes of the items",
+})
+function slicedCopy(
+  array: Raw<uint8>,
+  start: int,
+  end: int,
+  hasEnd: int32,
+): Raw<uint8> {
+  const head = viewAt<ArrayHead>(array, 0);
+  const length = head.length.toInt();
+  const from = relativeAt(start, length);
+  let to = length;
+
+  if (hasEnd != 0) {
+    to = relativeAt(end, length);
+  }
+
+  let count = 0;
+
+  if (to > from) {
+    count = to - from;
+  }
+
+  const result = arrayMade(head.type, count, count);
+
+  if (count > 0) {
+    const size = sizeOf(head.type);
+    const made = viewAt<ArrayHead>(result, 0);
+
+    copyCells(head.data, from * size, made.data, 0, count * size);
+  }
+
+  return result;
+}
+
+export function arraySliced(
+  array: Raw<uint8>,
+  start: int,
+  end: int,
+  hasEnd: int32,
+): Raw<uint8> {
+  const result = slicedCopy(array, start, end, hasEnd);
+
+  itemsRetained(result, 0, arrayLength(result));
+
+  return result;
+}
+
+export function arrayLentSliced(
+  array: Raw<uint8>,
+  start: int,
+  end: int,
+  hasEnd: int32,
+): Raw<uint8> {
+  return slicedCopy(array, start, end, hasEnd);
+}
+
+export function arrayCopied(array: Raw<uint8>): Raw<uint8> {
+  return arraySliced(array, 0, 0, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an array keeps its length in its head",
+})
+function arrayLength(array: Raw<uint8>): int {
+  const head = viewAt<ArrayHead>(array, 0);
+
+  return head.length.toInt();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the items of the other array are copied after the last item",
+})
+function itemsAdded(into: Raw<uint8>, from: Raw<uint8>): int {
+  const source = viewAt<ArrayHead>(from, 0);
+  const count = source.length.toInt();
+  const head = viewAt<ArrayHead>(into, 0);
+  const length = head.length.toInt();
+  const total = length + count;
+
+  if (total > head.capacity.toInt()) {
+    arrayGrown(into, total);
+  }
+
+  const size = sizeOf(head.type);
+
+  copyCells(source.data, 0, head.data, length * size, count * size);
+  head.length = total.toUint32();
+
+  return length;
+}
+
+export function arrayAppended(into: Raw<uint8>, from: Raw<uint8>): void {
+  if (arrayLength(from) == 0) {
+    return;
+  }
+
+  const first = itemsAdded(into, from);
+
+  itemsRetained(into, first, arrayLength(into));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the items move: the other array is left empty",
+})
+export function arrayTakenAppended(into: Raw<uint8>, from: Raw<uint8>): void {
+  if (arrayLength(from) == 0) {
+    return;
+  }
+
+  const source = viewAt<ArrayHead>(from, 0);
+
+  itemsAdded(into, from);
+  source.length = 0;
+}
+
+function grownKindName(kind: uint32): string {
+  if (kind == 6) {
+    return "arrays";
+  }
+  if (kind == 9) {
+    return "functions";
+  }
+  if (kind == 13) {
+    return "Json values";
+  }
+
+  return "objects";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "new items are zero bytes, dropped items are released",
+})
+export function arrayLengthSet(array: Raw<uint8>, length: int): void {
+  if (length < 0 || length > arrayLengthMost()) {
+    lengthFailed(length);
+  }
+
+  const head = viewAt<ArrayHead>(array, 0);
+  const old = head.length.toInt();
+  const type = viewAt<TypeHead>(head.type, 0);
+  const kind = type.kind;
+  const isCounted = kind == 6 || kind == 9 || kind == 10 || kind == 13;
+
+  if (length > old && isCounted) {
+    const name = grownKindName(kind);
+
+    panic(`internal error: an array of ${name} grows by setting its length`);
+  }
+  if (length < old) {
+    head.length = length.toUint32();
+    itemsReleased(array, length, old);
+  } else if (length > old) {
+    if (length > head.capacity.toInt()) {
+      arrayGrown(array, length);
+    }
+
+    const size = type.size.toInt();
+    const room = cellsAt<uint8>(head.data, old * size);
+
+    zeroFilled(room, (length - old) * size);
+    head.length = length.toUint32();
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first count places are opened before the items",
+})
+export function arrayUnshifted(array: Raw<uint8>, count: int): Raw<uint8> {
+  const head = viewAt<ArrayHead>(array, 0);
+  if (count == 0) {
+    return head.data;
+  }
+
+  const size = sizeOf(head.type);
+  const old = head.length.toInt();
+  const length = old + count;
+
+  if (length > arrayLengthMost()) {
+    lengthFailed(length);
+  }
+
+  let storage = head.alloc;
+
+  if (rawZero(storage)) {
+    storage = cellsAt<uint8>(array, arrayHeadSize());
+  }
+
+  const front = (rawBits(head.data) - rawBits(storage)).toInt() / size;
+
+  if (front >= count) {
+    head.data = bitsRaw(rawBits(head.data) - (count * size).toUint64());
+    head.capacity = (head.capacity.toInt() + count).toUint32();
+    head.length = length.toUint32();
+
+    return head.data;
+  }
+
+  const spare = length / 2 + 8;
+  const newFront = spare / 2;
+  let capacity = length + (spare - newFront);
+
+  if (capacity > arrayLengthMost()) {
+    capacity = length;
+  }
+
+  const buffer = allocate<uint8>((newFront + capacity) * size);
+  const data = cellsAt<uint8>(buffer, newFront * size);
+
+  if (old > 0) {
+    copyCells(head.data, 0, data, count * size, old * size);
+  }
+
+  release(head.alloc);
+  head.alloc = buffer;
+  head.data = data;
+  head.capacity = capacity.toUint32();
+  head.length = length.toUint32();
+
+  return data;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the removed items move to a new array, the rest shifts in place",
+})
+export function arraySpliced(
+  array: Raw<uint8>,
+  start: int,
+  deleteCount: int,
+  hasDelete: int32,
+  insert: int,
+  slots: Raw<uint8>,
+): Raw<uint8> {
+  const head = viewAt<ArrayHead>(array, 0);
+  const length = head.length.toInt();
+  const from = relativeAt(start, length);
+  let count = length - from;
+
+  if (hasDelete != 0 && deleteCount < count) {
+    count = deleteCount;
+
+    if (count < 0) {
+      count = 0;
+    }
+  }
+
+  const size = sizeOf(head.type);
+  const removed = arrayMade(head.type, count, count);
+
+  if (count > 0) {
+    const made = viewAt<ArrayHead>(removed, 0);
+
+    copyCells(head.data, from * size, made.data, 0, count * size);
+  }
+
+  const newLength = length - count + insert;
+
+  if (newLength > arrayLengthMost()) {
+    lengthFailed(newLength);
+  }
+  if (insert != count) {
+    if (newLength > head.capacity.toInt()) {
+      arrayGrown(array, newLength);
+    }
+
+    const rest = (length - from - count) * size;
+    const source = (from + count) * size;
+    const target = (from + insert) * size;
+
+    copyCells(head.data, source, head.data, target, rest);
+  }
+
+  head.length = newLength.toUint32();
+
+  const place = cellsAt<uint64>(slots, 0);
+
+  putAt(place, 0, rawBits(head.data) + (from * size).toUint64());
+
+  return removed;
+}

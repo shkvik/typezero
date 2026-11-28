@@ -1,0 +1,35 @@
+function busy(rounds: int): int {
+  let total = 0;
+
+  for (let round = 0; round < rounds; round++) {
+    total = (total * 31 + round) % 1000003;
+  }
+
+  return total;
+}
+
+function main(): void {
+  const first = performance.now();
+  const startDate = Date.now();
+  let previous = first;
+  let isRising = true;
+
+  for (let index = 0; index < 1000; index++) {
+    const now = performance.now();
+
+    isRising = isRising && now >= previous;
+    previous = now;
+  }
+
+  const spent = busy(20000000);
+  const later = performance.now();
+  const endDate = Date.now();
+
+  console.log(first >= 0.0, first < 5000.0, isRising, later > first);
+  console.log(spent > 0, later - first > 0.01, later - first < 60000.0);
+  console.log(startDate > 1700000000000, startDate < 4000000000000);
+  console.log(endDate >= startDate, endDate - startDate < 60000);
+  console.log(Math.abs((endDate - startDate).toDouble() - (later - first)) < 50.0);
+}
+
+main();

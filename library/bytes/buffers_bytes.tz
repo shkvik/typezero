@@ -1,0 +1,427 @@
+function bytesLengthMost(): int {
+  return 1073741823;
+}
+
+function bytesLayoutSize(): int {
+  return 40;
+}
+
+function bufferKind(): int {
+  return 11;
+}
+
+function arrayBufferKind(): int {
+  return 12;
+}
+
+function arrayBufferSize(): int {
+  return 32;
+}
+
+function bytesViewSize(): int {
+  return 40;
+}
+
+function elementSize(kind: int): int {
+  if (kind == 4 || kind == 5 || kind == 8) {
+    return 2;
+  }
+  if (kind == 6 || kind == 7 || kind == 9) {
+    return 4;
+  }
+  if (kind == 10) {
+    return 8;
+  }
+
+  return 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the layouts of C are 40 bytes each, by kind",
+})
+function bytesLayoutOf(layouts: Raw<uint8>, kind: int): Raw<uint8> {
+  return cellsAt<uint8>(layouts, kind * bytesLayoutSize());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the buffer has the 32 bytes of ArrayBufferHead and its bytes",
+})
+function arrayBufferMade(
+  length: int,
+  isZero: boolean,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  const buffer = objectMade(arrayBufferSize() + length);
+  const head = viewAt<ArrayBufferHead>(buffer, 0);
+
+  head.count = 1;
+  head.layout = bytesLayoutOf(layouts, arrayBufferKind());
+  head.data = cellsAt<uint8>(buffer, arrayBufferSize());
+  head.length = length.toInt32();
+  head.flags = 0;
+
+  if (isZero && length > 0) {
+    zeroFilled(head.data, length);
+  }
+
+  return buffer;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the view keeps the count of the buffer it was given",
+})
+function bytesViewMade(
+  kind: int,
+  buffer: Raw<uint8>,
+  offset: int,
+  length: int,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  const bytes = objectMade(bytesViewSize());
+  const head = viewAt<BytesHead>(bytes, 0);
+  const source = viewAt<ArrayBufferHead>(buffer, 0);
+
+  head.count = 1;
+  head.layout = bytesLayoutOf(layouts, kind);
+  head.data = cellsAt<uint8>(source.data, offset);
+  head.length = length.toInt32();
+  head.offset = offset.toInt32();
+  head.buffer = buffer;
+
+  return bytes;
+}
+
+function bytesMade(
+  kind: int,
+  length: int,
+  isZero: boolean,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  const size = length * elementSize(kind);
+  const buffer = arrayBufferMade(size, isZero, layouts);
+
+  return bytesViewMade(kind, buffer, 0, length, layouts);
+}
+
+function bufferSizeChecked(size: int): void {
+  if (size < 0) {
+    panic(`internal error: a Buffer of ${size} bytes`);
+  }
+  if (size > bytesLengthMost()) {
+    const most = bytesLengthMost();
+
+    panic(`a Buffer of ${size} bytes exceeds the maximum of ${most}`);
+  }
+}
+
+export function bufferMade(
+  size: int,
+  zero: int32,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  bufferSizeChecked(size);
+
+  return bytesMade(bufferKind(), size, zero != 0, layouts);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the borrowed text of this call",
+})
+export function bufferOfText(
+  text: Read<string>,
+  encoding: int32,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  const narrow = textCells<uint8>(text);
+  const wide = textCells<uint16>(text);
+  const units = new TextUnits(narrow, wide, text.length);
+  const code = encoding.toInt();
+  const size = lengthIn(units, code);
+
+  if (size > bytesLengthMost()) {
+    bufferSizeChecked(size);
+  }
+
+  const bytes = bytesMade(bufferKind(), size, false, layouts);
+  const head = viewAt<BytesHead>(bytes, 0);
+  const written = bytesEncoded(head.data, size, units, code);
+
+  head.length = written.toInt32();
+
+  return bytes;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an item of the list is a pointer to a Buffer",
+})
+function listedBytes(list: Raw<uint8>, index: int): Raw<uint8> {
+  const head = viewAt<ArrayHead>(list, 0);
+  const cells = cellsAt<uint64>(head.data, index * 8);
+  const bits = peekAt(cells, 0);
+
+  return bitsRaw(bits);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new Buffer has total bytes, each copy stays below it",
+})
+export function buffersJoined(
+  list: Raw<uint8>,
+  total: int,
+  hasTotal: int32,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  const array = viewAt<ArrayHead>(list, 0);
+  const count = array.length.toInt();
+  let size = total;
+
+  if (hasTotal == 0) {
+    size = 0;
+
+    for (let index = 0; index < count; index++) {
+      const listed = listedBytes(list, index);
+      const item = viewAt<BytesHead>(listed, 0);
+
+      size += item.length.toInt();
+    }
+  }
+
+  const joined = bufferMade(size, 0, layouts);
+  const head = viewAt<BytesHead>(joined, 0);
+  let at = 0;
+
+  for (let index = 0; index < count && at < size; index++) {
+    const listed = listedBytes(list, index);
+    const item = viewAt<BytesHead>(listed, 0);
+    let length = item.length.toInt();
+
+    if (length > size - at) {
+      length = size - at;
+    }
+
+    copyCells(item.data, 0, head.data, at, length);
+    at += length;
+  }
+  if (at < size) {
+    const rest = cellsAt<uint8>(head.data, at);
+
+    zeroFilled(rest, size - at);
+  }
+
+  return joined;
+}
+
+function relativeTo(position: int, length: int): int {
+  if (position < 0) {
+    const counted = position + length;
+
+    if (counted < 0) {
+      return 0;
+    }
+
+    return counted;
+  }
+  if (position > length) {
+    return length;
+  }
+
+  return position;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the view shares the buffer of the bytes and counts it",
+})
+export function bytesViewed(
+  bytes: Raw<uint8>,
+  start: int,
+  end: int,
+  has: int32,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  const head = viewAt<BytesHead>(bytes, 0);
+  const length = head.length.toInt();
+  let from = 0;
+  let to = length;
+
+  if ((has & 1) != 0) {
+    from = relativeTo(start, length);
+  }
+  if ((has & 2) != 0) {
+    to = relativeTo(end, length);
+  }
+  if (to < from) {
+    to = from;
+  }
+
+  const layout = viewAt<LayoutHead>(head.layout, 0);
+  const kind = (layout.flags >> 24).toInt();
+  const buffer = viewAt<ArrayBufferHead>(head.buffer, 0);
+  const offset = head.offset.toInt() + from * elementSize(kind);
+
+  buffer.count += 1;
+
+  return bytesViewMade(kind, head.buffer, offset, to - from, layouts);
+}
+
+function isSameBits(kind: int, from: int): boolean {
+  if (kind == from) {
+    return true;
+  }
+
+  const isFloat = from == 8 || from == 9 || from == 10;
+  if (isFloat || elementSize(kind) != elementSize(from)) {
+    return false;
+  }
+
+  return !(kind == 3 && from == 2);
+}
+
+function lowByteOf(magnitude: int, isNegative: boolean): int {
+  const byte = magnitude & 255;
+
+  if (isNegative && byte != 0) {
+    return 256 - byte;
+  }
+
+  return byte;
+}
+
+function shiftedLowByte(mantissa: int, shift: int, isNegative: boolean): int {
+  if (shift >= 8) {
+    return 0;
+  }
+  if (shift >= 0) {
+    return lowByteOf(mantissa << shift, isNegative);
+  }
+  if (shift <= -40) {
+    return 0;
+  }
+
+  return lowByteOf(mantissa >> (0 - shift), isNegative);
+}
+
+function floatLowByte(bits: int): int {
+  const exponent = (bits >> 23) & 255;
+  if (exponent == 255) {
+    return 0;
+  }
+
+  const isNegative = (bits & 2147483648) != 0;
+  let mantissa = bits & 8388607;
+  let shift = -149;
+
+  if (exponent != 0) {
+    mantissa = mantissa | 8388608;
+    shift = exponent - 150;
+  }
+
+  return shiftedLowByte(mantissa, shift, isNegative);
+}
+
+function halfLowByte(bits: int): int {
+  const exponent = (bits >> 10) & 31;
+  if (exponent == 31) {
+    return 0;
+  }
+
+  const isNegative = (bits & 32768) != 0;
+  let mantissa = bits & 1023;
+  let shift = -24;
+
+  if (exponent != 0) {
+    mantissa = mantissa | 1024;
+    shift = exponent - 25;
+  }
+
+  return shiftedLowByte(mantissa, shift, isNegative);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the bits of the double are read",
+})
+function doubleLowByte(value: double): int {
+  const bits = doubleBits(value);
+  const exponent = (bits >> 52) & 2047;
+  if (exponent == 2047) {
+    return 0;
+  }
+
+  const whole = Math.trunc(value);
+  const most = 2305843009213693952.0;
+
+  if (whole >= most || whole <= 0.0 - most) {
+    return 0;
+  }
+
+  const integer = Math.trunc(whole).toInt();
+
+  return integer & 255;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the item index of the source kind is inside its bytes",
+})
+function itemLowByte(data: Raw<uint8>, from: int, index: int): int {
+  if (from == 10) {
+    const cells = cellsAt<double>(data, index * 8);
+
+    return doubleLowByte(peekAt(cells, 0));
+  }
+  if (from == 9) {
+    const cells = cellsAt<uint32>(data, index * 4);
+
+    return floatLowByte(unitAt(cells, 0));
+  }
+  if (from == 8) {
+    const cells = cellsAt<uint16>(data, index * 2);
+
+    return halfLowByte(unitAt(cells, 0));
+  }
+
+  return unitAt(data, index * elementSize(from));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new Buffer has one byte for each item of the source",
+})
+export function bytesCopied(
+  kind: int32,
+  source: Raw<uint8>,
+  layouts: Raw<uint8>,
+): Raw<uint8> {
+  const target = kind.toInt();
+  if (target != bufferKind()) {
+    panic("internal error: tz:buffers copies bytes only into a Buffer");
+  }
+
+  const head = viewAt<BytesHead>(source, 0);
+  const layout = viewAt<LayoutHead>(head.layout, 0);
+  const from = (layout.flags >> 24).toInt();
+  const length = head.length.toInt();
+  const copy = bytesMade(target, length, false, layouts);
+  const made = viewAt<BytesHead>(copy, 0);
+
+  if (isSameBits(target, from)) {
+    copyCells(head.data, 0, made.data, 0, length);
+
+    return copy;
+  }
+
+  for (let index = 0; index < length; index++) {
+    const byte = itemLowByte(head.data, from, index);
+
+    putUnit(made.data, index, byte);
+  }
+
+  return copy;
+}

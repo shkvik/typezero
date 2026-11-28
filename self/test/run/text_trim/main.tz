@@ -1,0 +1,23 @@
+function shown(text: string): void {
+  console.log(`[${text.trim()}] [${text.trimStart()}] [${text.trimEnd()}]`);
+}
+
+function main(): void {
+  shown("");
+  shown("   ");
+  shown("abc");
+  shown("  abc  ");
+  shown("\t\n abc def \r\n");
+  shown(" a ");
+  shown("   a long enough piece of text to be shared   ");
+  shown(" привет　");
+  shown("﻿  mixed  ");
+  shown("  " + "glued " + "together" + "   ");
+  shown("x".repeat(20) + "   ");
+
+  const words = "  one  two  ".split(" ");
+
+  console.log(words.map((word) => `<${word.trim()}>`).join(","));
+}
+
+main();

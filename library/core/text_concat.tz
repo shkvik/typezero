@@ -1,0 +1,678 @@
+@InPlace()
+class ShortParts {
+  public readonly bits: uint64;
+  public readonly count: int;
+  public readonly numbers: int;
+  public readonly isShort: boolean;
+
+  public constructor(
+    bits: uint64,
+    count: int,
+    numbers: int,
+    isShort: boolean,
+  ) {
+    this.bits = bits;
+    this.count = count;
+    this.numbers = numbers;
+    this.isShort = isShort;
+  }
+}
+
+@InPlace()
+class PartsMeasure {
+  public readonly total: int;
+  public readonly kept: int;
+  public readonly first: int;
+  public readonly second: int;
+  public readonly firstCount: int;
+  public readonly isWide: boolean;
+  public readonly isPlain: boolean;
+
+  public constructor(
+    total: int,
+    kept: int,
+    first: int,
+    second: int,
+    firstCount: int,
+    isWide: boolean,
+    isPlain: boolean,
+  ) {
+    this.total = total;
+    this.kept = kept;
+    this.first = first;
+    this.second = second;
+    this.firstCount = firstCount;
+    this.isWide = isWide;
+    this.isPlain = isPlain;
+  }
+}
+
+function treeCount(): int {
+  return 13;
+}
+
+function numberSlot(): int {
+  return 32;
+}
+
+function partKindBits(): uint64 {
+  return textTreeBit() | textHeapBit() | textWideBit();
+}
+
+function isShortMeta(meta: uint64): boolean {
+  return (meta & partKindBits()) == textTreeBit();
+}
+
+function isNumberMeta(meta: uint64): boolean {
+  return (meta & partKindBits()) == (textTreeBit() | textWideBit());
+}
+
+function isWholeMeta(meta: uint64): boolean {
+  return (meta & textLengthBits()) == 1;
+}
+
+function metaCount(meta: uint64): int {
+  return (meta & textLengthBits()).toInt();
+}
+
+function highUnitBits(): uint64 {
+  return 9259542123273814144;
+}
+
+function signedOfBits(bits: uint64): int {
+  const top: uint64 = 9223372036854775808;
+  const most: uint64 = 18446744073709551615;
+  if (bits < top) {
+    return bits.toInt();
+  }
+  if (bits == top) {
+    return -9223372036854775807 - 1;
+  }
+
+  const magnitude = most - bits + 1;
+
+  return 0 - magnitude.toInt();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a number part keeps its bits in the object word",
+})
+function numberWritten(
+  part: Read<string>,
+  meta: uint64,
+  cells: Raw<uint8>,
+  at: int,
+): int {
+  const object = textObject(part);
+  const bits = rawBits(object);
+  let end = at + 1;
+
+  if (isWholeMeta(meta)) {
+    end = signedWritten(signedOfBits(bits), cells, at + 1);
+  } else {
+    end = doubleWritten(bitsDouble(bits), cells, at + 1);
+  }
+
+  const count = end - at - 1;
+
+  putUnit(cells, at, count);
+
+  return count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the short parts fill at most 8 cells of the bits",
+})
+function shortParts(parts: Raw<string>, count: int): ShortParts {
+  const digits = frameCells<uint8>(24);
+  let bits: uint64 = 0;
+  let used = 0;
+  let numbers = 0;
+  let isShort = true;
+
+  for (let index = 0; index < count; index++) {
+    const meta = textMeta(peekAt(parts, index));
+    const isNumber = isNumberMeta(meta);
+
+    if (isNumber) {
+      numbers += 1;
+    }
+    if (!isShort) {
+      continue;
+    }
+    if (isShortMeta(meta)) {
+      const length = metaCount(meta);
+      const object = textObject(peekAt(parts, index));
+      const shift = (8 * used).toUint64();
+
+      bits = bits | (rawBits(object) << shift);
+      used += length;
+      isShort = used <= 8;
+    } else if (isNumber && isWholeMeta(meta)) {
+      const object = textObject(peekAt(parts, index));
+      const end = signedWritten(signedOfBits(rawBits(object)), digits, 0);
+
+      isShort = end <= 8 - used;
+
+      for (let at = 0; at < end && isShort; at++) {
+        const unit = unitAt(digits, at).toUint64();
+        const shift = (8 * used).toUint64();
+
+        bits = bits | (unit << shift);
+        used += 1;
+      }
+    } else if (metaCount(meta) != 0 || isNumber) {
+      isShort = false;
+    }
+  }
+
+  return new ShortParts(bits, used, numbers, isShort);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bits of a short string are its object word",
+})
+function shortText(bits: uint64, count: int): string {
+  if (count == 0) {
+    return "";
+  }
+
+  let meta = count.toUint64() | textTreeBit();
+
+  if ((bits & highUnitBits()) == 0) {
+    meta = meta | textAsciiBit();
+  }
+
+  return textOf(bitsRaw(bits), meta);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a number slot holds its count and then the digits",
+})
+function numberPlaced<T>(
+  cells: Raw<uint8>,
+  slot: int,
+  into: Raw<T>,
+  at: int,
+): int {
+  const start = numberSlot() * slot;
+  const count = unitAt(cells, start);
+
+  copyCells(cells, start + 1, into, at, count);
+
+  return at + count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the cells the measure counted",
+})
+function partsPlaced<T>(
+  parts: Raw<string>,
+  from: int,
+  count: int,
+  cells: Raw<uint8>,
+  into: Raw<T>,
+  at: int,
+): int {
+  let used = at;
+  let slot = 0;
+
+  for (let index = 0; index < count; index++) {
+    const meta = textMeta(peekAt(parts, index));
+    const isNumber = isNumberMeta(meta);
+
+    if (index >= from && isNumber) {
+      used = numberPlaced(cells, slot, into, used);
+    } else if (index >= from && metaCount(meta) != 0) {
+      used = placedText(peekAt(parts, index), into, used);
+    }
+    if (isNumber) {
+      slot += 1;
+    }
+  }
+
+  return used;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "number slots were written by the measure",
+})
+function partsMeasured(
+  parts: Raw<string>,
+  from: int,
+  count: int,
+  cells: Raw<uint8>,
+  isWriting: boolean,
+): PartsMeasure {
+  let total = 0;
+  let kept = 0;
+  let first = -1;
+  let second = -1;
+  let firstCount = 0;
+  let isWide = false;
+  let isPlain = true;
+  let slot = 0;
+
+  for (let index = 0; index < count; index++) {
+    const meta = textMeta(peekAt(parts, index));
+    const isNumber = isNumberMeta(meta);
+    let length = metaCount(meta);
+
+    if (isNumber && isWriting) {
+      const at = numberSlot() * slot;
+
+      length = numberWritten(peekAt(parts, index), meta, cells, at);
+      slot += 1;
+    } else if (isNumber) {
+      length = unitAt(cells, numberSlot() * slot);
+      slot += 1;
+    }
+    if (index >= from && length != 0) {
+      if (kept == 0) {
+        first = index;
+        firstCount = length;
+      } else if (kept == 1) {
+        second = index;
+      }
+
+      kept += 1;
+      total += length;
+
+      if (!isNumber) {
+        isWide = isWide || (meta & textWideBit()) != 0;
+        isPlain = isPlain && (meta & textAsciiBit()) != 0;
+      }
+    }
+  }
+  if (total > maxCount()) {
+    panic(`string length ${total} exceeds the maximum of ${maxCount()}`);
+  }
+
+  return new PartsMeasure(
+    total,
+    kept,
+    first,
+    second,
+    firstCount,
+    isWide,
+    isPlain,
+  );
+}
+
+function partsJoined(
+  parts: Raw<string>,
+  from: int,
+  count: int,
+  cells: Raw<uint8>,
+): string {
+  const measure = partsMeasured(parts, from, count, cells, false);
+
+  return measuredJoined(parts, from, count, cells, measure);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the cells the measure counted",
+})
+function measuredJoined(
+  parts: Raw<string>,
+  from: int,
+  count: int,
+  cells: Raw<uint8>,
+  measure: Read<PartsMeasure>,
+): string {
+  const total = measure.total;
+  if (total == 0) {
+    return "";
+  }
+  if (measure.isWide) {
+    const wide = textRoom<uint16>(total);
+
+    partsPlaced(parts, from, count, cells, wide, 0);
+
+    return textClosed(wide, total, false);
+  }
+
+  const narrow = textRoom<uint8>(total);
+
+  partsPlaced(parts, from, count, cells, narrow, 0);
+
+  return textClosed(narrow, total, measure.isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a number slot holds its count and then the digits",
+})
+function partText(
+  parts: Raw<string>,
+  index: int,
+  cells: Raw<uint8>,
+): string {
+  const meta = textMeta(peekAt(parts, index));
+  if (!isNumberMeta(meta)) {
+    return peekAt(parts, index);
+  }
+
+  return partsJoined(parts, index, index + 1, cells);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a number slot holds its count and then the digits",
+})
+function pairTree(
+  parts: Raw<string>,
+  first: int,
+  second: int,
+  cells: Raw<uint8>,
+): string {
+  const isLeftNumber = isNumberMeta(textMeta(peekAt(parts, first)));
+  const isRightNumber = isNumberMeta(textMeta(peekAt(parts, second)));
+  if (!isLeftNumber && !isRightNumber) {
+    return textTree(peekAt(parts, first), peekAt(parts, second));
+  }
+  if (!isLeftNumber) {
+    const madeRight = partText(parts, second, cells);
+
+    return textTree(peekAt(parts, first), madeRight);
+  }
+
+  const madeLeft = partText(parts, first, cells);
+  if (!isRightNumber) {
+    return textTree(madeLeft, peekAt(parts, second));
+  }
+
+  const madeRight = partText(parts, second, cells);
+
+  return textTree(madeLeft, madeRight);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the buffer has capacity for the parts after its end",
+})
+function appended(
+  parts: Raw<string>,
+  count: int,
+  cells: Raw<uint8>,
+  measure: Read<PartsMeasure>,
+): string | undefined {
+  let object = textObject(peekAt(parts, measure.first));
+  let meta = textMeta(peekAt(parts, measure.first));
+  if (isNumberMeta(meta)) {
+    return undefined;
+  }
+  if (isTextTree(meta)) {
+    const tree = viewAt<TreeHead>(object, 0);
+    if (rawBits(tree.flatObject) == 0) {
+      return undefined;
+    }
+
+    object = tree.flatObject;
+    meta = tree.flatMeta;
+  }
+  if (!isTextHeld(meta)) {
+    return undefined;
+  }
+
+  const isBaseWide = (meta & textWideBit()) != 0;
+  if (measure.isWide && !isBaseWide) {
+    return undefined;
+  }
+
+  const head = viewAt<TextHead>(object, 0);
+  const offset = ((meta >> textOffsetShift()) & textLengthBits()).toInt();
+  const length = metaCount(meta);
+  const end = offset + length;
+  if (end + measure.total - length > head.capacity.toInt()) {
+    return undefined;
+  }
+  if (end != head.used.toInt()) {
+    return undefined;
+  }
+
+  const from = measure.first + 1;
+  let used = end;
+
+  if (isBaseWide) {
+    const wide = cellsAt<uint16>(object, 24);
+
+    used = partsPlaced(parts, from, count, cells, wide, end);
+  } else {
+    const narrow = cellsAt<uint8>(object, 24);
+
+    used = partsPlaced(parts, from, count, cells, narrow, end);
+  }
+
+  head.used = used.toUint32();
+  head.count += 1;
+
+  const place = offset.toUint64() << textOffsetShift();
+  let made = measure.total.toUint64() | place | textHeapBit();
+
+  if (isBaseWide) {
+    made = made | textWideBit();
+  } else if (measure.isPlain && (meta & textAsciiBit()) != 0) {
+    made = made | textAsciiBit();
+  }
+
+  return textOf(object, made);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the number slots were written for these parts",
+})
+function partsMade(
+  parts: Raw<string>,
+  count: int,
+  cells: Raw<uint8>,
+): string {
+  const measure = partsMeasured(parts, 0, count, cells, true);
+  const total = measure.total;
+  if (measure.kept == 0) {
+    return "";
+  }
+  if (!measure.isWide && total <= 8) {
+    return measuredJoined(parts, 0, count, cells, measure);
+  }
+  if (measure.kept == 1) {
+    return partText(parts, measure.first, cells);
+  }
+
+  const inPlace = appended(parts, count, cells, measure);
+  if (inPlace != undefined) {
+    return inPlace;
+  }
+  if (total >= treeCount() && measure.kept == 2) {
+    return pairTree(parts, measure.first, measure.second, cells);
+  }
+
+  const firstCount = measure.firstCount;
+  if (total >= treeCount() && firstCount >= total - firstCount) {
+    const rest = partsJoined(parts, measure.first + 1, count, cells);
+    if (isNumberMeta(textMeta(peekAt(parts, measure.first)))) {
+      const made = partText(parts, measure.first, cells);
+
+      return textTree(made, rest);
+    }
+
+    return textTree(peekAt(parts, measure.first), rest);
+  }
+
+  return measuredJoined(parts, 0, count, cells, measure);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the lowering made count cells of parts; slots hold 32 cells each",
+})
+export function concatParts(parts: Raw<string>, count: int): string {
+  const short = shortParts(parts, count);
+  if (short.isShort) {
+    return shortText(short.bits, short.count);
+  }
+
+  const isMany = short.numbers > 4;
+  let cells = frameCells<uint8>(128);
+
+  if (isMany) {
+    cells = allocate<uint8>(numberSlot() * short.numbers);
+  }
+
+  const made = partsMade(parts, count, cells);
+
+  if (isMany) {
+    release(cells);
+  }
+
+  return made;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the cells of both strings",
+})
+function pairJoined(
+  left: Read<string>,
+  right: Read<string>,
+  total: int,
+  isWide: boolean,
+  isPlain: boolean,
+): string {
+  if (isWide) {
+    const wide = textRoom<uint16>(total);
+    const middle = placedText(left, wide, 0);
+
+    placedText(right, wide, middle);
+
+    return textClosed(wide, total, false);
+  }
+
+  const narrow = textRoom<uint8>(total);
+  const middle = placedText(left, narrow, 0);
+
+  placedText(right, narrow, middle);
+
+  return textClosed(narrow, total, isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the buffer has capacity for the right string after its end",
+})
+function pairAppended(
+  left: Read<string>,
+  right: Read<string>,
+  total: int,
+  isWide: boolean,
+  isPlain: boolean,
+): string | undefined {
+  let object = textObject(left);
+  let meta = textMeta(left);
+
+  if (isTextTree(meta)) {
+    const tree = viewAt<TreeHead>(object, 0);
+    if (rawBits(tree.flatObject) == 0) {
+      return undefined;
+    }
+
+    object = tree.flatObject;
+    meta = tree.flatMeta;
+  }
+  if (!isTextHeld(meta)) {
+    return undefined;
+  }
+
+  const isBaseWide = (meta & textWideBit()) != 0;
+  if (isWide && !isBaseWide) {
+    return undefined;
+  }
+
+  const head = viewAt<TextHead>(object, 0);
+  const offset = ((meta >> textOffsetShift()) & textLengthBits()).toInt();
+  const length = metaCount(meta);
+  const end = offset + length;
+  if (end + total - length > head.capacity.toInt()) {
+    return undefined;
+  }
+  if (end != head.used.toInt()) {
+    return undefined;
+  }
+
+  let used = end;
+
+  if (isBaseWide) {
+    used = placedText(right, cellsAt<uint16>(object, 24), end);
+  } else {
+    used = placedText(right, cellsAt<uint8>(object, 24), end);
+  }
+
+  head.used = used.toUint32();
+  head.count += 1;
+
+  const place = offset.toUint64() << textOffsetShift();
+  let made = total.toUint64() | place | textHeapBit();
+
+  if (isBaseWide) {
+    made = made | textWideBit();
+  } else if (isPlain && (meta & textAsciiBit()) != 0) {
+    made = made | textAsciiBit();
+  }
+
+  return textOf(object, made);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "short strings keep their cells in the object word",
+})
+export function concatPair(left: Read<string>, right: Read<string>): string {
+  const leftMeta = textMeta(left);
+  const rightMeta = textMeta(right);
+  const leftCount = metaCount(leftMeta);
+  const rightCount = metaCount(rightMeta);
+  if (leftCount == 0) {
+    return right;
+  }
+  if (rightCount == 0) {
+    return left;
+  }
+
+  const total = leftCount + rightCount;
+  if (isShortMeta(leftMeta) && isShortMeta(rightMeta) && total <= 8) {
+    const low = rawBits(textObject(left));
+    const shift = (8 * leftCount).toUint64();
+    const high = rawBits(textObject(right)) << shift;
+
+    return shortText(low | high, total);
+  }
+  if (total > maxCount()) {
+    panic(`string length ${total} exceeds the maximum of ${maxCount()}`);
+  }
+
+  const wideBits = (leftMeta | rightMeta) & textWideBit();
+  const isWide = wideBits != 0;
+  const plainBits = leftMeta & rightMeta & textAsciiBit();
+  const isPlain = plainBits != 0;
+  if (!isWide && total <= 8) {
+    return pairJoined(left, right, total, false, isPlain);
+  }
+
+  const inPlace = pairAppended(left, right, total, isWide, isPlain);
+  if (inPlace != undefined) {
+    return inPlace;
+  }
+  if (total >= treeCount()) {
+    return textTree(left, right);
+  }
+
+  return pairJoined(left, right, total, isWide, isPlain);
+}

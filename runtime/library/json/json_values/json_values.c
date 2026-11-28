@@ -154,26 +154,6 @@ int32_t tz_json_equals_bool(const TzJson *j, int32_t value) {
   return j && j->kind == TZ_JSON_BOOL && j->u.boolean == (value != 0);
 }
 
-const char *tz_json_kind_name(const TzJson *j) {
-  if (!j) {
-    return "undefined";
-  }
-  switch (j->kind) {
-  case TZ_JSON_NULL:
-    return "null";
-  case TZ_JSON_BOOL:
-    return "boolean";
-  case TZ_JSON_NUMBER:
-    return "number";
-  case TZ_JSON_STRING:
-    return "string";
-  case TZ_JSON_ARRAY:
-    return "array";
-  default:
-    return "object";
-  }
-}
-
 static TzJson *element_of(const TzJson *j, uint32_t i) {
   if (j->kind == TZ_JSON_ARRAY) {
     const TzArray *a = j->u.array;

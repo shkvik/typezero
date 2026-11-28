@@ -1,0 +1,63 @@
+function shown(value: double): void {
+  const texts: string[] = [];
+
+  for (const radix of [2, 3, 7, 8, 10, 16, 32, 36]) {
+    texts.push(value.toString(radix));
+  }
+
+  console.log(texts.join(" "));
+}
+
+function main(): void {
+  const zero = 0.0;
+
+  shown(0.0);
+  shown(-0.0);
+  shown(1.0);
+  shown(-1.0);
+  shown(255.0);
+  shown(-255.0);
+  shown(0.5);
+  shown(0.1);
+  shown(0.2 + 0.1);
+  shown(1.0 / 3.0);
+  shown(-123.456);
+  shown(3.141592653589793);
+  shown(1e-7);
+  shown(0.000123);
+  shown(1234567.89);
+  shown(9007199254740992.0);
+  shown(9007199254740994.0);
+  shown(1e21);
+  shown(1e300);
+  shown(1.7976931348623157e308);
+  shown(5e-324);
+  shown(2.2250738585072014e-308);
+  shown(zero / zero);
+  shown(1.0 / zero);
+  shown(-1.0 / zero);
+  shown(35.0);
+  shown(36.0);
+  shown(0.999999999999);
+  shown(4294967295.5);
+
+  let value = 0.7;
+  const many: string[] = [];
+
+  for (let index = 0; index < 400; index++) {
+    value = value * 1.37 + 0.011;
+    many.push(value.toString(2 + (index % 35)));
+    many.push((1.0 / value).toString(2 + (index % 17)));
+    if (value > 1e200) {
+      value = 0.3;
+    }
+  }
+
+  console.log(many.join(","));
+
+  const count = 255;
+
+  console.log(count.toString(16), count.toString(2), (-count).toString(36));
+}
+
+main();

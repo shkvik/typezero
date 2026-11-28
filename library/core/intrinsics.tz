@@ -6,7 +6,7 @@ export type NativeError = {
   path?: string
   dest?: string
 }
-export declare function panic(message: string): void
+export declare function panic(message: string): never
 export declare function defer(release: () => void): object
 export declare function withContext<R>(frame: object, callback: () => R): R
 export declare function ahead<T>(value: T | Promise<T>): Promise<T>

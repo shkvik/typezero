@@ -405,7 +405,8 @@ partial class Lowering {
     }
 
     const objectExpr = tree.exprOf(member.objectId);
-    const self = this.value(frame, objectExpr);
+    const spot = this.receiverSpot(frame, objectExpr, object);
+    const self = spot?.value ?? this.value(frame, objectExpr);
     if (self == undefined) {
       return undefined;
     }
@@ -426,7 +427,7 @@ partial class Lowering {
     const all = [kPointerType].concat(params);
     const callee = this.ir.declare(target.name, result, all);
     const dispatched = this.virtualCall(frame, object, fn, self, args, target);
-    const receiver = this.recordAddress(frame, self);
+    const receiver = spot?.address ?? this.recordAddress(frame, self);
     const made = dispatched ?? frame.made.call(callee, [receiver].concat(args));
     const answer: IrValue = { type: result, value: made, tz: shape.result };
     const temporaries = kept.concat([self]);

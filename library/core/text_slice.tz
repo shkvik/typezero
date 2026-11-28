@@ -1,0 +1,215 @@
+function shareLimit(): int {
+  return 13;
+}
+
+function fromEnd(position: int, count: int): int {
+  if (position < 0) {
+    return clamped(count + position, count);
+  }
+
+  return clamped(position, count);
+}
+
+export function slice(
+  text: Read<string>,
+  start: int,
+  end: int,
+  hasEnd: boolean,
+): string {
+  const count = text.length;
+  const from = fromEnd(start, count);
+  let to = count;
+
+  if (hasEnd) {
+    to = fromEnd(end, count);
+  }
+  if (from >= to) {
+    return "";
+  }
+
+  return piece(text, from, to);
+}
+
+export function substring(
+  text: Read<string>,
+  start: int,
+  end: int,
+  hasEnd: boolean,
+): string {
+  const count = text.length;
+  const first = clamped(start, count);
+  let second = count;
+
+  if (hasEnd) {
+    second = clamped(end, count);
+  }
+  if (second < first) {
+    return piece(text, second, first);
+  }
+
+  return piece(text, first, second);
+}
+
+function piece(text: Read<string>, from: int, to: int): string {
+  const count = to - from;
+  if (count == 0) {
+    return "";
+  }
+  if (count == text.length) {
+    return text;
+  }
+  if (count < shareLimit()) {
+    return copied(text, from, count);
+  }
+
+  return shared(text, from, count);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "from + count <= text.length: the cells are inside the text",
+})
+function copiedCells<C>(
+  cells: Raw<C>,
+  from: int,
+  count: int,
+  isPlain: boolean,
+): string {
+  const room = textRoom<C>(count);
+
+  copyCells(cells, from, room, 0, count);
+
+  return textClosed(room, count, isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as this borrowed string",
+})
+function copied(text: Read<string>, from: int, count: int): string {
+  const isPlain = isAscii(text);
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return copiedCells(narrow, from, count, isPlain);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return copiedCells(wide, from, count, false);
+  }
+
+  return "";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a held buffer gets one more owner; the tree is flat after textCells",
+})
+function shared(text: Read<string>, from: int, count: int): string {
+  let object = textObject(text);
+  let meta = textMeta(text);
+
+  if (isTextTree(meta)) {
+    textCells<uint8>(text);
+
+    const tree = viewAt<TreeHead>(object, 0);
+
+    object = tree.flatObject;
+    meta = tree.flatMeta;
+  }
+  if (isTextHeld(meta)) {
+    const head = viewAt<TextHead>(object, 0);
+
+    head.count += 1;
+  }
+
+  const shift = textOffsetShift();
+  const offset = (meta >> shift) & textLengthBits();
+  const kept = meta & (textWideBit() | textAsciiBit() | textHeapBit());
+  const start = (offset + from.toUint64()) << shift;
+  const made = count.toUint64() | start | kept;
+
+  return textOf(object, made);
+}
+
+const kWideSpaces: int[] = [160, 5760, 8232, 8233, 8239, 8287, 12288, 65279];
+
+function isSpace(unit: int): boolean {
+  if (unit == 32 || (unit >= 9 && unit <= 13)) {
+    return true;
+  }
+  if (unit < 128) {
+    return false;
+  }
+  if (kWideSpaces.includes(unit)) {
+    return true;
+  }
+
+  return unit >= 8192 && unit <= 8202;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "start and end stay inside 0 … count",
+})
+function spaceless<C>(
+  cells: Raw<C>,
+  count: int,
+  atStart: boolean,
+  atEnd: boolean,
+): Piece {
+  let start = 0;
+  let end = count;
+
+  if (atStart) {
+    while (start < end && isSpace(unitAt(cells, start))) {
+      start += 1;
+    }
+  }
+  if (atEnd) {
+    while (end > start && isSpace(unitAt(cells, end - 1))) {
+      end -= 1;
+    }
+  }
+
+  return new Piece(start, end - start);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as this borrowed string",
+})
+function trimmed(
+  text: Read<string>,
+  atStart: boolean,
+  atEnd: boolean,
+): string {
+  const count = text.length;
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    const kept = spaceless(narrow, count, atStart, atEnd);
+
+    return piece(text, kept.at, kept.at + kept.count);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    const kept = spaceless(wide, count, atStart, atEnd);
+
+    return piece(text, kept.at, kept.at + kept.count);
+  }
+
+  return text;
+}
+
+export function trim(text: Read<string>): string {
+  return trimmed(text, true, true);
+}
+
+export function trimStart(text: Read<string>): string {
+  return trimmed(text, true, false);
+}
+
+export function trimEnd(text: Read<string>): string {
+  return trimmed(text, false, true);
+}

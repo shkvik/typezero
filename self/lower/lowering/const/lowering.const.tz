@@ -11,11 +11,9 @@ export const kPrintString = "tz_print_string";
 export const kErrorBegin = "tz_err_begin";
 export const kErrorEnd = "tz_err_end";
 export const kPanic = "tz_panic";
-export const kDebugger = "tz_debugger";
-export const kStringEqual = "tz_str_equal";
-export const kStringCompare = "tz_str_compare";
-export const kPowDouble = "tz_math_pow";
-export const kPowInt = "tz_math_pow_long";
+export const kPanicText = "tz_panic_str";
+export const kPanicName = "panic";
+export const kIntrinsicsModule = "tz:intrinsics";
 export const kConsoleName = "console";
 export const kStdoutPrints = ["log", "info", "debug"];
 export const kStderrPrints = ["error", "warn"];
@@ -78,7 +76,6 @@ export const kTypeKindNames = [
 ];
 export const kStringRetain = "tz.str.retain";
 export const kStringRelease = "tz.str.release";
-export const kStringConcat = "tz_str_concat_n";
 export const kNumberPartInt = "6000000000000001";
 export const kNumberPartDouble = "6000000000000002";
 export const kArrayRetain = "tz.arr.retain";
@@ -87,15 +84,12 @@ export const kStringFree = "tz_str_free";
 export const kArrayFree = "tz_arr_free";
 export const kArrayNew = "tz_arr_new";
 export const kArrayGrow = "tz_arr_grow";
-export const kArrayIndexOf = "tz_arr_index_of";
-export const kArrayJoin = "tz_arr_join";
 export const kArraySlice = "tz_arr_slice";
 export const kArraySliceLent = "tz_arr_slice_lent";
 export const kArrayAppend = "tz_arr_append";
 export const kArrayAppendTaken = "tz_arr_append_taken";
 export const kArraySetLength = "tz_arr_set_length";
 export const kArrayCopy = "tz_arr_copy";
-export const kPrintValue = "tz_print_value";
 export const kArrayLayout = "{ i64, ptr, ptr, i32, i32, ptr }";
 export const kDescriptorLayout = "{ i32, i32, ptr }";
 export const kArrayDataField = 2;
@@ -132,44 +126,11 @@ export const kMapDeleteText = "tz_map_delete_str";
 export const kMapKeys = "tz_map_keys";
 export const kMapValues = "tz_map_values";
 export const kObjectFree = "tz_obj_free";
-export const kTextSlice = "tz_str_slice";
-export const kTextSubstring = "tz_str_substring";
-export const kTextIndexOf = "tz_str_index_of";
-export const kTextLastIndexOf = "tz_str_last_index_of";
-export const kTextIncludes = "tz_str_includes";
-export const kTextStartsWith = "tz_str_starts_with";
-export const kTextEndsWith = "tz_str_ends_with";
-export const kTextUpper = "tz_str_to_upper";
-export const kTextLower = "tz_str_to_lower";
-export const kTextTrim = "tz_str_trim";
-export const kTextCharCode = "tz_str_char_code_at";
-export const kTextCodePoint = "tz_str_code_point";
-export const kTextCharAt = "tz_str_char_at_or_empty";
-export const kTextSplit = "tz_str_split";
-export const kTextRepeat = "tz_str_repeat";
-export const kTextPad = "tz_str_pad";
 export const kDecimalType = "{ i64, i64 }";
-export const kDecimalAdd = "tz_dec_add";
-export const kDecimalSubtract = "tz_dec_sub";
-export const kDecimalMultiply = "tz_dec_mul";
-export const kDecimalDivide = "tz_dec_div";
-export const kDecimalRemainder = "tz_dec_rem";
-export const kDecimalPower = "tz_dec_pow";
-export const kDecimalNegate = "tz_dec_neg";
-export const kDecimalAbs = "tz_dec_abs";
-export const kDecimalCompare = "tz_dec_cmp";
-export const kDecimalEqual = "tz_dec_equal";
-export const kDecimalFromDouble = "tz_dec_from_f64";
-export const kDecimalFromUnsigned = "tz_dec_from_u64";
-export const kDecimalIsInteger = "tz_dec_is_integer";
-export const kDecimalPlaces = "tz_dec_decimal_places";
-export const kDecimalToDouble = "tz_dec_to_f64";
-export const kDecimalToText = "tz_dec_to_string";
 export const kDecimalRoundHalfUp = 4;
 export const kDecimalRetain = "tz.dec.retain";
 export const kDecimalRelease = "tz.dec.release";
 export const kDecimalFree = "tz_dec_free";
-export const kTextFromUnsigned = "tz_str_from_u64";
 export const kIntegerNames = [
   "toInt",
   "toInt8",
@@ -182,8 +143,6 @@ export const kIntegerNames = [
   "toUint64",
 ];
 export const kPanicIntegerFit = "tz_panic_int_does_not_fit";
-export const kTextFromDouble = "tz_str_from_f64";
-export const kTextFromSigned = "tz_str_from_i64";
 export const kDecimalName = "decimal";
 export const kEmptyType = "{ }";
 export const kResultKind = 12;
@@ -196,16 +155,8 @@ export const kErrName = "err";
 export const kSiteLayout = "{ ptr, i32 }";
 export const kPathModule = "node:path";
 export const kPathStyle = 1;
-export const kPathJoin = "tz_path_join";
-export const kPathResolve = "tz_path_resolve";
-export const kPathDirname = "tz_path_dirname";
-export const kPathExtname = "tz_path_extname";
-export const kPathNormalize = "tz_path_normalize";
-export const kPathBasename = "tz_path_basename";
-export const kPathRelative = "tz_path_relative";
-export const kPathIsAbsolute = "tz_path_is_absolute";
-export const kTextCodePointAt = "tz_str_code_point_at";
 export const kCStringName = "cstring";
+export const kCStringLayoutFlag = 512;
 export const kCStringLayout = "tz_cstring_layout";
 export const kCStringCopy = "tz_cstring_copy";
 export const kCStringFromText = "tz_cstring_from_str";
@@ -231,8 +182,6 @@ export const kBytesNames = [
 export const kBufferName = "Buffer";
 export const kBufferAlloc = "tz_buffer_alloc";
 export const kBufferFromText = "tz_buffer_from_string";
-export const kBufferToText = "tz_buffer_to_string";
-export const kBufferEncoding = "tz_buffer_encoding_checked";
 export const kBytesSubarray = "tz_bytes_subarray";
 export const kBytesFromBytes = "tz_bytes_from_bytes";
 export const kBufferKindCode = "11";
@@ -241,35 +190,25 @@ export const kFromName = "from";
 export const kFailedSlot = "tz_thread";
 export const kFailureParts = "{ ptr, { ptr, i64 } }";
 export const kTextCompareC = "strcmp";
-export const kTextToNumber = "tz_str_to_number_r";
-export const kParseInteger = "tz_parse_int_r";
 export const kNumberName = "Number";
 export const kParseIntName = "parseInt";
 export const kTupleFlag = 1;
 export const kMapEntries = "tz_map_entries";
-export const kArraySort = "tz_arr_sort";
-export const kArraySortWith = "tz_arr_sort_with";
-export const kArrayReverse = "tz_arr_reverse";
-export const kStaticHolders = ["Math", "String", "Date", "performance"];
-export const kDateNow = "tz_date_now";
+export const kStaticHolders = [
+  "Math",
+  "String",
+  "Date",
+  "performance",
+  "JSON",
+];
 export const kMathAbsolute = "fabs";
 export const kMathFloor = "floor";
 export const kMathCeil = "ceil";
 export const kMathTrunc = "trunc";
-export const kMathRound = "tz_math_round";
-export const kCharCodesText = "tz_str_from_char_codes";
-export const kPerformanceNow = "tz_performance_now";
 export const kFsModule = "node:fs";
 export const kFsCompose = "tz_fs_compose";
-export const kFsExists = "tz_fs_exists";
-export const kFsReadFile = "tz_fs_read_file";
 export const kFsReadFileBytes = "tz_fs_read_file_bytes";
-export const kFsRealPath = "tz_fs_realpath";
-export const kFsMakeTemporary = "tz_fs_mkdtemp";
 export const kFsStat = "tz_fs_stat";
-export const kFsReadDirectory = "tz_fs_readdir";
-export const kFsRemove = "tz_fs_rm";
-export const kFsCopyFile = "tz_fs_copy_file";
 export const kFsErrorOrders = [
   ["message", "errno", "code", "syscall", "path", "dest"],
   ["code", "message", "syscall", "path"],
@@ -307,15 +246,10 @@ export const kFsVerbs = new Map<string, string>([
 ]);
 export const kReadFlag = "r";
 export const kProcessName = "process";
-export const kProcessArgv = "tz_process_argv";
-export const kProcessExecPath = "tz_process_exec_path";
-export const kProcessPlatform = "tz_process_platform";
+export const kPlatformName = "win32";
 export const kProcessSetExitCode = "tz_process_set_exit_code";
 export const kArraySplice = "tz_arr_splice";
 export const kArrayUnshift = "tz_arr_unshift_slots";
-export const kDecimalFromText = "tz_dec_from_string";
-export const kDecimalRound = "tz_dec_round";
-export const kDecimalRoundingMode = "tz_dec_rounding_mode";
 export const kDivisionPlaces = 20;
 export const kRoundingModes = [
   "up",
@@ -328,14 +262,6 @@ export const kRoundingModes = [
   "half-ceil",
   "half-floor",
 ];
-export const kDecimalShowers = new Map<string, string>([
-  ["toFixed", "tz_dec_to_fixed"],
-  ["toFormat", "tz_dec_to_format"],
-  ["toExponential", "tz_dec_to_exponential"],
-  ["toPrecision", "tz_dec_to_precision"],
-]);
-export const kNumberFixed = "tz_num_to_fixed";
-export const kNumberRadix = "tz_num_to_radix";
 export const kBitName = "Bit";
 export const kWordPairType = "i128";
 export const kStatsName = "Stats";
@@ -349,16 +275,14 @@ export const kFileKinds = new Map<string, int>([
   ["isBlockDevice", 24576],
   ["isCharacterDevice", 8192],
 ]);
-export const kCodePointsText = "tz_str_from_code_points";
-export const kBufferByteLength = "tz_buffer_byte_length";
 export const kBufferConcat = "tz_buffer_concat";
-export const kBufferIndexOfText = "tz_buffer_index_of_string";
 export const kChildModule = "node:child_process";
 export const kChildRun = "tz_child_run";
 export const kStrcmp = "strcmp";
 export const kOsModule = "node:os";
 export const kMemModule = "tz:mem";
 export const kUnsafeModule = "tz:unsafe";
+export const kViewAtName = "viewAt";
 export const kArrayModule = "tz:array";
 export const kMapModule = "tz:map";
 export const kReverseName = "reverse";
@@ -397,20 +321,63 @@ export const kBooleanName = "Boolean";
 export const kArrayClassName = "Array";
 export const kDisposeName = "[Symbol.dispose]";
 export const kSuperWord = "super";
-export const kRuntimeModules = ["tz:list", "tz:array", "tz:map", "tz:text"];
+export const kRuntimeModules = [
+  "tz:list",
+  "tz:array",
+  "tz:map",
+  "tz:text",
+  "tz:ffi",
+  "tz:files",
+  "tz:core",
+  "tz:paths",
+  "tz:maths",
+  "tz:time",
+  "tz:process",
+  "tz:decimals",
+  "tz:children",
+  "tz:values",
+  "tz:buffers",
+  "tz:counts",
+  "tz:dicts",
+];
+export const kSystemModulePrefix = "tz:win32/";
+export const kFilesModule = "tz:files";
+export const kPathsModule = "tz:paths";
+export const kMathsModule = "tz:maths";
+export const kTimeModule = "tz:time";
+export const kProcessModule = "tz:process";
+export const kDecimalsModule = "tz:decimals";
+export const kChildrenModule = "tz:children";
+export const kValuesModule = "tz:values";
+export const kBuffersModule = "tz:buffers";
+export const kCountsModule = "tz:counts";
+export const kDictsModule = "tz:dicts";
+export const kWideName = "wstring";
+export const kWideCells = "cells";
 export const kImmortalName = "tz.immortal";
 export const kImmortalCount = "1152921504606846976";
 export const kImmortalFloor = "576460752303423488";
 export const kObjectForget = "tz_obj_forget";
 export const kArrayForget = "tz_arr_forget";
-export const kMemoryAllocate = "malloc";
-export const kMemoryResize = "realloc";
-export const kMemoryFree = "free";
+export const kMemoryAllocate = "tz_alloc";
+export const kMemoryResize = "tz_realloc";
+export const kMemoryFree = "tz_free";
 export const kMemoryMove = "memmove";
 export const kMemoryCompare = "memcmp";
-export const kTextCells = "tz_str_cells";
-export const kTextRoom = "tz_str_room";
-export const kTextClosed = "tz_str_closed";
+export const kMemoryFind = "memchr";
+export const kWideFound = "wideUnitFound";
+export const kTextRoomMade = "roomMade";
+export const kTextClosedMade = "closedMade";
+export const kTextFreed = "textFreed";
+export const kDecimalFreed = "decimalFreed";
+export const kArrayMade = "arrayMade";
+export const kArrayGrown = "arrayGrown";
+export const kArrayFreed = "arrayFreed";
+export const kObjectMade = "objectMade";
+export const kObjectFreed = "objectFreed";
+export const kCStringMade = "cstringMade";
+export const kCStringCopied = "cstringCopied";
+export const kBytesLayouts = "tz_bytes_layouts";
 export const kTextShortCount = "8";
 export const kTextAsciiBit = "1000000000000000";
 export const kTextShortAscii = "5000000000000000";
@@ -424,14 +391,18 @@ export const kTextOffsetShift = "30";
 export const kTextBufferHead = "24";
 export const kWideCell = "i16";
 export const kByteCell = "i8";
-export const kCellsFind = "tz_cells_find";
 export const kTextModule = "tz:text";
+export const kFfiModule = "tz:ffi";
+export const kFixedName = "Fixed";
+export const kRawName = "Raw";
+export const kPadFill = " ";
+export const kJoinComma = ",";
+export const kTableHead = "{ i64, ptr, ptr, i32, i32, ptr }";
 export const kReplaceName = "replace";
 export const kSwapName = "swap";
 export const kTakeName = "take";
 export const kDropName = "drop";
 export const kStructuredCloneName = "structuredClone";
-export const kOsText = "tz_os_string";
 export const kEncodingNames = [
   "utf8",
   "utf16le",

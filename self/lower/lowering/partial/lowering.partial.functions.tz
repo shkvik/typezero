@@ -18,6 +18,7 @@ import { Lowering } from "../lowering.tz";
 import {
   kBooleanType,
   kGivenModes,
+  kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
@@ -150,9 +151,15 @@ partial class Lowering {
         return undefined;
       }
 
-      const type = this.irType(this.passedType(param));
+      const passed = this.passedType(param);
+      const type = this.irType(passed);
       if (type == undefined || type == kVoidType) {
         return undefined;
+      }
+      if (this.isMovedRecord(passed)) {
+        types.push(kPointerType);
+
+        continue;
       }
 
       types.push(type);
@@ -225,7 +232,13 @@ partial class Lowering {
       const pointer = frame.made.slot(type, param.name);
       const key = this.placeKey(frame.module, param.loc);
       const flag = this.dropFlag(frame, isBorrowed);
-      const place: Place = { pointer, type, tz, owner: frame.id, flag };
+      const plain: Place = { pointer, type, tz, owner: frame.id, flag };
+      const isView = type == kPointerType && this.isMovedRecord(tz);
+      let place = plain;
+
+      if (isView) {
+        place = this.viewPlace(frame, pointer, tz, flag) ?? plain;
+      }
 
       frame.made.store(given.value, pointer);
       this.places.set(key, place);

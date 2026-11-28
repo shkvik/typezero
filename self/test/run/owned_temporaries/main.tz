@@ -1,0 +1,64 @@
+interface Holder {
+  names: string[];
+}
+
+class Box {
+  public readonly names: string[];
+
+  public constructor(names: Own<string[]>) {
+    this.names = names;
+  }
+}
+
+function filled(count: int): string[] {
+  const names: string[] = [];
+
+  for (let index = 0; index < count; index++) {
+    names.push(`n${index}`);
+  }
+
+  return names;
+}
+
+function inRecord(count: int): Holder {
+  const names = filled(count);
+
+  return { names: names };
+}
+
+function inShorthand(count: int): Holder {
+  const names = filled(count);
+
+  return { names };
+}
+
+function inArray(count: int): string[][] {
+  const names = filled(count);
+
+  return [names];
+}
+
+function inClass(count: int): Box {
+  const names = filled(count);
+
+  return new Box(names);
+}
+
+function inOptional(count: int): string[] | undefined {
+  const names = filled(count);
+  if (count < 0) {
+    return undefined;
+  }
+
+  return names;
+}
+
+function main(): void {
+  console.log(inRecord(3).names.join(","));
+  console.log(inShorthand(3).names.join(","));
+  console.log((inArray(3)[0] ?? []).join(","));
+  console.log(inClass(3).names.join(","));
+  console.log((inOptional(3) ?? []).join(","));
+}
+
+main();

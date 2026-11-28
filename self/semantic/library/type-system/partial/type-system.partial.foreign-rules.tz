@@ -10,6 +10,7 @@ import {
   kCStringName,
   kDataViewName,
   kOutName,
+  kWideTextName,
 } from "../../foreign-rules/const/foreign-rules.const.tz";
 
 partial class TypeSystem {
@@ -58,8 +59,40 @@ partial class TypeSystem {
       this.isResult(type) ||
       this.isArray(type) ||
       this.isBytes(type) ||
-      this.isOut(type)
+      this.isOut(type) ||
+      this.isCRecord(type) ||
+      this.isWideText(type)
     );
+  }
+
+  private readonly isWideText(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kWideTextName &&
+      this.isLibraryModule(type.module)
+    );
+  }
+
+  public readonly isCRecord(type: Type): boolean {
+    const tree = this.program.tree;
+
+    if (type.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const opened = this.program.modules[type.module];
+    const loc = type.loc;
+    if (opened == undefined) {
+      return false;
+    }
+
+    for (const item of tree.stmtsOf(opened.file.itemsList)) {
+      if (item.kind == StmtKind.Class && item.loc == loc) {
+        return item.isCLayout;
+      }
+    }
+
+    return false;
   }
 
   private isResult(type: Type): boolean {

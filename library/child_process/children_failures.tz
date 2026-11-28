@@ -1,0 +1,242 @@
+
+function limitError(
+  prefix: string,
+  error: int,
+  command: string,
+  args: Own<string[]>,
+): SpawnTextError | undefined {
+  const syscall = "spawn";
+
+  if (error == tooBigCode()) {
+    const text = "the command line is longer than the system allows";
+
+    return {
+      kind: "SPAWN_TEXT_ERROR_COMMAND_LINE_TOO_LONG",
+      code: "E2BIG",
+      message: `${prefix}${text}`,
+      syscall,
+      command,
+      args,
+    };
+  }
+  if (error == nameTooLongCode()) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_PATH_TOO_LONG",
+      code: "ENAMETOOLONG",
+      message: `${prefix}the path is too long`,
+      syscall,
+      command,
+      args,
+    };
+  }
+  if (error == tooManyFilesCode()) {
+    const text = "too many files are open in this program";
+
+    return {
+      kind: "SPAWN_TEXT_ERROR_TOO_MANY_FILES",
+      code: "EMFILE",
+      message: `${prefix}${text}`,
+      syscall,
+      command,
+      args,
+    };
+  }
+  if (error == tryAgainCode()) {
+    const text = "the system allows no more processes";
+
+    return {
+      kind: "SPAWN_TEXT_ERROR_TOO_MANY_PROCESSES",
+      code: "EAGAIN",
+      message: `${prefix}${text}`,
+      syscall,
+      command,
+      args,
+    };
+  }
+  if (error == noMemoryCode()) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_OUT_OF_MEMORY",
+      code: "ENOMEM",
+      message: `${prefix}not enough memory`,
+      syscall,
+      command,
+      args,
+    };
+  }
+
+  return undefined;
+}
+
+function batchError(
+  prefix: string,
+  command: string,
+  args: Own<string[]>,
+): SpawnTextError {
+  const text = "run it with execSync or pass { shell: true }";
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_BATCH_FILE_WITHOUT_SHELL",
+    code: "EINVAL",
+    message: `${prefix}it is a batch file; ${text}`,
+    syscall: "spawn",
+    command,
+    args,
+  };
+}
+
+function startError(
+  file: Read<string>,
+  args: Own<string[]>,
+  run: Read<ChildRun>,
+): SpawnTextError {
+  let error = run.failure();
+
+  if (error == noError()) {
+    error = 0;
+  }
+
+  const name = programName(file);
+  const prefix = `could not run ${name}: `;
+  const command = file.slice(0);
+
+  if (error == missingCode()) {
+    return missingError(prefix, command, args);
+  }
+  if (error == deniedCode() || error == notPermittedCode()) {
+    return permissionError(prefix, error, run.system, command, args);
+  }
+  if (error == invalidCode() && run.isBatch) {
+    return batchError(prefix, command, args);
+  }
+  if (error == wrongFormatCode() || error == notExecutableCode()) {
+    return formatError(prefix, error, command, args);
+  }
+
+  const limited = limitError(prefix, error, command, args.slice());
+  if (limited != undefined) {
+    return limited;
+  }
+
+  const code = kChildCodes[error] ?? "UNKNOWN";
+  const note = windowsNote(run.system);
+  const message = `${prefix}the system failed with ${code}${note}`;
+
+  return systemError(message, error, command, args);
+}
+
+function overflowError(
+  file: Read<string>,
+  args: Own<string[]>,
+  run: Read<ChildRun>,
+  stdout: string | undefined,
+  stderr: string | undefined,
+): SpawnTextError {
+  const command = file.slice(0);
+  const limit = outputLimit();
+  const signal = "SIGTERM";
+  const tail = "(maxBuffer) and was stopped";
+  const head = `${file} printed more than ${limit} bytes to`;
+
+  if (run.overflow == 2) {
+    const message = `${head} stderr ${tail}`;
+
+    return {
+      kind: "SPAWN_TEXT_ERROR_OUTPUT_TOO_LARGE",
+      code: "ENOBUFS",
+      message,
+      command,
+      args,
+      stream: "stderr",
+      maxBuffer: limit,
+      signal,
+      stdout,
+      stderr,
+    };
+  }
+
+  const message = `${head} stdout ${tail}`;
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_OUTPUT_TOO_LARGE",
+    code: "ENOBUFS",
+    message,
+    command,
+    args,
+    stream: "stdout",
+    maxBuffer: limit,
+    signal,
+    stdout,
+    stderr,
+  };
+}
+
+function closedError(
+  file: Read<string>,
+  args: Own<string[]>,
+  error: int,
+  stdout: string | undefined,
+  stderr: string | undefined,
+): SpawnTextError {
+  const command = file.slice(0);
+  const message = `${file} closed its input before reading all of it`;
+  const syscall = "write";
+
+  if (error == brokenCode()) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_INPUT_CLOSED",
+      code: "EPIPE",
+      message,
+      syscall,
+      command,
+      args,
+      stdout,
+      stderr,
+    };
+  }
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_INPUT_CLOSED",
+    code: "EOF",
+    message,
+    syscall,
+    command,
+    args,
+    stdout,
+    stderr,
+  };
+}
+
+function runError(
+  file: Read<string>,
+  args: Read<string[]>,
+  run: Read<ChildRun>,
+  stdout: string | undefined,
+  stderr: string | undefined,
+): SpawnTextError {
+  const error = run.failure();
+  const given = args.slice();
+
+  if (error == timedOutCode()) {
+    const message = `${file} did not finish in 0 ms and was stopped`;
+
+    return {
+      kind: "SPAWN_TEXT_ERROR_TIMEOUT",
+      code: "ETIMEDOUT",
+      message,
+      command: file.slice(0),
+      args: given,
+      timeout: 0,
+      signal: "SIGTERM",
+      stdout,
+      stderr,
+    };
+  }
+  if (error == noBuffersCode()) {
+    return overflowError(file, given, run, stdout, stderr);
+  }
+  if (error == brokenCode() || error == endCode()) {
+    return closedError(file, given, error, stdout, stderr);
+  }
+
+  return startError(file, given, run);
+}

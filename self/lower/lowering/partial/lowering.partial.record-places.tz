@@ -1,0 +1,390 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Param } from "../../../program/ast/types/ast.types.functions.tz";
+import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kByteCell,
+  kPointerType,
+  kUnsafeModule,
+  kViewAtName,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  Place,
+  RecordSpot,
+  ViewParts,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isMovedRecord(type: Type): boolean {
+    return this.isInPlace(type) && !this.values.isCopy(type);
+  }
+
+  private isRecordView(type: Type): boolean {
+    if (this.isMovedRecord(type)) {
+      return true;
+    }
+
+    const inner = this.optionalInner(type);
+    if (inner == undefined) {
+      return false;
+    }
+
+    return this.isMovedRecord(inner);
+  }
+
+  private recordStruct(type: Type): string | undefined {
+    const inner = this.optionalInner(type) ?? type;
+
+    return this.layoutOf(inner)?.struct;
+  }
+
+  private readonly loadedThrough(
+    frame: Read<Frame>,
+    place: Place,
+    view: string,
+    record: string,
+  ): IrValue {
+    const made = frame.made;
+    const address = made.load(kPointerType, place.pointer);
+    const parts = place.viewParts;
+    if (view == record || parts == undefined) {
+      const value = made.load(record, address);
+
+      return { type: record, value, tz: place.tz };
+    }
+
+    const isSet = made.integerCompare(
+      IrIntPredicate.NotEqual,
+      address,
+      parts.none,
+    );
+    const before = made.currentBlock();
+    const read = made.block("view.read");
+    const end = made.block("view.end");
+
+    made.conditionalBranch(isSet, read, end);
+    made.open(read);
+
+    const inside = made.load(record, address);
+    const half = made.insert(parts.empty, inside, 0);
+    const full = made.insert(half, parts.one, 1);
+
+    made.branch(end);
+    made.open(end);
+
+    const value = made.phi(view, [parts.empty, full], [before, read]);
+
+    return { type: view, value, tz: place.tz };
+  }
+
+  private viewAddress(
+    frame: Read<Frame>,
+    expr: NameExpr,
+    place: Place,
+  ): LLVMValue | undefined {
+    if (this.isMovedRecord(place.tz)) {
+      return frame.made.load(kPointerType, place.pointer);
+    }
+
+    const inner = this.optionalInner(place.tz);
+    const seen = this.typeOf(expr);
+    if (inner == undefined || seen == undefined || inner.id != seen.id) {
+      return undefined;
+    }
+
+    return frame.made.load(kPointerType, place.pointer);
+  }
+
+  private viewPlace(
+    frame: Frame,
+    pointer: LLVMValue,
+    tz: Type,
+    flag: LLVMValue | undefined,
+  ): Place | undefined {
+    const view = this.irType(tz);
+    const record = this.recordStruct(tz);
+    if (view == undefined || record == undefined) {
+      return undefined;
+    }
+
+    const viewParts: ViewParts = {
+      empty: this.ir.zero(view),
+      none: this.ir.zero(kPointerType),
+      one: this.ir.integer(kBooleanType, "1"),
+    };
+
+    return {
+      pointer,
+      type: kPointerType,
+      tz,
+      owner: frame.id,
+      flag,
+      view,
+      record,
+      viewParts,
+    };
+  }
+
+  private receiverSpot(
+    frame: Frame,
+    expr: Expr,
+    type: Type,
+  ): RecordSpot | undefined {
+    if (!this.isMovedRecord(type)) {
+      return undefined;
+    }
+
+    const address = this.recordPlace(frame, expr);
+    const struct = this.layoutOf(type)?.struct;
+    if (address == undefined || struct == undefined) {
+      return undefined;
+    }
+
+    const whole = frame.made.load(struct, address);
+
+    return { address, value: { type: struct, value: whole, tz: type } };
+  }
+
+  private recordArgument(
+    frame: Frame,
+    expr: Expr,
+    wanted: Type,
+    declared: Param | undefined,
+    kept: IrValue[],
+  ): LLVMValue | undefined {
+    if (declared == undefined) {
+      const form = "an in-place value given to a function value";
+
+      this.notLowered(frame.module, expr.loc, form);
+
+      return undefined;
+    }
+
+    const isBorrowed = this.isBorrowedParam(declared);
+    if (isBorrowed) {
+      const address = this.recordPlace(frame, expr);
+      if (address != undefined) {
+        return address;
+      }
+    }
+
+    const given = this.argumentValue(frame, expr, wanted, isBorrowed);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const value = this.converted(frame, given, wanted, expr.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const slot = frame.made.slot(value.type, "record.argument");
+    if (isBorrowed) {
+      frame.made.store(value.value, slot);
+      kept.push(this.withOwnedFlag(value, given.ownedFlag));
+
+      return slot;
+    }
+
+    const owned = this.owning(frame, value);
+
+    frame.made.store(owned.value, slot);
+
+    return slot;
+  }
+
+  private recordBorrowed(frame: Frame, place: Place, init: Expr): void {
+    const source = this.borrowSource(frame, init);
+    if (source != undefined) {
+      return frame.made.store(source, place.pointer);
+    }
+
+    const given = this.wantedValue(frame, init, place.tz);
+    if (given == undefined) {
+      return;
+    }
+
+    const value = this.converted(frame, given, place.tz, init.loc);
+    const record = place.record;
+    const flag = place.flag;
+    if (value == undefined || record == undefined) {
+      return;
+    }
+
+    const slot = frame.made.slot(record, "record.borrow");
+    const isOwned = this.ir.integer(kBooleanType, this.flagText(value));
+    if (value.type == record) {
+      frame.made.store(value.value, slot);
+      frame.made.store(slot, place.pointer);
+      this.borrowFlagged(frame, flag, isOwned);
+
+      return;
+    }
+
+    const inside = frame.made.extract(value.value, 0);
+    const has = frame.made.extract(value.value, 1);
+    const none = this.ir.zero(kPointerType);
+    const address = frame.made.select(has, slot, none);
+
+    frame.made.store(inside, slot);
+    frame.made.store(address, place.pointer);
+    this.borrowFlagged(frame, flag, isOwned);
+  }
+
+  private readonly flagText(value: Read<IrValue>): string {
+    if (value.owned == true) {
+      return "1";
+    }
+
+    return "0";
+  }
+
+  private readonly borrowFlagged(
+    frame: Read<Frame>,
+    flag: LLVMValue | undefined,
+    isOwned: LLVMValue,
+  ): void {
+    if (flag != undefined) {
+      frame.made.store(isOwned, flag);
+    }
+  }
+
+  private borrowSource(frame: Frame, init: Expr): LLVMValue | undefined {
+    if (init.kind == ExprKind.Name || init.kind == ExprKind.Member) {
+      return this.recordPlace(frame, init);
+    }
+    if (init.kind == ExprKind.Call) {
+      return this.recordPlace(frame, init);
+    }
+    if (init.kind == ExprKind.Index) {
+      return this.indexedAddress(frame, init);
+    }
+
+    return undefined;
+  }
+
+  private indexedAddress(frame: Frame, expr: IndexExpr): LLVMValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const objectExpr = tree.exprOf(expr.objectId);
+    const isPlain =
+      objectExpr.kind == ExprKind.Name || objectExpr.kind == ExprKind.Member;
+    const object = this.typeIn(frame, objectExpr);
+    if (!isPlain || object == undefined || object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const item = this.itemOf(object);
+    const element = this.typeOrNone(item);
+    if (item == undefined || element == undefined) {
+      return undefined;
+    }
+
+    const array = this.value(frame, objectExpr);
+    const index = this.value(frame, tree.exprOf(expr.indexId));
+    if (array == undefined || index == undefined) {
+      return undefined;
+    }
+
+    const at = this.toLong(frame, index).value;
+    const length = this.arrayLength(frame, array.value);
+    const isInside = frame.made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      at,
+      length,
+    );
+    const data = this.arrayData(frame, array.value);
+    const address = frame.made.element(element, data, at);
+    const none = this.ir.zero(kPointerType);
+    const found = frame.made.select(isInside, address, none);
+
+    this.dropping(frame, array);
+
+    return found;
+  }
+
+  private viewItem(
+    frame: Read<Frame>,
+    place: Place,
+    item: IrValue,
+    address: LLVMValue | undefined,
+  ): void {
+    const record = place.record;
+    if (address != undefined && item.owned != true) {
+      return frame.made.store(address, place.pointer);
+    }
+    if (record == undefined || item.type != record) {
+      return;
+    }
+
+    const slot = frame.made.slot(record, "record.item");
+    const isOwned = this.ir.integer(kBooleanType, this.flagText(item));
+
+    frame.made.store(item.value, slot);
+    frame.made.store(slot, place.pointer);
+    this.borrowFlagged(frame, place.flag, isOwned);
+  }
+
+  private isViewCall(frame: Read<Frame>, expr: CallExpr): boolean {
+    const tree = this.values.types.program.tree;
+
+    const callee = tree.exprOf(expr.calleeId);
+    if (callee.kind != ExprKind.Name || callee.name != kViewAtName) {
+      return false;
+    }
+
+    const target = this.values.valueTargetOf(callee, frame.module);
+    const opened = this.values.types.program.modules[target?.module ?? -1];
+
+    return opened != undefined && opened.name == kUnsafeModule;
+  }
+
+  private viewAtAddress(frame: Frame, call: CallExpr): LLVMValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const offset = this.intArgument(frame, call, 1);
+    if (raw == undefined || offset == undefined) {
+      return undefined;
+    }
+
+    return frame.made.element(kByteCell, raw, offset);
+  }
+
+  private viewRead(
+    frame: Frame,
+    call: CallExpr,
+    item: Type,
+    cell: string,
+  ): IrValue | undefined {
+    const address = this.viewAtAddress(frame, call);
+    if (address == undefined) {
+      return undefined;
+    }
+
+    const value = frame.made.load(cell, address);
+
+    return { type: cell, value, tz: item };
+  }
+
+  private isViewInit(frame: Read<Frame>, decl: VarDeclarator): boolean {
+    const tree = this.values.types.program.tree;
+
+    const init = tree.exprAt(decl.initId);
+    if (init == undefined || init.kind != ExprKind.Call) {
+      return false;
+    }
+
+    return this.isViewCall(frame, init);
+  }
+}

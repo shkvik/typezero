@@ -47,3 +47,34 @@ export declare function textClosed<C>(
 ): string;
 export declare function isAscii(text: Read<string>): boolean;
 export declare function frameCells<T>(count: int): Raw<T>;
+export declare function viewAt<T>(raw: Raw<uint8>, offset: int): Mut<T>;
+export declare function doubleBits(value: double): uint64;
+export declare function bitsDouble(bits: uint64): double;
+export declare function productShifted(
+  value: uint64,
+  low: uint64,
+  high: uint64,
+  shift: int,
+): uint64;
+export declare function textObject(text: Read<string>): Raw<uint8>;
+export declare function textMeta(text: Read<string>): uint64;
+export declare function textOf(object: Raw<uint8>, meta: uint64): string;
+export declare function cellsAt<T>(raw: Raw<uint8>, offset: int): Raw<T>;
+export declare function rawBits(raw: Raw<uint8>): uint64;
+export declare function decimalCoef(value: Read<decimal>): int;
+export declare function decimalMeta(value: Read<decimal>): uint64;
+export declare function decimalOf(coef: int, meta: uint64): decimal;
+export declare function bitsRaw(bits: uint64): Raw<uint8>;
+export declare function textTree(
+  left: Read<string>,
+  right: Read<string>,
+): string;
+export declare function compared(
+  compare: Raw<uint8>,
+  context: Raw<uint8>,
+  first: Raw<uint8>,
+  second: Raw<uint8>,
+): int;
+export declare function threadState(): Raw<uint8>;
+export declare function dropped(drop: Raw<uint8>, object: Raw<uint8>): void;
+export declare function wrappedProduct(first: uint64, second: uint64): uint64;

@@ -1,0 +1,19 @@
+@InPlace({ layout: Layout.C })
+class Inner {
+  public low: uint32;
+  public high: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+class Sample {
+  public kind: uint8;
+  public inner: Inner;
+  public ratio: double;
+  public isSet: boolean;
+  public name: string;
+  public parts: int[];
+}
+
+const sample = new Sample();
+
+console.log(sample.kind);

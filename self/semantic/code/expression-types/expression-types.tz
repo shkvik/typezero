@@ -285,6 +285,7 @@ export class ExpressionTypes {
   private methodParts: Map<int, ClassDecl>;
   private partHomes: Map<int, int>;
   private unsafeUsed: Set<int>;
+  private foreignUsed: Set<int>;
   private typeArguments: Map<string, readonly Type[]>;
   private copies: Map<int, boolean>;
   private frozen: Map<int, boolean>;
@@ -380,6 +381,7 @@ export class ExpressionTypes {
     this.methodParts = new Map<int, ClassDecl>();
     this.partHomes = new Map<int, int>();
     this.unsafeUsed = new Set<int>();
+    this.foreignUsed = new Set<int>();
     this.typeArguments = new Map<string, readonly Type[]>();
     this.copies = new Map<int, boolean>();
     this.frozen = new Map<int, boolean>();

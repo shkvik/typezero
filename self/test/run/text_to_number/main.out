@@ -1,0 +1,128 @@
+ok Infinity
+ok Infinity
+ok Infinity
+ok -Infinity
+ok Infinity
+ok 1
+ok -1
+ok 1
+ok 42
+ok 42
+ok 7
+ok 8
+ok 9
+ok 3.14
+ok 0.5
+ok 5
+ok -0.5
+ok 1000
+ok 1000
+ok 1000
+ok 0.001
+err ERR_INVALID_NUMBER not a number: '1e'
+err ERR_INVALID_NUMBER not a number: '1e+'
+err ERR_INVALID_NUMBER not a number: 'e5'
+err ERR_INVALID_NUMBER not a number: '.'
+err ERR_INVALID_NUMBER not a number: '..1'
+err ERR_INVALID_NUMBER not a number: '1.2.3'
+ok 16
+ok 31
+err ERR_INVALID_NUMBER not a number: '0xg'
+err ERR_INVALID_NUMBER not a number: '0x'
+ok 15
+err ERR_INVALID_NUMBER not a number: '0o8'
+ok 5
+err ERR_INVALID_NUMBER not a number: '0b2'
+err ERR_INVALID_NUMBER not a number: '-0x10'
+err ERR_INVALID_NUMBER the number is beyond 1.8e308, the range of a double: 'Infinity'
+err ERR_INVALID_NUMBER the number is beyond 1.8e308, the range of a double: '-Infinity'
+err ERR_INVALID_NUMBER the number is beyond 1.8e308, the range of a double: '+Infinity'
+err ERR_INVALID_NUMBER not a number: 'infinity'
+err ERR_INVALID_NUMBER not a number: 'Infinityx'
+err ERR_INVALID_NUMBER not a number: 'NaN'
+ok 1e+308
+ok 1.7976931348623157e+308
+err ERR_INVALID_NUMBER the number is beyond 1.8e308, the range of a double: '1.7976931348623159e308'
+err ERR_INVALID_NUMBER the number is beyond 1.8e308, the range of a double: '1e309'
+err ERR_INVALID_NUMBER the number is beyond 1.8e308, the range of a double: '-1e309'
+ok 5e-324
+ok Infinity
+ok Infinity
+ok Infinity
+ok 0.1
+ok 0.2
+ok 0.30000000000000004
+ok 123456789012345680
+ok 1234567890123456800
+ok 12345678901234567000
+ok 9007199254740992
+ok 9007199254740992
+ok 18446744073709552000
+ok 1e-30
+ok 1e+30
+ok 1e+70
+ok 3.333333333333333e+79
+ok 0.3333333333333333
+ok 1e+22
+ok 1e+23
+ok 4.35
+ok 0.0025
+ok -127.5
+err ERR_INVALID_NUMBER not a number: '12abc'
+err ERR_INVALID_NUMBER not a number: 'abc'
+err ERR_INVALID_NUMBER not a number: '1 2'
+err ERR_INVALID_NUMBER not a number: '１２'
+err ERR_INVALID_NUMBER not a number: '12é'
+err ERR_INVALID_NUMBER not a number: 'é12'
+err ERR_INVALID_NUMBER the number is beyond 1.8e308, the range of a double: '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+ok 1.1805916207174113e+21
+ok 12
+ok -0.0012
+err ERR_INVALID_NUMBER not a number: '1_000'
+err ERR_INVALID_NUMBER not a number: '+-1'
+err ERR_INVALID_NUMBER not a number: '--1'
+ok Infinity
+ok 7e+22
+ok 8e-23
+ok 1.5e-22
+err ERR_INVALID_NUMBER not a number: ''
+ok 0
+ok 42
+ok 42
+ok -42
+ok 42
+ok 31
+ok 31
+ok 0
+ok 31
+ok 35
+ok 35
+ok 2
+ok 1
+err ERR_INVALID_NUMBER not a number: '2'
+ok 511
+ok 9223372036854775807
+ok -9223372036854775808
+err ERR_INVALID_NUMBER the number does not fit in an int (64 bits); read it as a decimal: '9223372036854775808'
+err ERR_INVALID_NUMBER the number does not fit in an int (64 bits); read it as a decimal: '-9223372036854775809'
+err ERR_INVALID_NUMBER the number does not fit in an int (64 bits); read it as a decimal: '99999999999999999999999'
+err ERR_INVALID_NUMBER not a number: 'abc'
+err ERR_INVALID_NUMBER not a number: '  '
+err ERR_INVALID_NUMBER not a number: '-'
+ok 3
+ok 0
+err ERR_INVALID_NUMBER not a number: '12'
+err ERR_INVALID_NUMBER not a number: '12'
+ok 12
+ok 12
+err ERR_INVALID_NUMBER not a number: 'é12'
+err ERR_INVALID_NUMBER the number does not fit in an int (64 bits); read it as a decimal: 'ffffffffffffffff'
+ok 9223372036854775807
+ok -9223372036854775808
+err ERR_INVALID_NUMBER not a number: '0x'
+err ERR_INVALID_NUMBER not a number: '0x'
+ok 0
+err ERR_INVALID_NUMBER the number does not fit in an int (64 bits); read it as a decimal: '1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111'
+err ERR_INVALID_NUMBER not a number: '１'
+0
+123 2.5

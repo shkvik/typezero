@@ -161,7 +161,7 @@ partial class Lowering {
   private isObjectLike(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Instance:
-        return !this.isHandleType(type);
+        return !this.isHandleType(type) && !this.isFixed(type);
       case TypeKind.Object:
       case TypeKind.Tuple:
         return true;
@@ -213,9 +213,27 @@ partial class Lowering {
       case TypeKind.Boolean:
       case TypeKind.Undefined:
         return 1;
+      case TypeKind.Instance:
+        return this.recordAlign(plain);
       default:
         return 8;
     }
+  }
+
+  private recordAlign(type: Type): int {
+    if (this.isFixed(type)) {
+      return this.fixedAlign(type);
+    }
+    if (!this.isInPlace(type) || !this.values.isCLayoutClass(type)) {
+      return 8;
+    }
+
+    const layout = this.layoutOf(type);
+    if (layout == undefined) {
+      return 8;
+    }
+
+    return this.fieldsAlign(this.fieldsOf(layout));
   }
 
   private readonly kindName(type: Type | undefined): string {

@@ -1,0 +1,181 @@
+type Point = { x: int; y: double; label?: string };
+type Inner = { level: int; more: Point[] };
+type Outer = { name: string; inner: Inner; flags: boolean[] };
+
+class Box {
+  public readonly size: int;
+  public readonly name: string;
+  public readonly tags: string[];
+
+  public constructor(size: int, name: string) {
+    this.size = size;
+    this.name = name;
+    this.tags = ["a", "b"];
+  }
+}
+
+function numbers(): void {
+  const small: int[] = [1, 2, 3];
+  const many: int[] = [];
+
+  for (let index = 0; index < 30; index++) {
+    many.push(index * 7 - 50);
+  }
+
+  const huge: int[] = [];
+
+  for (let index = 0; index < 130; index++) {
+    huge.push(index);
+  }
+
+  const zero: double = 0;
+  const doubles: double[] = [1.5, -zero, zero / zero, 1e21, 0.1 + 0.2, -7];
+  const nested: int[][][] = [[[1, 2], [3]], [[4]]];
+  const deep: int[][][][] = [[[[1]]], [[[2, 3]]]];
+  const empty: int[][] = [[], [1, 2]];
+  const words: string[] = [];
+
+  for (let index = 0; index < 12; index++) {
+    words.push(`w${index}`);
+  }
+
+  console.log(small);
+  console.log(many);
+  console.log(huge);
+  console.log(doubles);
+  console.log(nested);
+  console.log(deep);
+  console.log(empty);
+  console.log(words);
+}
+
+function texts(): void {
+  const quotes: string[] = [
+    "it's",
+    "say \"hi\"",
+    "both ' and \"",
+    "all ' \" `",
+    "tab\tnew\nline",
+  ];
+  const long = "x".repeat(70) + "\n" + "y".repeat(20);
+  const longs: string[] = [long, "short"];
+  const odd: string[] = [
+    "\u0001\u007f\u0090",
+    "wide 漢字",
+    "\ud800 lone",
+    "pair 😀",
+    "back\\slash",
+  ];
+  const giant: string[] = ["a".repeat(10020)];
+
+  console.log(quotes);
+  console.log(longs);
+  console.log(odd);
+  console.log(giant);
+}
+
+function records(): void {
+  const first: Point = { x: 1, y: 2.5 };
+  const second: Point = { x: -3, y: 0.25, label: "named" };
+
+  console.log(first);
+  console.log(second);
+
+  const points: Point[] = [first, second];
+  const outer: Outer = {
+    name: "deep",
+    inner: { level: 2, more: [{ x: 9, y: 9.5 }] },
+    flags: [true, false],
+  };
+  const outers: Outer[] = [outer];
+
+  console.log(points);
+  console.log(outers);
+}
+
+function classes(): void {
+  const box = new Box(3, "crate");
+
+  console.log(box);
+
+  const boxes: Box[] = [box, new Box(4, "pallet")];
+
+  console.log(boxes);
+}
+
+function tuples(): void {
+  const pair: [int, string] = [7, "seven"];
+  const triple: [boolean, double, string[]] = [true, 1.25, ["x"]];
+
+  console.log(pair);
+  console.log(triple);
+}
+
+function results(): void {
+  const good: Result<int, string> = ok(5);
+  const bad: Result<int, string> = err("broken");
+  const list: Result<int[], string>[] = [ok([1, 2]), err("no")];
+
+  console.log(good);
+  console.log(bad);
+  console.log(list);
+}
+
+function decimals(): void {
+  const values: decimal[] = [
+    decimal("1.50"),
+    decimal("-0.001"),
+    decimal("12345678901234567890.5"),
+  ];
+
+  console.log(values);
+}
+
+function optionals(): void {
+  const values: (int | undefined)[] = [1, undefined, 3];
+  const words: (string | undefined)[] = ["a", undefined];
+  const maybe: Point | undefined = undefined;
+  const some: Point | undefined = { x: 4, y: 4 };
+
+  console.log(values);
+  console.log(words);
+  console.log(maybe);
+  console.log(some);
+}
+
+function bytes(): void {
+  const buffer = Buffer.from("hello world", "utf8");
+  const long = Buffer.from("z".repeat(60), "utf8");
+
+  console.log(buffer);
+  console.log(long);
+}
+
+function joins(): void {
+  const ints: int[] = [1, 2, 3];
+  const nested: int[][] = [[1, 2], [3]];
+  const doubles: double[] = [1.5, -0.25];
+  const flags: boolean[] = [true, false];
+  const values: (int | undefined)[] = [1, undefined, 3];
+
+  console.log(ints.join("-"));
+  console.log(nested.join(";"));
+  console.log(doubles.join());
+  console.log(flags.join(" "));
+  console.log(values.join(","));
+}
+
+function main(): void {
+  numbers();
+  texts();
+  records();
+  classes();
+  tuples();
+  results();
+  decimals();
+  optionals();
+  bytes();
+  joins();
+}
+
+main();

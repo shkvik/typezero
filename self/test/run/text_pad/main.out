@@ -1,0 +1,33 @@
+[] 0
+[ab] 2
+[ababab] 6
+[abababab] 8
+[ababababab] 10
+[abababababababababababababababababababababababababababababababababababababababab] 80
+[] 0
+[приветпривет] 12
+[] 0
+[quickquickquick] 15
+[the quick brown fox приветthe quick brown fox привет] 52
+[ёёёёёёёёё] 9
+[xxxxxxxx] 8
+[xxxxxxxxx] 9
+[   ab] 5
+[ab   ] 5
+[ab] 2
+[------ab] 8
+[-------ab] 9
+[ab12312312] 10
+[12312312ab] 10
+[ab] 2
+[...........the quick brown fox] 30
+[the quick brown fox=+=+=+=+=+=] 30
+[****привет] 10
+[приветabab] 10
+[мирмиab] 7
+[abмирми] 7
+[мирмирпривет] 12
+[quickquickqu] 12
+[<><><><><><><>the quick brown fox привет] 40
+[zzz] 3
+[abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcababxyzxyzxyzxyzxyzxyzxyzxyzxyzxyz] 130

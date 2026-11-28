@@ -66,8 +66,6 @@ MATH1(asinh)
 MATH1(acosh)
 MATH1(atanh)
 
-TZ_HOT double tz_math_atan2(double y, double x) { return atan2(y, x); }
-
 double tz_math_hypot(const double *values, int64_t n) {
   double max = 0;
   int nan = 0;

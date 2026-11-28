@@ -1,0 +1,4 @@
+1:true 2:true 3:true 0:false -1:false 0:false 0:true 4:true -4:false 0:true 1e+300:true
+1024 1.4142135623730951 0.01 false
+1024 1 7 -8 1000000000000000000 4611686018427387904
+true 1

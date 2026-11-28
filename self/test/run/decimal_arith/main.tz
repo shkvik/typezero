@@ -1,0 +1,68 @@
+function values(): decimal[] {
+  return [
+    0,
+    1,
+    -1,
+    0.5,
+    -0.25,
+    19.99,
+    100,
+    1000000000,
+    999999999.999999999,
+    9223372036854775807,
+    -9223372036854775808,
+    0.000000000000000001,
+    12345678901234567890.123456789,
+    -98765432109876543210987654321,
+    0.1,
+    0.2,
+    3.14159265358979323846264338327950288,
+    1e30,
+    -1e-30,
+    4611686018427387904,
+    2.5,
+    -7,
+  ];
+}
+
+function main(): void {
+  const kValues = values();
+  let index = 0;
+
+  for (const first of kValues) {
+    const line: string[] = [];
+
+    for (const second of kValues) {
+      const sum = first + second;
+      const difference = first - second;
+      const product = first * second;
+
+      line.push(`${sum}|${difference}|${product}`);
+      line.push(`${first < second}${first == second}${first >= second}`);
+    }
+
+    console.log(index, line.join(" "));
+    console.log(index, `${-first}`, `${first.abs()}`, first, -first);
+    index += 1;
+  }
+
+  let total: decimal = 0;
+
+  for (let round = 0; round < 200; round++) {
+    total = total + 0.1;
+    total = total * 1.01;
+    total = total - 0.05;
+  }
+
+  console.log(total);
+
+  let grown: decimal = 1;
+
+  for (let round = 0; round < 40; round++) {
+    grown = grown * 12.5;
+  }
+
+  console.log(grown, grown - grown, grown == grown * 1);
+}
+
+main();

@@ -1,0 +1,139 @@
+import { panic } from "tz:intrinsics";
+import { fromSigned, fromUnsigned } from "tz:text";
+import {
+  Raw,
+  bitsDouble,
+  cellsAt,
+  doubleBits,
+  frameCells,
+  peekAt,
+  putAt,
+} from "tz:unsafe";
+import { pow } from "tz:win32/ucrt";
+
+function signBit(): uint64 {
+  return 9223372036854775808;
+}
+
+function magnitudeMask(): uint64 {
+  return 9223372036854775807;
+}
+
+function infinityBits(): uint64 {
+  return 9218868437227405312;
+}
+
+function notNumberBits(): uint64 {
+  return 9221120237041090560;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the bits of the double are read",
+})
+function isNotNumber(value: double): boolean {
+  return (doubleBits(value) & magnitudeMask()) > infinityBits();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the bits of the double are read",
+})
+function isInfinite(value: double): boolean {
+  return (doubleBits(value) & magnitudeMask()) == infinityBits();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bits of a double: the sign of value on a zero",
+})
+function signedZero(value: double): double {
+  return bitsDouble(doubleBits(value) & signBit());
+}
+
+export function round(value: double): double {
+  let rounded = Math.floor(value);
+
+  if (value - rounded >= 0.5) {
+    rounded += 1.0;
+  }
+  if (rounded == 0.0) {
+    return signedZero(value);
+  }
+
+  return rounded;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "pow of the system C library; NaN is made from its bits",
+})
+export function power(base: double, exponent: double): double {
+  const isOne = Math.abs(base) == 1.0;
+  if (isNotNumber(exponent) || (isOne && isInfinite(exponent))) {
+    return bitsDouble(notNumberBits());
+  }
+
+  return pow(base, exponent);
+}
+
+export function powerOf(base: int, exponent: int): int {
+  if (exponent < 0 && base == 0) {
+    panic("Division by zero");
+  }
+  if (exponent < 0 && (base == 1 || base == -1)) {
+    if (exponent % 2 != 0) {
+      return base;
+    }
+
+    return 1;
+  }
+  if (exponent < 0) {
+    return 0;
+  }
+
+  let result = 1;
+  let factor = base;
+  let rest = exponent;
+
+  while (rest != 0) {
+    if (rest % 2 != 0) {
+      result = result * factor;
+    }
+
+    factor = factor * factor;
+    rest = rest / 2;
+  }
+
+  return result;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bits of the integer are read back as unsigned",
+})
+function unsignedBits(value: int): uint64 {
+  const place = frameCells<uint8>(8);
+  const signed = cellsAt<int>(place, 0);
+  const bits = cellsAt<uint64>(place, 0);
+
+  putAt(signed, 0, value);
+
+  return peekAt(bits, 0);
+}
+
+export function integerUnfit(
+  value: int,
+  isUnsigned: boolean,
+  typeName: Read<string>,
+): void {
+  if (isUnsigned) {
+    const shown = fromUnsigned(unsignedBits(value));
+
+    panic(`${shown} does not fit in ${typeName}`);
+  }
+
+  const shown = fromSigned(value);
+
+  panic(`${shown} does not fit in ${typeName}`);
+}

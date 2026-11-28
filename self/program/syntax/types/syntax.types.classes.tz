@@ -70,6 +70,7 @@ export type ClassDecl = {
   readonly isAbstract: boolean;
   readonly isPartial: boolean;
   readonly isInPlace: boolean;
+  readonly isCLayout: boolean;
   readonly base?: TypeRef;
   readonly baseExpr?: Expr;
   readonly baseArgs: readonly TypeRef[];

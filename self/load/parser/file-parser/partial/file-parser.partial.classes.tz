@@ -24,7 +24,10 @@ import {
   Modifiers,
 } from "../types/file-parser.types.classes.tz";
 import {
+  kCLayoutName,
   kInPlaceDecorator,
+  kLayoutEnum,
+  kLayoutOption,
   kUnsafeDecorator,
 } from "../const/file-parser.const.classes.tz";
 import {
@@ -33,6 +36,7 @@ import {
 } from "../../../../program/syntax/types/syntax.types.classes.tz";
 import {
   Expr,
+  ObjectLitExpr,
 } from "../../../../program/syntax/types/syntax.types.expressions.tz";
 import {
   FunctionDecl,
@@ -65,6 +69,7 @@ partial class FileParser {
       isAbstract: draft.isAbstract,
       isPartial: draft.isPartial,
       isInPlace: draft.isInPlace,
+      isCLayout: draft.isCLayout,
       base: draft.base,
       baseExpr: draft.baseExpr,
       baseArgs: draft.baseArgs,
@@ -90,6 +95,7 @@ partial class FileParser {
       isAbstract: decl.isAbstract,
       isPartial: decl.isPartial,
       isInPlace: decl.isInPlace,
+      isCLayout: decl.isCLayout,
       base: decl.base,
       baseExpr: decl.baseExpr,
       baseArgs: decl.baseArgs,
@@ -104,18 +110,20 @@ partial class FileParser {
     };
   }
 
-  private readonly decoratedClass(
+  private decoratedClass(
     decl: Own<ClassDecl>,
     decorators: Own<Decorator[]>,
   ): ClassDecl {
     const all = decorators.concat(decl.decorators);
     const kept: Decorator[] = [];
     let isMarked = decl.isInPlace;
+    let isCLayout = decl.isCLayout;
     let next = all.pop();
 
     while (next != undefined) {
       if (this.isInPlaceMark(next.expr)) {
         isMarked = true;
+        isCLayout = isCLayout || this.isCLayoutMark(next.expr, next.loc);
       } else {
         kept.push(next);
       }
@@ -132,6 +140,7 @@ partial class FileParser {
       isAbstract: decl.isAbstract,
       isPartial: decl.isPartial,
       isInPlace: isMarked,
+      isCLayout,
       base: decl.base,
       baseExpr: decl.baseExpr,
       baseArgs: decl.baseArgs,
@@ -192,6 +201,7 @@ partial class FileParser {
       isAbstract: false,
       isPartial: false,
       isInPlace: false,
+      isCLayout: false,
       base: extended.base,
       baseExpr: extended.baseExpr,
       baseArgs: extended.baseArgs,
@@ -395,13 +405,50 @@ partial class FileParser {
   }
 
   private readonly isInPlaceMark(expr: Read<Expr>): boolean {
-    if (expr.kind != ExprKind.Call || expr.args.length > 0) {
+    if (expr.kind != ExprKind.Call) {
       return false;
     }
 
     const callee = expr.callee;
 
     return callee.kind == ExprKind.Name && callee.name == kInPlaceDecorator;
+  }
+
+  private isCLayoutMark(expr: Read<Expr>, loc: int): boolean {
+    if (expr.kind != ExprKind.Call || expr.args.length == 0) {
+      return false;
+    }
+
+    const first = expr.args[0]?.expr;
+    const isOne = expr.args.length == 1 && first != undefined;
+    const isObject = isOne && first.kind == ExprKind.ObjectLit;
+    if (isObject && this.isCLayoutOption(first)) {
+      return true;
+    }
+
+    this.cursor.report(loc, Code.InPlaceLayout);
+
+    return false;
+  }
+
+  private readonly isCLayoutOption(options: Read<ObjectLitExpr>): boolean {
+    const property = options.props[0];
+    if (options.props.length != 1 || property == undefined) {
+      return false;
+    }
+
+    const value = property.value;
+    if (property.name != kLayoutOption || value.kind != ExprKind.Member) {
+      return false;
+    }
+
+    const owner = value.object;
+
+    return (
+      owner.kind == ExprKind.Name &&
+      owner.name == kLayoutEnum &&
+      value.name == kCLayoutName
+    );
   }
 
   private readonly isUnsafeDecorator(expr: Expr): boolean {

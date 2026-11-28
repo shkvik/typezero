@@ -14,11 +14,8 @@ import {
   kChildModule,
   kFlagType,
   kIntType,
-  kPathBasename,
-  kPathDirname,
-  kPathExtname,
-  kPathIsAbsolute,
   kFsModule,
+  kIntrinsicsModule,
   kMemModule,
   kUnsafeModule,
   kInspectModule,
@@ -34,18 +31,16 @@ import {
   kArrayCopy,
   kNumberName,
   kOsModule,
-  kOsText,
   kOsTexts,
+  kProcessModule,
+  kPanicName,
   kParseIntName,
-  kPathJoin,
   kPathModule,
-  kPathNormalize,
-  kPathRelative,
-  kPathResolve,
+  kPathsModule,
   kPathStyle,
   kPointerType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 import {
   SyntheticNode,
 } from "../../../program/ast/ast-tree/types/ast-tree.types.synthetic.tz";
@@ -238,7 +233,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const copying = this.ir.declare(kArrayCopy, kPointerType, [kPointerType]);
+    const copyingName = this.countsHelper(kArrayCopy);
+
+    const copying = this.ir.declare(copyingName, kPointerType, [kPointerType]);
     const value = frame.made.call(copying, [given.value]);
 
     this.dropping(frame, given);
@@ -395,6 +392,10 @@ partial class Lowering {
     }
 
     const opened = this.values.types.program.modules[module];
+    const isIntrinsic = opened != undefined && opened.name == kIntrinsicsModule;
+    if (isIntrinsic && callee.name == kPanicName) {
+      return this.panicCalled(frame, call);
+    }
     if (opened != undefined && opened.name == kMemModule) {
       return this.memCall(frame, call, callee);
     }
@@ -426,6 +427,7 @@ partial class Lowering {
       case "dirname":
       case "extname":
       case "normalize":
+      case "toNamespacedPath":
         return this.pathPart(frame, call, callee.name);
       case "basename":
         return this.pathBase(frame, call);
@@ -454,9 +456,15 @@ partial class Lowering {
       return undefined;
     }
 
-    const kind = this.ir.integer(kIntType, `${which}`);
+    let name = "homeFolder";
 
-    return this.textOut(frame, kOsText, [kIntType], [kind]);
+    if (which == 1) {
+      name = "temporaryFolder";
+    }
+
+    const target: RuntimeTarget = { module: kProcessModule, name };
+
+    return this.runtimeFunctionCall(frame, target, [], [], call.loc);
   }
 
   private pathTexts(frame: Frame, call: CallExpr): IrValue[] | undefined {
@@ -528,22 +536,30 @@ partial class Lowering {
       frame.made.store(owned.value, at);
     }
 
-    const runtime = this.pick(name == "join", kPathJoin, kPathResolve);
-    const params = [kPointerType, kIntType];
-    const result = this.textOut(frame, runtime, params, [
-      array,
-      this.pathStyle(),
-    ]);
     const list: IrValue = {
       type: kPointerType,
       value: array,
       tz: this.values.types.store.arrayOf(string),
       owned: true,
     };
+    if (name == "join" || name == "resolve") {
+      const target: RuntimeTarget = { module: kPathsModule, name };
+      const joined = this.runtimeFunctionCall(
+        frame,
+        target,
+        [],
+        [list],
+        call.loc,
+      );
+
+      this.dropping(frame, list);
+
+      return joined;
+    }
 
     this.dropping(frame, list);
 
-    return result;
+    return undefined;
   }
 
   private pathPart(
@@ -557,25 +573,18 @@ partial class Lowering {
       return undefined;
     }
 
-    const runtime = this.pathPartRuntime(name);
-    const args = this.textParts(frame, text).concat([this.pathStyle()]);
-    const params = [kPointerType, kIntType, kIntType];
-    const result = this.textOut(frame, runtime, params, args);
+    const target: RuntimeTarget = { module: kPathsModule, name };
+    const found = this.runtimeFunctionCall(
+      frame,
+      target,
+      [],
+      [text],
+      call.loc,
+    );
 
     this.textsDropped(frame, texts);
 
-    return result;
-  }
-
-  private readonly pathPartRuntime(name: string): string {
-    switch (name) {
-      case "dirname":
-        return kPathDirname;
-      case "extname":
-        return kPathExtname;
-      default:
-        return kPathNormalize;
-    }
+    return found;
   }
 
   private pathBase(frame: Frame, call: CallExpr): IrValue | undefined {
@@ -586,19 +595,14 @@ partial class Lowering {
     }
 
     const suffix = texts[1];
-    const hasSuffix = this.flagIf(suffix != undefined, 1);
-    const args = this.textParts(frame, text)
-      .concat(this.separatorParts(frame, suffix))
-      .concat([this.ir.integer(kFlagType, `${hasSuffix}`), this.pathStyle()]);
-    const params = [
-      kPointerType,
-      kIntType,
-      kPointerType,
-      kIntType,
-      kFlagType,
-      kIntType,
-    ];
-    const result = this.textOut(frame, kPathBasename, params, args);
+    const flag = this.flagIf(suffix != undefined, 1);
+    const truth = this.values.types.store.plain(TypeKind.Boolean);
+    const marked = this.ir.integer(kBooleanType, `${flag}`);
+    const hasSuffix: IrValue = { type: kBooleanType, value: marked, tz: truth };
+    const cut = suffix ?? this.stringValue("");
+    const target: RuntimeTarget = { module: kPathsModule, name: "basename" };
+    const args = [text, cut, hasSuffix];
+    const result = this.runtimeFunctionCall(frame, target, [], args, call.loc);
 
     this.textsDropped(frame, texts);
 
@@ -613,11 +617,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const args = this.textParts(frame, from)
-      .concat(this.textParts(frame, to))
-      .concat([this.pathStyle()]);
-    const params = [kPointerType, kIntType, kPointerType, kIntType, kIntType];
-    const result = this.textOut(frame, kPathRelative, params, args);
+    const target: RuntimeTarget = { module: kPathsModule, name: "relative" };
+    const args = [from, to];
+    const result = this.runtimeFunctionCall(frame, target, [], args, call.loc);
 
     this.textsDropped(frame, texts);
 
@@ -631,20 +633,11 @@ partial class Lowering {
       return undefined;
     }
 
-    const params = [kPointerType, kIntType, kIntType];
-    const callee = this.ir.declare(kPathIsAbsolute, kFlagType, params);
-    const args = this.textParts(frame, text).concat([this.pathStyle()]);
-    const flag = frame.made.call(callee, args);
-    const zero = this.ir.zero(kFlagType);
-    const value = frame.made.integerCompare(
-      IrIntPredicate.NotEqual,
-      flag,
-      zero,
-    );
-    const tz = this.values.types.store.plain(TypeKind.Boolean);
+    const target: RuntimeTarget = { module: kPathsModule, name: "isAbsolute" };
+    const found = this.runtimeFunctionCall(frame, target, [], [text], call.loc);
 
     this.textsDropped(frame, texts);
 
-    return { type: kBooleanType, value, tz };
+    return found;
   }
 }

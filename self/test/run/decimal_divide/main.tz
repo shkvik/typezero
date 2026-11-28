@@ -1,0 +1,98 @@
+function values(): decimal[] {
+  return [
+    0,
+    1,
+    -1,
+    0.5,
+    -0.25,
+    19.99,
+    7,
+    -3,
+    1000000000,
+    12345678901234567890.123456789,
+    -98765432109876543210987654321,
+    0.000000000000000001,
+    3.14159265358979323846264338327950288,
+    2.5,
+    -2.5,
+    0.125,
+  
+  ];
+}
+
+type Mode =
+  | "up"
+  | "down"
+  | "ceil"
+  | "floor"
+  | "half-up"
+  | "half-down"
+  | "half-even"
+  | "half-ceil"
+  | "half-floor";
+
+function modes(): Mode[] {
+  return [
+    "up",
+    "down",
+    "ceil",
+    "floor",
+    "half-up",
+    "half-down",
+    "half-even",
+    "half-ceil",
+    "half-floor",
+  
+  ];
+}
+
+function main(): void {
+  const kValues = values();
+  const kModes = modes();
+  let index = 0;
+
+  for (const first of kValues) {
+    const line: string[] = [];
+
+    for (const second of kValues) {
+      if (second != 0) {
+        line.push(`${first / second}|${first % second}`);
+        line.push(`${first.div(second, 3)}`);
+      }
+    }
+
+    console.log(index, line.join(" "));
+    console.log(index, first.isInteger(), first.decimalPlaces());
+
+    const rounds: string[] = [];
+
+    for (const mode of kModes) {
+      rounds.push(`${first.round(0, mode)}/${first.round(2, mode)}`);
+    }
+
+    console.log(index, rounds.join(" "));
+
+    const powers: string[] = [];
+
+    for (let power = -3; power <= 5; power++) {
+      if (first != 0 || power >= 0) {
+        powers.push(`${first ** power}`);
+      }
+    }
+
+    console.log(index, powers.join(" "));
+    index += 1;
+  }
+
+  const third: decimal = 1;
+  const parts: decimal = 3;
+
+  console.log(third / parts, (third / parts) * parts, third.div(parts, 40, "down"));
+  const two: decimal = 2;
+  const half: decimal = 0.5;
+  const more: decimal = 1.1;
+
+  console.log(two ** 100, half ** 20, more ** -7);
+}
+
+main();

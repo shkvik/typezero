@@ -1,0 +1,101 @@
+function parsed(text: string): void {
+  const read = decimal(text);
+  if (read.isOk()) {
+    console.log(`ok [${read.value}]`, Number(read.value));
+  } else {
+    const error = read.error;
+
+    console.log(`err ${error.kind} ${error.code} ${error.message} [${error.text}]`);
+  }
+}
+
+function doubles(): double[] {
+  return [0.0, -0.0, 1.0, -1.5, 0.1, 0.2, 1e21, 1e-7, 123.456, 9007199254740993.0,
+    -9007199254740992.0, 3.141592653589793, 1e300, 5e-324, 2.5e-10];
+}
+
+function main(): void {
+  parsed("0");
+  parsed("-0");
+  parsed("1");
+  parsed("-1");
+  parsed("19.99");
+  parsed("0.5");
+  parsed(".5");
+  parsed("5.");
+  parsed("-.25");
+  parsed("1e3");
+  parsed("1E-3");
+  parsed("2.5e+10");
+  parsed("1e");
+  parsed("e1");
+  parsed(" 42 ");
+  parsed("\u00097\u000a");
+  parsed("+5");
+  parsed("+-5");
+  parsed("--5");
+  parsed("1_000");
+  parsed("1__000");
+  parsed("_1");
+  parsed("1_");
+  parsed("1_000.000_1");
+  parsed("0x1f");
+  parsed("0X1F");
+  parsed("0x1F");
+  parsed("0xfF");
+  parsed("-0x10");
+  parsed("0b101");
+  parsed("0o17");
+  parsed("0x1.8");
+  parsed("0b0.1");
+  parsed("0o.4");
+  parsed("0x.");
+  parsed("0x");
+  parsed("0x_1");
+  parsed("0x1_f");
+  parsed("Infinity");
+  parsed("-Infinity");
+  parsed("NaN");
+  parsed("abc");
+  parsed("");
+  parsed(" ");
+  parsed("1 2");
+  parsed("12abc");
+  parsed("\uff11\uff12");
+  parsed("123456789012345678901234567890.123456789");
+  parsed("-0.000000000000000000000000001");
+  parsed("9223372036854775807");
+  parsed("9223372036854775808");
+  parsed("-9223372036854775808");
+  parsed("-9223372036854775809");
+  parsed("10000000000000000000000000000000000000000");
+  parsed("0.0000000000000000000000000000001");
+  parsed("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+  parsed("\u043f\u0440\u0438\u0432\u0435\u0442 \u043c\u0438\u0440");
+  parsed("\ud83d\ude00");
+  parsed("1e-10000001");
+  parsed("1.5e-10000001");
+  parsed("1e100");
+
+  for (const value of doubles()) {
+    const made = decimal(value);
+
+    console.log(value, made, Number(made), Number(made) == value);
+  }
+
+  const big: uint64 = 18446744073709551615;
+  const small: uint64 = 42;
+  const middle: uint64 = 9223372036854775808;
+
+  console.log(decimal(big), decimal(small), decimal(middle));
+  console.log(Number(decimal(big)), decimal(middle) - decimal(1));
+
+  const mode = "half-even";
+  const value = decimal("2.5");
+
+  if (mode == "half-even" || mode == "up") {
+    console.log(value.round(0, mode));
+  }
+}
+
+main();

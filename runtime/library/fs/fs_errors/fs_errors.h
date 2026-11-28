@@ -74,11 +74,9 @@ Failure tz_fs_win32_failure(DWORD error);
 Failure tz_fs_errno_failure(int e);
 #endif
 
-TzOptStr tz_fs_opt_of(const TzBuf *text);
 
 TzStr tz_fs_ascii(const char *text);
 
-void tz_fs_throw_parts(TzMaker make, TzSystemErrorParts *parts);
 
 void tz_fs_throw_failure(TzMaker make, Failure f, const char *syscall, const TzBuf *path,
                          const TzBuf *dest);

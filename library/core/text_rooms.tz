@@ -1,0 +1,172 @@
+
+function textHeadSize(): int {
+  return 24;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the head and count cells of the width",
+})
+export function roomMade(count: int, isWide: boolean): Raw<uint8> {
+  if (count < 0 || count > maxCount()) {
+    panic(`string length ${count} exceeds the maximum of ${maxCount()}`);
+  }
+
+  let width = 1;
+  let kind: uint32 = 1;
+
+  if (isWide) {
+    width = 2;
+    kind = 2;
+  }
+
+  const object = allocate<uint8>(textHeadSize() + count * width);
+  const head = viewAt<TextHead>(object, 0);
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  head.count = 1;
+  head.kind = kind;
+  head.reserved = 0;
+  head.capacity = count.toUint32();
+  head.used = 0;
+  thread.liveStrings += 1;
+
+  return cellsAt<uint8>(object, textHeadSize());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells hold count units of the width",
+})
+function cellsSeen(cells: Raw<uint8>, isWide: boolean, count: int, stop: int): int {
+  let seen = 0;
+  let from = 0;
+
+  while (from < count && seen < stop) {
+    const end = Math.min(from + 1024, count);
+
+    if (isWide) {
+      const units = cellsAt<uint16>(cells, 0);
+
+      for (let index = from; index < end; index++) {
+        seen = seen | unitAt(units, index);
+      }
+    } else {
+      for (let index = from; index < end; index++) {
+        seen = seen | unitAt(cells, index);
+      }
+    }
+
+    from = end;
+  }
+
+  return seen;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the head is the 24 bytes before the cells, made by roomMade",
+})
+function roomFreed(cells: Raw<uint8>): void {
+  const object = bitsRaw(rawBits(cells) - 24);
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  thread.liveStrings -= 1;
+  release(object);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the wide cells hold count units, each below 256",
+})
+function narrowedText(cells: Raw<uint8>, count: int, isAscii: boolean): string {
+  const units = cellsAt<uint16>(cells, 0);
+  const room = textRoom<uint8>(count);
+
+  copyCells(units, 0, room, 0, count);
+
+  return textClosed(room, count, isAscii);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the head before the cells",
+})
+function heapClosed(
+  cells: Raw<uint8>,
+  count: int,
+  isWide: boolean,
+  isPlain: boolean,
+): string {
+  const object = bitsRaw(rawBits(cells) - 24);
+  const head = viewAt<TextHead>(object, 0);
+  let meta = count.toUint64() | textHeapBit();
+
+  head.used = count.toUint32();
+
+  if (isWide) {
+    meta = meta | textWideBit();
+  } else if (isPlain) {
+    meta = meta | textAsciiBit();
+  }
+
+  return textOf(object, meta);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a short room may be on the stack: its units are copied out",
+})
+function shortClosed(cells: Raw<uint8>, count: int, isWide: boolean): string {
+  if (!isWide) {
+    const room = textRoom<uint8>(count);
+    const seen = cellsSeen(cells, false, count, 128);
+
+    copyCells(cells, 0, room, 0, count);
+
+    return textClosed(room, count, seen < 128);
+  }
+
+  const seen = cellsSeen(cells, true, count, 256);
+  if (seen <= 255) {
+    return narrowedText(cells, count, seen < 128);
+  }
+
+  const heap = roomMade(count, true);
+
+  copyCells(cellsAt<uint16>(cells, 0), 0, cellsAt<uint16>(heap, 0), 0, count);
+
+  return heapClosed(heap, count, true, false);
+}
+
+export function closedMade(
+  cells: Raw<uint8>,
+  count: int,
+  isWide: boolean,
+  isAscii: boolean,
+): string {
+  if (count <= 8) {
+    return shortClosed(cells, count, isWide);
+  }
+
+  let seen = 0;
+
+  if (isWide || !isAscii) {
+    let stop = 128;
+
+    if (isWide) {
+      stop = 256;
+    }
+
+    seen = cellsSeen(cells, isWide, count, stop);
+  }
+  if (isWide && seen <= 255) {
+    const text = narrowedText(cells, count, seen < 128);
+
+    roomFreed(cells);
+
+    return text;
+  }
+
+  return heapClosed(cells, count, isWide, seen < 128);
+}

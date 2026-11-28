@@ -187,6 +187,7 @@ export enum Code {
   ClassNeedsName = "TZ1556",
   ExpectedClassAfterAbstract = "TZ1557",
   ExpectedFunctionAfterAsync = "TZ1558",
+  InPlaceLayout = "TZ1559",
   ExpectedAfterImportStar = "TZ1601",
   ExpectedAfterImportStarAs = "TZ1602",
   ExpectedAfterExportStarAs = "TZ1603",
@@ -1515,4 +1516,5 @@ export enum Code {
   OwnConstantLent = "TZ4055",
   OwnInPlaceHeritage = "TZ4056",
   OwnInPlaceItself = "TZ4057",
+  OwnCLayoutField = "TZ4058",
 }

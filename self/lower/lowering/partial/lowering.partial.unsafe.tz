@@ -31,6 +31,48 @@ partial class Lowering {
     if (callee.name == "isAscii") {
       return this.textIsAscii(frame, call);
     }
+    if (callee.name == "textObject" || callee.name == "textMeta") {
+      return this.textPiece(frame, call, callee.name == "textMeta");
+    }
+    if (callee.name == "textOf") {
+      return this.textJoined(frame, call);
+    }
+    if (callee.name == "doubleBits") {
+      return this.bitsOfDouble(frame, call);
+    }
+    if (callee.name == "bitsDouble") {
+      return this.doubleOfBits(frame, call);
+    }
+    if (callee.name == "productShifted") {
+      return this.shiftedProduct(frame, call);
+    }
+    if (callee.name == "rawBits") {
+      return this.bitsOfRaw(frame, call);
+    }
+    if (callee.name == "wrappedProduct") {
+      return this.productWrapped(frame, call);
+    }
+    if (callee.name == "compared") {
+      return this.comparedCall(frame, call);
+    }
+    if (callee.name == "threadState") {
+      return this.threadStateOf(call);
+    }
+    if (callee.name == "dropped") {
+      return this.droppedCall(frame, call);
+    }
+    if (callee.name == "bitsRaw") {
+      return this.rawOfBits(frame, call);
+    }
+    if (callee.name == "textTree") {
+      return this.textTreeMade(frame, call);
+    }
+    if (callee.name == "decimalCoef" || callee.name == "decimalMeta") {
+      return this.decimalPiece(frame, call, callee.name == "decimalMeta");
+    }
+    if (callee.name == "decimalOf") {
+      return this.decimalJoined(frame, call);
+    }
 
     const written = this.values.typeArgumentsOf(frame.module, callee.loc);
     const first = written?.[0];
@@ -82,6 +124,10 @@ partial class Lowering {
         return this.unitWritten(frame, call, cell);
       case "frameCells":
         return this.frameCellsOf(frame, call, cell);
+      case "cellsAt":
+        return this.cellsAtMade(frame, call);
+      case "viewAt":
+        return this.viewRead(frame, call, item, cell);
       case "textRoom":
         return this.textRoomOf(frame, call, cell);
       case "textClosed":

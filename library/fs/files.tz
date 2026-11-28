@@ -1,0 +1,155 @@
+import { wideOf, wstring } from "tz:ffi";
+import { resolve, toNamespacedPath } from "node:path";
+import {
+  CopyFileError,
+  ForceRemoveError,
+  MakeTemporaryDirectoryError,
+  ReadDirectoryError,
+  ReadFileError,
+  RealPathError,
+  RemoveError,
+} from "tz:fs/errors";
+import { rand_s } from "tz:win32/ucrt";
+import { textOfBytes } from "tz:text";
+import {
+  CloseHandle,
+  CopyFileW,
+  CreateDirectoryW,
+  CreateFileW,
+  DeleteFileW,
+  FileAttributeData,
+  FindClose,
+  FindFirstFileExW,
+  FindNextFileW,
+  GetCurrentDirectoryW,
+  GetEnvironmentVariableW,
+  GetFileAttributesExW,
+  GetFileAttributesW,
+  GetFileSizeEx,
+  GetFileInformationByHandle,
+  GetFileInformationByHandleEx,
+  GetFinalPathNameByHandleW,
+  GetLastError,
+  GetTickCount,
+  LargeInteger,
+  ReadFile,
+  RemoveDirectoryW,
+  SetFileAttributesW,
+  SetLastError,
+} from "tz:win32/kernel32";
+import {
+  Raw,
+  allocate,
+  bitsRaw,
+  cellsAt,
+  copyCells,
+  frameCells,
+  putUnit,
+  rawBits,
+  reallocate,
+  release,
+  textClosed,
+  textRoom,
+  unitAt,
+} from "tz:unsafe";
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the name ends with a zero, data is a whole record the system fills",
+})
+export function exists(path: Read<string>): boolean {
+  if (path.length == 0) {
+    return false;
+  }
+
+  const native = toNamespacedPath(path);
+  const name = wideOf(native);
+  if (name == undefined) {
+    return false;
+  }
+
+  const data = new FileAttributeData();
+
+  return GetFileAttributesExW(name, 0, data) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "cells hold count units",
+})
+export function textOfUnits(cells: Raw<uint16>, count: int): string {
+  const room = textRoom<uint16>(count);
+
+  copyCells(cells, 0, room, 0, count);
+
+  return textClosed(room, count, false);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer has the size the first call asked for, and one more",
+})
+export function currentDirectory(): string {
+  const probe = allocate<uint16>(1);
+  const capacity = GetCurrentDirectoryW(0, probe);
+
+  release(probe);
+
+  const size = capacity.toInt() + 1;
+  const cells = allocate<uint16>(size);
+  let count = GetCurrentDirectoryW(capacity + 1, cells).toInt();
+
+  if (count > capacity.toInt()) {
+    count = 0;
+  }
+  if (count > 3 && unitAt(cells, count - 1) == 92) {
+    count -= 1;
+  }
+
+  const text = textOfUnits(cells, count);
+
+  release(cells);
+
+  return text;
+}
+
+function notFound(): uint32 {
+  return 203;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer has the size the system asked for",
+})
+export function environmentValue(name: Read<string>): string | undefined {
+  const wide = wideOf(name);
+  if (wide == undefined) {
+    return undefined;
+  }
+
+  let capacity: uint32 = 256;
+  let cells = allocate<uint16>(256);
+
+  SetLastError(0);
+
+  let count = GetEnvironmentVariableW(wide, cells, capacity);
+
+  while (count >= capacity) {
+    release(cells);
+    capacity = count;
+    cells = allocate<uint16>(capacity.toInt());
+    SetLastError(0);
+    count = GetEnvironmentVariableW(wide, cells, capacity);
+  }
+  if (count == 0 && GetLastError() == notFound()) {
+    release(cells);
+
+    return undefined;
+  }
+
+  const text = textOfUnits(cells, count.toInt());
+
+  release(cells);
+
+  return text;
+}

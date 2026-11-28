@@ -13,14 +13,12 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kArrayModule,
-  kArrayReverse,
-  kArraySort,
-  kArraySortWith,
   kDoubleType,
   kFlagType,
   kIntType,
   kPointerType,
   kReverseName,
+  kValuesModule,
   kVoidType,
 } from "../const/lowering.const.tz";
 import {
@@ -50,10 +48,14 @@ partial class Lowering {
       return undefined;
     }
 
-    if (callback == undefined) {
-      const sorting = this.ir.declare(kArraySort, kVoidType, [kPointerType]);
+    const int = this.values.types.store.integer(64, false);
+    const raw: IrValue = { type: kPointerType, value: array.value, tz: int };
 
-      frame.made.call(sorting, [array.value]);
+    if (callback == undefined) {
+      const name = "sortValues";
+      const target: RuntimeTarget = { module: kValuesModule, name };
+
+      this.runtimeFunctionCall(frame, target, [], [raw], call.loc);
 
       return array;
     }
@@ -67,11 +69,16 @@ partial class Lowering {
       return undefined;
     }
 
-    const params = [kPointerType, kPointerType, kPointerType];
-    const sorting = this.ir.declare(kArraySortWith, kVoidType, params);
     const context = this.comparatorContext(frame);
+    const args: IrValue[] = [
+      raw,
+      { type: kPointerType, value: compare, tz: int },
+      { type: kPointerType, value: context, tz: int },
+    ];
+    const name = "sortedWith";
+    const target: RuntimeTarget = { module: kValuesModule, name };
 
-    frame.made.call(sorting, [array.value, compare, context]);
+    this.runtimeFunctionCall(frame, target, [], args, call.loc);
 
     return array;
   }
@@ -226,10 +233,12 @@ partial class Lowering {
       return array;
     }
 
-    const params = [kPointerType];
-    const reversing = this.ir.declare(kArrayReverse, kVoidType, params);
+    const int = this.values.types.store.integer(64, false);
+    const raw: IrValue = { type: kPointerType, value: array.value, tz: int };
+    const name = "reverseValues";
+    const target: RuntimeTarget = { module: kValuesModule, name };
 
-    frame.made.call(reversing, [array.value]);
+    this.runtimeFunctionCall(frame, target, [], [raw], call.loc);
 
     return array;
   }

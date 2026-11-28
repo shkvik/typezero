@@ -13,25 +13,13 @@ import {
   kBooleanType,
   kFlagType,
   kIntType,
+  kPadFill,
   kPointerType,
   kStringType,
+  kBuffersModule,
   kCStringFromText,
-  kTextCharCode,
-  kTextCodePoint,
-  kTextEndsWith,
-  kTextIncludes,
-  kTextIndexOf,
-  kTextLastIndexOf,
-  kTextLower,
+  kCStringMade,
   kTextModule,
-  kTextPad,
-  kTextRepeat,
-  kTextSlice,
-  kTextSplit,
-  kTextStartsWith,
-  kTextSubstring,
-  kTextTrim,
-  kTextUpper,
   kVoidType,
 } from "../const/lowering.const.tz";
 import {
@@ -121,9 +109,8 @@ partial class Lowering {
         return this.cstringOf(frame, call, receiver);
       case "slice":
       case "substring":
-        return this.textSlice(frame, name, receiver, given);
+        return this.textSlice(frame, call, name, receiver, given);
       case "lastIndexOf":
-        return this.textSearch(frame, name, receiver, given);
       case "indexOf":
       case "includes":
       case "startsWith":
@@ -131,28 +118,28 @@ partial class Lowering {
         return this.textFound(frame, call, name, receiver, given);
       case "toLowerCase":
       case "toUpperCase":
-        return this.textCase(frame, name, receiver);
+        return this.textCase(frame, call, name, receiver);
       case "trim":
       case "trimStart":
       case "trimEnd":
-        return this.textTrim(frame, name, receiver);
+        return this.textTrim(frame, call, name, receiver);
       case "charCodeAt":
       case "codePointAt":
         return this.textCode(frame, call, name, receiver, given);
       case "charAt":
-        return this.textCharAt(frame, receiver, given);
+        return this.textCharAt(frame, call, receiver, given);
       case "at":
         return this.textAt(frame, call, receiver, given);
       case "split":
-        return this.textSplit(frame, receiver, given);
+        return this.textSplit(frame, call, receiver, given);
       case "replace":
       case "replaceAll":
         return this.textReplace(frame, call, name, receiver, given);
       case "repeat":
-        return this.textRepeat(frame, receiver, given);
+        return this.textRepeat(frame, call, receiver, given);
       case "padStart":
       case "padEnd":
-        return this.textPad(frame, name, receiver, given);
+        return this.textPad(frame, call, name, receiver, given);
       default: {
         const called = this.calledName(call);
 
@@ -173,11 +160,33 @@ partial class Lowering {
       return undefined;
     }
 
-    const params = [kPointerType, kIntType];
-    const callee = this.ir.declare(kCStringFromText, kPointerType, params);
-    const value = frame.made.call(callee, this.textParts(frame, receiver));
+    const name = this.runtimeHelperName(
+      kBuffersModule,
+      kCStringMade,
+      kCStringFromText,
+    );
+    const value = this.cstringMadeOf(frame, name, receiver);
 
     return { type: kPointerType, value, tz: result, owned: true };
+  }
+
+  private cstringMadeOf(
+    frame: Read<Frame>,
+    name: string,
+    receiver: IrValue,
+  ): LLVMValue {
+    if (name == kCStringFromText) {
+      const params = [kPointerType, kIntType];
+      const callee = this.ir.declare(name, kPointerType, params);
+
+      return frame.made.call(callee, this.textParts(frame, receiver));
+    }
+
+    const layout = this.cstringLayout();
+    const params = [kStringType, kPointerType];
+    const callee = this.ir.declare(name, kPointerType, params);
+
+    return frame.made.call(callee, [receiver.value, layout]);
   }
 
   private readonly textParts(frame: Read<Frame>, text: IrValue): LLVMValue[] {
@@ -217,63 +226,25 @@ partial class Lowering {
 
   private textSlice(
     frame: Read<Frame>,
-    name: string,
-    receiver: IrValue,
-    given: Read<TextArguments>,
-  ): IrValue {
-    const isSlice = name == "slice";
-    const runtime = this.pick(isSlice, kTextSlice, kTextSubstring);
-    const args = this.textParts(frame, receiver).concat([
-      this.numberAt(given, 0),
-      this.numberAt(given, 1),
-      this.flagAt(given, 1),
-    ]);
-    const params = [kPointerType, kIntType, kIntType, kIntType, kFlagType];
-
-    return this.textOut(frame, runtime, params, args);
-  }
-
-  private textSearch(
-    frame: Read<Frame>,
+    call: CallExpr,
     name: string,
     receiver: IrValue,
     given: Read<TextArguments>,
   ): IrValue | undefined {
-    const search = given.texts[0];
-    if (search == undefined) {
-      return undefined;
-    }
-
-    const runtime = this.searchRuntime(name);
-    const params = [
-      kPointerType,
-      kIntType,
-      kPointerType,
-      kIntType,
-      kIntType,
-      kFlagType,
-    ];
-    const callee = this.ir.declare(runtime, kFlagType, params);
-    const args = this.textParts(frame, receiver)
-      .concat(this.textParts(frame, search))
-      .concat([this.numberAt(given, 0), this.flagAt(given, 0)]);
-    const found = frame.made.call(callee, args);
-    if (name == "indexOf" || name == "lastIndexOf") {
-      const value = frame.made.cast(IrOpcode.SExt, found, kIntType);
-      const tz = this.values.types.store.integer(64, false);
-
-      return { type: kIntType, value, tz };
-    }
-
     const zero = this.ir.zero(kFlagType);
-    const value = frame.made.integerCompare(
-      IrIntPredicate.NotEqual,
-      found,
-      zero,
-    );
-    const tz = this.values.types.store.plain(TypeKind.Boolean);
+    const flag = this.flagAt(given, 1);
+    const has = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const first = this.numberAt(given, 0);
+    const second = this.numberAt(given, 1);
+    const int = this.values.types.store.integer(64, false);
+    const truth = this.values.types.store.plain(TypeKind.Boolean);
+    const start: IrValue = { type: kIntType, value: first, tz: int };
+    const end: IrValue = { type: kIntType, value: second, tz: int };
+    const hasEnd: IrValue = { type: kBooleanType, value: has, tz: truth };
+    const target: RuntimeTarget = { module: kTextModule, name };
+    const args = [receiver, start, end, hasEnd];
 
-    return { type: kBooleanType, value, tz };
+    return this.runtimeFunctionCall(frame, target, [], args, call.loc);
   }
 
   private textFound(
@@ -308,56 +279,26 @@ partial class Lowering {
     return this.runtimeFunctionCall(frame, target, [], args, call.loc);
   }
 
-  private readonly searchRuntime(name: string): string {
-    switch (name) {
-      case "indexOf":
-        return kTextIndexOf;
-      case "lastIndexOf":
-        return kTextLastIndexOf;
-      case "includes":
-        return kTextIncludes;
-      case "startsWith":
-        return kTextStartsWith;
-      default:
-        return kTextEndsWith;
-    }
-  }
-
   private textCase(
     frame: Read<Frame>,
+    call: CallExpr,
     name: string,
     receiver: IrValue,
-  ): IrValue {
-    const isUpper = name == "toUpperCase";
-    const runtime = this.pick(isUpper, kTextUpper, kTextLower);
-    const args = this.textParts(frame, receiver);
+  ): IrValue | undefined {
+    const target: RuntimeTarget = { module: kTextModule, name };
 
-    return this.textOut(frame, runtime, [kPointerType, kIntType], args);
+    return this.runtimeFunctionCall(frame, target, [], [receiver], call.loc);
   }
 
   private textTrim(
     frame: Read<Frame>,
+    call: CallExpr,
     name: string,
     receiver: IrValue,
-  ): IrValue {
-    const ends = this.trimEnds(name);
-    const args = this.textParts(frame, receiver).concat([
-      this.ir.integer(kFlagType, `${ends}`),
-    ]);
-    const params = [kPointerType, kIntType, kFlagType];
+  ): IrValue | undefined {
+    const target: RuntimeTarget = { module: kTextModule, name };
 
-    return this.textOut(frame, kTextTrim, params, args);
-  }
-
-  private readonly trimEnds(name: string): int {
-    switch (name) {
-      case "trimStart":
-        return 1;
-      case "trimEnd":
-        return 2;
-      default:
-        return 3;
-    }
+    return this.runtimeFunctionCall(frame, target, [], [receiver], call.loc);
   }
 
   private textCode(
@@ -377,22 +318,16 @@ partial class Lowering {
 
     const position = this.numberAt(given, 0);
     const int = this.values.types.store.integer(64, false);
-    const isCode = name == "charCodeAt";
-    const runtime = this.pick(isCode, kTextCharCode, kTextCodePoint);
-    const callee = this.ir.declare(runtime, kFlagType, [
-      kPointerType,
-      kIntType,
-      kIntType,
-    ]);
+    const at: IrValue = { type: kIntType, value: position, tz: int };
+    const target: RuntimeTarget = { module: kTextModule, name };
     if (this.optionalInner(result) == undefined) {
-      const args = this.textParts(frame, receiver).concat([position]);
-      const code = frame.made.cast(
-        IrOpcode.SExt,
-        frame.made.call(callee, args),
-        kIntType,
+      return this.runtimeFunctionCall(
+        frame,
+        target,
+        [],
+        [receiver, at],
+        call.loc,
       );
-
-      return { type: kIntType, value: code, tz: int };
     }
 
     const length = this.textLength(frame, receiver);
@@ -408,13 +343,17 @@ partial class Lowering {
     frame.made.conditionalBranch(isInside, read, end);
     frame.made.open(read);
 
-    const args = this.textParts(frame, receiver).concat([position]);
-    const code = frame.made.cast(
-      IrOpcode.SExt,
-      frame.made.call(callee, args),
-      kIntType,
+    const found = this.runtimeFunctionCall(
+      frame,
+      target,
+      [],
+      [receiver, at],
+      call.loc,
     );
-    const found: IrValue = { type: kIntType, value: code, tz: int };
+    if (found == undefined) {
+      return undefined;
+    }
+
     const placed = this.somewhere(frame, found, result);
     const readEnd = frame.made.currentBlock();
 
@@ -433,41 +372,28 @@ partial class Lowering {
 
   private textSplit(
     frame: Read<Frame>,
+    call: CallExpr,
     receiver: IrValue,
     given: Read<TextArguments>,
   ): IrValue | undefined {
-    const string = this.values.types.store.plain(TypeKind.String);
-    const descriptor = this.descriptor(string);
-    if (descriptor == undefined) {
-      return undefined;
-    }
-
     const separator = given.texts[0];
-    const hasSeparator = this.flagIf(separator != undefined, 1);
-    const parts = this.separatorParts(frame, separator);
-    const params = [
-      kPointerType,
-      kPointerType,
-      kIntType,
-      kPointerType,
-      kIntType,
-      kFlagType,
-      kIntType,
-      kFlagType,
-    ];
-    const callee = this.ir.declare(kTextSplit, kPointerType, params);
-    const args = [descriptor]
-      .concat(this.textParts(frame, receiver))
-      .concat(parts)
-      .concat([
-        this.ir.integer(kFlagType, `${hasSeparator}`),
-        this.numberAt(given, 0),
-        this.flagAt(given, 0),
-      ]);
-    const value = frame.made.call(callee, args);
-    const tz = this.values.types.store.arrayOf(string);
+    const hasSeparator = separator != undefined;
+    const zero = this.ir.zero(kFlagType);
+    const flag = this.flagAt(given, 0);
+    const has = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const limit = this.numberAt(given, 0);
+    const isGiven = this.flagIf(hasSeparator, 1);
+    const marked = this.ir.integer(kBooleanType, `${isGiven}`);
+    const int = this.values.types.store.integer(64, false);
+    const truth = this.values.types.store.plain(TypeKind.Boolean);
+    const cut = separator ?? this.stringValue("");
+    const isCut: IrValue = { type: kBooleanType, value: marked, tz: truth };
+    const most: IrValue = { type: kIntType, value: limit, tz: int };
+    const isMost: IrValue = { type: kBooleanType, value: has, tz: truth };
+    const target: RuntimeTarget = { module: kTextModule, name: "split" };
+    const args = [receiver, cut, isCut, most, isMost];
 
-    return { type: kPointerType, value, tz, owned: true };
+    return this.runtimeFunctionCall(frame, target, [], args, call.loc);
   }
 
   private separatorParts(
@@ -505,43 +431,42 @@ partial class Lowering {
 
   private textRepeat(
     frame: Read<Frame>,
+    call: CallExpr,
     receiver: IrValue,
     given: Read<TextArguments>,
-  ): IrValue {
-    const args = this.textParts(frame, receiver).concat([
-      this.numberAt(given, 0),
-    ]);
-    const params = [kPointerType, kIntType, kIntType];
+  ): IrValue | undefined {
+    const count: IrValue = {
+      type: kIntType,
+      value: this.numberAt(given, 0),
+      tz: this.values.types.store.integer(64, false),
+    };
+    const target: RuntimeTarget = { module: kTextModule, name: "repeat" };
 
-    return this.textOut(frame, kTextRepeat, params, args);
+    return this.runtimeFunctionCall(
+      frame,
+      target,
+      [],
+      [receiver, count],
+      call.loc,
+    );
   }
 
   private textPad(
     frame: Read<Frame>,
+    call: CallExpr,
     name: string,
     receiver: IrValue,
     given: Read<TextArguments>,
-  ): IrValue {
-    const fill = given.texts[0];
-    const hasFill = this.flagIf(fill != undefined, 1);
-    const atStart = this.flagIf(name == "padStart", 1);
-    const args = this.textParts(frame, receiver)
-      .concat([this.numberAt(given, 0)])
-      .concat(this.separatorParts(frame, fill))
-      .concat([
-        this.ir.integer(kFlagType, `${hasFill}`),
-        this.ir.integer(kFlagType, `${atStart}`),
-      ]);
-    const params = [
-      kPointerType,
-      kIntType,
-      kIntType,
-      kPointerType,
-      kIntType,
-      kFlagType,
-      kFlagType,
-    ];
+  ): IrValue | undefined {
+    const length: IrValue = {
+      type: kIntType,
+      value: this.numberAt(given, 0),
+      tz: this.values.types.store.integer(64, false),
+    };
+    const fill = given.texts[0] ?? this.stringValue(kPadFill);
+    const target: RuntimeTarget = { module: kTextModule, name };
+    const args = [receiver, length, fill];
 
-    return this.textOut(frame, kTextPad, params, args);
+    return this.runtimeFunctionCall(frame, target, [], args, call.loc);
   }
 }

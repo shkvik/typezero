@@ -104,6 +104,3 @@ int32_t tz_cstring_equal(const void *a, const void *b) {
   return memcmp(x->text, y->text, (size_t)x->length) == 0;
 }
 
-const char *tz_cstring_text(const void *cstring) {
-  return ((const TzCString *)cstring)->text;
-}

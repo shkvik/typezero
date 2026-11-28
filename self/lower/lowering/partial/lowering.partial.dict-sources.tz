@@ -20,15 +20,24 @@ import {
   kArrayName,
   kArraySlice,
   kArraySliceLent,
+  kDictsModule,
   kFlagType,
   kFromName,
   kIntType,
+  kMapAdd,
+  kMapAddText,
   kMapCopy,
   kMapCopyName,
+  kMapDelete,
+  kMapDeleteText,
+  kMapDrop,
   kMapEntries,
   kMapEntriesName,
+  kMapFind,
+  kMapFindText,
   kMapKeys,
   kMapKeysName,
+  kMapNew,
   kMapValues,
   kMapValuesName,
   kPointerType,
@@ -36,6 +45,46 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
+  private dictsHelper(name: string): string {
+    const helper = this.dictsHelperOf(name);
+    if (helper == undefined) {
+      return name;
+    }
+
+    return this.runtimeHelperName(kDictsModule, helper, name);
+  }
+
+  private readonly dictsHelperOf(name: string): string | undefined {
+    switch (name) {
+      case kMapNew:
+        return "mapMade";
+      case kMapCopy:
+        return "mapCopied";
+      case kMapDrop:
+        return "mapDropped";
+      case kMapFind:
+        return "mapFound";
+      case kMapFindText:
+        return "mapTextFound";
+      case kMapAdd:
+        return "mapAdded";
+      case kMapAddText:
+        return "mapTextAdded";
+      case kMapDelete:
+        return "mapDeleted";
+      case kMapDeleteText:
+        return "mapTextDeleted";
+      case kMapKeys:
+        return "mapKeys";
+      case kMapValues:
+        return "mapValues";
+      case kMapEntries:
+        return "mapEntries";
+      default:
+        return undefined;
+    }
+  }
+
   private dictItems(
     frame: Frame,
     expr: Expr,
@@ -66,7 +115,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const name = this.pick(isKeys, kMapKeys, kMapValues);
+    const picked = this.pick(isKeys, kMapKeys, kMapValues);
+    const name = this.dictsHelper(picked);
     const listing = this.ir.declare(name, kPointerType, [
       kPointerType,
       kPointerType,
@@ -201,7 +251,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const copying = this.ir.declare(kMapCopy, kPointerType, [
+    const copyingName = this.dictsHelper(kMapCopy);
+
+    const copying = this.ir.declare(copyingName, kPointerType, [
       kPointerType,
       kPointerType,
     ]);
@@ -383,7 +435,8 @@ partial class Lowering {
 
     const result = this.typeOf(call) ?? type;
     const isLent = this.isLookingArray(result);
-    const name = this.pick(isLent, kArraySliceLent, kArraySlice);
+    const picked = this.pick(isLent, kArraySliceLent, kArraySlice);
+    const name = this.countsHelper(picked);
     const copying = this.ir.declare(name, kPointerType, [
       kPointerType,
       kIntType,
@@ -433,7 +486,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const listing = this.ir.declare(kMapEntries, kPointerType, [
+    const listingName = this.dictsHelper(kMapEntries);
+
+    const listing = this.ir.declare(listingName, kPointerType, [
       kPointerType,
       kPointerType,
       kPointerType,

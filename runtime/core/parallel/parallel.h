@@ -44,7 +44,6 @@ int64_t tz_thread_sum(size_t offset);
 void tz_thread_register(void);
 int32_t tz_thread_total(void);
 TzThread *tz_thread_at(int32_t i);
-int32_t tz_thread_index(void);
 void tz_parallel_init(void);
 void tz_thread_yield(void);
 void tz_call_awaited(void);

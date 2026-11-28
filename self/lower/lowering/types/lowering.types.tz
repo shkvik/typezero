@@ -31,6 +31,20 @@ export type Place = {
   readonly owner: int;
   readonly flag?: LLVMValue;
   readonly isCaptured?: boolean;
+  readonly view?: string;
+  readonly record?: string;
+  readonly viewParts?: ViewParts;
+};
+
+export type ViewParts = {
+  readonly empty: LLVMValue;
+  readonly none: LLVMValue;
+  readonly one: LLVMValue;
+};
+
+export type RecordSpot = {
+  readonly address: LLVMValue;
+  readonly value: IrValue;
 };
 
 export type LoopTarget = {
@@ -231,4 +245,15 @@ export type LayoutShape = {
 export type CellPair = {
   readonly from: string;
   readonly into: string;
+};
+
+export type FixedParts = {
+  readonly item: Type;
+  readonly count: int;
+  readonly cell: string;
+};
+
+export type BytesCall = {
+  readonly params: string[];
+  readonly args: LLVMValue[];
 };

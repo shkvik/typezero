@@ -1,0 +1,59 @@
+type Point = { x: int; y: int };
+
+function doubles(): void {
+  const zero: double = 0;
+  const nan = zero / zero;
+  const values: double[] = [1.5, nan, -zero, 2.25, zero, nan];
+
+  const first = values.indexOf(nan);
+
+  console.log(first, values.lastIndexOf(nan), values.includes(nan));
+  console.log(values.indexOf(0), values.lastIndexOf(-zero), values.includes(7));
+}
+
+function optionals(): void {
+  const values: (int | undefined)[] = [1, undefined, 3, undefined];
+  const texts: (string | undefined)[] = ["a", undefined, "b"];
+  const numbers: (double | undefined)[] = [undefined, 2.5];
+
+  console.log(values.indexOf(undefined), values.lastIndexOf(undefined));
+  const three = values.indexOf(3);
+
+  console.log(three, values.includes(5), values.includes(undefined));
+  const found = texts.indexOf("b");
+
+  console.log(found, texts.indexOf(undefined), texts.includes("c"));
+  console.log(numbers.indexOf(2.5), numbers.indexOf(undefined));
+}
+
+function records(): void {
+  const first: Point = { x: 1, y: 2 };
+  const twin: Point = { x: 1, y: 2 };
+  const points: Point[] = [first, { x: 3, y: 4 }];
+
+  console.log(points.indexOf(twin), points.includes(twin));
+}
+
+function decimals(): void {
+  const values: decimal[] = [decimal("1.50"), decimal("2"), decimal("2.00")];
+
+  console.log(values.indexOf(decimal("1.5")), values.lastIndexOf(decimal("2")));
+  console.log(values.includes(decimal("3")), values.indexOf(decimal("-0")));
+}
+
+function nested(): void {
+  const row: int[] = [1, 2];
+  const rows: int[][] = [[3], [1, 2]];
+
+  console.log(rows.indexOf(row), rows.includes(row));
+}
+
+function main(): void {
+  doubles();
+  optionals();
+  records();
+  decimals();
+  nested();
+}
+
+main();

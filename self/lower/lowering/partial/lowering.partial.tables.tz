@@ -1,0 +1,101 @@
+import {
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kFlagType,
+  kForeverCount,
+  kIntType,
+  kPointerType,
+  kTableHead,
+} from "../const/lowering.const.tz";
+
+partial class Lowering {
+  private staticTable(
+    module: int,
+    decl: VarDeclarator,
+    tz: Type,
+  ): LLVMValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (!this.isRuntimeModule(module) || tz.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const item = this.values.types.store.itemOf(tz);
+    const cell = this.irType(item);
+    const init = tree.exprAt(decl.initId);
+    const isNumbers = this.isInteger(item) && cell != undefined;
+    if (!isNumbers || init == undefined || init.kind != ExprKind.ArrayLit) {
+      return undefined;
+    }
+
+    const values: LLVMValue[] = [];
+
+    for (const element of tree.elementsOf(init.elementsList)) {
+      const text = this.tableNumber(tree.exprOf(element.exprId));
+      if (text == undefined || element.spread || cell == undefined) {
+        return undefined;
+      }
+
+      values.push(this.ir.integer(cell, text));
+    }
+
+    const descriptor = this.descriptor(item);
+    if (descriptor == undefined || cell == undefined) {
+      return undefined;
+    }
+
+    return this.tableMade(cell, values, descriptor);
+  }
+
+  private tableMade(
+    cell: string,
+    values: Read<LLVMValue[]>,
+    descriptor: LLVMValue,
+  ): LLVMValue {
+    const count = `${values.length}`;
+    const cells = `[${count} x ${cell}]`;
+    const content = this.ir.constArray(cell, values);
+    const data = this.ir.global(
+      this.ir.uniqueName("tz.table."),
+      cells,
+      content,
+      true,
+    );
+    const head = this.ir.constStruct([
+      this.ir.hexInteger(kIntType, kForeverCount),
+      descriptor,
+      data,
+      this.ir.integer(kFlagType, count),
+      this.ir.integer(kFlagType, count),
+      this.ir.zero(kPointerType),
+    ]);
+    const name = this.ir.uniqueName("tz.table.head.");
+
+    return this.ir.global(name, kTableHead, head, false);
+  }
+
+  private readonly tableNumber(expr: Expr): string | undefined {
+    const tree = this.values.types.program.tree;
+
+    if (expr.kind == ExprKind.IntLit) {
+      return `${expr.value}`;
+    }
+    if (expr.kind != ExprKind.Unary || expr.op != UnaryOp.Neg) {
+      return undefined;
+    }
+
+    const inner = tree.exprOf(expr.operandId);
+    if (inner.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    return `-${inner.value}`;
+  }
+}

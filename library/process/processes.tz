@@ -1,0 +1,129 @@
+import { environmentValue, textOfUnits } from "tz:files";
+import {
+  Raw,
+  allocate,
+  bitsRaw,
+  cellsAt,
+  release,
+  unitAt,
+} from "tz:unsafe";
+import {
+  DebugBreak,
+  GetModuleFileNameW,
+  IsDebuggerPresent,
+} from "tz:win32/kernel32";
+import { __p___argc, __p___wargv, _configure_wide_argv } from "tz:win32/ucrt";
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer has the size the call is told",
+})
+export function execPath(): string {
+  let capacity = 260;
+
+  while (true) {
+    const cells = allocate<uint16>(capacity);
+    const none = bitsRaw(0);
+    const size = capacity.toUint32();
+    const length = GetModuleFileNameW(none, cells, size).toInt();
+
+    if (length < capacity) {
+      const path = textOfUnits(cells, length);
+
+      release(cells);
+
+      return path;
+    }
+
+    release(cells);
+    capacity = capacity * 2;
+  }
+
+  return "";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a C argument ends with a zero unit",
+})
+function argumentText(address: int): string {
+  const cells = cellsAt<uint16>(bitsRaw(address.toUint64()), 0);
+  let count = 0;
+
+  while (unitAt(cells, count) != 0) {
+    count += 1;
+  }
+
+  return textOfUnits(cells, count);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the C runtime keeps argc wide arguments in its table",
+})
+export function argumentsOf(): string[] {
+  _configure_wide_argv(1);
+
+  const count = unitAt(__p___argc(), 0);
+  const holder = __p___wargv();
+  const table = unitAt(holder, 0);
+  const program = execPath();
+  const items: string[] = [program, program];
+
+  if (table == 0) {
+    return items;
+  }
+
+  const vector = cellsAt<uint64>(bitsRaw(table.toUint64()), 0);
+
+  for (let index = 1; index < count; index++) {
+    const address = unitAt(vector, index);
+
+    items.push(argumentText(address));
+  }
+
+  return items;
+}
+
+export function homeFolder(): string {
+  const profile = environmentValue("USERPROFILE");
+  if (profile != undefined) {
+    return profile;
+  }
+
+  const drive = environmentValue("HOMEDRIVE") ?? "";
+  const path = environmentValue("HOMEPATH") ?? "";
+
+  return `${drive}${path}`;
+}
+
+function systemTemporary(): string {
+  const root = environmentValue("SystemRoot") ?? environmentValue("windir");
+  const base = root ?? "undefined";
+
+  return `${base}\\temp`;
+}
+
+export function temporaryFolder(): string {
+  const found = environmentValue("TEMP") ?? environmentValue("TMP");
+  let folder = found ?? systemTemporary();
+  const count = folder.length;
+
+  if (count > 1 && folder.endsWith("\\")) {
+    if (folder.charCodeAt(count - 2) != 58) {
+      folder = folder.slice(0, count - 1);
+    }
+  }
+
+  return folder;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the program stops only when a debugger is attached",
+})
+export function debuggerStopped(): void {
+  if (IsDebuggerPresent() != 0) {
+    DebugBreak();
+  }
+}

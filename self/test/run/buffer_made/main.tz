@@ -1,0 +1,42 @@
+function shown(label: string, bytes: Read<Buffer>): void {
+  console.log(label, bytes.length, bytes.toString("hex"));
+}
+
+function main(): void {
+  const empty = Buffer.alloc(0);
+  const zeros = Buffer.alloc(5);
+  const text = Buffer.from("héllo, мир 😀");
+  const wide = Buffer.from("héllo", "utf16le");
+  const latin = Buffer.from("héllo", "latin1");
+  const base = Buffer.from("aGVsbG8gd29ybGQ=", "base64");
+  const hex = Buffer.from("00ff10abz", "hex");
+
+  shown("empty", empty);
+  shown("zeros", zeros);
+  shown("text", text);
+  shown("wide", wide);
+  shown("latin", latin);
+  shown("base", base);
+  shown("hex", hex);
+
+  const middle = text.subarray(1, 6);
+  const tail = text.subarray(-4);
+  const none = text.subarray(8, 2);
+
+  shown("middle", middle);
+  shown("tail", tail);
+  shown("none", none);
+  shown("inner", middle.subarray(2));
+
+  const joined = Buffer.concat([zeros, latin, base]);
+  const cut = Buffer.concat([text, hex], 7);
+  const more = Buffer.from("00ff", "hex");
+  const padded = Buffer.concat([more], 6);
+
+  shown("joined", joined);
+  shown("cut", cut);
+  shown("padded", padded);
+  console.log(joined.toString("latin1").length, cut.toString());
+}
+
+main();

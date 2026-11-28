@@ -1,0 +1,91 @@
+function noMoreFiles(): uint32 {
+  return 18;
+}
+
+function fileNotFound(): uint32 {
+  return 2;
+}
+
+function listFailed(
+  failure: Own<FsFailure>,
+): Result<string[], ReadDirectoryError> {
+  return err(readDirectoryErrorOf(failure));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the find record has 592 bytes; the find handle is closed",
+})
+function listedNames(
+  native: Read<string>,
+): Result<string[], ReadDirectoryError> {
+  const shown = shownOf(native);
+  const wide = wideOf(native);
+  if (wide == undefined) {
+    return listFailed(codeFailure("ERR_INVALID_PATH", "scandir", shown));
+  }
+
+  const attributes = GetFileAttributesW(wide);
+  if (attributes == noAttributes()) {
+    const error = GetLastError();
+
+    return listFailed(windowsFailure(error, "scandir", shown, ""));
+  }
+  if ((attributes & folderAttribute()) == 0) {
+    return listFailed(codeFailure("ENOTDIR", "scandir", shown));
+  }
+
+  let pattern = `${native}\\*`;
+
+  if (native.endsWith("\\")) {
+    pattern = `${native}*`;
+  }
+
+  const search = wideOf(pattern);
+  if (search == undefined) {
+    return listFailed(codeFailure("ERR_INVALID_PATH", "scandir", shown));
+  }
+
+  const data = frameCells<uint8>(592);
+  const none = bitsRaw(0);
+  const find = FindFirstFileExW(search, 1, data, 0, none, 2);
+  if (rawBits(find) == badHandle()) {
+    const error = GetLastError();
+    if (error == fileNotFound() || error == noMoreFiles()) {
+      return ok([]);
+    }
+
+    return listFailed(windowsFailure(error, "scandir", shown, ""));
+  }
+
+  const names: string[] = [];
+  let isMore = true;
+
+  while (isMore) {
+    const name = foundName(data);
+
+    if (name != "." && name != "..") {
+      names.push(name);
+    }
+
+    isMore = FindNextFileW(find, data) != 0;
+  }
+
+  FindClose(find);
+
+  return ok(names);
+}
+
+export function readNames(
+  path: Read<string>,
+): Result<string[], ReadDirectoryError> {
+  if (path.includes("\0")) {
+    const failure = codeFailure("ERR_INVALID_PATH", "scandir", path);
+
+    return err(readDirectoryErrorOf(failure));
+  }
+
+  const native = toNamespacedPath(path);
+
+  return listedNames(native);
+}

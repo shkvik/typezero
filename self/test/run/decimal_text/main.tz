@@ -1,0 +1,120 @@
+function values(): decimal[] {
+  return [
+    0,
+    1,
+    -1,
+    0.5,
+    -0.25,
+    19.99,
+    123456.789,
+    -98765.4321,
+    1000000000,
+    12345678901234567890.123456789,
+    -98765432109876543210987654321,
+    0.000000000000000001,
+    0.00000012345,
+    3.14159265358979323846264338327950288,
+    1e30,
+    -1e-30,
+    999.995,
+    0.0005,
+    1234567890123456789012.5,
+  ];
+}
+
+type Mode =
+  | "up"
+  | "down"
+  | "ceil"
+  | "floor"
+  | "half-up"
+  | "half-down"
+  | "half-even"
+  | "half-ceil"
+  | "half-floor";
+
+function modes(): Mode[] {
+  return [
+    "up",
+    "down",
+    "ceil",
+    "floor",
+    "half-up",
+    "half-down",
+    "half-even",
+    "half-ceil",
+    "half-floor",
+  ];
+}
+
+function halves(): decimal[] {
+  return [
+    1.005,
+    -1.005,
+    2.5,
+    -2.5,
+    0.125,
+    -0.125,
+    999.995,
+    -0.0005,
+    0.000000000000000001,
+    9223372036854775.807,
+    -9223372036854775.808,
+    15,
+    -0.5,
+    0.05,
+  ];
+}
+
+function main(): void {
+  for (const value of halves()) {
+    const line: string[] = [];
+
+    for (const mode of modes()) {
+      for (let places = 0; places <= 3; places++) {
+        line.push(value.toFixed(places, mode));
+      }
+
+      line.push(value.toFixed(18, mode));
+      line.push(value.toFormat(1, mode));
+    }
+
+    console.log(value, line.join(" "));
+  }
+
+  const items = values();
+  let index = 0;
+
+  for (const value of items) {
+    const parts: string[] = [];
+
+    parts.push(value.toString());
+    parts.push(`${value}`);
+    parts.push(value.toFixed());
+    parts.push(value.toFixed(0));
+    parts.push(value.toFixed(2));
+    parts.push(value.toFixed(2, "down"));
+    parts.push(value.toFixed(5, "half-even"));
+    parts.push(value.toFixed(-2));
+    parts.push(value.toFormat());
+    parts.push(value.toFormat(2));
+    parts.push(value.toExponential());
+    parts.push(value.toExponential(0));
+    parts.push(value.toExponential(3, "up"));
+    parts.push(value.toPrecision());
+    parts.push(value.toPrecision(1));
+    parts.push(value.toPrecision(4));
+    parts.push(value.toPrecision(25, "floor"));
+    console.log(index, parts.join(" | "));
+    index += 1;
+  }
+
+  let grown: decimal = 1;
+
+  for (let round = 0; round < 30; round++) {
+    grown = grown * 7.5;
+    console.log(`${grown}`, grown.toFixed(3), grown.toPrecision(6));
+  }
+}
+
+main();

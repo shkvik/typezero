@@ -1,0 +1,27 @@
+ok status=0 pid>0=true
+  out="hi\r\n" err=""
+  output=3 first=<none>
+ok status=3 pid>0=true
+  out="" err=""
+  output=3 first=<none>
+ok status=0 pid>0=true
+  out="" err="err \r\n"
+  output=3 first=<none>
+ok status=-1073741819 pid>0=true
+  out="" err=""
+  output=3 first=<none>
+error SPAWN_TEXT_ERROR_PROGRAM_NOT_FOUND_IN_PATH ENOENT
+  could not run no-such-program-xyz: there is no such program in PATH; install it or give the full path
+error SPAWN_TEXT_ERROR_PROGRAM_FILE_NOT_FOUND ENOENT
+  could not run C:\no-such-folder-xyz\x.exe: there is no such file
+error SPAWN_TEXT_ERROR_BATCH_FILE_WITHOUT_SHELL EINVAL
+  could not run run.bat: it is a batch file; run it with execSync or pass { shell: true }
+error SPAWN_TEXT_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE
+  could not run a program: file has a zero character in it
+error SPAWN_TEXT_ERROR_ZERO_CHARACTER ERR_INVALID_ARG_VALUE
+  could not run cmd: args[1] has a zero character in it
+error SPAWN_TEXT_ERROR_EMPTY_NAME ERR_INVALID_ARG_VALUE
+  could not run a program: its name is empty
+ok status=0 pid>0=true
+  out="[a b]\n[]\n[q"x]\n[back\slash]\n[tail\]\n[q\"y]\n[t	ab]\n" err=""
+  output=3 first=<none>

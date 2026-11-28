@@ -11,16 +11,14 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kArrayIndexOf,
-  kArrayJoin,
   kArrayModule,
-  kArrayNew,
   kBooleanType,
   kFlagType,
   kIntType,
   kPointerType,
-  kStringType,
-  kVoidType,
+  kJoinComma,
+  kValuesModule,
+  kTextModule,
 } from "../const/lowering.const.tz";
 import {
   EachLoop,
@@ -197,7 +195,7 @@ partial class Lowering {
       { type: kIntType, value: zero, tz },
     ];
 
-    return this.runtimeValue(frame, kArrayNew, kPointerType, args);
+    return this.runtimeValue(frame, this.arrayMaking(), kPointerType, args);
   }
 
   private searched(
@@ -254,32 +252,31 @@ partial class Lowering {
 
     const slot = frame.made.slot(wanted.type, "search.value");
     const mode = this.searchMode(member.name);
+    const int = this.values.types.store.integer(64, false);
+    const modeValue = this.ir.integer(kIntType, `${mode}`);
+    const searchParts: IrValue[] = [
+      { type: kPointerType, value: array.value, tz: int },
+      { type: kPointerType, value: slot, tz: int },
+      { type: kIntType, value: modeValue, tz: int },
+    ];
+    const name = "indexOfValue";
+    const target: RuntimeTarget = { module: kValuesModule, name };
 
     frame.made.store(wanted.value, slot);
 
-    const searching = this.ir.declare(kArrayIndexOf, kFlagType, [
-      kPointerType,
-      kPointerType,
-      kIntType,
-      kFlagType,
-      kFlagType,
-    ]);
-    const found = frame.made.call(searching, [
-      array.value,
-      slot,
-      this.ir.zero(kIntType),
-      this.ir.zero(kFlagType),
-      this.ir.integer(kFlagType, `${mode}`),
-    ]);
+    const found = this.runtimeFunctionCall(frame, target, [], searchParts, loc);
 
     this.dropping(frame, wanted);
     this.dropping(frame, array);
 
+    if (found == undefined) {
+      return undefined;
+    }
     if (mode == 2) {
-      const zero = this.ir.zero(kFlagType);
+      const zero = this.ir.zero(kIntType);
       const value = frame.made.integerCompare(
         IrIntPredicate.NotEqual,
-        found,
+        found.value,
         zero,
       );
       const tz = this.values.types.store.plain(TypeKind.Boolean);
@@ -287,10 +284,7 @@ partial class Lowering {
       return { type: kBooleanType, value, tz };
     }
 
-    const value = frame.made.cast(IrOpcode.SExt, found, kIntType);
-    const tz = this.values.types.store.integer(64, false);
-
-    return { type: kIntType, value, tz };
+    return { type: kIntType, value: found.value, tz: int };
   }
 
   private isPlainElement(item: Type): boolean {
@@ -338,28 +332,36 @@ partial class Lowering {
     if (separator == undefined) {
       return undefined;
     }
+    if (this.isTextArray(array.tz)) {
+      return this.textsJoined(frame, call, array, separator);
+    }
 
-    const out = frame.made.slot(kStringType, "join.out");
-    const joining = this.ir.declare(kArrayJoin, kVoidType, [
-      kPointerType,
-      kPointerType,
-      kPointerType,
-      kIntType,
-      kFlagType,
-    ]);
-    const text = frame.made.extract(separator.value, 0);
-    const meta = frame.made.extract(separator.value, 1);
-    const hasSeparator = this.ir.integer(kFlagType, `${separator.given}`);
+    return this.valuesJoined(frame, call, array, separator);
+  }
 
-    frame.made.call(joining, [out, array.value, text, meta, hasSeparator]);
+  private valuesJoined(
+    frame: Frame,
+    call: CallExpr,
+    array: IrValue,
+    separator: Read<GivenText>,
+  ): IrValue | undefined {
+    let cut = separator.text;
 
-    const value = frame.made.load(kStringType, out);
-    const tz = this.values.types.store.plain(TypeKind.String);
+    if (separator.given == 0) {
+      cut = this.stringValue(kJoinComma);
+    }
+
+    const tz = this.values.types.store.integer(64, false);
+    const raw: IrValue = { type: kPointerType, value: array.value, tz };
+    const name = "joinedValues";
+    const target: RuntimeTarget = { module: kValuesModule, name };
+    const args = [raw, cut];
+    const joined = this.runtimeFunctionCall(frame, target, [], args, call.loc);
 
     this.dropping(frame, separator.text);
     this.dropping(frame, array);
 
-    return { type: kStringType, value, tz, owned: true };
+    return joined;
   }
 
   private optionalText(
@@ -388,5 +390,33 @@ partial class Lowering {
     }
 
     return { value: text.value, text, given: 1 };
+  }
+
+  private isTextArray(type: Type): boolean {
+    const item = this.itemOf(type) ?? type;
+
+    return type.kind == TypeKind.Array && this.isString(item);
+  }
+
+  private textsJoined(
+    frame: Frame,
+    call: CallExpr,
+    array: IrValue,
+    separator: Read<GivenText>,
+  ): IrValue | undefined {
+    let cut = separator.text;
+
+    if (separator.given == 0) {
+      cut = this.stringValue(kJoinComma);
+    }
+
+    const target: RuntimeTarget = { module: kTextModule, name: "join" };
+    const args = [array, cut];
+    const joined = this.runtimeFunctionCall(frame, target, [], args, call.loc);
+
+    this.dropping(frame, separator.text);
+    this.dropping(frame, array);
+
+    return joined;
   }
 }

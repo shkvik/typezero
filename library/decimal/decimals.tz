@@ -1,0 +1,756 @@
+import { panic } from "tz:intrinsics";
+import {
+  Raw,
+  allocate,
+  arrayCells,
+  cellsAt,
+  decimalCoef,
+  decimalMeta,
+  decimalOf,
+  bitsRaw,
+  copyCells,
+  frameCells,
+  putUnit,
+  rawBits,
+  reallocate,
+  release,
+  textCells,
+  textClosed,
+  textRoom,
+  threadState,
+  unitAt,
+  viewAt,
+} from "tz:unsafe";
+import { DecimalHead, ThreadHead } from "tz:core";
+import { doubleText } from "tz:text";
+import { log10, strtod } from "tz:win32/ucrt";
+
+function heapBit(): uint64 {
+  return 9223372036854775808;
+}
+
+function longBit(): uint64 {
+  return 4611686018427387904;
+}
+
+function scaleBits(): uint64 {
+  return 4294967295;
+}
+
+function scaleMost(): int {
+  return 2147483647;
+}
+
+function exponentMost(): int {
+  return 10000000;
+}
+
+function exponentLeast(): int {
+  return -10000000;
+}
+
+function intMost(): int {
+  return 9223372036854775807;
+}
+
+function intLeast(): int {
+  return -9223372036854775807 - 1;
+}
+
+function isShortMeta(meta: uint64): boolean {
+  return (meta & longBit()) == 0;
+}
+
+function scaleOf(meta: uint64): int {
+  return (meta & scaleBits()).toInt();
+}
+
+function magnitudeOf(value: int): uint64 {
+  if (value >= 0) {
+    return value.toUint64();
+  }
+  if (value == intLeast()) {
+    return heapBit();
+  }
+
+  return (0 - value).toUint64();
+}
+
+function overflowed(): never {
+  panic("Maximum decimal size exceeded");
+}
+
+class Decimal {
+  public natural: Natural;
+  public exponent: int;
+  public isNegative: boolean;
+
+  public constructor(
+    natural: Own<Natural>,
+    exponent: int,
+    isNegative: boolean,
+  ) {
+    this.natural = natural;
+    this.exponent = exponent;
+    this.isNegative = isNegative;
+  }
+
+  public readonly isZero(): boolean {
+    return this.natural.count == 0;
+  }
+}
+
+function normalized(value: Mut<Decimal>): void {
+  if (value.natural.count == 0) {
+    value.exponent = 0;
+    value.isNegative = false;
+
+    return;
+  }
+
+  const zeros = naturalTrailingZeros(value.natural);
+
+  if (zeros != 0) {
+    naturalDropInPlace(value.natural, zeros);
+    value.exponent += zeros;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a long decimal points at its object; count limbs follow the head",
+})
+function loaded(given: Read<decimal>): Decimal {
+  const coef = decimalCoef(given);
+  const meta = decimalMeta(given);
+
+  if (isShortMeta(meta)) {
+    const natural = naturalOf(magnitudeOf(coef));
+    const isNegative = coef < 0 && natural.count != 0;
+    const made = new Decimal(natural, 0 - scaleOf(meta), isNegative);
+
+    normalized(made);
+
+    return made;
+  }
+
+  const object = bitsRaw(coef.toUint64());
+  const head = viewAt<DecimalHead>(object, 0);
+  const count = head.used.toInt();
+  const limbs = cellsAt<uint32>(object, 24);
+  const natural = new Natural(count);
+
+  for (let index = 0; index < count; index++) {
+    natural.put(index, unitAt(limbs, index));
+  }
+
+  natural.count = count;
+
+  const made = new Decimal(natural, head.exponent, head.negative != 0);
+
+  normalized(made);
+
+  return made;
+}
+
+function topOf(value: Read<Decimal>): int {
+  if (value.natural.count == 0) {
+    return 0;
+  }
+
+  return value.exponent + naturalDigits(value.natural) - 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has the head and count limbs",
+})
+function stored(value: Decimal): decimal {
+  normalized(value);
+
+  if (value.natural.count == 0) {
+    return decimalOf(0, 0);
+  }
+
+  const top = topOf(value);
+  if (top > exponentMost()) {
+    overflowed();
+  }
+  if (top < exponentLeast()) {
+    return decimalOf(0, 0);
+  }
+
+  const digits = naturalDigits(value.natural);
+  if (digits <= 19) {
+    const short = shortStored(value);
+    if (short != undefined) {
+      return short;
+    }
+  }
+
+  const count = value.natural.count;
+  const object = roomOfLimbs(count);
+  const head = viewAt<DecimalHead>(object, 0);
+  const limbs = cellsAt<uint32>(object, 24);
+
+  head.exponent = value.exponent;
+  head.negative = 0;
+
+  if (value.isNegative) {
+    head.negative = 1;
+  }
+
+  head.used = count.toUint32();
+
+  for (let index = 0; index < count; index++) {
+    putUnit(limbs, index, value.natural.at(index));
+  }
+
+  const coef = rawBits(object).toInt();
+
+  return decimalOf(coef, heapBit() | longBit());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+function shortStored(value: Read<Decimal>): decimal | undefined {
+  let whole: uint64 = 0;
+  const base = limbBase().toUint64();
+
+  for (let index = value.natural.count - 1; index >= 0; index--) {
+    whole = whole * base + value.natural.at(index).toUint64();
+  }
+
+  let limit: uint64 = 9223372036854775807;
+
+  if (value.isNegative) {
+    limit = heapBit();
+  }
+
+  const exponent = value.exponent;
+
+  if (exponent > 0 && exponent < 20) {
+    const factor = tenPowerUnsigned(exponent);
+    const most: uint64 = 18446744073709551615;
+
+    if (whole <= most / factor) {
+      const scaled = whole * factor;
+
+      if (scaled <= limit) {
+        return decimalOf(signedOf(scaled, value.isNegative), 0);
+      }
+    }
+  }
+  if (exponent <= 0 && 0 - exponent <= scaleMost() && whole <= limit) {
+    const scale = (0 - exponent).toUint64();
+
+    return decimalOf(signedOf(whole, value.isNegative), scale);
+  }
+
+  return undefined;
+}
+
+function tenPowerUnsigned(exponent: int): uint64 {
+  if (exponent == 19) {
+    return 10000000000000000000;
+  }
+
+  return tenPowerOf(exponent).toUint64();
+}
+
+function signedOf(magnitude: uint64, isNegative: boolean): int {
+  if (!isNegative) {
+    return magnitude.toInt();
+  }
+  if (magnitude == heapBit()) {
+    return intLeast();
+  }
+
+  return 0 - magnitude.toInt();
+}
+
+class Aligned {
+  public first: Natural;
+  public second: Natural;
+  public exponent: int;
+
+  public constructor(first: Own<Natural>, second: Own<Natural>, exponent: int) {
+    this.first = first;
+    this.second = second;
+    this.exponent = exponent;
+  }
+}
+
+function alignedOf(first: Read<Decimal>, second: Read<Decimal>): Aligned {
+  let exponent = first.exponent;
+
+  if (second.exponent < exponent) {
+    exponent = second.exponent;
+  }
+
+  const left = naturalShifted(first.natural, first.exponent - exponent);
+  const right = naturalShifted(second.natural, second.exponent - exponent);
+
+  return new Aligned(left, right, exponent);
+}
+
+function magnitudeCompare(first: Read<Decimal>, second: Read<Decimal>): int {
+  if (first.natural.count == 0 || second.natural.count == 0) {
+    if (first.natural.count != 0) {
+      return 1;
+    }
+    if (second.natural.count != 0) {
+      return -1;
+    }
+
+    return 0;
+  }
+
+  const firstTop = topOf(first);
+  const secondTop = topOf(second);
+  if (firstTop != secondTop) {
+    if (firstTop < secondTop) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  const aligned = alignedOf(first, second);
+
+  return naturalCompare(aligned.first, aligned.second);
+}
+
+function signOf(value: Read<Decimal>): int {
+  if (value.natural.count == 0) {
+    return 0;
+  }
+  if (value.isNegative) {
+    return -1;
+  }
+
+  return 1;
+}
+
+function decimalCompare(first: Read<Decimal>, second: Read<Decimal>): int {
+  const firstSign = signOf(first);
+  const secondSign = signOf(second);
+  if (firstSign != secondSign) {
+    if (firstSign < secondSign) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  const order = magnitudeCompare(first, second);
+  if (firstSign < 0) {
+    return 0 - order;
+  }
+
+  return order;
+}
+
+function decimalCopy(value: Read<Decimal>): Decimal {
+  const natural = naturalCopy(value.natural);
+
+  return new Decimal(natural, value.exponent, value.isNegative);
+}
+
+function decimalSum(
+  first: Read<Decimal>,
+  second: Read<Decimal>,
+  isNegated: boolean,
+): Decimal {
+  let isSecondNegative = false;
+
+  if (!second.isZero()) {
+    isSecondNegative = second.isNegative != isNegated;
+  }
+  if (first.isZero()) {
+    const made = decimalCopy(second);
+
+    made.isNegative = isSecondNegative;
+
+    return made;
+  }
+  if (second.isZero()) {
+    return decimalCopy(first);
+  }
+
+  const shift = first.exponent - second.exponent;
+  if (shift > 0) {
+    const shifted = naturalShifted(first.natural, shift);
+
+    const exponent = second.exponent;
+
+    const negative = isSecondNegative;
+
+    return alignedSum(shifted, second.natural, exponent, first, negative);
+  }
+  if (shift < 0) {
+    const shifted = naturalShifted(second.natural, 0 - shift);
+
+    const exponent = first.exponent;
+
+    const negative = isSecondNegative;
+
+    return alignedSum(first.natural, shifted, exponent, first, negative);
+  }
+
+  return alignedSum(
+    first.natural,
+    second.natural,
+    first.exponent,
+    first,
+    isSecondNegative,
+  );
+}
+
+function alignedSum(
+  left: Read<Natural>,
+  right: Read<Natural>,
+  exponent: int,
+  first: Read<Decimal>,
+  isSecondNegative: boolean,
+): Decimal {
+  if (first.isNegative == isSecondNegative) {
+    const sum = naturalSum(left, right);
+
+    return new Decimal(sum, exponent, first.isNegative);
+  }
+
+  const order = naturalCompare(left, right);
+  if (order == 0) {
+    return new Decimal(new Natural(0), exponent, false);
+  }
+  if (order > 0) {
+    const rest = naturalDifference(left, right);
+
+    return new Decimal(rest, exponent, first.isNegative);
+  }
+
+  const rest = naturalDifference(right, left);
+
+  return new Decimal(rest, exponent, isSecondNegative);
+}
+
+function decimalProduct(first: Read<Decimal>, second: Read<Decimal>): Decimal {
+  const natural = naturalProduct(first.natural, second.natural);
+  const exponent = first.exponent + second.exponent;
+  let isNegative = false;
+
+  if (natural.count != 0) {
+    isNegative = first.isNegative != second.isNegative;
+  }
+
+  return new Decimal(natural, exponent, isNegative);
+}
+
+function isSumSafe(first: int, second: int): boolean {
+  if (second > 0) {
+    return first <= intMost() - second;
+  }
+  if (second < 0) {
+    return first >= intLeast() - second;
+  }
+
+  return true;
+}
+
+function isProductSafe(first: int, second: int): boolean {
+  if (first == 0 || second == 0) {
+    return true;
+  }
+
+  const firstSize = magnitudeOf(first);
+  const secondSize = magnitudeOf(second);
+  let limit: uint64 = 9223372036854775807;
+
+  if ((first < 0) != (second < 0)) {
+    limit = heapBit();
+  }
+
+  return firstSize <= limit / secondSize;
+}
+
+function scaledUp(value: int, places: int): int | undefined {
+  if (places >= 19) {
+    if (value == 0) {
+      return 0;
+    }
+
+    return undefined;
+  }
+
+  const factor = tenPowerOf(places);
+  if (!isProductSafe(value, factor)) {
+    return undefined;
+  }
+
+  return value * factor;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+function slowSum(
+  first: Read<decimal>,
+  second: Read<decimal>,
+  isNegated: boolean,
+): decimal {
+  const firstMeta = decimalMeta(first);
+  const secondMeta = decimalMeta(second);
+
+  if (isShortMeta(firstMeta) && isShortMeta(secondMeta)) {
+    const firstScale = scaleOf(firstMeta);
+    const secondScale = scaleOf(secondMeta);
+    let left: int | undefined = decimalCoef(first);
+    let right: int | undefined = decimalCoef(second);
+    let scale = secondScale;
+
+    if (firstScale < secondScale) {
+      left = scaledUp(decimalCoef(first), secondScale - firstScale);
+    } else {
+      right = scaledUp(decimalCoef(second), firstScale - secondScale);
+      scale = firstScale;
+    }
+    if (left != undefined && right != undefined && isNegated) {
+      if (right == intLeast()) {
+        right = undefined;
+      } else {
+        right = 0 - right;
+      }
+    }
+    if (left != undefined && right != undefined && isSumSafe(left, right)) {
+      return decimalOf(left + right, scale.toUint64());
+    }
+  }
+
+  const x = loaded(first);
+  const y = loaded(second);
+
+  return stored(decimalSum(x, y, isNegated));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function add(first: Read<decimal>, second: Read<decimal>): decimal {
+  const firstCoef = decimalCoef(first);
+  const secondCoef = decimalCoef(second);
+  const meta = decimalMeta(first);
+  const isSame = meta == decimalMeta(second) && isShortMeta(meta);
+  if (isSame && isSumSafe(firstCoef, secondCoef)) {
+    return decimalOf(firstCoef + secondCoef, meta);
+  }
+
+  return slowSum(first, second, false);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function subtract(first: Read<decimal>, second: Read<decimal>): decimal {
+  const firstCoef = decimalCoef(first);
+  const secondCoef = decimalCoef(second);
+  const meta = decimalMeta(first);
+  const isSame = meta == decimalMeta(second) && isShortMeta(meta);
+  if (isSame && secondCoef != intLeast()) {
+    const negated = 0 - secondCoef;
+
+    if (isSumSafe(firstCoef, negated)) {
+      return decimalOf(firstCoef - secondCoef, meta);
+    }
+  }
+  if (isSame && secondCoef == intLeast() && firstCoef < 0) {
+    return decimalOf(firstCoef - secondCoef, meta);
+  }
+
+  return slowSum(first, second, true);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function multiply(first: Read<decimal>, second: Read<decimal>): decimal {
+  const firstMeta = decimalMeta(first);
+  const secondMeta = decimalMeta(second);
+  const firstCoef = decimalCoef(first);
+  const secondCoef = decimalCoef(second);
+  const scale = firstMeta + secondMeta;
+  const isShort = isShortMeta(firstMeta | secondMeta);
+  if (isShort && scale <= scaleMost().toUint64()) {
+    if (isProductSafe(firstCoef, secondCoef)) {
+      return decimalOf(firstCoef * secondCoef, scale);
+    }
+  }
+
+  const x = loaded(first);
+  const y = loaded(second);
+
+  return stored(decimalProduct(x, y));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function negate(given: Read<decimal>): decimal {
+  const coef = decimalCoef(given);
+  const meta = decimalMeta(given);
+  if (isShortMeta(meta) && coef != intLeast()) {
+    return decimalOf(0 - coef, meta);
+  }
+
+  const value = loaded(given);
+
+  value.isNegative = value.natural.count != 0 && !value.isNegative;
+
+  return stored(value);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a long decimal points at its object",
+})
+export function absolute(given: Read<decimal>): decimal {
+  const coef = decimalCoef(given);
+  const meta = decimalMeta(given);
+  if (isShortMeta(meta) && coef >= 0) {
+    return given;
+  }
+  if (!isShortMeta(meta)) {
+    const head = viewAt<DecimalHead>(bitsRaw(coef.toUint64()), 0);
+
+    if (head.negative == 0) {
+      return given;
+    }
+  }
+
+  return negate(given);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+function slowCompare(first: Read<decimal>, second: Read<decimal>): int {
+  const firstMeta = decimalMeta(first);
+  const secondMeta = decimalMeta(second);
+  const firstCoef = decimalCoef(first);
+  const secondCoef = decimalCoef(second);
+
+  if (isShortMeta(firstMeta) && isShortMeta(secondMeta)) {
+    const firstScale = scaleOf(firstMeta);
+    const secondScale = scaleOf(secondMeta);
+    let left = firstCoef;
+    let right = secondCoef;
+
+    if (firstScale < secondScale) {
+      const up = scaledUp(firstCoef, secondScale - firstScale);
+
+      if (up == undefined) {
+        if (firstCoef < 0) {
+          return -1;
+        }
+
+        return 1;
+      }
+
+      left = up;
+    }
+    if (secondScale < firstScale) {
+      const up = scaledUp(secondCoef, firstScale - secondScale);
+
+      if (up == undefined) {
+        if (secondCoef < 0) {
+          return 1;
+        }
+
+        return -1;
+      }
+
+      right = up;
+    }
+
+    return orderOf(left, right);
+  }
+
+  const x = loaded(first);
+  const y = loaded(second);
+
+  return decimalCompare(x, y);
+}
+
+function orderOf(first: int, second: int): int {
+  if (first > second) {
+    return 1;
+  }
+  if (first < second) {
+    return -1;
+  }
+
+  return 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function compare(first: Read<decimal>, second: Read<decimal>): int {
+  const meta = decimalMeta(first);
+  if (meta == decimalMeta(second) && isShortMeta(meta)) {
+    return orderOf(decimalCoef(first), decimalCoef(second));
+  }
+
+  return slowCompare(first, second);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function equals(first: Read<decimal>, second: Read<decimal>): boolean {
+  const meta = decimalMeta(first);
+  if (meta == decimalMeta(second) && isShortMeta(meta)) {
+    return decimalCoef(first) == decimalCoef(second);
+  }
+
+  return slowCompare(first, second) == 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the object has the 24 bytes of DecimalHead and count limbs",
+})
+function roomOfLimbs(count: int): Raw<uint8> {
+  const object = allocate<uint8>(24 + count * 4);
+  const head = viewAt<DecimalHead>(object, 0);
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  head.count = 1;
+  head.exponent = 0;
+  head.negative = 0;
+  head.used = count.toUint32();
+  thread.liveDecimals += 1;
+
+  return object;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "no one counts the object any more",
+})
+export function decimalFreed(object: Raw<uint8>): void {
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  thread.liveDecimals -= 1;
+  release(object);
+}

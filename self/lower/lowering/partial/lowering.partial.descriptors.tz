@@ -22,7 +22,7 @@ partial class Lowering {
       return known;
     }
 
-    if (this.isHandleType(plain)) {
+    if (this.isHandleType(plain) || this.isFixed(plain)) {
       return this.handleDescriptor(plain);
     }
     if (this.isInPlace(plain)) {

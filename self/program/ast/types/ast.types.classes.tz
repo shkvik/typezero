@@ -91,6 +91,7 @@ export type ClassDecl = {
   readonly isAbstract: boolean;
   readonly isPartial: boolean;
   readonly isInPlace: boolean;
+  readonly isCLayout: boolean;
   readonly baseId?: int;
   readonly baseExprId?: int;
   readonly baseArgsList: AstList;

@@ -1,0 +1,13 @@
+[] []
+[ABC XYZ 123] [abc xyz 123]
+[HELLO, WORLD! A LONG ENOUGH LINE TO BE A BUFFER] [hello, world! a long enough line to be a buffer]
+[ПРИВЕТ, МИР: ЁЛКА ЁЖ] [привет, мир: ёлка ёж]
+[STRASSE SS FI ʼN] [straße ß ﬁ ŉ]
+[ΟΔΥΣΣΕΥΣ ΣΑ Σ ΑΣ.] [οδυσσευς σα σ ας.]
+[İSTANBUL I I] [i̇stanbul ı i]
+[Ÿ Μ À É Ø Þ] [ÿ µ à é ø þ]
+[EMOJI 😀 𐐀𐐀 OK] [emoji 😀 𐐨𐐨 ok]
+[MIXED CASE GLUED TOGETHER] [mixed case glued together]
+[ABC] [abc]
+[ABC] [abc]
+true äöü ÄÖÜ

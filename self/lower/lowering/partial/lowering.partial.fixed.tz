@@ -1,0 +1,229 @@
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kFfiModule,
+  kFixedName,
+  kIntType,
+  kPointerType,
+  kRawName,
+  kUnsafeModule,
+} from "../const/lowering.const.tz";
+import { FixedParts, Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private readonly isFixed(type: Type): boolean {
+    if (type.kind != TypeKind.Instance || type.name != kFixedName) {
+      return false;
+    }
+
+    const opened = this.values.types.program.modules[type.module];
+
+    return opened != undefined && opened.name == kFfiModule;
+  }
+
+  private readonly isRawCells(type: Type): boolean {
+    if (type.kind != TypeKind.Instance || type.name != kRawName) {
+      return false;
+    }
+
+    const opened = this.values.types.program.modules[type.module];
+
+    return opened != undefined && opened.name == kUnsafeModule;
+  }
+
+  private rawNone(type: Type): IrValue {
+    return { type: kPointerType, value: this.ir.zero(kPointerType), tz: type };
+  }
+
+  private fixedParts(type: Type): FixedParts | undefined {
+    if (!this.isFixed(type)) {
+      return undefined;
+    }
+
+    const args = this.values.types.store.argsOf(type);
+    const item = this.boundOrNone(args[0]);
+    const counted = args[1];
+    if (item == undefined || counted == undefined) {
+      return undefined;
+    }
+    if (counted.kind != TypeKind.Literal) {
+      return undefined;
+    }
+
+    const count = parseInt(counted.text).unwrapOr(-1);
+    const cell = this.irType(item);
+    if (count < 0 || cell == undefined) {
+      return undefined;
+    }
+
+    return { item, count, cell };
+  }
+
+  private fixedIrType(type: Type): string | undefined {
+    const parts = this.fixedParts(type);
+    if (parts == undefined) {
+      return undefined;
+    }
+
+    return `[${parts.count} x ${parts.cell}]`;
+  }
+
+  private fixedSize(type: Type): int {
+    const parts = this.fixedParts(type);
+    if (parts == undefined) {
+      return 8;
+    }
+
+    return parts.count * this.sizeOf(parts.item);
+  }
+
+  private fixedAlign(type: Type): int {
+    const parts = this.fixedParts(type);
+    if (parts == undefined) {
+      return 8;
+    }
+
+    return this.alignOf(parts.item);
+  }
+
+  private fixedMade(type: Type): IrValue | undefined {
+    const ir = this.fixedIrType(type);
+    if (ir == undefined) {
+      return undefined;
+    }
+
+    return { type: ir, value: this.ir.zero(ir), tz: type, owned: true };
+  }
+
+  private fixedCall(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const parts = this.fixedParts(object);
+    const address = this.recordPlace(frame, tree.exprOf(member.objectId));
+    if (parts == undefined || address == undefined) {
+      this.notLowered(frame.module, call.loc, "a call on these cells");
+
+      return undefined;
+    }
+
+    const int = this.values.types.store.integer(64, false);
+    const count = this.ir.integer(kIntType, `${parts.count}`);
+    if (member.name == "length") {
+      return { type: kIntType, value: count, tz: int };
+    }
+
+    const index = this.intArgument(frame, call, 0);
+    if (index == undefined) {
+      return undefined;
+    }
+
+    const isInside = frame.made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      index,
+      count,
+    );
+    const cell = frame.made.element(parts.cell, address, index);
+    if (member.name == "set") {
+      return this.fixedSet(frame, call, parts, isInside, cell);
+    }
+    if (member.name == "at") {
+      return this.fixedAt(frame, call, parts, isInside, cell);
+    }
+
+    this.notLowered(frame.module, call.loc, "this call on cells");
+
+    return undefined;
+  }
+
+  private fixedAt(
+    frame: Frame,
+    call: CallExpr,
+    parts: Read<FixedParts>,
+    isInside: LLVMValue,
+    cell: LLVMValue,
+  ): IrValue | undefined {
+    const empty = this.values.types.store.plain(TypeKind.Undefined);
+    const result = this.values.types.store.unionOf([parts.item, empty]);
+    const type = this.irType(result);
+    if (type == undefined) {
+      this.notLowered(frame.module, call.loc, "a cell of this type");
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const before = made.currentBlock();
+    const read = made.block("cells.read");
+    const end = made.block("cells.end");
+
+    made.conditionalBranch(isInside, read, end);
+    made.open(read);
+
+    const loaded = made.load(parts.cell, cell);
+    const found: IrValue = { type: parts.cell, value: loaded, tz: parts.item };
+    const placed = this.somewhere(frame, found, result);
+    const readEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    const none = this.ir.zero(type);
+    const value = made.phi(type, [none, placed.value], [before, readEnd]);
+
+    return { type, value, tz: result };
+  }
+
+  private fixedSet(
+    frame: Frame,
+    call: CallExpr,
+    parts: Read<FixedParts>,
+    isInside: LLVMValue,
+    cell: LLVMValue,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[1];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.wantedValue(frame, expr, parts.item);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const value = this.converted(frame, given, parts.item, expr.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const write = made.block("cells.write");
+    const end = made.block("cells.done");
+
+    made.conditionalBranch(isInside, write, end);
+    made.open(write);
+    made.store(value.value, cell);
+    made.branch(end);
+    made.open(end);
+
+    const tz = this.values.types.store.plain(TypeKind.Boolean);
+
+    return { type: kBooleanType, value: isInside, tz };
+  }
+}

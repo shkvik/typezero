@@ -16,7 +16,9 @@ import {
   kFlagType,
   kIntType,
   kLayoutHead,
+  kCountsModule,
   kObjectFree,
+  kObjectFreed,
   kTupleFlag,
   kPointerType,
   kVoidType,
@@ -131,7 +133,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const placed = this.placedFields(shape.fields, 0, -2);
+    const isC = this.values.isCLayoutClass(type);
+    const placed = this.placedFields(shape.fields, 0, -2, isC);
     if (placed == undefined || placed.length == 0) {
       return undefined;
     }
@@ -140,12 +143,16 @@ partial class Lowering {
     const struct = `{ ${types.join(", ")} }`;
     const last = placed[placed.length - 1];
     let end: int = 0;
+    let align: int = 8;
 
     if (last != undefined) {
       end = last.offset + this.sizeOf(last.type);
     }
+    if (isC) {
+      align = this.fieldsAlign(placed);
+    }
 
-    const size = this.aligned(end, 8);
+    const size = this.aligned(end, align);
     const classId = this.nextClassId();
     const drop = this.ir.zero(kPointerType);
     const descriptor = this.layoutDescriptor(shape, drop, placed, classId, []);
@@ -345,12 +352,12 @@ partial class Lowering {
     base: Read<ClassLayout | undefined>,
   ): LayoutField[] | undefined {
     if (base == undefined) {
-      return this.placedFields(fields, 16, 0);
+      return this.placedFields(fields, 16, 0, false);
     }
 
     const baseFields = this.fieldsOf(base);
     const end = this.structSize(baseFields);
-    const own = this.placedFields(fields, end, baseFields.length);
+    const own = this.placedFields(fields, end, baseFields.length, false);
     if (own == undefined) {
       return undefined;
     }
@@ -370,10 +377,13 @@ partial class Lowering {
     fields: Read<InstanceField[]>,
     start: int,
     first: int,
+    isOrdered: boolean,
   ): LayoutField[] | undefined {
     const order = fields.slice();
 
-    order.sort((one, other) => this.fieldOrder(one, other));
+    if (!isOrdered) {
+      order.sort((one, other) => this.fieldOrder(one, other));
+    }
 
     const placed: LayoutField[] = [];
     let offset: int = start;
@@ -403,6 +413,19 @@ partial class Lowering {
     }
 
     return placed;
+  }
+
+  private fieldsAlign(placed: Read<LayoutField[]>): int {
+    let align: int = 1;
+
+    for (const field of placed) {
+      const own = this.alignOf(field.type);
+      if (own > align) {
+        align = own;
+      }
+    }
+
+    return align;
   }
 
   private fieldOrder(first: InstanceField, second: InstanceField): int {
@@ -491,7 +514,12 @@ partial class Lowering {
       held.push({ type: field.ir, value, tz: field.type, owned: true });
     }
 
-    const freeing = this.ir.declare(kObjectFree, kVoidType, [kPointerType]);
+    const freeName = this.runtimeHelperName(
+      kCountsModule,
+      kObjectFreed,
+      kObjectFree,
+    );
+    const freeing = this.ir.declare(freeName, kVoidType, [kPointerType]);
 
     made.call(freeing, [object]);
 

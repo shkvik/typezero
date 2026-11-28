@@ -26,6 +26,7 @@ import {
   kPushName,
   kStrictGlobals,
   kTextStatics,
+  kSystemModulePrefix,
   kUnsafeModuleName,
 } from "../../const/expression-types.const.tz";
 import { DoorState } from "../../../../types/type-resolver/types/type-resolver.types.tz";
@@ -222,8 +223,12 @@ partial class ExpressionTypes {
     if (type.kind != TypeKind.Function) {
       return this.types.store.plain(TypeKind.Error);
     }
-    if (this.types.program.modules[target.module]?.name == kUnsafeModuleName) {
-      this.unsafeCallCheck(callee, module);
+    const owner = this.types.program.modules[target.module]?.name ?? "";
+    if (owner == kUnsafeModuleName) {
+      this.unsafeCallCheck(callee, module, false);
+    }
+    if (owner.startsWith(kSystemModulePrefix)) {
+      this.unsafeCallCheck(callee, module, true);
     }
     const typeParams = tree.typeParamsOf(fn.typeParamsList);
     if (typeParams.length > 0) {

@@ -1,0 +1,272 @@
+
+function signedOf(value: int): int {
+  if (value >= 2147483648) {
+    return value - 4294967296;
+  }
+
+  return value;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the handle list has three places",
+})
+function inheritedOf(run: Read<ChildRun>, handles: Raw<uint64>): int {
+  let count = 0;
+
+  for (let index = 0; index < 3; index++) {
+    const bits = rawBits(run.clientAt(index));
+
+    if (bits != invalidHandle()) {
+      let isSeen = false;
+
+      for (let other = 0; other < count; other++) {
+        if (peekAt(handles, other) == bits) {
+          isSeen = true;
+        }
+      }
+      if (!isSeen) {
+        putAt(handles, count, bits);
+        count += 1;
+      }
+    }
+  }
+
+  return count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the list has the size the first call asked for",
+})
+function attributesMade(
+  list: Raw<uint8>,
+  room: int,
+  handles: Raw<uint64>,
+  count: int,
+): uint32 {
+  const none = bitsRaw(0);
+  const size = frameCells<uint64>(1);
+
+  putUnit(size, 0, room);
+
+  if (InitializeProcThreadAttributeList(list, 1, 0, size) == 0) {
+    return GetLastError();
+  }
+
+  const bytes = (count * 8).toUint64();
+  const updated = UpdateProcThreadAttribute(
+    list,
+    0,
+    131074,
+    handles,
+    bytes,
+    none,
+    none,
+  );
+
+  if (updated == 0) {
+    return GetLastError();
+  }
+
+  return 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the size cell is written by the system",
+})
+function attributesSize(): int {
+  const none = bitsRaw(0);
+  const size = frameCells<uint64>(1);
+
+  putUnit(size, 0, 0);
+  InitializeProcThreadAttributeList(none, 1, 0, size);
+
+  return unitAt(size, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the job handle is made once and kept for the whole program",
+})
+function jobJoined(process: Raw<uint8>): void {
+  if (!ChildShared.isJobTried) {
+    ChildShared.isJobTried = true;
+    ChildShared.jobBits = childJobMade();
+  }
+  if (ChildShared.jobBits != 0) {
+    AssignProcessToJobObject(bitsRaw(ChildShared.jobBits), process);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "every text given to the system ends with a zero",
+})
+function processMade(
+  run: Read<ChildRun>,
+  parts: Read<ChildStart>,
+  info: ProcessInformation,
+): uint32 {
+  const none = bitsRaw(0);
+  const startup = new StartupInfo();
+  let flags: uint32 = 1024;
+
+  startup.size = 104;
+
+  if (parts.hasAttributes) {
+    startup.size = 112;
+    flags = flags | 524288;
+  }
+
+  startup.flags = 257;
+  startup.reservedSize = 31;
+  startup.reservedBlock = parts.reserved;
+  startup.input = run.clientAt(0);
+  startup.output = run.clientAt(1);
+  startup.errors = run.clientAt(2);
+  startup.attributes = parts.attributes;
+  startup.showWindow = 10;
+
+  const application = wideOf(parts.application);
+  const folder = wideOf(parts.folder);
+  if (application == undefined || folder == undefined) {
+    return 87;
+  }
+
+  const isMade = CreateProcessW(
+    application,
+    parts.line.units(),
+    none,
+    none,
+    parts.inheriting,
+    flags,
+    parts.block.units(),
+    folder,
+    startup,
+    info,
+  );
+
+  if (isMade == 0) {
+    return GetLastError();
+  }
+
+  jobJoined(info.process);
+
+  return 0;
+}
+
+class ChildStart {
+  public readonly line: UnitBuffer;
+  public readonly block: UnitBuffer;
+  public readonly folder: string;
+  public readonly path: string;
+  public application: string;
+  public reserved: Raw<uint8>;
+  public attributes: Raw<uint8>;
+  public hasAttributes: boolean;
+  public inheriting: int32;
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "an empty pointer is only a mark",
+  })
+  public constructor(file: Read<string>, args: Read<string[]>) {
+    const environment = new ChildEnvironment();
+
+    environment.prepared();
+
+    this.line = commandLine(file, args);
+    this.block = environment.block();
+    this.folder = processFolder();
+    this.application = "";
+    this.reserved = bitsRaw(0);
+    this.attributes = bitsRaw(0);
+    this.hasAttributes = false;
+    this.inheriting = 0;
+    this.path = environment.path() ?? environmentValue("PATH") ?? "";
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the pipes, the list and the process are closed on every path",
+})
+function childStarted(
+  run: Mut<ChildRun>,
+  file: Read<string>,
+  args: Read<string[]>,
+): void {
+  if (isBatchFile(file)) {
+    run.error = invalidCode();
+    run.isBatch = true;
+
+    return;
+  }
+
+  const parts = new ChildStart(file, args);
+  let failure: uint32 = 0;
+
+  for (let index = 0; index < 3; index++) {
+    if (failure == 0) {
+      failure = run.pipeMade(index);
+
+      if (failure == 0) {
+        run.eventMade(index);
+      }
+    }
+  }
+
+  parts.reserved = run.reservedMade();
+
+  if (failure == 0) {
+    const found = pathSearched(file, parts.folder, parts.path);
+
+    if (found == undefined) {
+      failure = 2;
+    } else {
+      parts.application = found;
+    }
+  }
+
+  const handles = frameCells<uint64>(3);
+  const count = inheritedOf(run, handles);
+
+  if (count > 0) {
+    parts.inheriting = 1;
+  }
+  if (failure == 0 && count > 0) {
+    const room = attributesSize();
+
+    parts.attributes = allocate<uint8>(room);
+    parts.hasAttributes = true;
+    failure = attributesMade(parts.attributes, room, handles, count);
+  }
+
+  const info = new ProcessInformation();
+
+  if (failure == 0) {
+    failure = processMade(run, parts, info);
+  }
+  if (parts.hasAttributes) {
+    DeleteProcThreadAttributeList(parts.attributes);
+    release(parts.attributes);
+  }
+
+  release(parts.reserved);
+  run.clientsClosed();
+
+  if (failure != 0) {
+    run.error = codeOfWindows(failure);
+    run.system = failure;
+    run.allClosed();
+
+    return;
+  }
+
+  CloseHandle(info.thread);
+  run.isStarted = true;
+  run.pid = info.processId.toInt();
+  childWaited(run, info.process);
+}

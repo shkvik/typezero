@@ -1,0 +1,55 @@
+function shown(text: string): void {
+  const parts = [
+    text.slice(0),
+    text.slice(2),
+    text.slice(-3),
+    text.slice(1, 4),
+    text.slice(4, 1),
+    text.slice(-5, -1),
+    text.slice(0, 100),
+    text.slice(100),
+    text.substring(2),
+    text.substring(5, 1),
+    text.substring(-3, 3),
+    text.substring(1, 30),
+    text.slice(3, 20),
+    text.slice(2, -2),
+  ];
+
+  console.log(parts.map((part) => `[${part}]`).join(" "));
+}
+
+function main(): void {
+  const short = "abcdef";
+  const long = "the quick brown fox jumps over the lazy dog";
+  const wide = "привет, мир: hello, world and more words";
+  const glued = long + " / " + wide;
+  const part = long.substring(4, 40);
+  const literal = "a literal string that is long enough to share";
+
+  shown(short);
+  shown(long);
+  shown(wide);
+  shown(glued);
+  shown(part);
+  shown(literal);
+  shown("");
+
+  let built = "";
+
+  for (let index = 0; index < 30; index++) {
+    built += `${index},`;
+  }
+
+  shown(built);
+
+  const pieces: string[] = [];
+
+  for (let index = 0; index < 20; index++) {
+    pieces.push(glued.slice(index, index + 25));
+  }
+
+  console.log(pieces.join("|").length, pieces[19], built.slice(10, 40).length);
+}
+
+main();

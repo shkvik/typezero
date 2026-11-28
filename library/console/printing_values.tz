@@ -1,0 +1,424 @@
+
+class PrintContext {
+  public indentation: int;
+  public currentDepth: int;
+  public seen: int[];
+  public circular: int[];
+
+  public constructor() {
+    this.indentation = 0;
+    this.currentDepth = 0;
+    this.seen = [];
+    this.circular = [];
+  }
+
+  public readonly baseOf(key: int): string {
+    let base = "";
+
+    for (let index = 0; index < this.circular.length; index++) {
+      if (this.circular[index] == key) {
+        base = `<ref *${index + 1}>`;
+      }
+    }
+
+    return base;
+  }
+
+  public circularOf(key: int): int {
+    if (!this.seen.includes(key)) {
+      return 0;
+    }
+
+    let index = this.circular.indexOf(key) + 1;
+
+    if (index == 0) {
+      this.circular.push(key);
+      index = this.circular.length;
+    }
+
+    return index;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length cells of its element type",
+})
+function arrayJoinedInto(
+  out: Mut<TextBuilder>,
+  array: Raw<uint8>,
+  separator: Read<string>,
+): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const type = head.type;
+  const data = head.data;
+  const length = head.length.toInt();
+  const size = sizeOf(type);
+
+  for (let index = 0; index < length; index++) {
+    if (index > 0) {
+      out.add(separator);
+    }
+
+    valueInto(out, type, placeAt(data, index * size), true);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the object is a C string: a length and the bytes after the head",
+})
+function cTextOf(object: Raw<uint8>): string {
+  const head = viewAt<CStringHead>(object, 0);
+  const count = head.length.toUint32();
+
+  return utf8Text(placeAt(object, 24), count);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an object starts with its count and layout",
+})
+function layoutOfObject(object: Raw<uint8>): Raw<uint8> {
+  const head = viewAt<ObjectHead>(object, 0);
+
+  return head.layout;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a layout keeps its flags after the fields",
+})
+function flagsOf(layout: Raw<uint8>): uint32 {
+  const head = viewAt<LayoutHead>(layout, 0);
+
+  return head.flags;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the address is compared",
+})
+function isCText(object: Raw<uint8>): boolean {
+  if (rawBits(object) == 0) {
+    return false;
+  }
+
+  return (flagsOf(layoutOfObject(object)) & 512) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds what the type says",
+})
+function valueInto(
+  out: Mut<TextBuilder>,
+  type: Raw<uint8>,
+  value: Raw<uint8>,
+  isJoin: boolean,
+): void {
+  const kind = kindOf(type);
+
+  if (isIntegerKind(kind)) {
+    integerInto(out, kind, value);
+  } else if (kind == 3) {
+    out.addDouble(doubleAt(value, 0));
+  } else if (kind == 4) {
+    if (byteAt(value, 0) != 0) {
+      out.add("true");
+    } else {
+      out.add("false");
+    }
+  } else if (kind == 5) {
+    out.add(stringAt(value));
+  } else if (kind == 11) {
+    out.add(decimalAt(value).toString());
+  } else if (kind == 6) {
+    arrayJoinedInto(out, pointerAt(value, 0), ",");
+  } else if (kind == 10) {
+    const object = pointerAt(value, 0);
+
+    if (isCText(object)) {
+      out.add(cTextOf(object));
+    }
+  } else if (kind == 24) {
+    const handle = viewAt<HandleTypeHead>(type, 0);
+
+    out.addUnit(91);
+    out.add(utf8Text(handle.name, handle.nameLength));
+    out.addUnit(93);
+  } else if (kind == 7 && isPresent(type, value)) {
+    valueInto(out, innerOf(type), value, isJoin);
+  } else if ((kind == 7 || kind == 8) && !isJoin) {
+    out.add("undefined");
+  }
+}
+
+function isNumberElement(type: Raw<uint8>, value: Raw<uint8>): boolean {
+  let kind = kindOf(type);
+
+  if (kind == 7) {
+    if (!isPresent(type, value)) {
+      return false;
+    }
+
+    kind = kindOf(innerOf(type));
+  }
+
+  return isIntegerKind(kind) || kind == 3 || kind == 11;
+}
+
+function isNumberArray(
+  type: Raw<uint8>,
+  data: Raw<uint8>,
+  count: int,
+): boolean {
+  const size = sizeOf(type);
+
+  for (let index = 0; index < count; index++) {
+    if (!isNumberElement(type, placeAt(data, index * size))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function moreItems(remaining: int): string {
+  return `... ${remaining} more item${plural(remaining)}`;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length cells of its element type",
+})
+function arrayFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  array: Raw<uint8>,
+  depth: int,
+): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const length = head.length.toInt();
+  if (length == 0) {
+    out.add("[]");
+
+    return;
+  }
+  if (depth > depthLimit()) {
+    out.add("[Array]");
+
+    return;
+  }
+
+  const next = depth + 1;
+  const key = keyOf(array);
+  const type = head.type;
+  const data = head.data;
+  const size = sizeOf(type);
+  const shown = Math.min(length, arrayLimit());
+  const output: string[] = [];
+  const entry = new TextBuilder();
+
+  context.seen.push(key);
+  context.currentDepth = next;
+
+  for (let index = 0; index < shown; index++) {
+    context.indentation += 2;
+    formatted(context, entry, type, placeAt(data, index * size), next);
+    context.indentation -= 2;
+    output.push(entry.taken());
+  }
+  if (length > shown) {
+    output.push(moreItems(length - shown));
+  }
+
+  context.seen.pop();
+
+  const base = context.baseOf(key);
+  const count = Math.min(output.length, length);
+  const isPadStart = isNumberArray(type, data, count);
+  const braces = arrayBraces("[", base, isPadStart);
+
+  singleString(context, out, output, next, braces);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the field record is the index-th of the layout",
+})
+function fieldAt(layout: Raw<uint8>, index: int): Raw<uint8> {
+  const head = viewAt<LayoutHead>(layout, 0);
+
+  return placeAt(head.fields, index * 24);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the tuple holds the fields its layout lists",
+})
+function tupleFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  layout: Raw<uint8>,
+  depth: int,
+): void {
+  const count = viewAt<LayoutHead>(layout, 0).count.toInt();
+  if (count == 0) {
+    out.add("[]");
+
+    return;
+  }
+  if (depth > depthLimit()) {
+    out.add("[Array]");
+
+    return;
+  }
+
+  const next = depth + 1;
+  const key = keyOf(object);
+  const output: string[] = [];
+  const entry = new TextBuilder();
+
+  context.seen.push(key);
+  context.currentDepth = next;
+
+  for (let index = 0; index < count; index++) {
+    const field = viewAt<FieldHead>(fieldAt(layout, index), 0);
+    const value = placeAt(object, field.offset.toInt());
+
+    context.indentation += 2;
+    formatted(context, entry, field.type, value, next);
+    context.indentation -= 2;
+    output.push(entry.taken());
+  }
+
+  context.seen.pop();
+
+  const braces = plainBraces("[", 93, context.baseOf(key));
+
+  singleString(context, out, output, next, braces);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the result holds its flag, value, error and site at the offsets",
+})
+function resultFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  type: Raw<uint8>,
+  value: Raw<uint8>,
+  depth: int,
+): void {
+  const head = viewAt<ResultTypeHead>(type, 0);
+  const isOk = byteAt(value, head.okOffset.toInt()) != 0;
+  let name = "Err";
+
+  if (isOk) {
+    name = "Ok";
+  }
+  if (depth > depthLimit()) {
+    out.addUnit(91);
+    out.add(name);
+    out.addUnit(93);
+
+    return;
+  }
+
+  const next = depth + 1;
+  const builder = new TextBuilder();
+
+  context.currentDepth = next;
+  context.indentation += 2;
+
+  if (isOk) {
+    const place = placeAt(value, head.valueOffset.toInt());
+
+    builder.add("value: ");
+    formatted(context, builder, head.inner, place, next);
+  } else {
+    const place = placeAt(value, head.errorOffset.toInt());
+
+    builder.add("error: ");
+    formatted(context, builder, head.error, place, next);
+  }
+
+  context.indentation -= 2;
+
+  const entry = builder.taken();
+  let isSingle = false;
+
+  if (context.currentDepth - next < compactLevel()) {
+    const start = 1 + context.indentation + name.length + 2 + 10;
+    const total = 1 + start;
+
+    isSingle = total + 1 <= breakLength();
+    isSingle = isSingle && total + entry.length <= breakLength();
+    isSingle = isSingle && !entry.includes("\n");
+  }
+
+  out.add(name);
+
+  if (isSingle) {
+    out.add(" { ");
+    out.add(entry);
+    out.add(" }");
+  } else {
+    out.add(" {\n");
+    out.addSpaces(context.indentation + 2);
+    out.add(entry);
+    out.addUnit(10);
+    out.addSpaces(context.indentation);
+    out.addUnit(125);
+  }
+
+  const site = pointerAt(value, head.siteOffset.toInt());
+
+  if (!isOk && rawBits(site) != 0) {
+    const place = viewAt<SiteHead>(site, 0);
+
+    out.add(" at ");
+    out.add(utf8Text(place.text, place.length));
+  }
+}
+
+function formatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  type: Raw<uint8>,
+  value: Raw<uint8>,
+  depth: int,
+): void {
+  const kind = kindOf(type);
+
+  if (kind == 12) {
+    resultFormatted(context, out, type, value, depth);
+  } else if (kind == 3 && isNegativeZero(doubleAt(value, 0))) {
+    out.add("-0");
+  } else if (kind == 5) {
+    stringFormatted(context, out, stringAt(value));
+  } else if (kind == 6 || kind == 10) {
+    const target = pointerAt(value, 0);
+    const circular = context.circularOf(keyOf(target));
+
+    if (circular > 0) {
+      out.add(`[Circular *${circular}]`);
+    } else if (kind == 6) {
+      arrayFormatted(context, out, target, depth);
+    } else {
+      objectFormatted(context, out, target, depth);
+    }
+  } else if (kind == 25) {
+    fieldsFormatted(context, out, value, innerOf(type), depth);
+  } else if (kind == 7) {
+    if (isPresent(type, value)) {
+      formatted(context, out, innerOf(type), value, depth);
+    } else {
+      out.add("undefined");
+    }
+  } else {
+    valueInto(out, type, value, false);
+  }
+}

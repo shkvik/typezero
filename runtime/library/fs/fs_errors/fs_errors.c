@@ -315,23 +315,7 @@ Failure tz_fs_errno_failure(int e) {
 }
 #endif
 
-TzOptStr tz_fs_opt_of(const TzBuf *text) {
-  TzOptStr o;
-  memset(&o, 0, sizeof o);
-  if (text) {
-    o.value = tz_str_from_utf16(text->data, text->length);
-    o.has = 1;
-  }
-
-  return o;
-}
-
 TzStr tz_fs_ascii(const char *text) { return tz_str_from_ascii(text, strlen(text)); }
-
-void tz_fs_throw_parts(TzMaker make, TzSystemErrorParts *parts) {
-  void *error = make(parts);
-  tz_failed = error;
-}
 
 void tz_fs_throw_failure(TzMaker make, Failure f, const char *syscall, const TzBuf *path,
                          const TzBuf *dest) {

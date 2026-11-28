@@ -437,6 +437,23 @@ TZ_HOT void tz_free(void *p) {
   tz_free_slow(p);
 }
 
+void *tz_realloc(void *p, size_t size) {
+  if (!p) {
+    return tz_alloc(size);
+  }
+  Segment *s = segment_of(p);
+  size_t old = s->kind == KIND_HUGE ? (size_t)s->huge_units * UNIT_SIZE - HUGE_HEADER
+                                    : page_of(s, p)->block_size;
+  if (size <= old) {
+    return p;
+  }
+  void *grown = tz_alloc(size);
+  memcpy(grown, p, old);
+  tz_free(p);
+
+  return grown;
+}
+
 void tz_heap_collect(void) {
 #if TZ_PARALLEL
   void *block = __atomic_exchange_n(&tz_heap.remote, NULL, __ATOMIC_ACQUIRE);

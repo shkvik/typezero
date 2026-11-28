@@ -1,0 +1,69 @@
+import { spawnSync } from "node:child_process";
+
+function shown(text: Read<string> | undefined): string {
+  if (text == undefined) {
+    return "<none>";
+  }
+
+  const lines = text.replaceAll("\r", "\\r").replaceAll("\n", "\\n");
+
+  return `"${lines}"`;
+}
+
+function ran(file: string, args: Read<string[]>): void {
+  const done = spawnSync(file, args, { encoding: "utf8" });
+  if (done.isErr()) {
+    const error = done.error;
+
+    console.log(`error ${error.kind} ${error.code}`);
+    console.log(`  ${error.message}`);
+
+    return;
+  }
+
+  const value = done.value;
+  const output = value.output;
+
+  console.log(`ok status=${value.status ?? -999} pid>0=${value.pid > 0}`);
+  console.log(`  out=${shown(value.stdout)} err=${shown(value.stderr)}`);
+  console.log(`  output=${output.length} first=${shown(output[0])}`);
+}
+
+function child(): void {
+  const items = process.argv;
+
+  for (let index = 3; index < items.length; index++) {
+    console.log(`[${items[index] ?? ""}]`);
+  }
+}
+
+function main(): void {
+  if (process.argv[2] == "child") {
+    child();
+
+    return;
+  }
+
+  ran("cmd.exe", ["/d", "/c", "echo hi"]);
+  ran("cmd", ["/d", "/c", "exit 3"]);
+  ran("cmd", ["/d", "/c", "echo err 1>&2"]);
+  ran("cmd", ["/d", "/c", "exit -1073741819"]);
+  ran("no-such-program-xyz", []);
+  ran("C:\\no-such-folder-xyz\\x.exe", []);
+  ran("run.bat", []);
+  ran("a\0b", []);
+  ran("cmd", ["ok", "x\0y"]);
+  ran("", []);
+  ran(process.execPath, [
+    "child",
+    "a b",
+    "",
+    "q\"x",
+    "back\\slash",
+    "tail\\",
+    "q\\\"y",
+    "t\tab",
+  ]);
+}
+
+main();

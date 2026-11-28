@@ -1,0 +1,478 @@
+import { panic } from "tz:intrinsics";
+import {
+  Raw,
+  allocate,
+  bitsRaw,
+  cellsAt,
+  copyCells,
+  frameCells,
+  peekAt,
+  putAt,
+  rawBits,
+  release,
+  textCells,
+  unitAt,
+  viewAt,
+  wrappedProduct,
+} from "tz:unsafe";
+import {
+  ArrayHead,
+  FieldHead,
+  LayoutHead,
+  MapHead,
+  MapLayoutHead,
+  ObjectHead,
+  TypeHead,
+} from "tz:core";
+import {
+  arrayGrown,
+  arrayMade,
+  isManaged,
+  objectFreed,
+  objectMade,
+  valueReleased,
+  valueRetained,
+  zeroFilled,
+} from "tz:counts";
+import { toText } from "tz:decimals";
+import { treeCells } from "tz:text";
+
+function mixKey(): uint64 {
+  return 11400714819323198485;
+}
+
+function finishKey(): uint64 {
+  return 13787848793156543929;
+}
+
+function emptyHash(): uint32 {
+  return 2654435769;
+}
+
+function lengthBits(): uint64 {
+  return 1073741823;
+}
+
+function wideBit(): uint64 {
+  return 2305843009213693952;
+}
+
+function treeBit(): uint64 {
+  return 4611686018427387904;
+}
+
+function heapBit(): uint64 {
+  return 9223372036854775808;
+}
+
+function magnitudeBits(): uint64 {
+  return 9223372036854775807;
+}
+
+function exponentBits(): uint64 {
+  return 9218868437227405312;
+}
+
+function fractionBits(): uint64 {
+  return 4503599627370495;
+}
+
+function quietNan(): uint64 {
+  return 9221120237041090560;
+}
+
+function foldFlag(): uint32 {
+  return 2;
+}
+
+function smallMost(): int {
+  return 8;
+}
+
+function entriesMost(): int {
+  return 1073741824;
+}
+
+function mapSize(): int {
+  return 64;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds eight bytes",
+})
+function bitsAt(place: Raw<uint8>, offset: int): uint64 {
+  const cells = cellsAt<uint64>(place, offset);
+
+  return peekAt(cells, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds a pointer",
+})
+function pointerAt(place: Raw<uint8>, offset: int): Raw<uint8> {
+  const bits = bitsAt(place, offset);
+
+  return bitsRaw(bits);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds four bytes",
+})
+function wordAt(place: Raw<uint8>, offset: int): uint32 {
+  const cells = cellsAt<uint32>(place, offset);
+
+  return peekAt(cells, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds four bytes",
+})
+function wordPut(place: Raw<uint8>, offset: int, value: uint32): void {
+  const cells = cellsAt<uint32>(place, offset);
+
+  putAt(cells, 0, value);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds eight bytes",
+})
+function bitsPut(place: Raw<uint8>, offset: int, value: uint64): void {
+  const cells = cellsAt<uint64>(place, offset);
+
+  putAt(cells, 0, value);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a pointer is only compared with zero",
+})
+function rawZero(raw: Raw<uint8>): boolean {
+  return rawBits(raw) == 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description starts with its kind and size",
+})
+function kindOf(type: Raw<uint8>): uint32 {
+  const head = viewAt<TypeHead>(type, 0);
+
+  return head.kind;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description starts with its kind and size",
+})
+function sizeOf(type: Raw<uint8>): int {
+  const head = viewAt<TypeHead>(type, 0);
+
+  return head.size.toInt();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description has its inner type third",
+})
+function innerOf(type: Raw<uint8>): Raw<uint8> {
+  const head = viewAt<TypeHead>(type, 0);
+
+  return head.inner;
+}
+
+function slotOf(type: Raw<uint8>, slot: int): Raw<uint8> {
+  return pointerAt(type, 16 + slot * 8);
+}
+
+function isIntegerKind(kind: uint32): boolean {
+  return kind == 1 || kind == 2 || (kind >= 18 && kind <= 23);
+}
+
+function isInlineMeta(meta: uint64): boolean {
+  const forms = treeBit() | heapBit() | wideBit();
+
+  return (meta & forms) == treeBit();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "temporary: give the reason",
+})
+function mixedWord(hash: uint64, word: uint64): uint64 {
+  const mixed = wrappedProduct(hash ^ word, mixKey());
+
+  return mixed ^ (mixed >> 32);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "temporary: give the reason",
+})
+function finishedHash(hash: uint64): uint32 {
+  const first = hash ^ (hash >> 29);
+  const second = wrappedProduct(first, finishKey());
+  const third = second ^ (second >> 32);
+  const low = third & 4294967295;
+
+  return low.toUint32();
+}
+
+function wordHash(kind: uint64, word: uint64): uint32 {
+  const mixed = mixedWord(kind, word);
+
+  return finishedHash(mixed);
+}
+
+function inlineHash(object: uint64, meta: uint64): uint32 {
+  return wordHash(meta & lengthBits(), object);
+}
+
+function foldedUnit(unit: int, isFold: boolean): int {
+  if (isFold && unit >= 97 && unit <= 122) {
+    return unit - 32;
+  }
+
+  return unit;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells hold length units",
+})
+function unitsHash<C>(cells: Raw<C>, length: int, isFold: boolean): uint32 {
+  let hash = length.toUint64();
+
+  for (let index = 0; index < length; index += 8) {
+    let word: uint64 = 0;
+
+    for (let step = 0; step < 8 && index + step < length; step++) {
+      const given = unitAt(cells, index + step);
+      const unit = foldedUnit(given, isFold);
+      const byte = (unit ^ (unit >> 8)) & 255;
+      const shift = (8 * step).toUint64();
+
+      word = word | (byte.toUint64() << shift);
+    }
+
+    hash = mixedWord(hash, word);
+  }
+
+  return finishedHash(hash);
+}
+
+function narrowHash(bytes: Raw<uint8>, length: int, isFold: boolean): uint32 {
+  if (isFold || length < 8) {
+    return unitsHash(bytes, length, isFold);
+  }
+
+  let hash = length.toUint64();
+  let index = 0;
+
+  while (index + 8 <= length) {
+    const word = bitsAt(bytes, index);
+
+    hash = mixedWord(hash, word);
+    index += 8;
+  }
+  if (index < length) {
+    const last = bitsAt(bytes, length - 8);
+    const shift = (8 * (8 - (length - index))).toUint64();
+
+    hash = mixedWord(hash, last >> shift);
+  }
+
+  return finishedHash(hash);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of the text are read where the text lives",
+})
+function textUnitsHash(text: Read<string>, isFold: boolean): uint32 {
+  const length = text.length;
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return narrowHash(narrow, length, isFold);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return unitsHash(wide, length, isFold);
+  }
+
+  return finishedHash(length.toUint64());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the place holds a text",
+})
+function textHash(place: Raw<uint8>, isFold: boolean): uint32 {
+  const meta = bitsAt(place, 8);
+  if (isInlineMeta(meta) && !isFold) {
+    return inlineHash(bitsAt(place, 0), meta);
+  }
+
+  const cells = cellsAt<string>(place, 0);
+
+  return textUnitsHash(peekAt(cells, 0), isFold);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of the decimal is read in this frame",
+})
+function decimalHash(place: Raw<uint8>): uint32 {
+  const cells = cellsAt<decimal>(place, 0);
+  const text = toText(peekAt(cells, 0));
+  const length = text.length;
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return unitsHash(narrow, length, false);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return unitsHash(wide, length, false);
+  }
+
+  return finishedHash(length.toUint64());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the place holds an integer of the kind",
+})
+function integerBits(kind: uint32, place: Raw<uint8>): uint64 {
+  if (kind == 18 || kind == 20) {
+    const byte = unitAt(place, 0).toUint64();
+
+    if (kind == 18 && byte >= 128) {
+      return byte | 18446744073709551360;
+    }
+
+    return byte;
+  }
+  if (kind == 19 || kind == 21) {
+    const cells = cellsAt<uint16>(place, 0);
+    const half = unitAt(cells, 0).toUint64();
+
+    if (kind == 19 && half >= 32768) {
+      return half | 18446744073709486080;
+    }
+
+    return half;
+  }
+  if (kind == 1 || kind == 22) {
+    const word = wordAt(place, 0).toUint64();
+
+    if (kind == 1 && word >= 2147483648) {
+      return word | 18446744069414584320;
+    }
+
+    return word;
+  }
+
+  return bitsAt(place, 0);
+}
+
+function doubleKeyBits(place: Raw<uint8>): uint64 {
+  const bits = bitsAt(place, 0);
+  const magnitude = bits & magnitudeBits();
+
+  if (magnitude == 0) {
+    return 0;
+  }
+  if ((bits & exponentBits()) == exponentBits()) {
+    if ((bits & fractionBits()) != 0) {
+      return quietNan();
+    }
+  }
+
+  return bits;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value has the shape its optional type gives",
+})
+function isPresent(type: Raw<uint8>, value: Raw<uint8>): boolean {
+  const inner = innerOf(type);
+  const kind = kindOf(inner);
+
+  if (kind == 10 || kind == 13 || kind == 16 || kind == 24) {
+    return bitsAt(value, 0) != 0;
+  }
+  if (kind == 14 || kind == 15) {
+    return wordAt(value, 0) != 0;
+  }
+
+  return unitAt(value, sizeOf(inner)) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the key has the shape its type description gives",
+})
+function valueHash(type: Raw<uint8>, key: Raw<uint8>, isFold: boolean): uint32 {
+  const kind = kindOf(type);
+
+  if (isIntegerKind(kind)) {
+    return wordHash(2, integerBits(kind, key));
+  }
+  if (kind == 3) {
+    return wordHash(3, doubleKeyBits(key));
+  }
+  if (kind == 4) {
+    if (unitAt(key, 0) != 0) {
+      return wordHash(4, 1);
+    }
+
+    return wordHash(4, 0);
+  }
+  if (kind == 5) {
+    return textHash(key, isFold);
+  }
+  if (kind == 11) {
+    return decimalHash(key);
+  }
+  if (kind == 9) {
+    return wordHash(bitsAt(key, 0), bitsAt(key, 8));
+  }
+  if (kind == 7) {
+    if (!isPresent(type, key)) {
+      return emptyHash();
+    }
+
+    return valueHash(innerOf(type), key, isFold);
+  }
+  if (kind == 15) {
+    return wordHash(15, wordAt(key, 0).toUint64());
+  }
+  if (kind == 14) {
+    return unionHash(type, key, isFold);
+  }
+
+  return wordHash(10, bitsAt(key, 0));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a union value keeps its tag first and the part after eight bytes",
+})
+function unionHash(type: Raw<uint8>, key: Raw<uint8>, isFold: boolean): uint32 {
+  const tag = wordAt(key, 0).toInt();
+  if (tag == 0) {
+    return emptyHash();
+  }
+
+  const part = slotOf(type, tag);
+  const held = cellsAt<uint8>(key, 8);
+
+  return valueHash(part, held, isFold);
+}

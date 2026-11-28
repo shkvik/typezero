@@ -1,0 +1,347 @@
+function sameIgnoringCase(first: Read<string>, second: Read<string>): boolean {
+  return first.toLowerCase() == second.toLowerCase();
+}
+
+function driveDirectory(device: Read<string>): string {
+  let path = environmentValue("=" + device) ?? "";
+
+  if (path.length == 0) {
+    path = currentDirectory();
+  }
+
+  const isOther = !sameIgnoringCase(path.slice(0, 2), device);
+  if (isOther && unitOf(path, 2) == 92) {
+    return device + "\\";
+  }
+
+  return path;
+}
+
+@InPlace()
+class ResolvedRoot {
+  public readonly device: string;
+  public readonly rootEnd: int;
+  public readonly isAbsolute: boolean;
+
+  public constructor(device: string, rootEnd: int, isAbsolute: boolean) {
+    this.device = device;
+    this.rootEnd = rootEnd;
+    this.isAbsolute = isAbsolute;
+  }
+}
+
+function separatedResolvedRoot(path: Read<string>): ResolvedRoot {
+  if (!isSeparator(unitOf(path, 1))) {
+    return new ResolvedRoot("", 1, true);
+  }
+
+  const unc = matchedUnc(path);
+  if (unc.shareEnd < 0) {
+    return new ResolvedRoot("", 0, true);
+  }
+
+  const first = path.slice(unc.server, unc.serverEnd);
+  if (first == "." || first == "?") {
+    return new ResolvedRoot("\\\\" + first, 4, true);
+  }
+
+  const device = "\\\\" + first + "\\" + path.slice(unc.share, unc.shareEnd);
+
+  return new ResolvedRoot(device, unc.shareEnd, true);
+}
+
+function resolvedRoot(path: Read<string>): ResolvedRoot {
+  const code = unitOf(path, 0);
+  if (path.length == 1 && isSeparator(code)) {
+    return new ResolvedRoot("", 1, true);
+  }
+  if (path.length == 1) {
+    return new ResolvedRoot("", 0, false);
+  }
+  if (isSeparator(code)) {
+    return separatedResolvedRoot(path);
+  }
+  if (!hasDrive(path)) {
+    return new ResolvedRoot("", 0, false);
+  }
+
+  const isAbsolute = path.length > 2 && isSeparator(unitOf(path, 2));
+  let end = 2;
+
+  if (isAbsolute) {
+    end = 3;
+  }
+
+  return new ResolvedRoot(path.slice(0, 2), end, isAbsolute);
+}
+
+function resolvedPart(
+  parts: Read<string[]>,
+  index: int,
+  device: Read<string>,
+): string {
+  if (index >= 0) {
+    return parts[index] ?? "";
+  }
+  if (device.length == 0) {
+    return currentDirectory();
+  }
+
+  return driveDirectory(device);
+}
+
+export function resolve(parts: Read<string[]>): string {
+  let device = "";
+  let tail = "";
+  let isResolvedAbsolute = false;
+
+  for (let index = parts.length - 1; index >= -1; index--) {
+    const path = resolvedPart(parts, index, device);
+    if (index >= 0 && path.length == 0) {
+      continue;
+    }
+
+    const root = resolvedRoot(path);
+    if (root.device.length > 0 && device.length > 0) {
+      if (!sameIgnoringCase(root.device, device)) {
+        continue;
+      }
+    } else if (root.device.length > 0) {
+      device = root.device;
+    }
+    if (isResolvedAbsolute && device.length > 0) {
+      break;
+    }
+    if (isResolvedAbsolute) {
+      continue;
+    }
+
+    tail = path.slice(root.rootEnd) + "\\" + tail;
+    isResolvedAbsolute = root.isAbsolute;
+
+    if (root.isAbsolute && device.length > 0) {
+      break;
+    }
+  }
+
+  const normal = normalizedString(tail, !isResolvedAbsolute);
+  if (isResolvedAbsolute) {
+    return device + "\\" + normal;
+  }
+  if (device.length + normal.length > 0) {
+    return device + normal;
+  }
+
+  return ".";
+}
+
+export function resolveOne(path: Read<string>): string {
+  const parts = [path.toString()];
+
+  return resolve(parts);
+}
+
+function splitBackslash(text: Read<string>): string[] {
+  const parts = text.split("\\");
+  const last = parts[parts.length - 1];
+
+  if (last != undefined && last.length == 0) {
+    parts.pop();
+  }
+
+  return parts;
+}
+
+function relativeByParts(fromWhole: Read<string>, toWhole: Read<string>): string {
+  const fromParts = splitBackslash(fromWhole);
+  const toParts = splitBackslash(toWhole);
+  let length = fromParts.length;
+
+  if (toParts.length < length) {
+    length = toParts.length;
+  }
+
+  let same = 0;
+
+  while (same < length) {
+    const one = fromParts[same] ?? "";
+    const other = toParts[same] ?? "";
+    if (!sameIgnoringCase(one, other)) {
+      break;
+    }
+
+    same += 1;
+  }
+  if (same == 0) {
+    return toWhole;
+  }
+
+  const out: string[] = [];
+
+  if (same == length && toParts.length > length) {
+    return toParts.slice(same).join("\\");
+  }
+  if (same == length && fromParts.length > length) {
+    for (let index = same; index < fromParts.length; index++) {
+      out.push("..");
+    }
+
+    return out.join("\\");
+  }
+  if (same == length) {
+    return "";
+  }
+
+  for (let index = same; index < fromParts.length; index++) {
+    out.push("..");
+  }
+  for (let index = same; index < toParts.length; index++) {
+    out.push(toParts[index] ?? "");
+  }
+
+  return out.join("\\");
+}
+
+function trimmedStart(text: Read<string>): int {
+  let start = 0;
+
+  while (start < text.length && unitOf(text, start) == 92) {
+    start += 1;
+  }
+
+  return start;
+}
+
+function trimmedEnd(text: Read<string>, start: int): int {
+  let end = text.length;
+
+  while (end - 1 > start && unitOf(text, end - 1) == 92) {
+    end -= 1;
+  }
+
+  return end;
+}
+
+export function relative(from: Read<string>, to: Read<string>): string {
+  if (from == to) {
+    return "";
+  }
+
+  const fromWhole = resolveOne(from);
+  const toWhole = resolveOne(to);
+  if (fromWhole == toWhole) {
+    return "";
+  }
+
+  const fromLow = fromWhole.toLowerCase();
+  const toLow = toWhole.toLowerCase();
+  if (fromLow == toLow) {
+    return "";
+  }
+
+  const isChanged =
+    fromLow.length != fromWhole.length || toLow.length != toWhole.length;
+  if (isChanged) {
+    return relativeByParts(fromWhole, toWhole);
+  }
+
+  const fromStart = trimmedStart(fromLow);
+  const fromEnd = trimmedEnd(fromLow, fromStart);
+  const fromLength = fromEnd - fromStart;
+  let toStart = trimmedStart(toLow);
+  const toEnd = trimmedEnd(toLow, toStart);
+  const toLength = toEnd - toStart;
+  let length = fromLength;
+
+  if (toLength < length) {
+    length = toLength;
+  }
+
+  let at = 0;
+  let lastCommon = -1;
+
+  while (at < length) {
+    const code = unitOf(fromLow, fromStart + at);
+    if (code != unitOf(toLow, toStart + at)) {
+      break;
+    }
+    if (code == 92) {
+      lastCommon = at;
+    }
+
+    at += 1;
+  }
+  if (at != length && lastCommon == -1) {
+    return toWhole;
+  }
+  if (at == length && toLength > length) {
+    if (unitOf(toLow, toStart + at) == 92) {
+      return toWhole.slice(toStart + at + 1);
+    }
+    if (at == 2) {
+      return toWhole.slice(toStart + at);
+    }
+  }
+  if (at == length && fromLength > length) {
+    if (unitOf(fromLow, fromStart + at) == 92) {
+      lastCommon = at;
+    } else if (at == 2) {
+      lastCommon = 3;
+    }
+  }
+  if (at == length && lastCommon == -1) {
+    lastCommon = 0;
+  }
+
+  let out = "";
+  let isWritten = false;
+
+  for (let index = fromStart + lastCommon + 1; index <= fromEnd; index++) {
+    if (index == fromEnd || unitOf(fromLow, index) == 92) {
+      if (isWritten) {
+        out += "\\..";
+      } else {
+        out += "..";
+      }
+
+      isWritten = true;
+    }
+  }
+
+  toStart += lastCommon;
+
+  if (isWritten) {
+    return out + toWhole.slice(toStart, toEnd);
+  }
+  if (unitOf(toWhole, toStart) == 92) {
+    toStart += 1;
+  }
+
+  return toWhole.slice(toStart, toEnd);
+}
+
+export function toNamespacedPath(path: Read<string>): string {
+  if (path.length == 0) {
+    return "";
+  }
+
+  const resolved = resolveOne(path);
+  if (resolved.length <= 2) {
+    return path;
+  }
+
+  const first = unitOf(resolved, 0);
+  const second = unitOf(resolved, 1);
+  const third = unitOf(resolved, 2);
+  if (first == 92 && second == 92 && third != 63 && third != 46) {
+    return "\\\\?\\UNC\\" + resolved.slice(2);
+  }
+  if (first == 92) {
+    return resolved;
+  }
+  if (isDriveLetter(first) && second == 58 && third == 92) {
+    return "\\\\?\\" + resolved;
+  }
+
+  return resolved;
+}

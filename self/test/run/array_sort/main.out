@@ -1,0 +1,24 @@
+[ 'Apple', 'apple', 'banana', 'pear', 'z', 'Ä' ]
+[ false, true, true ]
+[ 'a', 'b', 'c', undefined, undefined ]
+[
+  'k0',  'k0',  'k0',  'k0',  'k1',  'k1',
+  'k1',  'k10', 'k10', 'k10', 'k11', 'k11',
+  'k11', 'k12', 'k12', 'k12', 'k2',  'k2',
+  'k2',  'k3',  'k3',  'k3',  'k4',  'k4',
+  'k4',  'k5',  'k5',  'k5',  'k6',  'k6',
+  'k6',  'k7',  'k7',  'k7',  'k8',  'k8',
+  'k8',  'k9',  'k9',  'k9'
+]
+[
+  -5,  1,  3,   3, 7,
+   9, 10, 25, 100
+]
+[
+  { name: 'dee', age: 20 },
+  { name: 'bob', age: 25 },
+  { name: 'ann', age: 30 },
+  { name: 'cid', age: 30 }
+]
+[ 1, 2, 3, undefined, undefined ]
+[ 'ccc', 'bb', 'dd', 'a' ]

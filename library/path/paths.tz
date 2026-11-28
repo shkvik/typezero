@@ -1,0 +1,621 @@
+import { currentDirectory, environmentValue } from "tz:files";
+
+const kReservedNames: string[] = [
+  "CON",
+  "PRN",
+  "AUX",
+  "NUL",
+  "COM1",
+  "COM2",
+  "COM3",
+  "COM4",
+  "COM5",
+  "COM6",
+  "COM7",
+  "COM8",
+  "COM9",
+  "LPT1",
+  "LPT2",
+  "LPT3",
+  "LPT4",
+  "LPT5",
+  "LPT6",
+  "LPT7",
+  "LPT8",
+  "LPT9",
+];
+
+@InPlace()
+class UncRoot {
+  public readonly server: int;
+  public readonly serverEnd: int;
+  public readonly share: int;
+  public readonly shareEnd: int;
+
+  public constructor(
+    server: int,
+    serverEnd: int,
+    share: int,
+    shareEnd: int,
+  ) {
+    this.server = server;
+    this.serverEnd = serverEnd;
+    this.share = share;
+    this.shareEnd = shareEnd;
+  }
+}
+
+function isSeparator(unit: int): boolean {
+  return unit == 47 || unit == 92;
+}
+
+function isDriveLetter(unit: int): boolean {
+  return (unit >= 65 && unit <= 90) || (unit >= 97 && unit <= 122);
+}
+
+function unitOf(text: Read<string>, index: int): int {
+  return text.charCodeAt(index) ?? 0;
+}
+
+function hasDrive(path: Read<string>): boolean {
+  return path.length >= 2 && isDriveLetter(unitOf(path, 0)) &&
+    unitOf(path, 1) == 58;
+}
+
+function noUnc(): UncRoot {
+  return new UncRoot(-1, -1, -1, -1);
+}
+
+function matchedUnc(path: Read<string>): UncRoot {
+  const count = path.length;
+  let at = 2;
+  let last = at;
+
+  while (at < count && !isSeparator(unitOf(path, at))) {
+    at += 1;
+  }
+  if (!(at < count && at != last)) {
+    return noUnc();
+  }
+
+  const server = last;
+  const serverEnd = at;
+
+  last = at;
+
+  while (at < count && isSeparator(unitOf(path, at))) {
+    at += 1;
+  }
+  if (!(at < count && at != last)) {
+    return noUnc();
+  }
+
+  last = at;
+
+  while (at < count && !isSeparator(unitOf(path, at))) {
+    at += 1;
+  }
+  if (at != count && at == last) {
+    return noUnc();
+  }
+
+  return new UncRoot(server, serverEnd, last, at);
+}
+
+function upperUnit(unit: int): int {
+  if (unit >= 97 && unit <= 122) {
+    return unit - 32;
+  }
+
+  return unit;
+}
+
+function isReservedName(path: Read<string>, colon: int): boolean {
+  let end = colon;
+
+  if (colon < 0) {
+    end = path.length - 1;
+  }
+  if (end < 0) {
+    end = 0;
+  }
+
+  const device = path.slice(0, end);
+  if (device.length < 3 || device.length > 4) {
+    return false;
+  }
+
+  const upper = device.toUpperCase();
+  if (kReservedNames.includes(upper)) {
+    return true;
+  }
+  if (device.length != 4) {
+    return false;
+  }
+
+  const digit = unitOf(device, 3);
+  if (digit != 185 && digit != 178 && digit != 179) {
+    return false;
+  }
+
+  const head = upper.slice(0, 3);
+
+  return head == "COM" || head == "LPT";
+}
+
+function normalizedString(path: Read<string>, isAboveRoot: boolean): string {
+  const parts: string[] = [];
+  let lastSlash = -1;
+  let dots = 0;
+  let code = 0;
+
+  for (let index = 0; index <= path.length; index++) {
+    if (index < path.length) {
+      code = unitOf(path, index);
+    } else if (isSeparator(code)) {
+      break;
+    } else {
+      code = 47;
+    }
+
+    if (!isSeparator(code)) {
+      if (code == 46 && dots != -1) {
+        dots += 1;
+      } else {
+        dots = -1;
+      }
+
+      continue;
+    }
+    if (lastSlash != index - 1 && dots == 2) {
+      const last = parts[parts.length - 1];
+
+      if (last != undefined && last != "..") {
+        parts.pop();
+      } else if (isAboveRoot) {
+        parts.push("..");
+      }
+    } else if (lastSlash != index - 1 && dots != 1) {
+      parts.push(path.slice(lastSlash + 1, index));
+    }
+
+    lastSlash = index;
+    dots = 0;
+  }
+
+  return parts.join("\\");
+}
+
+@InPlace()
+class RootPart {
+  public readonly device: string;
+  public readonly rootEnd: int;
+  public readonly isAbsolute: boolean;
+  public readonly hasDevice: boolean;
+  public readonly whole: string;
+
+  public constructor(
+    device: string,
+    rootEnd: int,
+    isAbsolute: boolean,
+    hasDevice: boolean,
+    whole: string,
+  ) {
+    this.device = device;
+    this.rootEnd = rootEnd;
+    this.isAbsolute = isAbsolute;
+    this.hasDevice = hasDevice;
+    this.whole = whole;
+  }
+}
+
+function separatedRoot(path: Read<string>): RootPart {
+  const count = path.length;
+  const second = unitOf(path, 1);
+  if (!isSeparator(second)) {
+    return new RootPart("", 1, true, false, "");
+  }
+
+  const unc = matchedUnc(path);
+  if (unc.shareEnd < 0) {
+    return new RootPart("", 0, true, false, "");
+  }
+
+  const first = path.slice(unc.server, unc.serverEnd);
+  const isLocal = first.length == 1 && (first == "." || first == "?");
+  if (isLocal) {
+    const colon = path.indexOf(":");
+    let end = 0;
+
+    if (colon >= 0) {
+      end = colon + 1;
+    }
+
+    const possible = path.slice(4, end);
+    const isNamed = possible.length > 0 &&
+      isReservedName(possible, possible.length - 1);
+    if (isNamed) {
+      const device = "\\\\?\\" + possible;
+
+      return new RootPart(device, 4 + possible.length, true, true, "");
+    }
+
+    return new RootPart("\\\\" + first, 4, true, true, "");
+  }
+
+  const share = path.slice(unc.share, unc.shareEnd);
+  if (unc.shareEnd == count) {
+    const whole = "\\\\" + first + "\\" + path.slice(unc.share) + "\\";
+
+    return new RootPart("", 0, true, true, whole);
+  }
+
+  const device = "\\\\" + first + "\\" + share;
+
+  return new RootPart(device, unc.shareEnd, true, true, "");
+}
+
+function rootOf(path: Read<string>): RootPart {
+  const code = unitOf(path, 0);
+  if (isSeparator(code)) {
+    return separatedRoot(path);
+  }
+
+  const colon = path.indexOf(":");
+  if (colon <= 0) {
+    return new RootPart("", 0, false, false, "");
+  }
+  if (isDriveLetter(code) && colon == 1) {
+    const isAbsolute = path.length > 2 && isSeparator(unitOf(path, 2));
+    let end = 2;
+
+    if (isAbsolute) {
+      end = 3;
+    }
+
+    return new RootPart(path.slice(0, 2), end, isAbsolute, true, "");
+  }
+  if (isReservedName(path, colon)) {
+    const device = path.slice(0, colon + 1);
+
+    return new RootPart(device, colon + 1, false, true, "");
+  }
+
+  return new RootPart("", 0, false, false, "");
+}
+
+function hasDotPrefix(path: Read<string>, tail: Read<string>): boolean {
+  if (hasDrive(tail)) {
+    return true;
+  }
+
+  let colon = path.indexOf(":");
+
+  while (colon != -1) {
+    if (colon == path.length - 1 || isSeparator(unitOf(path, colon + 1))) {
+      return true;
+    }
+
+    colon = path.indexOf(":", colon + 1);
+  }
+
+  return false;
+}
+
+export function normalize(path: Read<string>): string {
+  const count = path.length;
+  if (count == 0) {
+    return ".";
+  }
+
+  const code = unitOf(path, 0);
+  if (count == 1 && code == 47) {
+    return "\\";
+  }
+  if (count == 1) {
+    return path;
+  }
+
+  const root = rootOf(path);
+  if (root.whole.length > 0) {
+    return root.whole;
+  }
+
+  let tail = "";
+
+  if (root.rootEnd < count) {
+    tail = normalizedString(path.slice(root.rootEnd), !root.isAbsolute);
+  }
+  if (tail.length == 0 && !root.isAbsolute) {
+    tail = ".";
+  }
+  if (tail.length > 0 && isSeparator(unitOf(path, count - 1))) {
+    tail += "\\";
+  }
+
+  const isPlain = !root.isAbsolute && !root.hasDevice;
+  if (isPlain && path.includes(":") && hasDotPrefix(path, tail)) {
+    return ".\\" + tail;
+  }
+  if (isReservedName(path, path.indexOf(":"))) {
+    return ".\\" + root.device + tail;
+  }
+
+  let start = root.device;
+
+  if (root.isAbsolute) {
+    start += "\\";
+  }
+
+  return start + tail;
+}
+
+function isReservedPart(whole: Read<string>): boolean {
+  for (const part of whole.split("\\")) {
+    const colon = part.indexOf(":");
+    if (part.length > 0 && colon != -1 && isReservedName(part, colon)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function leadingSlashes(first: Read<string>): int {
+  if (!isSeparator(unitOf(first, 0))) {
+    return 0;
+  }
+  if (first.length == 1 || !isSeparator(unitOf(first, 1))) {
+    return 1;
+  }
+  if (first.length == 2) {
+    return 2;
+  }
+  if (isSeparator(unitOf(first, 2))) {
+    return 3;
+  }
+
+  return -1;
+}
+
+export function join(parts: Read<string[]>): string {
+  const kept: string[] = [];
+
+  for (const part of parts) {
+    if (part.length > 0) {
+      kept.push(part);
+    }
+  }
+
+  const first = kept[0];
+  if (first == undefined) {
+    return ".";
+  }
+
+  let joined = kept.join("\\");
+  let slashes = leadingSlashes(first);
+
+  if (slashes >= 0) {
+    while (slashes < joined.length && isSeparator(unitOf(joined, slashes))) {
+      slashes += 1;
+    }
+    if (slashes >= 2) {
+      joined = "\\" + joined.slice(slashes);
+    }
+  }
+  if (isReservedPart(joined)) {
+    return joined.replaceAll("/", "\\");
+  }
+
+  return normalize(joined);
+}
+
+export function isAbsolute(path: Read<string>): boolean {
+  if (path.length == 0) {
+    return false;
+  }
+  if (isSeparator(unitOf(path, 0))) {
+    return true;
+  }
+
+  return path.length > 2 && hasDrive(path) && isSeparator(unitOf(path, 2));
+}
+
+function rootEndOf(path: Read<string>): int {
+  const count = path.length;
+  const code = unitOf(path, 0);
+  if (isSeparator(code)) {
+    if (!isSeparator(unitOf(path, 1))) {
+      return 1;
+    }
+
+    const unc = matchedUnc(path);
+    if (unc.shareEnd < 0) {
+      return 1;
+    }
+    if (unc.shareEnd == count) {
+      return -2;
+    }
+
+    return unc.shareEnd + 1;
+  }
+  if (hasDrive(path)) {
+    if (count > 2 && isSeparator(unitOf(path, 2))) {
+      return 3;
+    }
+
+    return 2;
+  }
+
+  return -1;
+}
+
+export function dirname(path: Read<string>): string {
+  const count = path.length;
+  if (count == 0) {
+    return ".";
+  }
+  if (count == 1 && isSeparator(unitOf(path, 0))) {
+    return path;
+  }
+  if (count == 1) {
+    return ".";
+  }
+
+  const rootEnd = rootEndOf(path);
+  if (rootEnd == -2) {
+    return path;
+  }
+
+  let offset = rootEnd;
+
+  if (offset < 0) {
+    offset = 0;
+  }
+
+  let end = -1;
+  let isSlashRun = true;
+
+  for (let index = count - 1; index >= offset; index--) {
+    if (!isSeparator(unitOf(path, index))) {
+      isSlashRun = false;
+    } else if (!isSlashRun) {
+      end = index;
+      index = -1;
+    }
+  }
+  if (end == -1 && rootEnd == -1) {
+    return ".";
+  }
+  if (end == -1) {
+    end = rootEnd;
+  }
+
+  return path.slice(0, end);
+}
+
+function driveStart(path: Read<string>): int {
+  if (hasDrive(path)) {
+    return 2;
+  }
+
+  return 0;
+}
+
+function basenameWith(path: Read<string>, suffix: Read<string>): string {
+  if (suffix == path) {
+    return "";
+  }
+
+  let start = driveStart(path);
+  let end = -1;
+  let isSlashRun = true;
+  let ending = suffix.length - 1;
+  let firstEnd = -1;
+
+  for (let index = path.length - 1; index >= start; index--) {
+    const code = unitOf(path, index);
+
+    if (isSeparator(code)) {
+      if (!isSlashRun) {
+        start = index + 1;
+        index = -1;
+      }
+    } else {
+      if (firstEnd == -1) {
+        isSlashRun = false;
+        firstEnd = index + 1;
+      }
+      if (ending >= 0 && code == unitOf(suffix, ending)) {
+        ending -= 1;
+
+        if (ending == -1) {
+          end = index;
+        }
+      } else if (ending >= 0) {
+        ending = -1;
+        end = firstEnd;
+      }
+    }
+  }
+  if (start == end) {
+    end = firstEnd;
+  } else if (end == -1) {
+    end = path.length;
+  }
+
+  return path.slice(start, end);
+}
+
+export function basename(
+  path: Read<string>,
+  suffix: Read<string>,
+  hasSuffix: boolean,
+): string {
+  const isSuffixed = hasSuffix && suffix.length > 0;
+  if (isSuffixed && suffix.length <= path.length) {
+    return basenameWith(path, suffix);
+  }
+
+  let start = driveStart(path);
+  let end = -1;
+  let isSlashRun = true;
+
+  for (let index = path.length - 1; index >= start; index--) {
+    if (isSeparator(unitOf(path, index))) {
+      if (!isSlashRun) {
+        start = index + 1;
+        index = -1;
+      }
+    } else if (end == -1) {
+      isSlashRun = false;
+      end = index + 1;
+    }
+  }
+  if (end == -1) {
+    return "";
+  }
+
+  return path.slice(start, end);
+}
+
+export function extname(path: Read<string>): string {
+  const from = driveStart(path);
+  let startPart = from;
+  let startDot = -1;
+  let end = -1;
+  let isSlashRun = true;
+  let dotState = 0;
+
+  for (let index = path.length - 1; index >= from; index--) {
+    const code = unitOf(path, index);
+
+    if (isSeparator(code)) {
+      if (!isSlashRun) {
+        startPart = index + 1;
+        index = -1;
+      }
+
+      continue;
+    }
+    if (end == -1) {
+      isSlashRun = false;
+      end = index + 1;
+    }
+    if (code == 46 && startDot == -1) {
+      startDot = index;
+    } else if (code == 46 && dotState != 1) {
+      dotState = 1;
+    } else if (code != 46 && startDot != -1) {
+      dotState = -1;
+    }
+  }
+
+  const isSolo = dotState == 1 && startDot == end - 1 &&
+    startDot == startPart + 1;
+  if (startDot == -1 || end == -1 || dotState == 0 || isSolo) {
+    return "";
+  }
+
+  return path.slice(startDot, end);
+}

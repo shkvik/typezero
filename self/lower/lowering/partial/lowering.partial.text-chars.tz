@@ -16,13 +16,13 @@ import {
   kLengthMask,
   kPointerType,
   kStringType,
-  kTextCharAt,
-  kTextCodePointAt,
+  kTextModule,
 } from "../const/lowering.const.tz";
 import {
   Frame,
   IrValue,
   Place,
+  RuntimeTarget,
   TextArguments,
 } from "../types/lowering.types.tz";
 
@@ -98,9 +98,11 @@ partial class Lowering {
     frame.made.conditionalBranch(isInside, read, end);
     frame.made.open(read);
 
-    const args = this.textParts(frame, text).concat([position]);
-    const params = [kPointerType, kIntType, kIntType];
-    const char = this.textOut(frame, kTextCharAt, params, args);
+    const char = this.charOf(frame, text, position, loc);
+    if (char == undefined) {
+      return undefined;
+    }
+
     const placed = this.converted(frame, char, result, loc);
     const readEnd = frame.made.currentBlock();
 
@@ -165,19 +167,27 @@ partial class Lowering {
     frame.made.open(body);
     this.openScope(frame);
 
-    const out = frame.made.slot(kStringType, "text.point");
-    const params = [kPointerType, kPointerType, kIntType, kIntType];
-    const callee = this.ir.declare(kTextCodePointAt, kFlagType, params);
-    const args = [out].concat(this.textParts(frame, text)).concat([index]);
-    const units = frame.made.call(callee, args);
-    const step = frame.made.cast(IrOpcode.SExt, units, kIntType);
+    const int = this.values.types.store.integer(64, false);
+    const at: IrValue = { type: kIntType, value: index, tz: int };
+    const pointAt: RuntimeTarget = { module: kTextModule, name: "pointAt" };
+    const found = this.runtimeFunctionCall(
+      frame,
+      pointAt,
+      [],
+      [text, at],
+      statement.loc,
+    );
+    if (found == undefined) {
+      return;
+    }
+
+    const step = this.textLength(frame, found);
 
     frame.made.store(frame.made.binary(IrOpcode.Add, index, step), counter);
 
-    const point = frame.made.load(kStringType, out);
     const item: IrValue = {
       type: kStringType,
-      value: point,
+      value: found.value,
       tz: string,
       owned: true,
     };
@@ -203,14 +213,23 @@ partial class Lowering {
 
   private textCharAt(
     frame: Read<Frame>,
+    call: CallExpr,
     receiver: IrValue,
     given: Read<TextArguments>,
-  ): IrValue {
-    const args = this.textParts(frame, receiver).concat([
-      this.numberAt(given, 0),
-    ]);
-    const params = [kPointerType, kIntType, kIntType];
+  ): IrValue | undefined {
+    return this.charOf(frame, receiver, this.numberAt(given, 0), call.loc);
+  }
 
-    return this.textOut(frame, kTextCharAt, params, args);
+  private charOf(
+    frame: Read<Frame>,
+    text: IrValue,
+    position: LLVMValue,
+    loc: int,
+  ): IrValue | undefined {
+    const int = this.values.types.store.integer(64, false);
+    const at: IrValue = { type: kIntType, value: position, tz: int };
+    const target: RuntimeTarget = { module: kTextModule, name: "charAt" };
+
+    return this.runtimeFunctionCall(frame, target, [], [text, at], loc);
   }
 }

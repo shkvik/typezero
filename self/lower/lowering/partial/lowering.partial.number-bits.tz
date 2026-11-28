@@ -1,0 +1,92 @@
+import { CallExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kDoubleType,
+  kIntType,
+  kWordPairType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private productWrapped(frame: Frame, call: CallExpr): IrValue | undefined {
+    const first = this.rawArgument(frame, call, 0);
+    const second = this.rawArgument(frame, call, 1);
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const value = frame.made.binary(IrOpcode.Mul, first, second);
+    const tz = this.values.types.store.integer(64, true);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private bitsOfDouble(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const double = this.values.types.store.plain(TypeKind.Double);
+    const expr = tree.exprOf(argument.exprId);
+    const given = this.wantedValue(frame, expr, double);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const value = this.converted(frame, given, double, expr.loc);
+    if (value == undefined || value.type != kDoubleType) {
+      return undefined;
+    }
+
+    const bits = frame.made.cast(IrOpcode.BitCast, value.value, kIntType);
+    const tz = this.values.types.store.integer(64, true);
+
+    return { type: kIntType, value: bits, tz };
+  }
+
+  private shiftedProduct(frame: Frame, call: CallExpr): IrValue | undefined {
+    const value = this.rawArgument(frame, call, 0);
+    const low = this.rawArgument(frame, call, 1);
+    const high = this.rawArgument(frame, call, 2);
+    const shift = this.intArgument(frame, call, 3);
+    if (value == undefined || low == undefined) {
+      return undefined;
+    }
+    if (high == undefined || shift == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const wide = made.cast(IrOpcode.ZExt, value, kWordPairType);
+    const first = made.cast(IrOpcode.ZExt, low, kWordPairType);
+    const second = made.cast(IrOpcode.ZExt, high, kWordPairType);
+    const half = this.ir.integer(kWordPairType, "64");
+    const lowProduct = made.binary(IrOpcode.Mul, wide, first);
+    const carried = made.binary(IrOpcode.LShr, lowProduct, half);
+    const highProduct = made.binary(IrOpcode.Mul, wide, second);
+    const sum = made.binary(IrOpcode.Add, carried, highProduct);
+    const steps = made.cast(IrOpcode.ZExt, shift, kWordPairType);
+    const shifted = made.binary(IrOpcode.LShr, sum, steps);
+    const result = made.cast(IrOpcode.Trunc, shifted, kIntType);
+    const tz = this.values.types.store.integer(64, true);
+
+    return { type: kIntType, value: result, tz };
+  }
+
+  private doubleOfBits(frame: Frame, call: CallExpr): IrValue | undefined {
+    const bits = this.rawArgument(frame, call, 0);
+    if (bits == undefined) {
+      return undefined;
+    }
+
+    const value = frame.made.cast(IrOpcode.BitCast, bits, kDoubleType);
+    const tz = this.values.types.store.plain(TypeKind.Double);
+
+    return { type: kDoubleType, value, tz };
+  }
+}

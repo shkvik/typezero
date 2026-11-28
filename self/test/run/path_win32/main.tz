@@ -1,0 +1,81 @@
+import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
+
+const kSamples: string[] = [
+  "",
+  ".",
+  "..",
+  "/",
+  "\\",
+  "a",
+  "a/b",
+  "a\\b\\",
+  "C:",
+  "C:\\",
+  "C:/",
+  "C:\\a\\b\\..\\c",
+  "c:a\\..\\..\\b",
+  "\\\\server\\share",
+  "\\\\server\\share\\",
+  "\\\\server\\share\\dir\\file.txt",
+  "//server/share/x/../y",
+  "\\\\.\\COM1",
+  "\\\\?\\C:\\very\\long",
+  "\\\\.\\C:\\x",
+  "///a//b///",
+  "a/./b/../../..",
+  "../x/../../y",
+  "file.tar.gz",
+  ".bashrc",
+  "a/.b",
+  "dir/",
+  "C:\\dir\\file.",
+  "x..y",
+  "con",
+  "CON:",
+  "aux.txt",
+  "foo:bar",
+  "a/b:c/d",
+  "привет\\мир.txt",
+  "\\\\a",
+  "\\\\a\\",
+  "\\\\a\\b\\..\\..\\c",
+  "C:\\..",
+  "\\..\\..",
+  "C:con",
+  "LPT1:",
+  "COM¹:",
+  "\\\\?\\COM1:",
+];
+
+function main(): void {
+  for (const sample of kSamples) {
+    const line = [
+      `[${sample}]`,
+      normalize(sample),
+      dirname(sample),
+      basename(sample),
+      basename(sample, ".txt"),
+      extname(sample),
+      `${isAbsolute(sample)}`,
+    ];
+
+    console.log(line.join(" | "));
+  }
+
+  console.log(join("a", "", "b"));
+  console.log(join("/a", "b", "../c"));
+  console.log(join("\\\\server", "share"));
+  console.log(join("//", "x"));
+  console.log(join("C:", "x"));
+  console.log(join("a", "C:"));
+  console.log(join("C:\\", "..", "..", "x"));
+  console.log(join("a/", "/b/"));
+  console.log(join("con:", "x"));
+  console.log(join("\\\\\\x", "y"));
+  console.log(join("\\\\", "a", "b"));
+  console.log(join("", ""));
+  console.log(join("x\\", "\\y"));
+  console.log(join());
+}
+
+main();

@@ -1,0 +1,130 @@
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+
+function cleaned(text: string, folder: string): string {
+  const here = resolve(".");
+  const inFolder = text.replaceAll(folder, "<tmp>");
+
+  return inFolder.replaceAll(here, "<here>").replaceAll(tmpdir(), "<os>");
+}
+
+function copied(label: string, from: string, to: string, folder: string): void {
+  const done = copyFileSync(from, to);
+
+  if (done.isOk()) {
+    console.log(label, "ok", existsSync(to));
+  } else {
+    const error = done.error;
+
+    console.log(label, error.kind, error.code, error.syscall);
+    console.log("  ", cleaned(error.message, folder));
+    console.log("  ", cleaned(error.path, folder), cleaned(error.dest, folder));
+  }
+}
+
+function removed(label: string, path: string, folder: string): void {
+  const done = rmSync(path);
+
+  if (done.isOk()) {
+    console.log(label, "ok", existsSync(path));
+  } else {
+    const error = done.error;
+
+    console.log(label, error.kind, error.code, error.syscall);
+    console.log("  ", cleaned(error.message, folder));
+  }
+}
+
+function isPlainName(name: string): boolean {
+  for (let index = 0; index < name.length; index++) {
+    const unit = name.charCodeAt(index);
+    const isDigit = unit >= 48 && unit <= 57;
+    const isUpper = unit >= 65 && unit <= 90;
+    const isLower = unit >= 97 && unit <= 122;
+
+    if (!isDigit && !isUpper && !isLower) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function main(): void {
+  const nulPath = `a${String.fromCharCode(0)}b`;
+  const made = mkdtempSync(join(tmpdir(), "tz-dirs-"));
+  if (made.isErr()) {
+    console.log("no temp", made.error.message);
+
+    return;
+  }
+
+  const folder = made.value;
+  const name = folder.slice(folder.length - 6);
+
+  console.log(existsSync(folder), name.length, isPlainName(name));
+
+  const file = join(folder, "copy.tz");
+
+  copied("first", "main.tz", file, folder);
+  copied("again", "main.tz", file, folder);
+  copied("missing", "missing.tz", join(folder, "x.tz"), folder);
+  copied("no folder", "main.tz", join(folder, "no", "x.tz"), folder);
+  copied("folder", folder, join(folder, "y.tz"), folder);
+  copied("nul", nulPath, file, folder);
+  copied("nul to", "main.tz", nulPath, folder);
+
+  const inner = mkdtempSync(join(folder, "sub-"));
+
+  if (inner.isOk()) {
+    const deeper = mkdtempSync(join(inner.value, "deep-"));
+
+    copied("inner", "main.tz", join(inner.value, "a.tz"), folder);
+
+    if (deeper.isOk()) {
+      copied("deeper", "main.tz", join(deeper.value, "b.tz"), folder);
+    }
+
+    const plain = rmSync(inner.value);
+
+    if (plain.isErr()) {
+      const error = plain.error;
+      const text = error.message.replaceAll(inner.value, "<sub>");
+
+      console.log("folder plain", error.kind, error.code, error.syscall);
+      console.log("  ", cleaned(text, folder));
+    }
+  }
+
+  const bad = mkdtempSync(join(folder, "no", "such", "x-"));
+
+  if (bad.isErr()) {
+    console.log("bad temp", bad.error.kind, bad.error.code, bad.error.syscall);
+    console.log("  ", cleaned(bad.error.message, folder));
+  }
+
+  const nul = mkdtempSync(nulPath);
+
+  if (nul.isErr()) {
+    console.log("nul temp", nul.error.code, cleaned(nul.error.message, folder));
+  }
+
+  removed("file", file, folder);
+  removed("missing", join(folder, "gone.tz"), folder);
+  removed("nul", nulPath, folder);
+
+  const forced = rmSync(join(folder, "gone.tz"), { force: true });
+
+  console.log("forced", forced.isOk());
+
+  const whole = rmSync(folder, { recursive: true });
+
+  console.log("whole", whole.isOk(), existsSync(folder));
+
+  const again = rmSync(folder, { recursive: true, force: true });
+
+  console.log("again", again.isOk());
+}
+
+main();

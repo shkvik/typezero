@@ -21,13 +21,16 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kCountsModule,
   kArrayAppend,
   kArrayCapacityField,
   kArrayClassName,
   kArrayDataField,
   kArrayGrow,
+  kArrayGrown,
   kArrayLayout,
   kArrayLengthField,
+  kArrayMade,
   kArrayNew,
   kFlagType,
   kIntType,
@@ -223,7 +226,8 @@ partial class Lowering {
       count,
       count,
     ];
-    const value = this.runtimeValue(frame, kArrayNew, kPointerType, args);
+    const making = this.arrayMaking();
+    const value = this.runtimeValue(frame, making, kPointerType, args);
 
     return { type: kPointerType, value, tz: type, owned: true };
   }
@@ -302,7 +306,11 @@ partial class Lowering {
       { type: kIntType, value: size, tz },
     ];
 
-    return this.runtimeValue(frame, kArrayNew, kPointerType, args);
+    return this.runtimeValue(frame, this.arrayMaking(), kPointerType, args);
+  }
+
+  private arrayMaking(): string {
+    return this.runtimeHelperName(kCountsModule, kArrayMade, kArrayNew);
   }
 
   private readonly arrayField(
@@ -418,6 +426,11 @@ partial class Lowering {
     }
     if (array.owned != true) {
       return loaded;
+    }
+    if (this.isSingleOwner(loaded) && this.isSingleOwner(array)) {
+      frame.made.store(this.ir.zero(element), address);
+
+      return { type: element, value, tz: item, owned: true };
     }
 
     return this.owning(frame, loaded);
@@ -539,7 +552,8 @@ partial class Lowering {
       }
 
       const params = [kPointerType, kPointerType];
-      const appending = this.ir.declare(kArrayAppend, kVoidType, params);
+      const appendingName = this.countsHelper(kArrayAppend);
+      const appending = this.ir.declare(appendingName, kVoidType, params);
 
       frame.made.call(appending, [array, other.value]);
       this.dropping(frame, other);
@@ -605,7 +619,12 @@ partial class Lowering {
     frame.made.open(grow);
 
     const wanted = frame.made.cast(IrOpcode.ZExt, next, kIntType);
-    const growing = this.ir.declare(kArrayGrow, kVoidType, [
+    const growName = this.runtimeHelperName(
+      kCountsModule,
+      kArrayGrown,
+      kArrayGrow,
+    );
+    const growing = this.ir.declare(growName, kVoidType, [
       kPointerType,
       kIntType,
     ]);

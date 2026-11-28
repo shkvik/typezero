@@ -240,11 +240,25 @@ partial class Lowering {
     type: Type,
     loc: int,
   ): IrValue | undefined {
+    if (this.isFixed(type)) {
+      return this.fixedMade(type);
+    }
+    if (this.isRawCells(type)) {
+      return this.rawNone(type);
+    }
+
     const layout = this.layoutOf(type);
     if (layout == undefined || this.ownConstructor(type) != undefined) {
       this.notLowered(frame.module, loc, "an empty value of this class");
 
       return undefined;
+    }
+    if (this.isInPlace(type)) {
+      const slot = this.recordSlot(frame, layout);
+
+      this.fieldsInitialized(frame, type, slot);
+
+      return this.recordMade(frame, slot, layout, type);
     }
 
     const object = this.allocated(frame, layout);

@@ -1,0 +1,155 @@
+function units(text: string): string {
+  const codes: string[] = [];
+
+  for (let index = 0; index < text.length; index++) {
+    codes.push(`${text.charCodeAt(index)}`);
+  }
+
+  return `${text.length}:${codes.join(".")}`;
+}
+
+function shown(label: string, text: string): void {
+  console.log(`${label} [${text}] ${text.length}`);
+}
+
+function numbers(): void {
+  const small = 7;
+  const negative = -42;
+  const big = 9223372036854775807;
+  const lowest = -9223372036854775807 - 1;
+  const half = 0.5;
+  const third = 1.0 / 3.0;
+  const huge = 1e300;
+  const tiny = -5e-324;
+  const zero = 0.0;
+
+  shown("a", `${small}`);
+  shown("b", `${small}${small}`);
+  shown("c", `x${negative}y`);
+  shown("d", `${big}`);
+  shown("e", `${lowest}`);
+  shown("f", `${half}`);
+  shown("g", `${third}`);
+  shown("h", `${huge} ${tiny}`);
+  shown("i", `${zero} ${-zero} ${1.0 / zero} ${-1.0 / zero}`);
+  shown("j", `${small} ${negative} ${big} ${half} ${third} ${huge} ${tiny}`);
+  shown("k", `[${big}${lowest}]`);
+  shown("l", `${12345678}`);
+  shown("m", `${123456789}`);
+  shown("n", `${third}${small}`);
+  shown("o", `${small}${third}`);
+  shown("p", `${big}${third}`);
+  shown("q", `${third}${"long text after the number part"}`);
+}
+
+function shorts(): void {
+  const a = "ab";
+  const b = "cdef";
+  const empty = "";
+  const ok = true;
+  let maybe: string | undefined = undefined;
+
+  shown("s1", a + b);
+  shown("s2", a + b + a);
+  shown("s3", a + b + a + b);
+  shown("s4", empty + empty);
+  shown("s5", empty + a + empty);
+  shown("s6", `${ok}${!ok}`);
+  shown("s7", `${maybe}`);
+  maybe = "set";
+  shown("s8", `${maybe}!`);
+  shown("s9", `${a}${empty}${b}${empty}`);
+}
+
+function wides(): void {
+  const word = "привет";
+  const smile = "😀";
+  const latin = "café";
+  const plain = "plain text that is long enough";
+
+  shown("w1", word + smile);
+  shown("w2", latin + word);
+  shown("w3", plain + word);
+  shown("w4", word + plain);
+  shown("w5", `${word}${12}${smile}${3.5}`);
+  console.log(units(latin + latin));
+  console.log(units(smile + latin));
+  console.log(units(`${latin}${1}`));
+}
+
+function growing(): void {
+  let text = "";
+
+  for (let index = 0; index < 300; index++) {
+    text += `${index},`;
+  }
+
+  shown("g1", text.slice(0, 60));
+  console.log(text.length, text.slice(text.length - 20));
+
+  let wide = "я";
+
+  for (let index = 0; index < 100; index++) {
+    wide += "ж";
+    wide += `${index}`;
+  }
+
+  console.log(wide.length, wide.slice(0, 30));
+
+  let mixed = "start";
+
+  for (let index = 0; index < 50; index++) {
+    mixed = mixed + "-" + `${index}`;
+
+    if (index % 10 == 0) {
+      mixed = `${mixed}é`;
+    }
+  }
+
+  console.log(mixed.length, mixed);
+
+  const base = "shared base string that is long";
+  const one = base + "one";
+  const two = base + "two";
+
+  console.log(one, two, base);
+
+  let joined = "";
+
+  for (let index = 0; index < 20; index++) {
+    joined = joined + `${index.toDouble() * 1.5}` + "|";
+  }
+
+  console.log(joined);
+}
+
+function ropes(): void {
+  const long = "a long left part of the text";
+  const other = "and the right part of it";
+  const tree = long + other;
+  const deeper = tree + tree;
+
+  console.log(tree.length, deeper.length, deeper);
+  console.log(`${tree}${7}`);
+  console.log(`${7}${tree}`);
+  console.log(`${long}${other}${long}`);
+  console.log(`${long}x`);
+
+  let parts = "";
+
+  for (let index = 0; index < 30; index++) {
+    parts = `${index}${parts}`;
+  }
+
+  console.log(parts);
+}
+
+function main(): void {
+  numbers();
+  shorts();
+  wides();
+  growing();
+  ropes();
+}
+
+main();

@@ -9,11 +9,23 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kArrayFree,
+  kArrayFreed,
+  kArrayAppend,
+  kArrayAppendTaken,
+  kArrayCopy,
   kArrayLengthField,
   kArrayRelease,
   kArrayRetain,
+  kArraySetLength,
+  kArraySlice,
+  kArraySliceLent,
+  kArraySplice,
+  kArrayUnshift,
   kBooleanType,
+  kCountsModule,
   kDecimalFree,
+  kDecimalFreed,
+  kDecimalsModule,
   kDecimalRelease,
   kDecimalRetain,
   kDecimalType,
@@ -26,6 +38,8 @@ import {
   kStringRelease,
   kStringRetain,
   kStringType,
+  kTextFreed,
+  kTextModule,
   kVoidType,
 } from "../const/lowering.const.tz";
 import { CountForm, Frame, IrValue, Place } from "../types/lowering.types.tz";
@@ -219,11 +233,34 @@ partial class Lowering {
   }
 
   private placeReleased(frame: Read<Frame>, place: Place): void {
+    if (place.view != undefined) {
+      return this.viewReleased(frame, place);
+    }
+
     const loaded = frame.made.load(place.type, place.pointer);
     const value: IrValue = {
       type: place.type,
       value: loaded,
       tz: place.tz,
+      owned: true,
+    };
+    const flag = place.flag;
+
+    frame.made.store(this.ir.zero(place.type), place.pointer);
+
+    if (flag == undefined) {
+      return this.dropping(frame, value);
+    }
+
+    this.flaggedDrop(frame, flag, value);
+  }
+
+  private viewReleased(frame: Read<Frame>, place: Place): void {
+    const seen = this.loaded(frame, place);
+    const value: IrValue = {
+      type: seen.type,
+      value: seen.value,
+      tz: seen.tz,
       owned: true,
     };
     const flag = place.flag;
@@ -301,6 +338,12 @@ partial class Lowering {
   }
 
   private stored(frame: Read<Frame>, place: Place, value: IrValue): void {
+    if (place.view != undefined) {
+      const form = "a new value for a borrow of an in-place value";
+
+      return this.notLowered(frame.module, this.statementLoc, form);
+    }
+
     const owned = this.owning(frame, value);
     if (!this.isManaged(place.tz)) {
       return frame.made.store(owned.value, place.pointer);
@@ -376,14 +419,70 @@ partial class Lowering {
     }
   }
 
-  private readonly freeName(form: CountForm): string {
+  private runtimeHelperName(
+    module: string,
+    freeing: string,
+    fallback: string,
+  ): string {
+    const tree = this.values.types.program.tree;
+
+    const homeId = this.moduleIdNamed(module);
+    const fn = this.functionNamed(homeId, freeing);
+    if (homeId == undefined || fn == undefined) {
+      return fallback;
+    }
+
+    const name = this.instanceName(homeId, fn, []);
+    const params = this.values.types.parameterTypes(
+      homeId,
+      tree.typeParamsOf(fn.typeParamsList),
+    );
+
+    this.instanceWanted({ module: homeId, fn, name, params, args: [] });
+
+    return name;
+  }
+
+  private countsHelper(name: string): string {
+    const helper = this.countsHelperOf(name);
+    if (helper == undefined) {
+      return name;
+    }
+
+    return this.runtimeHelperName(kCountsModule, helper, name);
+  }
+
+  private readonly countsHelperOf(name: string): string | undefined {
+    switch (name) {
+      case kArraySlice:
+        return "arraySliced";
+      case kArraySliceLent:
+        return "arrayLentSliced";
+      case kArrayCopy:
+        return "arrayCopied";
+      case kArrayAppend:
+        return "arrayAppended";
+      case kArrayAppendTaken:
+        return "arrayTakenAppended";
+      case kArraySetLength:
+        return "arrayLengthSet";
+      case kArrayUnshift:
+        return "arrayUnshifted";
+      case kArraySplice:
+        return "arraySpliced";
+      default:
+        return undefined;
+    }
+  }
+
+  private freeName(form: CountForm): string {
     switch (form) {
       case CountForm.Text:
-        return kStringFree;
+        return this.runtimeHelperName(kTextModule, kTextFreed, kStringFree);
       case CountForm.Decimal:
-        return kDecimalFree;
+        return this.runtimeHelperName(kDecimalsModule, kDecimalFreed, kDecimalFree);
       default:
-        return kArrayFree;
+        return this.runtimeHelperName(kCountsModule, kArrayFreed, kArrayFree);
     }
   }
 
@@ -512,7 +611,8 @@ partial class Lowering {
     }
 
     const length = this.arrayField(frame, array, kArrayLengthField);
-    const freeing = this.ir.declare(kArrayFree, kVoidType, [kPointerType]);
+    const name = this.runtimeHelperName(kCountsModule, kArrayFreed, kArrayFree);
+    const freeing = this.ir.declare(name, kVoidType, [kPointerType]);
 
     frame.made.store(this.ir.zero(kFlagType), length);
     frame.made.call(freeing, [array]);

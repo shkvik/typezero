@@ -1,0 +1,262 @@
+function limbBits(): int {
+  return 4294967295;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the number has at most 17 limbs; count is the used part",
+})
+function limbsTimes(limbs: Raw<int>, count: int, factor: int): int {
+  let carry = 0;
+
+  for (let index = 0; index < count; index++) {
+    const product = unitAt(limbs, index) * factor + carry;
+
+    putUnit(limbs, index, product & limbBits());
+    carry = product >> 32;
+  }
+  if (carry != 0) {
+    putUnit(limbs, count, carry);
+
+    return count + 1;
+  }
+
+  return count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "count is the used part of the limbs",
+})
+function limbsDivided(limbs: Raw<int>, count: int, rest: Raw<int>): int {
+  let carry = 0;
+
+  for (let index = count - 1; index >= 0; index--) {
+    const both = (carry << 32) | unitAt(limbs, index);
+
+    putUnit(limbs, index, both / 10);
+    carry = both % 10;
+  }
+
+  putUnit(rest, 0, carry);
+
+  let used = count;
+
+  while (used > 0 && unitAt(limbs, used - 1) == 0) {
+    used -= 1;
+  }
+
+  return used;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "count is the used part of the limbs",
+})
+function limbsBitLength(limbs: Raw<int>, count: int): int {
+  if (count == 0) {
+    return 0;
+  }
+
+  let bits = 32 * (count - 1);
+  let top = unitAt(limbs, count - 1);
+
+  while (top != 0) {
+    top = top >> 1;
+    bits += 1;
+  }
+
+  return bits;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the limbs have room for the shifted number; 18 cells in the copy",
+})
+function limbsShiftedLeft(limbs: Raw<int>, count: int, shift: int): int {
+  if (count == 0) {
+    return 0;
+  }
+
+  const words = shift / 32;
+  const bits = shift % 32;
+  const moved = frameCells<int>(40);
+  let carry = 0;
+
+  for (let index = 0; index < count + words + 1; index++) {
+    putUnit(moved, index, 0);
+  }
+  for (let index = 0; index < count; index++) {
+    const limb = unitAt(limbs, index);
+
+    putUnit(moved, index + words, ((limb << bits) & limbBits()) | carry);
+
+    if (bits == 0) {
+      carry = 0;
+    } else {
+      carry = limb >> (32 - bits);
+    }
+  }
+
+  putUnit(moved, count + words, carry);
+
+  let used = count + words + 1;
+
+  for (let index = 0; index < used; index++) {
+    putUnit(limbs, index, unitAt(moved, index));
+  }
+  while (used > 0 && unitAt(limbs, used - 1) == 0) {
+    used -= 1;
+  }
+
+  return used;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "count is the used part of the limbs",
+})
+function limbsShiftedRight(limbs: Raw<int>, count: int, shift: int): int {
+  const words = shift / 32;
+  const bits = shift % 32;
+  if (words >= count) {
+    return 0;
+  }
+
+  for (let index = 0; index + words < count; index++) {
+    let pair = unitAt(limbs, index + words);
+
+    if (index + words + 1 < count) {
+      pair = pair | (unitAt(limbs, index + words + 1) << 32);
+    }
+
+    putUnit(limbs, index, (pair >> bits) & limbBits());
+  }
+
+  let used = count - words;
+
+  while (used > 0 && unitAt(limbs, used - 1) == 0) {
+    used -= 1;
+  }
+
+  return used;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the limbs have room up to the word of the power",
+})
+function limbsPowerAdded(limbs: Raw<int>, count: int, power: int): int {
+  const word = power / 32;
+  let used = count;
+
+  while (used <= word) {
+    putUnit(limbs, used, 0);
+    used += 1;
+  }
+
+  let carry = 1 << (power % 32);
+
+  for (let index = word; carry != 0 && index < 16; index++) {
+    if (index == used) {
+      putUnit(limbs, used, 0);
+      used += 1;
+    }
+
+    const sum = unitAt(limbs, index) + carry;
+
+    putUnit(limbs, index, sum & limbBits());
+    carry = sum >> 32;
+  }
+
+  return used;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the frame cells hold 17 limbs and 170 digits",
+})
+export function toFixed(value: double, digits: int): string {
+  const bits = doubleBits(value);
+  const biased = ((bits >> 52) & exponentBits()).toInt();
+  const isNegative = (bits >> 63) != 0 && (bits & magnitudeBits()) != 0;
+  if (biased == 2047 && (bits & mantissaBits()) != 0) {
+    return "NaN";
+  }
+  if (Math.abs(value) >= 1e21) {
+    return fromDouble(value);
+  }
+
+  const limbs = frameCells<int>(40);
+  let count = 0;
+  let exponent = 0;
+  let mantissa = (bits & mantissaBits()).toInt();
+
+  if (biased != 0) {
+    mantissa = mantissa + 4503599627370496;
+    exponent = biased - 1075;
+  } else if (mantissa != 0) {
+    exponent = -1074;
+
+    while (mantissa < 4503599627370496) {
+      mantissa = mantissa * 2;
+      exponent -= 1;
+    }
+  }
+  if (mantissa != 0) {
+    putUnit(limbs, 0, mantissa & limbBits());
+    putUnit(limbs, 1, mantissa >> 32);
+    count = 2;
+  }
+
+  for (let index = 0; index < digits; index++) {
+    count = limbsTimes(limbs, count, 10);
+  }
+
+  if (exponent >= 0) {
+    count = limbsShiftedLeft(limbs, count, exponent);
+  } else if (limbsBitLength(limbs, count) < 0 - exponent) {
+    count = 0;
+  } else {
+    count = limbsPowerAdded(limbs, count, 0 - exponent - 1);
+    count = limbsShiftedRight(limbs, count, 0 - exponent);
+  }
+
+  const reversed = frameCells<uint8>(176);
+  const rest = frameCells<int>(1);
+  let made = 0;
+
+  while (count > 0) {
+    count = limbsDivided(limbs, count, rest);
+    putUnit(reversed, made, 48 + unitAt(rest, 0));
+    made += 1;
+  }
+  while (made < digits + 1) {
+    putUnit(reversed, made, 48);
+    made += 1;
+  }
+
+  const text = frameCells<uint8>(184);
+  let length = 0;
+
+  if (isNegative) {
+    putUnit(text, 0, 45);
+    length = 1;
+  }
+
+  for (let index = made - 1; index >= 0; index--) {
+    putUnit(text, length, unitAt(reversed, index));
+    length += 1;
+
+    if (index == digits && digits > 0) {
+      putUnit(text, length, 46);
+      length += 1;
+    }
+  }
+
+  const room = textRoom<uint8>(length);
+
+  copyCells(text, 0, room, 0, length);
+
+  return textClosed(room, length, true);
+}

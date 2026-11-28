@@ -9,6 +9,7 @@ import {
   IrIntPredicate,
   IrOpcode,
 } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import { kIntType, kPointerType } from "../const/lowering.const.tz";
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
@@ -122,7 +123,7 @@ partial class Lowering {
     };
     const staticItem = this.staticOrSame(looked, source.isStatic == true);
 
-    this.loopItem(frame, statement, staticItem);
+    this.loopItem(frame, statement, staticItem, address);
     frame.loops.push(target);
     const bodyStmt = tree.stmtOf(statement.bodyId);
 
@@ -187,7 +188,12 @@ partial class Lowering {
     return this.sourceItems(frame, expr);
   }
 
-  private loopItem(frame: Frame, statement: ForOfStmt, item: IrValue): void {
+  private loopItem(
+    frame: Frame,
+    statement: ForOfStmt,
+    item: IrValue,
+    address?: LLVMValue,
+  ): void {
     const binding = statement.binding;
     const variable = this.values.variableOf(frame.module, binding.loc);
     const declared = this.boundOrNone(variable);
@@ -195,6 +201,9 @@ partial class Lowering {
     const place = this.boundPlace(frame, binding, item.tz, isUnknown);
     if (place == undefined) {
       return;
+    }
+    if (place.view != undefined) {
+      return this.viewItem(frame, place, item, address);
     }
 
     const value = this.converted(frame, item, place.tz, binding.loc);

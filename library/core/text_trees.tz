@@ -1,0 +1,295 @@
+
+function treeKind(): uint32 {
+  return 3;
+}
+
+function metaLength(meta: uint64): int {
+  return (meta & textLengthBits()).toInt();
+}
+
+function metaOffset(meta: uint64): int {
+  return ((meta >> textOffsetShift()) & textLengthBits()).toInt();
+}
+
+function isTreeMeta(meta: uint64): boolean {
+  const forms = textTreeBit() | textHeapBit();
+
+  return (meta & forms) == forms;
+}
+
+function isHeapMeta(meta: uint64): boolean {
+  return (meta & textHeapBit()) != 0;
+}
+
+function isInlineMeta(meta: uint64): boolean {
+  const forms = textTreeBit() | textHeapBit() | textWideBit();
+
+  return (meta & forms) == textTreeBit();
+}
+
+function isWideMeta(meta: uint64): boolean {
+  return (meta & textWideBit()) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a heap text starts with its head",
+})
+function textHeld(text: Read<string>): void {
+  const meta = textMeta(text);
+
+  if (isHeapMeta(meta)) {
+    const head = viewAt<TextHead>(textObject(text), 0);
+
+    head.count += 1;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the tree object has the 64 bytes of TreeHead",
+})
+export function treeMade(left: Read<string>, right: Read<string>): string {
+  const leftMeta = textMeta(left);
+  const rightMeta = textMeta(right);
+  const length = metaLength(leftMeta) + metaLength(rightMeta);
+  const isWide = isWideMeta(leftMeta) || isWideMeta(rightMeta);
+  const isPlain = (leftMeta & rightMeta & textAsciiBit()) != 0;
+  const object = allocate<uint8>(64);
+  const head = viewAt<TreeHead>(object, 0);
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+
+  head.count = 1;
+  head.kind = treeKind();
+  head.reserved = 0;
+  head.leftObject = textObject(left);
+  head.leftMeta = leftMeta;
+  head.rightObject = textObject(right);
+  head.rightMeta = rightMeta;
+  head.flatObject = bitsRaw(0);
+  head.flatMeta = 0;
+  thread.liveStrings += 1;
+  textHeld(left);
+  textHeld(right);
+
+  let meta = length.toUint64() | textHeapBit() | textTreeBit();
+
+  if (isWide) {
+    meta = meta | textWideBit();
+  } else if (isPlain) {
+    meta = meta | textAsciiBit();
+  }
+
+  return textOf(object, meta);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the pieces were counted, so each is pushed once",
+})
+function childDropped(
+  objects: Mut<uint64[]>,
+  object: Raw<uint8>,
+  meta: uint64,
+): void {
+  if (!isHeapMeta(meta)) {
+    return;
+  }
+
+  const head = viewAt<TextHead>(object, 0);
+
+  head.count -= 1;
+
+  if (head.count == 0) {
+    objects.push(rawBits(object));
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every object on the stack is a text no one counts any more",
+})
+export function textFreed(object: Raw<uint8>): void {
+  const thread = viewAt<ThreadHead>(threadState(), 0);
+  const first = viewAt<TextHead>(object, 0);
+
+  if (first.kind != treeKind()) {
+    thread.liveStrings -= 1;
+    release(object);
+
+    return;
+  }
+
+  const objects: uint64[] = [rawBits(object)];
+
+  while (objects.length > 0) {
+    const held = bitsRaw(objects.pop() ?? 0);
+    const head = viewAt<TreeHead>(held, 0);
+
+    if (head.kind == treeKind()) {
+      childDropped(objects, head.leftObject, head.leftMeta);
+      childDropped(objects, head.rightObject, head.rightMeta);
+      childDropped(objects, head.flatObject, head.flatMeta);
+    }
+
+    thread.liveStrings -= 1;
+    release(held);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has place for every unit of the tree",
+})
+function leafCopied(
+  room: Raw<uint8>,
+  isWide: boolean,
+  at: int,
+  object: Raw<uint8>,
+  meta: uint64,
+): void {
+  const length = metaLength(meta);
+  if (length == 0) {
+    return;
+  }
+
+  const isLeafWide = isWideMeta(meta);
+
+  if (isInlineMeta(meta)) {
+    const bits = rawBits(object);
+
+    for (let index = 0; index < length; index++) {
+      const unit = ((bits >> (index * 8).toUint64()) & 255).toInt();
+
+      if (isWide) {
+        putUnit(cellsAt<uint16>(room, 0), at + index, unit);
+      } else {
+        putUnit(room, at + index, unit);
+      }
+    }
+
+    return;
+  }
+
+  let width = 1;
+
+  if (isLeafWide) {
+    width = 2;
+  }
+
+  const from = cellsAt<uint8>(object, 24 + metaOffset(meta) * width);
+
+  if (isWide && isLeafWide) {
+    copyCells(cellsAt<uint16>(from, 0), 0, cellsAt<uint16>(room, 0), at, length);
+  } else if (isWide) {
+    copyCells(from, 0, cellsAt<uint16>(room, 0), at, length);
+  } else {
+    copyCells(from, 0, room, at, length);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a tree keeps two pieces and its flat copy",
+})
+function treeFlattened(object: Raw<uint8>, meta: uint64): void {
+  const length = metaLength(meta);
+  const isWide = isWideMeta(meta);
+  const room = roomMade(length + length / 2, isWide);
+  const objects: uint64[] = [];
+  const metas: uint64[] = [];
+  const head = viewAt<TreeHead>(object, 0);
+  let at = 0;
+
+  objects.push(rawBits(head.rightObject));
+  metas.push(head.rightMeta);
+  objects.push(rawBits(head.leftObject));
+  metas.push(head.leftMeta);
+
+  while (objects.length > 0) {
+    const piece = bitsRaw(objects.pop() ?? 0);
+    const pieceMeta = metas.pop() ?? 0;
+
+    if (isTreeMeta(pieceMeta)) {
+      const child = viewAt<TreeHead>(piece, 0);
+
+      if (rawBits(child.flatObject) == 0) {
+        objects.push(rawBits(child.rightObject));
+        metas.push(child.rightMeta);
+        objects.push(rawBits(child.leftObject));
+        metas.push(child.leftMeta);
+
+        continue;
+      }
+
+      leafCopied(room, isWide, at, child.flatObject, child.flatMeta);
+    } else {
+      leafCopied(room, isWide, at, piece, pieceMeta);
+    }
+
+    at += metaLength(pieceMeta);
+  }
+
+  const flat = bitsRaw(rawBits(room) - 24);
+  const flatHead = viewAt<TextHead>(flat, 0);
+  let flatMeta = length.toUint64() | textHeapBit();
+
+  flatHead.used = length.toUint32();
+
+  if (isWide) {
+    flatMeta = flatMeta | textWideBit();
+  } else if ((meta & textAsciiBit()) != 0) {
+    flatMeta = flatMeta | textAsciiBit();
+  }
+
+  const left = head.leftObject;
+  const leftMeta = head.leftMeta;
+  const right = head.rightObject;
+  const rightMeta = head.rightMeta;
+
+  head.flatObject = flat;
+  head.flatMeta = flatMeta;
+  head.leftObject = bitsRaw(0);
+  head.leftMeta = textAsciiBit();
+  head.rightObject = bitsRaw(0);
+  head.rightMeta = textAsciiBit();
+  pieceReleased(left, leftMeta);
+  pieceReleased(right, rightMeta);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a heap piece starts with its head",
+})
+function pieceReleased(object: Raw<uint8>, meta: uint64): void {
+  if (!isHeapMeta(meta)) {
+    return;
+  }
+
+  const head = viewAt<TextHead>(object, 0);
+
+  head.count -= 1;
+
+  if (head.count == 0) {
+    textFreed(object);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text is a tree: its flat copy is made once and kept",
+})
+export function treeCells(text: Read<string>, isWide: boolean): Raw<uint8> {
+  const meta = textMeta(text);
+  const object = textObject(text);
+  const head = viewAt<TreeHead>(object, 0);
+
+  if (rawBits(head.flatObject) == 0) {
+    treeFlattened(object, meta);
+  }
+  if (isWideMeta(head.flatMeta) != isWide) {
+    return bitsRaw(0);
+  }
+
+  return cellsAt<uint8>(head.flatObject, 24);
+}

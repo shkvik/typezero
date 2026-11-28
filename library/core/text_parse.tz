@@ -1,0 +1,521 @@
+@InPlace()
+class NumberReading {
+  public readonly value: double;
+  public readonly failure: int;
+
+  public constructor(value: double, failure: int) {
+    this.value = value;
+    this.failure = failure;
+  }
+}
+
+@InPlace()
+class IntegerReading {
+  public readonly value: int;
+  public readonly failure: int;
+
+  public constructor(value: int, failure: int) {
+    this.value = value;
+    this.failure = failure;
+  }
+}
+
+function notNumber(): int {
+  return 1;
+}
+
+function beyondRange(): int {
+  return 2;
+}
+
+function largestDouble(): double {
+  return 1.7976931348623157e308;
+}
+
+function isDigitUnit(unit: int): boolean {
+  return unit >= 48 && unit <= 57;
+}
+
+function isSignUnit(unit: int): boolean {
+  return unit == 43 || unit == 45;
+}
+
+function digitValue(unit: int): int {
+  if (isDigitUnit(unit)) {
+    return unit - 48;
+  }
+
+  const lower = unit | 32;
+  if (lower >= 97 && lower <= 122) {
+    return lower - 87;
+  }
+
+  return 36;
+}
+
+function tenPower(exponent: int): double {
+  let value = 1.0;
+
+  for (let index = 0; index < exponent; index++) {
+    value = value * 10.0;
+  }
+
+  return value;
+}
+
+function finiteReading(value: double): NumberReading {
+  if (value > largestDouble() || value < 0.0 - largestDouble()) {
+    return new NumberReading(0.0, beyondRange());
+  }
+
+  return new NumberReading(value, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "from … to is inside the cells",
+})
+function asciiRun<C>(cells: Raw<C>, from: int, to: int): int {
+  let at = from;
+
+  while (at < to && unitAt(cells, at) < 128) {
+    at += 1;
+  }
+
+  return at - from;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells hold count units",
+})
+function decimalLength(cells: Raw<uint8>, from: int, count: int): int {
+  let at = from;
+  let digits = 0;
+
+  while (at < count && isDigitUnit(unitAt(cells, at))) {
+    at += 1;
+    digits += 1;
+  }
+  if (at < count && unitAt(cells, at) == 46) {
+    at += 1;
+
+    while (at < count && isDigitUnit(unitAt(cells, at))) {
+      at += 1;
+      digits += 1;
+    }
+  }
+  if (digits == 0) {
+    return 0;
+  }
+  if (at < count && (unitAt(cells, at) | 32) == 101) {
+    let next = at + 1;
+
+    if (next < count && isSignUnit(unitAt(cells, next))) {
+      next += 1;
+    }
+    if (next < count && isDigitUnit(unitAt(cells, next))) {
+      while (next < count && isDigitUnit(unitAt(cells, next))) {
+        next += 1;
+      }
+
+      at = next;
+    }
+  }
+
+  return at - from;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells hold count units of a checked decimal",
+})
+function decimalFast(cells: Raw<uint8>, count: int): NumberReading {
+  const slow = new NumberReading(0.0, notNumber());
+  let at = 0;
+  let isNegative = false;
+
+  if (at < count && isSignUnit(unitAt(cells, at))) {
+    isNegative = unitAt(cells, at) == 45;
+    at += 1;
+  }
+
+  let mantissa = 0;
+  let digits = 0;
+  let exponent = 0;
+  let isFraction = false;
+
+  while (at < count) {
+    const unit = unitAt(cells, at);
+
+    if (unit == 46) {
+      isFraction = true;
+    } else if (!isDigitUnit(unit)) {
+      break;
+    } else if (mantissa == 0 && unit == 48) {
+      if (isFraction) {
+        exponent -= 1;
+      }
+    } else {
+      digits += 1;
+
+      if (digits > 18) {
+        return slow;
+      }
+
+      mantissa = mantissa * 10 + unit - 48;
+
+      if (isFraction) {
+        exponent -= 1;
+      }
+    }
+
+    at += 1;
+  }
+  if (at < count) {
+    at += 1;
+
+    let isLess = false;
+
+    if (at < count && isSignUnit(unitAt(cells, at))) {
+      isLess = unitAt(cells, at) == 45;
+      at += 1;
+    }
+
+    let power = 0;
+
+    while (at < count) {
+      if (power > 100000) {
+        return slow;
+      }
+
+      power = power * 10 + unitAt(cells, at) - 48;
+      at += 1;
+    }
+    if (isLess) {
+      exponent -= power;
+    } else {
+      exponent += power;
+    }
+  }
+
+  let value = 0.0;
+
+  if (mantissa != 0) {
+    if (mantissa > 9007199254740992 || exponent < -22 || exponent > 22) {
+      return slow;
+    }
+
+    const whole = mantissa.toDouble();
+
+    if (exponent >= 0) {
+      value = whole * tenPower(exponent);
+    } else {
+      value = whole / tenPower(0 - exponent);
+    }
+  }
+  if (isNegative) {
+    value = -value;
+  }
+
+  return new NumberReading(value, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory, UnsafeUse.Foreign],
+  reason: "the cells hold count units and a zero after them",
+})
+function decimalValue(cells: Raw<uint8>, count: int): double {
+  const fast = decimalFast(cells, count);
+  if (fast.failure == 0) {
+    return fast.value;
+  }
+
+  const end = frameCells<uint64>(1);
+
+  return strtod(cells, end);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "from + 8 <= the count of the cells",
+})
+function isInfinityAt(cells: Raw<uint8>, from: int): boolean {
+  let at = from;
+
+  for (const unit of kInfinityUnits) {
+    if (unitAt(cells, at) != unit) {
+      return false;
+    }
+
+    at += 1;
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells hold count units and a zero after them",
+})
+function readNumber(
+  cells: Raw<uint8>,
+  count: int,
+  isComplete: boolean,
+): NumberReading {
+  if (!isComplete) {
+    return new NumberReading(0.0, notNumber());
+  }
+  if (count == 0) {
+    return new NumberReading(0.0, 0);
+  }
+  if (count > 2 && unitAt(cells, 0) == 48) {
+    const kind = unitAt(cells, 1) | 32;
+    let radix = 0;
+
+    if (kind == 120) {
+      radix = 16;
+    } else if (kind == 111) {
+      radix = 8;
+    } else if (kind == 98) {
+      radix = 2;
+    }
+    if (radix != 0) {
+      const base = radix.toDouble();
+      let value = 0.0;
+
+      for (let index = 2; index < count; index++) {
+        const digit = digitValue(unitAt(cells, index));
+        if (digit >= radix) {
+          return new NumberReading(0.0, notNumber());
+        }
+
+        value = value * base + digit.toDouble();
+      }
+
+      return finiteReading(value);
+    }
+  }
+
+  let from = 0;
+
+  if (isSignUnit(unitAt(cells, 0))) {
+    from = 1;
+  }
+  if (count - from == 8 && isInfinityAt(cells, from)) {
+    return new NumberReading(0.0, beyondRange());
+  }
+
+  const length = decimalLength(cells, from, count);
+  if (length == 0 || length != count - from) {
+    return new NumberReading(0.0, notNumber());
+  }
+
+  const value = decimalValue(cells, count);
+
+  return finiteReading(value);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells hold count units",
+})
+function readInteger(
+  cells: Raw<uint8>,
+  count: int,
+  given: int,
+): IntegerReading {
+  let at = 0;
+  let isNegative = false;
+  let radix = given;
+  let isPrefixed = true;
+
+  if (at < count && isSignUnit(unitAt(cells, at))) {
+    isNegative = unitAt(cells, at) == 45;
+    at += 1;
+  }
+  if (radix != 0) {
+    if (radix < 2 || radix > 36) {
+      return new IntegerReading(0, notNumber());
+    }
+
+    isPrefixed = radix == 16;
+  } else {
+    radix = 10;
+  }
+  if (isPrefixed && count - at >= 2 && unitAt(cells, at) == 48) {
+    if ((unitAt(cells, at + 1) | 32) == 120) {
+      at += 2;
+      radix = 16;
+    }
+  }
+
+  const start = at;
+  const base = radix.toUint64();
+  const most: uint64 = 18446744073709551615;
+  let value: uint64 = 0;
+  let isOverflow = false;
+
+  while (at < count && digitValue(unitAt(cells, at)) < radix) {
+    const digit = digitValue(unitAt(cells, at)).toUint64();
+
+    if (value > (most - digit) / base) {
+      isOverflow = true;
+    } else {
+      value = value * base + digit;
+    }
+
+    at += 1;
+  }
+  if (at == start) {
+    return new IntegerReading(0, notNumber());
+  }
+
+  const lowest: uint64 = 9223372036854775808;
+  let limit: uint64 = 9223372036854775807;
+
+  if (isNegative) {
+    limit = lowest;
+  }
+  if (isOverflow || value > limit) {
+    return new IntegerReading(0, beyondRange());
+  }
+  if (!isNegative) {
+    return new IntegerReading(value.toInt(), 0);
+  }
+  if (value == lowest) {
+    return new IntegerReading(-9223372036854775807 - 1, 0);
+  }
+
+  const magnitude = value.toInt();
+
+  return new IntegerReading(0 - magnitude, 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the scratch holds the ascii run and a zero after it",
+})
+function numberCells<C>(cells: Raw<C>, count: int): NumberReading {
+  const kept = spaceless(cells, count, true, true);
+  const run = asciiRun(cells, kept.at, kept.at + kept.count);
+  const isLong = run >= 64;
+  let scratch = frameCells<uint8>(64);
+
+  if (isLong) {
+    scratch = allocate<uint8>(run + 1);
+  }
+
+  copyCells(cells, kept.at, scratch, 0, run);
+  putUnit(scratch, run, 0);
+
+  const reading = readNumber(scratch, run, run == kept.count);
+
+  if (isLong) {
+    release(scratch);
+  }
+
+  return reading;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the scratch holds the ascii run",
+})
+function integerCells<C>(
+  cells: Raw<C>,
+  count: int,
+  radix: int,
+): IntegerReading {
+  const kept = spaceless(cells, count, true, false);
+  const run = asciiRun(cells, kept.at, kept.at + kept.count);
+  const isLong = run >= 64;
+  let scratch = frameCells<uint8>(64);
+
+  if (isLong) {
+    scratch = allocate<uint8>(run + 1);
+  }
+
+  copyCells(cells, kept.at, scratch, 0, run);
+
+  const reading = readInteger(scratch, run, radix);
+
+  if (isLong) {
+    release(scratch);
+  }
+
+  return reading;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as this borrowed string",
+})
+function numberReading(text: Read<string>): NumberReading {
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return numberCells(narrow, text.length);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return numberCells(wide, text.length);
+  }
+
+  return new NumberReading(0.0, notNumber());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as this borrowed string",
+})
+function integerReading(text: Read<string>, radix: int): IntegerReading {
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return integerCells(narrow, text.length, radix);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return integerCells(wide, text.length, radix);
+  }
+
+  return new IntegerReading(0, notNumber());
+}
+
+export function numberOf(text: Read<string>): Result<double, NumberError> {
+  const reading = numberReading(text);
+  if (reading.failure == 0) {
+    return ok(reading.value);
+  }
+
+  let what = "not a number";
+
+  if (reading.failure == beyondRange()) {
+    what = "the number is beyond 1.8e308, the range of a double";
+  }
+
+  const message = `${what}: '${text}'`;
+
+  return err({ kind: "NUMBER_ERROR", code: "ERR_INVALID_NUMBER", message });
+}
+
+export function integerOf(
+  text: Read<string>,
+  radix: int,
+): Result<int, NumberError> {
+  const reading = integerReading(text, radix);
+  if (reading.failure == 0) {
+    return ok(reading.value);
+  }
+
+  let what = "not a number";
+
+  if (reading.failure == beyondRange()) {
+    what = "the number does not fit in an int (64 bits); read it as a decimal";
+  }
+
+  const message = `${what}: '${text}'`;
+
+  return err({ kind: "NUMBER_ERROR", code: "ERR_INVALID_NUMBER", message });
+}

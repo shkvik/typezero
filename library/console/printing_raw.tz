@@ -1,0 +1,160 @@
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds a pointer",
+})
+function pointerAt(raw: Raw<uint8>, offset: int): Raw<uint8> {
+  const cells = cellsAt<uint64>(raw, offset);
+  const bits = unitAt(cells, 0).toUint64();
+
+  return bitsRaw(bits);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds four bytes",
+})
+function wordAt(raw: Raw<uint8>, offset: int): int {
+  return unitAt(cellsAt<uint32>(raw, offset), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place that holds a byte",
+})
+function byteAt(raw: Raw<uint8>, offset: int): int {
+  return unitAt(cellsAt<uint8>(raw, offset), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "callers give a place inside the value",
+})
+function placeAt(raw: Raw<uint8>, offset: int): Raw<uint8> {
+  return cellsAt<uint8>(raw, offset);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the address is read",
+})
+function keyOf(raw: Raw<uint8>): int {
+  return rawBits(raw).toInt();
+}
+
+function utf8Text(raw: Raw<uint8>, count: uint32): string {
+  return textOfBytes(raw, count.toInt(), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description starts with its kind",
+})
+function kindOf(type: Raw<uint8>): uint32 {
+  const head = viewAt<TypeHead>(type, 0);
+
+  return head.kind;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description starts with its kind and size",
+})
+function sizeOf(type: Raw<uint8>): int {
+  const head = viewAt<TypeHead>(type, 0);
+
+  return head.size.toInt();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a type description has its inner type third",
+})
+function innerOf(type: Raw<uint8>): Raw<uint8> {
+  const head = viewAt<TypeHead>(type, 0);
+
+  return head.inner;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds a text",
+})
+function stringAt(value: Raw<uint8>): Read<string> {
+  return peekAt(cellsAt<string>(value, 0), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds a decimal",
+})
+function decimalAt(value: Raw<uint8>): Read<decimal> {
+  return peekAt(cellsAt<decimal>(value, 0), 0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds a double",
+})
+function doubleAt(value: Raw<uint8>, offset: int): double {
+  return peekAt(cellsAt<double>(value, offset), 0);
+}
+
+function isIntegerKind(kind: uint32): boolean {
+  return kind == 1 || kind == 2 || (kind >= 18 && kind <= 23);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the bits of a number are read",
+})
+function isNegativeZero(number: double): boolean {
+  return doubleBits(number) == 9223372036854775808;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the value holds an integer of the kind",
+})
+function integerInto(
+  out: Mut<TextBuilder>,
+  kind: uint32,
+  value: Raw<uint8>,
+): void {
+  switch (kind) {
+    case 18:
+      return out.addSigned(peekAt(cellsAt<int8>(value, 0), 0).toInt());
+    case 19:
+      return out.addSigned(peekAt(cellsAt<int16>(value, 0), 0).toInt());
+    case 1:
+      return out.addSigned(peekAt(cellsAt<int32>(value, 0), 0).toInt());
+    case 20:
+      return out.addSigned(unitAt(cellsAt<uint8>(value, 0), 0));
+    case 21:
+      return out.addSigned(unitAt(cellsAt<uint16>(value, 0), 0));
+    case 22:
+      return out.addSigned(unitAt(cellsAt<uint32>(value, 0), 0));
+    case 23:
+      return out.add(`${peekAt(cellsAt<uint64>(value, 0), 0)}`);
+    default:
+      return out.addSigned(peekAt(cellsAt<int>(value, 0), 0));
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the optional holds its flag after the inner value",
+})
+function isPresent(type: Raw<uint8>, value: Raw<uint8>): boolean {
+  const inner = innerOf(type);
+  const kind = kindOf(inner);
+
+  if (kind == 10 || kind == 13 || kind == 16 || kind == 24) {
+    return rawBits(pointerAt(value, 0)) != 0;
+  }
+  if (kind == 14 || kind == 15) {
+    return wordAt(value, 0) != 0;
+  }
+
+  return byteAt(value, sizeOf(inner)) != 0;
+}

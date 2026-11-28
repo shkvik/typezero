@@ -11,7 +11,9 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kIntType,
+  kCountsModule,
   kObjectAllocate,
+  kObjectMade,
   kObjectHeader,
   kPointerType,
   kVoidType,
@@ -43,6 +45,9 @@ partial class Lowering {
       this.notLowered(frame.module, expr.loc, `a new ${kind}`);
 
       return undefined;
+    }
+    if (this.isFixed(type)) {
+      return this.fixedMade(type);
     }
 
     const decl = this.values.classDeclOf(type);
@@ -170,9 +175,12 @@ partial class Lowering {
     const tz = this.values.types.store.integer(64, false);
     const size = this.ir.integer(kIntType, `${layout.size}`);
     const sizeValue: IrValue = { type: kIntType, value: size, tz };
-    const object = this.runtimeValue(frame, kObjectAllocate, kPointerType, [
-      sizeValue,
-    ]);
+    const making = this.runtimeHelperName(
+      kCountsModule,
+      kObjectMade,
+      kObjectAllocate,
+    );
+    const object = this.runtimeValue(frame, making, kPointerType, [sizeValue]);
     const count = frame.made.field(kObjectHeader, object, 0);
     const kind = frame.made.field(kObjectHeader, object, 1);
 
@@ -287,6 +295,17 @@ partial class Lowering {
     }
     if (object.owned != true || !this.isManaged(object.tz)) {
       return loaded;
+    }
+    if (this.isSingleOwner(loaded) && this.isSingleOwner(object)) {
+      frame.made.store(this.ir.zero(place.type), place.pointer);
+      this.dropping(frame, object);
+
+      return {
+        type: loaded.type,
+        value: loaded.value,
+        tz: loaded.tz,
+        owned: true,
+      };
     }
 
     const kept = this.owning(frame, loaded);

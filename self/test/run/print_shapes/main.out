@@ -1,0 +1,54 @@
+Pair { left: 3, right: 4.5 }
+[ Pair { left: 1, right: 1 }, Pair { left: 2, right: -0.5 } ]
+Empty {}
+Maybe { count: 2 }
+{}
+[
+  '漢',     '漢漢',
+  '漢漢漢', '漢',
+  '漢漢',   '漢漢漢',
+  '漢',     '漢漢',
+  '漢漢漢'
+]
+[
+  true,  false,
+  true,  true,
+  false, false,
+  true,  false
+]
+[
+  -1, 2, -3, 4,
+  -5, 6, -7
+]
+[ 18446744073709551615, 0, 1 ]
+[
+  {
+    alpha: 'aaaaaaaaaaaaaaaaaaaa',
+    beta: 'bbbbbbbbbbbbbbbbbbbb',
+    gamma: 'cccccccccccccccccccc',
+    delta: [ 1, 2, 3 ]
+  },
+  {
+    alpha: 'aaaaaaaaaaaaaaaaaaaa',
+    beta: 'bbbbbbbbbbbbbbbbbbbb',
+    gamma: 'cccccccccccccccccccc',
+    delta: [ 1, 2, 3 ]
+  }
+]
+Ok {
+  value: {
+    alpha: 'aaaaaaaaaaaaaaaaaaaa',
+    beta: 'bbbbbbbbbbbbbbbbbbbb',
+    gamma: 'cccccccccccccccccccc',
+    delta: [ 1, 2, 3 ]
+  }
+}
+Err {
+  error: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+} at wides (main.tz:75)
+[
+  [ 'line one\nline two\nline three is a bit longer than the others' ]
+]
+[ 'line one\nline two\nline three is a bit longer than the others', 1 ]
+[]
+<Buffer >

@@ -16,6 +16,7 @@ import { Lowering } from "../lowering.tz";
 import {
   kBooleanType,
   kChildRun,
+  kChildrenModule,
   kDoubleType,
   kEncodingNames,
   kFlagType,
@@ -26,7 +27,12 @@ import {
   kStringType,
   kStrcmp,
 } from "../const/lowering.const.tz";
-import { ClassLayout, Frame, IrValue } from "../types/lowering.types.tz";
+import {
+  ClassLayout,
+  Frame,
+  IrValue,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private childCall(
@@ -65,6 +71,10 @@ partial class Lowering {
     const exprExpr = tree.exprOf(command.exprId);
     const file = this.value(frame, exprExpr);
     const list = this.spawnList(frame, listExpr);
+    if (encoding > 0) {
+      return this.spawnTextCall(frame, call, file, list, encoding);
+    }
+
     const string = this.values.types.store.plain(TypeKind.String);
     const descriptor = this.descriptor(string);
     const resultMaker = this.spawnMaker(this.values.types.store.valueOf(type));
@@ -111,6 +121,31 @@ partial class Lowering {
     this.dropping(frame, list);
 
     return this.caughtResult(frame, value, type, call.loc);
+  }
+
+  private spawnTextCall(
+    frame: Frame,
+    call: CallExpr,
+    file: IrValue | undefined,
+    list: IrValue | undefined,
+    encoding: int,
+  ): IrValue | undefined {
+    if (file == undefined || list == undefined) {
+      return undefined;
+    }
+
+    const int = this.values.types.store.integer(64, false);
+    const value = this.ir.integer(kIntType, `${encoding - 1}`);
+    const code: IrValue = { type: kIntType, value, tz: int };
+    const name = "spawnText";
+    const target: RuntimeTarget = { module: kChildrenModule, name };
+    const given = [file, list, code];
+    const found = this.runtimeFunctionCall(frame, target, [], given, call.loc);
+
+    this.dropping(frame, file);
+    this.dropping(frame, list);
+
+    return found;
   }
 
   private isListArgument(frame: Frame, expr: Expr): boolean {

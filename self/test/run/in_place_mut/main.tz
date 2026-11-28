@@ -1,0 +1,135 @@
+@InPlace()
+class Counter {
+  public count: int;
+  public label: string;
+
+  public constructor(label: string) {
+    this.count = 0;
+    this.label = label;
+  }
+
+  public bump(): void {
+    this.count += 1;
+  }
+
+  public readonly shown(): string {
+    return `${this.label}=${this.count}`;
+  }
+}
+
+@InPlace()
+class Pair {
+  public left: Counter;
+  public right: Counter;
+  public total: int;
+
+  public constructor(left: string, right: string) {
+    this.left = new Counter(left);
+    this.right = new Counter(right);
+    this.total = 0;
+  }
+
+  public bumpBoth(): void {
+    this.left.bump();
+    this.right.bump();
+    this.right.bump();
+    this.total = this.left.count + this.right.count;
+  }
+}
+
+class Holder {
+  public counter: Counter;
+  public name: string;
+
+  public constructor(name: string) {
+    this.counter = new Counter(name + "!");
+    this.name = name;
+  }
+}
+
+function bumped(counter: Counter): void {
+  counter.bump();
+  counter.count += 10;
+}
+
+function seen(counter: Read<Counter>): string {
+  return counter.shown();
+}
+
+function kept(counter: Own<Counter>): Counter {
+  counter.count += 100;
+
+  return counter;
+}
+
+function made(label: string): Counter {
+  const counter = new Counter(label);
+
+  counter.count = 7;
+
+  return counter;
+}
+
+function main(): void {
+  const counter = new Counter("a");
+
+  counter.bump();
+  counter.count += 1;
+  bumped(counter);
+  console.log(counter.shown(), seen(counter));
+
+  const moved = counter;
+
+  moved.bump();
+  console.log(moved.shown());
+
+  const back = kept(moved);
+
+  console.log(back.shown());
+  console.log(made("m").shown());
+
+  const pair = new Pair("l", "r");
+
+  pair.bumpBoth();
+  pair.left.count += 5;
+  console.log(pair.left.shown(), pair.right.shown(), pair.total);
+
+  const holder = new Holder("h");
+
+  holder.counter.bump();
+  holder.counter.count += 2;
+  bumped(holder.counter);
+  console.log(holder.counter.shown(), holder.name);
+
+  const items: Counter[] = [];
+
+  items.push(new Counter("x"));
+  items.push(new Counter("y"));
+  items.push(made("z"));
+
+  for (const item of items) {
+    console.log(item.shown());
+  }
+
+  const first = items[0];
+  if (first != undefined) {
+    first.bump();
+    first.count += 3;
+  }
+
+  const last = items[2];
+  if (last != undefined) {
+    bumped(last);
+  }
+
+  let sum = 0;
+
+  for (const item of items) {
+    sum += item.count;
+    console.log(item.shown());
+  }
+
+  console.log(sum, items.length);
+}
+
+main();

@@ -143,6 +143,7 @@ partial class FileParser {
       isAbstract: node.isAbstract,
       isPartial: node.isPartial,
       isInPlace: node.isInPlace,
+      isCLayout: node.isCLayout,
       base,
       baseExpr,
       baseArgs,

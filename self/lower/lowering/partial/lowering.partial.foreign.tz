@@ -16,19 +16,29 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kBooleanType,
+  kBuffersModule,
   kByteType,
+  kCountsModule,
   kBytesDataField,
   kBytesNames,
   kBytesStruct,
+  kCStringCopied,
   kCStringCopy,
   kCStringFromText,
-  kCStringLayout,
+  kCStringLayoutFlag,
   kCStringName,
   kCStringTextOffset,
+  kFfiModule,
+  kWideCells,
+  kWideName,
   kDoubleType,
   kForeignNullText,
   kForeverCount,
+  kFlagType,
   kIntType,
+  kLayoutHead,
+  kObjectFree,
+  kObjectFreed,
   kPointerType,
   kVoidType,
 } from "../const/lowering.const.tz";
@@ -126,7 +136,7 @@ partial class Lowering {
     }
 
     const bytes = Buffer.from(text, "utf8");
-    const layout = this.ir.external(kCStringLayout, kPointerType);
+    const layout = this.cstringLayout();
     const data = this.ir.bytes(bytes, true);
     const array = `[${bytes.length + 1} x i8]`;
     const value = this.ir.constStruct([
@@ -183,6 +193,18 @@ partial class Lowering {
 
       const wanted = this.passedType(param);
       const expr = tree.exprAt(argument?.exprId);
+      if (expr != undefined && this.isInPlace(wanted)) {
+        const address = this.recordForeign(frame, expr, wanted, given);
+        if (address == undefined) {
+          return undefined;
+        }
+
+        args.push(address);
+        params.push(kPointerType);
+
+        continue;
+      }
+
       const value = this.foreignArgument(frame, expr, wanted, call.loc);
       if (value == undefined) {
         return undefined;
@@ -240,6 +262,9 @@ partial class Lowering {
 
   private foreignValue(frame: Read<Frame>, value: IrValue): LLVMValue {
     const type = this.definedOf(value.tz);
+    if (this.isWideText(type)) {
+      return this.wideCells(frame, value.value, type);
+    }
     if (this.isCString(type)) {
       const none = this.ir.zero(kPointerType);
       const isAbsent = frame.made.integerCompare(
@@ -310,12 +335,10 @@ partial class Lowering {
     isOptional: boolean,
     fn: FunctionDecl,
   ): LLVMValue {
-    const params = [kPointerType];
-    const copying = this.ir.declare(kCStringCopy, kPointerType, params);
     if (!isOptional) {
       this.notNullChecked(frame, value, fn);
 
-      return frame.made.call(copying, [value]);
+      return this.cstringCopyMade(frame, value);
     }
 
     const none = this.ir.zero(kPointerType);
@@ -331,13 +354,62 @@ partial class Lowering {
     frame.made.conditionalBranch(isAbsent, end, copy);
     frame.made.open(copy);
 
-    const copied = frame.made.call(copying, [value]);
+    const copied = this.cstringCopyMade(frame, value);
     const copyEnd = frame.made.currentBlock();
 
     frame.made.branch(end);
     frame.made.open(end);
 
     return frame.made.phi(kPointerType, [none, copied], [before, copyEnd]);
+  }
+
+  private cstringLayout(): LLVMValue {
+    const known = this.cstringLayoutGlobal;
+    if (known != undefined) {
+      return known;
+    }
+
+    const freeName = this.runtimeHelperName(
+      kCountsModule,
+      kObjectFreed,
+      kObjectFree,
+    );
+    const freeing = this.ir.declare(freeName, kVoidType, [kPointerType]);
+    const none = this.ir.zero(kPointerType);
+    const head = this.ir.constStruct([
+      freeing.fn,
+      none,
+      this.ir.integer(kFlagType, "0"),
+      this.ir.integer(kFlagType, `${kCStringLayoutFlag}`),
+      this.cText(kCStringName),
+      this.ir.integer(kFlagType, `${kCStringName.length}`),
+      this.ir.integer(kFlagType, "0"),
+    ]);
+    const name = this.ir.uniqueName("tz.layout.cstring.");
+    const global = this.ir.global(name, kLayoutHead, head, true);
+
+    this.cstringLayoutGlobal = global;
+
+    return global;
+  }
+
+  private cstringCopyMade(frame: Read<Frame>, value: LLVMValue): LLVMValue {
+    const name = this.runtimeHelperName(
+      kBuffersModule,
+      kCStringCopied,
+      kCStringCopy,
+    );
+    if (name == kCStringCopy) {
+      const copying = this.ir.declare(name, kPointerType, [kPointerType]);
+
+      return frame.made.call(copying, [value]);
+    }
+
+    const layout = this.cstringLayout();
+    const params = [kPointerType, kPointerType];
+    const copying = this.ir.declare(name, kPointerType, params);
+
+    return frame.made.call(copying, [value, layout]);
   }
 
   private notNullChecked(
@@ -358,5 +430,59 @@ partial class Lowering {
     this.panic(frame, message);
     frame.made.unreachable();
     frame.made.open(good);
+  }
+
+  private recordForeign(
+    frame: Frame,
+    expr: Expr,
+    wanted: Type,
+    given: IrValue[],
+  ): LLVMValue | undefined {
+    const address = this.recordPlace(frame, expr);
+    if (address != undefined) {
+      return address;
+    }
+
+    const value = this.foreignArgument(frame, expr, wanted, expr.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const slot = frame.made.slot(value.type, "record.foreign");
+
+    frame.made.store(value.value, slot);
+    given.push(value);
+
+    return slot;
+  }
+
+  private readonly isWideText(type: Type): boolean {
+    if (type.kind != TypeKind.Instance || type.name != kWideName) {
+      return false;
+    }
+
+    const opened = this.values.types.program.modules[type.module];
+
+    return opened != undefined && opened.name == kFfiModule;
+  }
+
+  private wideCells(
+    frame: Read<Frame>,
+    object: LLVMValue,
+    type: Type,
+  ): LLVMValue {
+    const layout = this.layoutOf(type);
+    if (layout == undefined) {
+      return this.ir.zero(kPointerType);
+    }
+
+    const field = this.fieldsOf(layout).find((one) => one.name == kWideCells);
+    if (field == undefined) {
+      return this.ir.zero(kPointerType);
+    }
+
+    const address = frame.made.field(layout.struct, object, field.index);
+
+    return frame.made.load(kPointerType, address);
   }
 }

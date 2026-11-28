@@ -1,0 +1,84 @@
+type Point = { x: int; y: double; label?: string };
+type Shape = { name: string; points: Point[]; tags: string[]; closed: boolean };
+
+class Box {
+  public readonly size: int;
+  public readonly note?: string;
+  public readonly scale: decimal;
+
+  public constructor(size: int) {
+    this.size = size;
+    this.scale = decimal("1.50");
+  }
+}
+
+function records(): void {
+  const point: Point = { x: 1, y: 2.5 };
+  const named: Point = { x: -3, y: 0.1 + 0.2, label: "say \"hi\"\n\ttab" };
+
+  console.log(JSON.stringify(point));
+  console.log(JSON.stringify(named));
+
+  const shape: Shape = {
+    name: "tri",
+    points: [point, named, { x: 7, y: -0, label: "\u0001ü€😀" }],
+    tags: ["a", "b"],
+    closed: true,
+  };
+
+  console.log(JSON.stringify(shape));
+  console.log(JSON.stringify(shape, null, 2));
+  console.log(JSON.stringify(shape, null, "--"));
+  console.log(JSON.stringify(shape, null, 20));
+}
+
+function values(): void {
+  const count = process.argv.length;
+  const zero = (count - count).toDouble();
+  const one = zero + 1;
+  const numbers: double[] = [1.5, one * 1e21, -zero, one / 3];
+  const ints: int[] = [1, -2, 300];
+  const maybe: (int | undefined)[] = [1, undefined, 3];
+  const words: string[] = ["x", "y\\z"];
+  const nested: int[][] = [[], [1, 2], [3]];
+  const big: uint64[] = [18446744073709551615];
+  const flags: boolean[] = [true, false];
+
+  console.log(JSON.stringify(numbers));
+  console.log(JSON.stringify(ints), JSON.stringify(maybe));
+  console.log(JSON.stringify(words), JSON.stringify(nested, null, 1));
+  console.log(JSON.stringify(big), JSON.stringify(flags));
+  const plain = JSON.stringify("plain");
+
+  console.log(plain, JSON.stringify(42), JSON.stringify(true));
+  console.log(JSON.stringify(new Box(3)));
+
+  const boxes: Box[] = [new Box(1), new Box(2)];
+
+  console.log(JSON.stringify(boxes, null, 1));
+}
+
+function results(): void {
+  const good: Result<int, string> = ok(5);
+  const bad: Result<int, string> = err("no");
+  const pair: [int, string] = [1, "one"];
+
+  console.log(JSON.stringify(good), JSON.stringify(bad), JSON.stringify(pair));
+  console.log(JSON.stringify(decimal("-0.25")));
+}
+
+function bytes(): void {
+  const buffer = Buffer.from("hi!", "utf8");
+
+  console.log(JSON.stringify(buffer));
+  console.log(JSON.stringify(buffer, null, 2));
+}
+
+function main(): void {
+  records();
+  values();
+  results();
+  bytes();
+}
+
+main();

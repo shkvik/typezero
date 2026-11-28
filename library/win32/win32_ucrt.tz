@@ -1,0 +1,20 @@
+import { Raw } from "tz:unsafe";
+
+export declare function pow(base: double, exponent: double): double;
+export declare function log10(value: double): double;
+export declare function strtod(text: Raw<uint8>, end: Raw<uint64>): double;
+export declare function _configure_wide_argv(mode: int32): int32;
+export declare function __p___argc(): Raw<int32>;
+export declare function __p___wargv(): Raw<uint64>;
+export declare function rand_s(value: Raw<uint32>): int32;
+export declare function memset(
+  into: Raw<uint8>,
+  value: int32,
+  size: uint64,
+): Raw<uint8>;
+export declare function sqrt(value: double): double;
+export declare function memchr(
+  buffer: Raw<uint8>,
+  value: int32,
+  count: uint64,
+): Raw<uint8> | undefined;

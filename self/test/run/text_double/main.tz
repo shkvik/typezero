@@ -1,0 +1,40 @@
+function shown(values: Read<double[]>): void {
+  const texts: string[] = [];
+
+  for (const value of values) {
+    texts.push(String(value));
+  }
+
+  console.log(texts.join(" "));
+}
+
+function main(): void {
+  shown([0.0, -0.0, 1.0, -1.0, 0.5, 0.1, 0.2, 0.30000000000000004, 1.5, 2.5, 3.14159]);
+  shown([1e21, 1e20, 123456789012345680000.0, 1e-6, 1e-7, 1.5e-7, 0.000001, 0.0000001]);
+  shown([1.7976931348623157e308, 5e-324, 2.2250738585072014e-308, 4.9e-324, 1e308, 1e-308]);
+  shown([100.0, 1000000.0, 12345.678, 0.001, 9007199254740993.0, 9007199254740992.0]);
+  shown([2.0 / 3.0, 1.0 / 3.0, 10.0 / 3.0, 7.0 / 1024.0, 123e45, 6.02214076e23]);
+
+  const many: double[] = [];
+  let value = 1.0;
+
+  for (let index = 0; index < 40; index++) {
+    value = value * 3.7 + 0.13;
+    many.push(value);
+    many.push(1.0 / value);
+  }
+
+  shown(many);
+
+  let mixed = 0.0;
+  const parts: string[] = [];
+
+  for (let index = 1; index < 60; index++) {
+    mixed = mixed + 1.0 / index.toDouble();
+    parts.push(mixed.toString());
+  }
+
+  console.log(parts.join(","));
+}
+
+main();

@@ -120,7 +120,8 @@ partial class Lowering {
       kIntType,
       kPointerType,
     ];
-    const splicing = this.ir.declare(kArraySplice, kPointerType, params);
+    const splicingName = this.countsHelper(kArraySplice);
+    const splicing = this.ir.declare(splicingName, kPointerType, params);
     const hasCount = this.ir.integer(kFlagType, `${count.given}`);
     const inserted = this.ir.integer(kIntType, `${items.length}`);
     const removed = frame.made.call(splicing, [
@@ -168,7 +169,8 @@ partial class Lowering {
     }
 
     const params = [kPointerType, kIntType];
-    const opening = this.ir.declare(kArrayUnshift, kPointerType, params);
+    const openingName = this.countsHelper(kArrayUnshift);
+    const opening = this.ir.declare(openingName, kPointerType, params);
     const count = this.ir.integer(kIntType, `${items.length}`);
     const data = frame.made.call(opening, [array.value, count]);
 
@@ -197,7 +199,8 @@ partial class Lowering {
 
     const array = frame.made.load(kPointerType, place.pointer);
     const params = [kPointerType, kPointerType];
-    const appending = this.ir.declare(kArrayAppend, kVoidType, params);
+    const appendingName = this.countsHelper(kArrayAppend);
+    const appending = this.ir.declare(appendingName, kVoidType, params);
 
     frame.made.call(appending, [array, part.value]);
     this.dropping(frame, part);

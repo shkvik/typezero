@@ -10,20 +10,13 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kDoubleType,
-  kFlagType,
+  kBooleanType,
+  kMathsModule,
   kIntType,
   kIntegerNames,
-  kNumberFixed,
-  kNumberRadix,
-  kPanicIntegerFit,
-  kPointerType,
-  kTextFromDouble,
-  kTextFromSigned,
-  kTextFromUnsigned,
-  kVoidType,
+  kTextModule,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private numberMethod(
@@ -81,30 +74,49 @@ partial class Lowering {
       return undefined;
     }
 
-    const runtime = this.pick(name == "toFixed", kNumberFixed, kNumberRadix);
-    const params = [kDoubleType, kIntType];
+    let runtime = "toRadix";
 
-    return this.textOut(frame, runtime, params, [value.value, count.value]);
+    if (name == "toFixed") {
+      runtime = name;
+    }
+
+    const target: RuntimeTarget = { module: kTextModule, name: runtime };
+    const int = this.values.types.store.integer(64, false);
+    const digits: IrValue = { type: kIntType, value: count.value, tz: int };
+
+    return this.runtimeFunctionCall(
+      frame,
+      target,
+      [],
+      [value, digits],
+      call.loc,
+    );
   }
 
   private numberText(frame: Read<Frame>, given: IrValue): IrValue | undefined {
     if (this.isDouble(given.tz)) {
-      const params = [kDoubleType];
+      const target: RuntimeTarget = { module: kTextModule, name: "fromDouble" };
+      const loc = this.statementLoc;
 
-      return this.textOut(frame, kTextFromDouble, params, [given.value]);
+      return this.runtimeFunctionCall(frame, target, [], [given], loc);
     }
 
     const isWideUnsigned =
       this.isUnsigned(given.tz) && this.bitsOf(given.tz) == 64;
     if (isWideUnsigned) {
-      const args = [given.value];
+      const name = "fromUnsigned";
+      const target: RuntimeTarget = { module: kTextModule, name };
+      const loc = this.statementLoc;
 
-      return this.textOut(frame, kTextFromUnsigned, [kIntType], args);
+      return this.runtimeFunctionCall(frame, target, [], [given], loc);
     }
 
     const long = this.toLong(frame, given);
+    const target: RuntimeTarget = { module: kTextModule, name: "fromSigned" };
 
-    return this.textOut(frame, kTextFromSigned, [kIntType], [long.value]);
+    const loc = this.statementLoc;
+
+    return this.runtimeFunctionCall(frame, target, [], [long], loc);
   }
 
   private integerFitted(
@@ -135,16 +147,17 @@ partial class Lowering {
     frame.made.conditionalBranch(fits, good, bad);
     frame.made.open(bad);
 
-    const panic = this.ir.declare(kPanicIntegerFit, kVoidType, [
-      kIntType,
-      kFlagType,
-      kPointerType,
-    ]);
-    const flag = this.ir.integer(kFlagType, `${this.flagIf(isUnsigned, 1)}`);
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
+    const int = this.values.types.store.integer(64, false);
+    const bit = `${this.flagIf(isUnsigned, 1)}`;
+    const flagBit = this.ir.integer(kBooleanType, bit);
+    const flag: IrValue = { type: kBooleanType, value: flagBit, tz: boolean };
+    const shown: IrValue = { type: kIntType, value: long.value, tz: int };
+    const unfit: RuntimeTarget = { module: kMathsModule, name: "integerUnfit" };
 
-    const name = this.cText(this.integerName(target));
+    const name = this.stringValue(this.integerName(target));
 
-    frame.made.call(panic, [long.value, flag, name]);
+    this.runtimeFunctionCall(frame, unfit, [], [shown, flag, name], 0);
     frame.made.unreachable();
     frame.made.open(good);
 

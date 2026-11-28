@@ -1,0 +1,355 @@
+function argumentMost(): int {
+  return 1000000000;
+}
+
+function divisionPlaces(): int {
+  return 20;
+}
+
+function roundHalfUp(): int {
+  return 4;
+}
+
+function outOfRange(value: int): never {
+  panic(`internal error: a decimal argument out of range: ${value}`);
+}
+
+function divisionByZero(): never {
+  panic("Division by zero");
+}
+
+function modeOf(mode: int): int {
+  if (mode < 0 || mode > 8) {
+    outOfRange(mode);
+  }
+
+  return mode;
+}
+
+function isRoundedAway(
+  mode: int,
+  isNegative: boolean,
+  half: int,
+  isInexact: boolean,
+  isOdd: boolean,
+): boolean {
+  switch (mode) {
+    case 0:
+      return isInexact;
+    case 1:
+      return false;
+    case 2:
+      return isInexact && !isNegative;
+    case 3:
+      return isInexact && isNegative;
+    case 4:
+      return isInexact && half >= 0;
+    case 5:
+      return half > 0;
+    case 6:
+      return half > 0 || (half == 0 && isOdd);
+    case 7:
+      return half > 0 || (half == 0 && !isNegative);
+    default:
+      return half > 0 || (half == 0 && isNegative);
+  }
+}
+
+function halfOf(digit: int, isSticky: boolean): int {
+  if (digit > 5) {
+    return 1;
+  }
+  if (digit < 5) {
+    return -1;
+  }
+  if (isSticky) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function decimalRounded(value: Mut<Decimal>, places: int, mode: int): void {
+  const target = 0 - places;
+  if (value.natural.count == 0 || value.exponent >= target) {
+    return;
+  }
+
+  const cut = target - value.exponent;
+  const digit = naturalDigit(value.natural, cut - 1);
+  const isSticky = naturalAnyBelow(value.natural, cut - 1);
+
+  naturalDropInPlace(value.natural, cut);
+
+  const half = halfOf(digit, isSticky);
+  const isOdd = value.natural.count != 0 && value.natural.at(0) % 2 == 1;
+  const isInexact = digit != 0 || isSticky;
+
+  if (isRoundedAway(mode, value.isNegative, half, isInexact, isOdd)) {
+    naturalScaled(value.natural, 1, 1);
+  }
+
+  value.exponent = target;
+}
+
+function decimalQuotient(
+  first: Read<Decimal>,
+  second: Read<Decimal>,
+  places: int,
+  mode: int,
+): Decimal {
+  if (second.isZero()) {
+    divisionByZero();
+  }
+  if (first.isZero()) {
+    return new Decimal(new Natural(0), 0, false);
+  }
+
+  const shift = first.exponent - second.exponent + places;
+  let upper = 0;
+  let lower = 0;
+
+  if (shift > 0) {
+    upper = shift;
+  } else {
+    lower = 0 - shift;
+  }
+
+  const top = naturalShifted(first.natural, upper);
+  const bottom = naturalShifted(second.natural, lower);
+  const division = naturalDivided(top, bottom);
+  const quotient = naturalCopy(division.quotient);
+  const isNegative = first.isNegative != second.isNegative;
+  const rest = division.rest;
+  let half = -1;
+
+  if (rest.count != 0) {
+    const twice = naturalSum(rest, rest);
+
+    half = naturalCompare(twice, bottom);
+  }
+
+  const isOdd = quotient.count != 0 && quotient.at(0) % 2 == 1;
+  const isInexact = rest.count != 0;
+
+  if (isRoundedAway(mode, isNegative, half, isInexact, isOdd)) {
+    naturalScaled(quotient, 1, 1);
+  }
+
+  const isSigned = quotient.count != 0 && isNegative;
+
+  return new Decimal(quotient, 0 - places, isSigned);
+}
+
+function decimalRemainder(
+  first: Read<Decimal>,
+  second: Read<Decimal>,
+): Decimal {
+  if (second.isZero()) {
+    divisionByZero();
+  }
+
+  let exponent = first.exponent;
+
+  if (second.exponent < exponent) {
+    exponent = second.exponent;
+  }
+
+  const left = naturalShifted(first.natural, first.exponent - exponent);
+  const right = naturalShifted(second.natural, second.exponent - exponent);
+  const division = naturalDivided(left, right);
+  const rest = naturalCopy(division.rest);
+  const isNegative = rest.count != 0 && first.isNegative;
+
+  return new Decimal(rest, exponent, isNegative);
+}
+
+function decimalOne(): Decimal {
+  return new Decimal(naturalOf(1), 0, false);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "log10 of the C runtime takes and gives a plain double",
+})
+function logTenOf(value: Read<Decimal>): double {
+  let lead = 0.0;
+  let used = 0;
+
+  for (let index = value.natural.count - 1; index >= 0 && used < 3; index--) {
+    lead = lead * limbBase().toDouble() + value.natural.at(index).toDouble();
+    used += 1;
+  }
+
+  const rest = (value.natural.count - used).toDouble();
+
+  return log10(lead) + 9.0 * rest + value.exponent.toDouble();
+}
+
+function decimalPowerOf(value: Read<Decimal>, power: int): Decimal {
+  if (power == 0) {
+    return decimalOne();
+  }
+  if (value.isZero()) {
+    if (power < 0) {
+      divisionByZero();
+    }
+
+    return new Decimal(new Natural(0), 0, false);
+  }
+
+  const size = logTenOf(value) * power.toDouble();
+  const most = exponentMost().toDouble() + 2.0;
+
+  if (size > most) {
+    overflowed();
+  }
+
+  let least = exponentLeast().toDouble() - 2.0;
+
+  if (power < 0) {
+    least = 0.0 - 22.0;
+  }
+  if (size < least) {
+    return new Decimal(new Natural(0), 0, false);
+  }
+
+  let base = decimalCopy(value);
+  let result = decimalOne();
+  let left = magnitudeOf(power);
+
+  while (true) {
+    if (left % 2 == 1) {
+      result = decimalProduct(result, base);
+      normalized(result);
+    }
+
+    left = left / 2;
+
+    if (left == 0) {
+      break;
+    }
+
+    base = decimalProduct(base, base);
+    normalized(base);
+  }
+  if (power < 0) {
+    const one = decimalOne();
+
+    return decimalQuotient(one, result, divisionPlaces(), roundHalfUp());
+  }
+
+  return result;
+}
+
+export function divide(
+  first: Read<decimal>,
+  second: Read<decimal>,
+  places: int,
+  mode: int,
+): decimal {
+  if (places < 0 || places > argumentMost()) {
+    outOfRange(places);
+  }
+
+  const checked = modeOf(mode);
+  const x = loaded(first);
+  const y = loaded(second);
+
+  return stored(decimalQuotient(x, y, places, checked));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function remainder(
+  first: Read<decimal>,
+  second: Read<decimal>,
+): decimal {
+  const firstMeta = decimalMeta(first);
+  const secondMeta = decimalMeta(second);
+  const secondCoef = decimalCoef(second);
+  const isShort = isShortMeta(firstMeta) && isShortMeta(secondMeta);
+
+  if (isShort && secondCoef != 0) {
+    const firstScale = scaleOf(firstMeta);
+    const secondScale = scaleOf(secondMeta);
+    let left: int | undefined = decimalCoef(first);
+    let right: int | undefined = secondCoef;
+    let scale = secondScale;
+
+    if (firstScale < secondScale) {
+      left = scaledUp(decimalCoef(first), secondScale - firstScale);
+    } else {
+      right = scaledUp(secondCoef, firstScale - secondScale);
+      scale = firstScale;
+    }
+    if (left != undefined && right != undefined && right != -1) {
+      if (right != 0) {
+        return decimalOf(left % right, scale.toUint64());
+      }
+    }
+  }
+
+  const x = loaded(first);
+  const y = loaded(second);
+
+  return stored(decimalRemainder(x, y));
+}
+
+export function power(value: Read<decimal>, exponent: int): decimal {
+  const x = loaded(value);
+
+  return stored(decimalPowerOf(x, exponent));
+}
+
+export function rounded(value: Read<decimal>, places: int, mode: int): decimal {
+  if (places < 0 - argumentMost() || places > argumentMost()) {
+    outOfRange(places);
+  }
+
+  const checked = modeOf(mode);
+  const x = loaded(value);
+
+  decimalRounded(x, places, checked);
+
+  if (x.natural.count == 0) {
+    x.isNegative = false;
+  }
+
+  return stored(x);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function isWhole(value: Read<decimal>): boolean {
+  const coef = decimalCoef(value);
+  const meta = decimalMeta(value);
+  if (isShortMeta(meta)) {
+    const scale = scaleOf(meta);
+    if (scale == 0) {
+      return true;
+    }
+    if (scale < 19) {
+      return coef % tenPowerOf(scale) == 0;
+    }
+
+    return coef == 0;
+  }
+
+  const head = viewAt<DecimalHead>(bitsRaw(coef.toUint64()), 0);
+
+  return head.exponent >= 0;
+}
+
+export function placesOf(value: Read<decimal>): int {
+  const x = loaded(value);
+  if (x.exponent < 0) {
+    return 0 - x.exponent;
+  }
+
+  return 0;
+}

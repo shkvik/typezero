@@ -1,0 +1,453 @@
+
+function base64Digit(unit: int): int {
+  if (unit >= 65 && unit <= 90) {
+    return unit - 65;
+  }
+  if (unit >= 97 && unit <= 122) {
+    return unit - 71;
+  }
+  if (unit >= 48 && unit <= 57) {
+    return unit + 4;
+  }
+  if (unit == 43 || unit == 45) {
+    return 62;
+  }
+  if (unit == 47 || unit == 95) {
+    return 63;
+  }
+
+  return 255;
+}
+
+function hexDigit(unit: int): int {
+  if (unit >= 48 && unit <= 57) {
+    return unit - 48;
+  }
+  if (unit >= 97 && unit <= 102) {
+    return unit - 87;
+  }
+  if (unit >= 65 && unit <= 70) {
+    return unit - 55;
+  }
+
+  return -1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "out has room for size bytes from at",
+})
+function utf8Put(out: Raw<uint8>, at: int, point: int): int {
+  if (point < 128) {
+    putUnit(out, at, point);
+
+    return at + 1;
+  }
+  if (point < 2048) {
+    putUnit(out, at, 192 | (point >> 6));
+    putUnit(out, at + 1, 128 | (point & 63));
+
+    return at + 2;
+  }
+  if (point < 65536) {
+    putUnit(out, at, 224 | (point >> 12));
+    putUnit(out, at + 1, 128 | ((point >> 6) & 63));
+    putUnit(out, at + 2, 128 | (point & 63));
+
+    return at + 3;
+  }
+
+  putUnit(out, at, 240 | (point >> 18));
+  putUnit(out, at + 1, 128 | ((point >> 12) & 63));
+  putUnit(out, at + 2, 128 | ((point >> 6) & 63));
+  putUnit(out, at + 3, 128 | (point & 63));
+
+  return at + 4;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every write is checked against the capacity first",
+})
+function wideUtf8Encoded(
+  out: Raw<uint8>,
+  capacity: int,
+  wide: Raw<uint16>,
+  count: int,
+): int {
+  let written = 0;
+  let index = 0;
+
+  while (index < count) {
+    const unit = unitAt(wide, index);
+    let point = unit;
+    let step = 1;
+
+    if (unit >= 55296 && unit <= 56319 && index + 1 < count) {
+      const next = unitAt(wide, index + 1);
+
+      if (next >= 56320 && next <= 57343) {
+        point = 65536 + (unit - 55296) * 1024 + (next - 56320);
+        step = 2;
+      } else {
+        point = 65533;
+      }
+    } else if (unit >= 55296 && unit <= 57343) {
+      point = 65533;
+    }
+
+    const size = utf8Size(point);
+    if (written + size > capacity) {
+      return written;
+    }
+
+    written = utf8Put(out, written, point);
+    index += step;
+  }
+
+  return written;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every write is checked against the capacity first",
+})
+function utf8Encoded(
+  out: Raw<uint8>,
+  capacity: int,
+  units: Read<TextUnits>,
+): int {
+  const wide = units.wide;
+  if (wide != undefined) {
+    return wideUtf8Encoded(out, capacity, wide, units.count);
+  }
+
+  let written = 0;
+
+  if (!units.isWide()) {
+    for (let index = 0; index < units.count; index++) {
+      const byte = units.unitAt(index);
+
+      if (byte < 128) {
+        if (written + 1 > capacity) {
+          return written;
+        }
+
+        putUnit(out, written, byte);
+        written += 1;
+      } else {
+        if (written + 2 > capacity) {
+          return written;
+        }
+
+        written = utf8Put(out, written, byte);
+      }
+    }
+
+    return written;
+  }
+
+  let index = 0;
+
+  while (index < units.count) {
+    const point = units.pointAt(index);
+    const size = utf8Size(point);
+    if (written + size > capacity) {
+      return written;
+    }
+
+    written = utf8Put(out, written, point);
+    index += units.pointUnits(index);
+  }
+
+  return written;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every write is checked against the capacity first",
+})
+function base64Group(
+  out: Raw<uint8>,
+  capacity: int,
+  units: Read<TextUnits>,
+  place: Mut<GroupPlace>,
+): boolean {
+  const count = units.count;
+  let high = 0;
+  let low = 0;
+
+  for (let step = 0; step < 4; step++) {
+    while (true) {
+      const unit = units.unitAt(place.read);
+
+      low = base64Digit(unit);
+      place.read += 1;
+
+      if (low < 64) {
+        break;
+      }
+      if (unit == 61 || place.read >= count) {
+        return false;
+      }
+    }
+    if (step == 1) {
+      putUnit(out, place.written, ((high & 63) << 2) | ((low & 48) >> 4));
+      place.written += 1;
+    } else if (step == 2) {
+      putUnit(out, place.written, ((high & 15) << 4) | ((low & 60) >> 2));
+      place.written += 1;
+    } else if (step == 3) {
+      putUnit(out, place.written, ((high & 3) << 6) | (low & 63));
+      place.written += 1;
+    }
+    if (place.read >= count || place.written >= capacity) {
+      return false;
+    }
+
+    high = low;
+  }
+
+  return true;
+}
+
+class GroupPlace {
+  public read: int;
+  public written: int;
+
+  public constructor() {
+    this.read = 0;
+    this.written = 0;
+  }
+}
+
+function decodedSize(units: Read<TextUnits>): int {
+  const count = units.count;
+  let size = count;
+
+  if (size >= 2 && units.unitAt(size - 1) == 61) {
+    size -= 1;
+
+    if (units.unitAt(size - 1) == 61) {
+      size -= 1;
+    }
+  }
+  if (count < 2 || size <= 1) {
+    return 0;
+  }
+
+  return (size / 4) * 3 + (size % 4 + 1) / 2;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every write is below the capacity",
+})
+function base64Decoded(
+  out: Raw<uint8>,
+  capacity: int,
+  units: Read<TextUnits>,
+): int {
+  const count = units.count;
+  const available = Math.min(capacity, decodedSize(units));
+  const writtenEnd = (available / 3) * 3;
+  let readEnd = (count / 4) * 4;
+  const place = new GroupPlace();
+
+  while (place.read < readEnd && place.written < writtenEnd) {
+    const first = base64Digit(units.unitAt(place.read));
+    const second = base64Digit(units.unitAt(place.read + 1));
+    const third = base64Digit(units.unitAt(place.read + 2));
+    const fourth = base64Digit(units.unitAt(place.read + 3));
+
+    if (first >= 64 || second >= 64 || third >= 64 || fourth >= 64) {
+      if (!base64Group(out, capacity, units, place)) {
+        return place.written;
+      }
+
+      readEnd = place.read + ((count - place.read) / 4) * 4;
+    } else {
+      putUnit(out, place.written, (first << 2) | (second >> 4));
+      putUnit(out, place.written + 1, ((second << 4) | (third >> 2)) & 255);
+      putUnit(out, place.written + 2, ((third << 6) | fourth) & 255);
+      place.read += 4;
+      place.written += 3;
+    }
+  }
+  if (place.read < count && place.written < capacity) {
+    base64Group(out, capacity, units, place);
+  }
+
+  return place.written;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every write is below the capacity",
+})
+function hexDecoded(
+  out: Raw<uint8>,
+  capacity: int,
+  units: Read<TextUnits>,
+): int {
+  const count = Math.min(units.count / 2, capacity);
+
+  for (let index = 0; index < count; index++) {
+    const high = hexDigit(units.unitAt(2 * index));
+    const low = hexDigit(units.unitAt(2 * index + 1));
+
+    if (high < 0 || low < 0) {
+      return index;
+    }
+
+    putUnit(out, index, (high << 4) | low);
+  }
+
+  return count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every write is below the capacity",
+})
+function bytesEncoded(
+  out: Raw<uint8>,
+  capacity: int,
+  units: Read<TextUnits>,
+  encoding: int,
+): int {
+  switch (encoding) {
+    case 0:
+      return utf8Encoded(out, capacity, units);
+    case 1: {
+      const count = Math.min(units.count, capacity / 2);
+
+      for (let index = 0; index < count; index++) {
+        const unit = units.unitAt(index);
+
+        putUnit(out, 2 * index, unit & 255);
+        putUnit(out, 2 * index + 1, unit >> 8);
+      }
+
+      return count * 2;
+    }
+    case 4:
+    case 5:
+      return base64Decoded(out, capacity, units);
+    case 6:
+      return hexDecoded(out, capacity, units);
+    default: {
+      const count = Math.min(units.count, capacity);
+
+      for (let index = 0; index < count; index++) {
+        putUnit(out, index, units.unitAt(index) & 255);
+      }
+
+      return count;
+    }
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every compare stays inside the bytes of the buffer and the needle",
+})
+function bytesFound(
+  data: Raw<uint8>,
+  length: int,
+  needle: Raw<uint8>,
+  count: int,
+  start: int,
+  mode: int,
+): int {
+  if (mode == 1) {
+    let at = start;
+
+    if (at > length - count) {
+      at = length - count;
+    }
+
+    while (at >= 0) {
+      if (count == 0 || sameCells(data, at, needle, 0, count)) {
+        return at;
+      }
+
+      at -= 1;
+    }
+
+    return -1;
+  }
+  if (count == 0) {
+    if (mode == 2) {
+      return 1;
+    }
+
+    return Math.min(start, length);
+  }
+
+  const head = unitAt(needle, 0);
+
+  for (let at = start; at + count <= length; at++) {
+    if (unitAt(data, at) == head && sameCells(data, at, needle, 0, count)) {
+      if (mode == 2) {
+        return 1;
+      }
+
+      return at;
+    }
+  }
+  if (mode == 2) {
+    return 0;
+  }
+
+  return -1;
+}
+
+function searchStart(from: int, hasFrom: boolean, length: int, mode: int): int {
+  if (mode == 1) {
+    if (!hasFrom) {
+      return length;
+    }
+    if (from < 0) {
+      return from + length;
+    }
+
+    return from;
+  }
+  if (!hasFrom) {
+    return 0;
+  }
+  if (from < 0) {
+    return Math.max(from + length, 0);
+  }
+
+  return from;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the needle room has the byte length of the text, and one more",
+})
+export function bufferTextFound(
+  buffer: Raw<uint8>,
+  text: Read<string>,
+  from: int,
+  hasFrom: boolean,
+  encoding: int,
+  mode: int,
+): int {
+  const head = viewAt<BytesHead>(buffer, 0);
+  const length = head.length.toInt();
+  const narrow = textCells<uint8>(text);
+  const wide = textCells<uint16>(text);
+  const units = new TextUnits(narrow, wide, text.length);
+  const size = lengthIn(units, encoding);
+  const needle = allocate<uint8>(size + 1);
+  const count = bytesEncoded(needle, size, units, encoding);
+  const start = searchStart(from, hasFrom, length, mode);
+  const found = bytesFound(head.data, length, needle, count, start, mode);
+
+  release(needle);
+
+  return found;
+}

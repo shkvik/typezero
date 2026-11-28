@@ -1,0 +1,58 @@
+[] | . | . |  |  |  | false
+[.] | . | . | . | . |  | false
+[..] | .. | . | .. | .. |  | false
+[/] | \ | / |  |  |  | true
+[\] | \ | \ |  |  |  | true
+[a] | a | . | a | a |  | false
+[a/b] | a\b | a | b | b |  | false
+[a\b\] | a\b\ | a | b | b |  | false
+[C:] | C:. | C: |  |  |  | false
+[C:\] | C:\ | C:\ |  |  |  | true
+[C:/] | C:\ | C:/ |  |  |  | true
+[C:\a\b\..\c] | C:\a\c | C:\a\b\.. | c | c |  | true
+[c:a\..\..\b] | c:..\b | c:a\..\.. | b | b |  | false
+[\\server\share] | \\server\share\ | \\server\share | share | share |  | true
+[\\server\share\] | \\server\share\ | \\server\share\ | share | share |  | true
+[\\server\share\dir\file.txt] | \\server\share\dir\file.txt | \\server\share\dir | file.txt | file | .txt | true
+[//server/share/x/../y] | \\server\share\y | //server/share/x/.. | y | y |  | true
+[\\.\COM1] | \\.\COM1 | \\.\COM1 | COM1 | COM1 |  | true
+[\\?\C:\very\long] | \\?\C:\very\long | \\?\C:\very | long | long |  | true
+[\\.\C:\x] | \\.\C:\x | \\.\C:\ | x | x |  | true
+[///a//b///] | \a\b\ | ///a/ | b | b |  | true
+[a/./b/../../..] | .. | a/./b/../.. | .. | .. |  | false
+[../x/../../y] | ..\..\y | ../x/../.. | y | y |  | false
+[file.tar.gz] | file.tar.gz | . | file.tar.gz | file.tar.gz | .gz | false
+[.bashrc] | .bashrc | . | .bashrc | .bashrc |  | false
+[a/.b] | a\.b | a | .b | .b |  | false
+[dir/] | dir\ | . | dir | dir |  | false
+[C:\dir\file.] | C:\dir\file. | C:\dir | file. | file. | . | true
+[x..y] | x..y | . | x..y | x..y | .y | false
+[con] | con | . | con | con |  | false
+[CON:] | .\CON:. | . | CON: | CON: |  | false
+[aux.txt] | aux.txt | . | aux.txt | aux | .txt | false
+[foo:bar] | foo:bar | . | foo:bar | foo:bar |  | false
+[a/b:c/d] | a\b:c\d | a/b:c | d | d |  | false
+[привет\мир.txt] | привет\мир.txt | привет | мир.txt | мир | .txt | false
+[\\a] | \a | \ | a | a |  | true
+[\\a\] | \a\ | \ | a | a |  | true
+[\\a\b\..\..\c] | \\a\b\c | \\a\b\..\.. | c | c |  | true
+[C:\..] | C:\ | C:\ | .. | .. |  | true
+[\..\..] | \ | \.. | .. | .. |  | true
+[C:con] | C:con | C: | con | con |  | false
+[LPT1:] | .\LPT1:. | . | LPT1: | LPT1: |  | false
+[COM¹:] | .\COM¹:. | . | COM¹: | COM¹: |  | false
+[\\?\COM1:] | \\?\COM1:\ | \\?\COM1: | COM1: | COM1: |  | true
+a\b
+\a\c
+\\server\share\
+\x
+C:\x
+.\a\C:
+C:\x
+a\b\
+con:\x
+\x\y
+\a\b
+.
+x\y
+.

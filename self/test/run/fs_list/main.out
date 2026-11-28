@@ -1,0 +1,10 @@
+empty 0 
+full 10 10,9,a.txt,b.txt,sub-*,UPPER.TXT,z,_x,Ж.txt,с пробелом.tz
+file READ_DIRECTORY_ERROR_WRONG_TYPE ENOTDIR scandir
+   could not list <tmp>\a.txt: it is a file, not a folder
+missing READ_DIRECTORY_ERROR_NOT_FOUND ENOENT scandir
+   could not list <tmp>\none: there is no such folder
+nul READ_DIRECTORY_ERROR_PATH ERR_INVALID_PATH scandir
+   could not list "a\0b": the path has a zero character in it
+gone READ_DIRECTORY_ERROR_NOT_FOUND ENOENT scandir
+   could not list <tmp>: there is no such folder

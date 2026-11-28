@@ -1,0 +1,49 @@
+type Person = { name: string; age: int };
+
+function plain(): void {
+  const words: string[] = ["pear", "Apple", "apple", "banana", "Ä", "z"];
+  const flags: boolean[] = [true, false, true];
+  const maybe: (string | undefined)[] = ["c", undefined, "a", undefined, "b"];
+  const many: string[] = [];
+
+  for (let index = 0; index < 40; index++) {
+    many.push(`k${(index * 7) % 13}`);
+  }
+
+  words.sort();
+  flags.sort();
+  maybe.sort();
+  many.sort();
+  console.log(words);
+  console.log(flags);
+  console.log(maybe);
+  console.log(many);
+}
+
+function compared(): void {
+  const ints: int[] = [10, 9, 1, -5, 100, 25, 3, 3, 7];
+  const people: Person[] = [
+    { name: "ann", age: 30 },
+    { name: "bob", age: 25 },
+    { name: "cid", age: 30 },
+    { name: "dee", age: 20 },
+  ];
+  const maybe: (int | undefined)[] = [3, undefined, 1, undefined, 2];
+  const words: string[] = ["bb", "a", "ccc", "dd"];
+
+  ints.sort((a, b) => a - b);
+  people.sort((a, b) => a.age - b.age);
+  maybe.sort((a, b) => (a ?? 0) - (b ?? 0));
+  words.sort((a, b) => b.length - a.length);
+  console.log(ints);
+  console.log(people);
+  console.log(maybe);
+  console.log(words);
+}
+
+function main(): void {
+  plain();
+  compared();
+}
+
+main();

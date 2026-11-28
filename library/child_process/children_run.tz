@@ -1,0 +1,456 @@
+
+class ChildShared {
+  public static pipeCount: int = 0;
+  public static jobBits: uint64 = 0;
+  public static isJobTried: boolean = false;
+}
+
+function invalidHandle(): uint64 {
+  return 18446744073709551615;
+}
+
+function chunkSize(): int {
+  return 65536;
+}
+
+function outputLimit(): int {
+  return 1048576;
+}
+
+function pendingRead(): uint32 {
+  return 997;
+}
+
+function brokenPipeError(): uint32 {
+  return 109;
+}
+
+function noDataError(): uint32 {
+  return 232;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the limit record has the size the system asks for",
+})
+function childJobMade(): uint64 {
+  const security = allocate<uint8>(24);
+  const info = allocate<uint8>(144);
+  const none = bitsRaw(0);
+
+  memset(security, 0, 24);
+  memset(info, 0, 144);
+  putUnit(cellsAt<uint32>(info, 16), 0, 15360);
+
+  let job = CreateJobObjectW(security, none);
+
+  if (rawBits(job) != 0 && SetInformationJobObject(job, 9, info, 144) == 0) {
+    CloseHandle(job);
+    job = none;
+  }
+  if (rawBits(job) != 0) {
+    AssignProcessToJobObject(job, GetCurrentProcess());
+  }
+
+  release(security);
+  release(info);
+
+  return rawBits(job);
+}
+
+class ChildRun {
+  public error: int;
+  public pipeError: int;
+  public isStarted: boolean;
+  public overflow: int;
+  public isBatch: boolean;
+  public system: uint32;
+  public pid: int;
+  public status: int;
+  public signal: int;
+  public output: ByteStore;
+  public errors: ByteStore;
+  private readonly servers: Raw<uint8>;
+  private readonly clients: Raw<uint8>;
+  private readonly overlapped: Raw<uint8>;
+  private readonly chunks: Raw<uint8>;
+  private pending: int;
+  public buffered: int;
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "the rooms are released by the dispose of the run",
+  })
+  public constructor() {
+    this.error = noError();
+    this.pipeError = noError();
+    this.isStarted = false;
+    this.overflow = 0;
+    this.isBatch = false;
+    this.system = 0;
+    this.pid = 0;
+    this.status = 0;
+    this.signal = 0;
+    this.output = new ByteStore();
+    this.errors = new ByteStore();
+    this.servers = allocate<uint8>(24);
+    this.clients = allocate<uint8>(24);
+    this.overlapped = allocate<uint8>(96);
+    this.chunks = allocate<uint8>(chunkSize() * 2);
+    this.pending = 0;
+    this.buffered = 0;
+    memset(this.servers, 0, 24);
+    memset(this.clients, 255, 24);
+    memset(this.overlapped, 0, 96);
+  }
+
+  public readonly failure(): int {
+    if (this.error != noError()) {
+      return this.error;
+    }
+
+    return this.pipeError;
+  }
+
+  public errorSet(error: int): void {
+    if (this.error == noError()) {
+      this.error = error;
+    }
+  }
+
+  public pipeErrorSet(error: int): void {
+    if (this.pipeError == noError()) {
+      this.pipeError = error;
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "there are three handles",
+  })
+  public readonly serverAt(index: int): Raw<uint8> {
+    const cells = cellsAt<uint64>(this.servers, 0);
+    const bits = peekAt(cells, index);
+
+    return bitsRaw(bits);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "there are three handles",
+  })
+  public serverSet(index: int, handle: Raw<uint8>): void {
+    const cells = cellsAt<uint64>(this.servers, 0);
+
+    putAt(cells, index, rawBits(handle));
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "there are three handles",
+  })
+  public readonly clientAt(index: int): Raw<uint8> {
+    const cells = cellsAt<uint64>(this.clients, 0);
+    const bits = peekAt(cells, index);
+
+    return bitsRaw(bits);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "there are three records of 32 bytes",
+  })
+  public readonly overlappedAt(index: int): Raw<uint8> {
+    return cellsAt<uint8>(this.overlapped, index * 32);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the event is the last field of the record",
+  })
+  public readonly eventAt(index: int): Raw<uint8> {
+    const cells = cellsAt<uint64>(this.overlapped, index * 32 + 24);
+    const bits = peekAt(cells, 0);
+
+    return bitsRaw(bits);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the chunks are for the pipes 1 and 2",
+  })
+  public readonly chunkAt(index: int): Raw<uint8> {
+    return cellsAt<uint8>(this.chunks, (index - 1) * chunkSize());
+  }
+
+  public readonly isPending(index: int): boolean {
+    return ((this.pending >> index) & 1) != 0;
+  }
+
+  public pendingSet(index: int, isPending: boolean): void {
+    const bit = 1 << index;
+
+    this.pending = this.pending & ~bit;
+
+    if (isPending) {
+      this.pending = this.pending | bit;
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "the pipe name ends with a zero; the records are whole",
+  })
+  public pipeMade(index: int): uint32 {
+    let server: uint32 = 1074528256;
+    let client: uint32 = 1073741952;
+
+    if (index == 0) {
+      server = server | 3;
+      client = 2147483904;
+    } else {
+      server = server | 1;
+    }
+
+    const none = bitsRaw(0);
+    const process = GetCurrentProcessId();
+    let handle = bitsRaw(invalidHandle());
+    let name = "";
+    let failure: uint32 = 0;
+    let attempt = 0;
+
+    while (attempt < 32 && rawBits(handle) == invalidHandle()) {
+      ChildShared.pipeCount += 1;
+
+      const count = ChildShared.pipeCount;
+
+      name = `\\\\.\\pipe\\tz-run-${process}-${count}`;
+
+      const wide = wideOf(name);
+      if (wide != undefined) {
+        handle = CreateNamedPipeW(wide, server, 0, 1, 65536, 65536, 0, none);
+      }
+      if (rawBits(handle) == invalidHandle()) {
+        failure = GetLastError();
+        if (failure != 231 && failure != 5) {
+          return failure;
+        }
+      }
+
+      attempt += 1;
+    }
+    if (rawBits(handle) == invalidHandle()) {
+      return failure;
+    }
+
+    return this.pipeConnected(index, handle, name, client);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "the pipe name ends with a zero; the records are whole",
+  })
+  public pipeConnected(
+    index: int,
+    handle: Raw<uint8>,
+    name: Read<string>,
+    access: uint32,
+  ): uint32 {
+    const none = bitsRaw(0);
+    const security = allocate<uint8>(24);
+
+    memset(security, 0, 24);
+    putUnit(cellsAt<uint32>(security, 0), 0, 24);
+    putUnit(cellsAt<uint32>(security, 16), 0, 1);
+
+    let child = bitsRaw(invalidHandle());
+    const wide = wideOf(name);
+
+    if (wide != undefined) {
+      child = CreateFileW(wide, access, 0, security, 3, 0, none);
+    }
+
+    release(security);
+
+    if (rawBits(child) == invalidHandle()) {
+      const error = GetLastError();
+
+      CloseHandle(handle);
+
+      return error;
+    }
+
+    const connect = allocate<uint8>(32);
+    const got = frameCells<uint32>(1);
+
+    memset(connect, 0, 32);
+
+    const event = CreateEventW(none, 1, 0, none);
+
+    putAt(cellsAt<uint64>(connect, 24), 0, rawBits(event));
+
+    if (ConnectNamedPipe(handle, connect) == 0) {
+      if (GetLastError() == pendingRead()) {
+        GetOverlappedResult(handle, connect, got, 1);
+      }
+    }
+
+    CloseHandle(event);
+    release(connect);
+    this.serverSet(index, handle);
+    putAt(cellsAt<uint64>(this.clients, 0), index, rawBits(child));
+
+    return 0;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "the event is the last field of the record",
+  })
+  public eventMade(index: int): void {
+    const none = bitsRaw(0);
+    const event = CreateEventW(none, 1, 0, none);
+    const cells = cellsAt<uint64>(this.overlapped, index * 32 + 24);
+
+    putAt(cells, 0, rawBits(event));
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "a pending read is cancelled and waited for before the close",
+  })
+  public pipeClosed(index: int): void {
+    const handle = this.serverAt(index);
+    if (rawBits(handle) == 0) {
+      return;
+    }
+    if (this.isPending(index)) {
+      const got = frameCells<uint32>(1);
+      const overlapped = this.overlappedAt(index);
+
+      CancelIoEx(handle, overlapped);
+      GetOverlappedResult(handle, overlapped, got, 1);
+      this.pendingSet(index, false);
+    }
+
+    CloseHandle(handle);
+    this.serverSet(index, bitsRaw(0));
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "only events this run made are closed",
+  })
+  public allClosed(): void {
+    for (let index = 0; index < 3; index++) {
+      this.pipeClosed(index);
+
+      const event = this.eventAt(index);
+
+      if (rawBits(event) != 0) {
+        CloseHandle(event);
+      }
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "the chunk has room for the bytes asked for",
+  })
+  public readStarted(index: int): void {
+    const handle = this.serverAt(index);
+    const counted = cellsAt<uint32>(bitsRaw(0), 0);
+
+    ResetEvent(this.eventAt(index));
+
+    const size = chunkSize().toUint32();
+    const chunk = this.chunkAt(index);
+    const overlapped = this.overlappedAt(index);
+    const isRead = ReadFile(handle, chunk, size, counted, overlapped) != 0;
+
+    if (isRead) {
+      this.pendingSet(index, true);
+
+      return;
+    }
+
+    const error = GetLastError();
+
+    if (error == pendingRead()) {
+      this.pendingSet(index, true);
+
+      return;
+    }
+    if (error != brokenPipeError()) {
+      this.pipeErrorSet(codeOfWindows(error));
+    }
+
+    this.pipeClosed(index);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the reserved block has 31 bytes",
+  })
+  public reservedMade(): Raw<uint8> {
+    const reserved = allocate<uint8>(31);
+    const handles = cellsAt<uint64>(this.clients, 0);
+
+    putUnit(reserved, 0, 3);
+    putUnit(reserved, 1, 0);
+    putUnit(reserved, 2, 0);
+    putUnit(reserved, 3, 0);
+
+    for (let index = 0; index < 3; index++) {
+      putUnit(reserved, 4 + index, 9);
+
+      const bits = peekAt(handles, index);
+
+      for (let byte = 0; byte < 8; byte++) {
+        const shift = (byte * 8).toUint64();
+        const part = ((bits >> shift) & 255).toInt();
+
+        putUnit(reserved, 7 + index * 8 + byte, part);
+      }
+    }
+
+    return reserved;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "only handles this run made are closed",
+  })
+  public clientsClosed(): void {
+    for (let index = 0; index < 3; index++) {
+      const handle = this.clientAt(index);
+
+      if (rawBits(handle) != invalidHandle()) {
+        CloseHandle(handle);
+      }
+    }
+  }
+
+  public stored(index: int, count: int): void {
+    const chunk = this.chunkAt(index);
+
+    if (index == 1) {
+      this.output.append(chunk, count);
+
+      return;
+    }
+
+    this.errors.append(chunk, count);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the rooms came from allocate and nothing else holds them",
+  })
+  public [Symbol.dispose](): void {
+    release(this.servers);
+    release(this.clients);
+    release(this.overlapped);
+    release(this.chunks);
+  }
+}

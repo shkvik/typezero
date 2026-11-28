@@ -1,0 +1,225 @@
+function isShortText(meta: uint64): boolean {
+  const forms = textTreeBit() | textHeapBit() | textWideBit();
+
+  return (meta & forms) == textTreeBit();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both cells hold count units",
+})
+function sameUnits<F, S>(first: Raw<F>, second: Raw<S>, count: int): boolean {
+  for (let index = 0; index < count; index++) {
+    if (unitAt(first, index) != unitAt(second, index)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of second live as long as this borrowed string",
+})
+function equalsBy<F>(first: Raw<F>, second: Read<string>, count: int): boolean {
+  const narrow = textCells<uint8>(second);
+  if (narrow != undefined) {
+    return sameUnits(first, narrow, count);
+  }
+
+  const wide = textCells<uint16>(second);
+  if (wide != undefined) {
+    return sameUnits(first, wide, count);
+  }
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the two borrowed strings",
+})
+export function equals(first: Read<string>, second: Read<string>): boolean {
+  const count = first.length;
+  if (count != second.length) {
+    return false;
+  }
+
+  const firstMeta = textMeta(first);
+  const secondMeta = textMeta(second);
+  if (firstMeta == secondMeta && textObject(first) == textObject(second)) {
+    return true;
+  }
+  if (isShortText(firstMeta) && isShortText(secondMeta)) {
+    return false;
+  }
+
+  const narrow = textCells<uint8>(first);
+  const otherNarrow = textCells<uint8>(second);
+  if (narrow != undefined && otherNarrow != undefined) {
+    return sameCells(narrow, 0, otherNarrow, 0, count);
+  }
+  if (narrow != undefined) {
+    return equalsBy(narrow, second, count);
+  }
+
+  const wide = textCells<uint16>(first);
+  if (wide != undefined) {
+    return equalsBy(wide, second, count);
+  }
+
+  return false;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both cells hold at least count units",
+})
+function orderOf<F, S>(
+  first: Raw<F>,
+  second: Raw<S>,
+  count: int,
+  rest: int,
+): int {
+  for (let index = 0; index < count; index++) {
+    const one = unitAt(first, index);
+    const other = unitAt(second, index);
+    if (one != other) {
+      return one - other;
+    }
+  }
+
+  return rest;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of second live as long as this borrowed string",
+})
+function compareBy<F>(
+  first: Raw<F>,
+  second: Read<string>,
+  count: int,
+  rest: int,
+): int {
+  const narrow = textCells<uint8>(second);
+  if (narrow != undefined) {
+    return orderOf(first, narrow, count, rest);
+  }
+
+  const wide = textCells<uint16>(second);
+  if (wide != undefined) {
+    return orderOf(first, wide, count, rest);
+  }
+
+  return rest;
+}
+
+function swappedBytes(word: uint64): uint64 {
+  let rest = word;
+  let swapped: uint64 = 0;
+
+  for (let index = 0; index < 8; index++) {
+    swapped = (swapped << 8) | (rest & 255);
+    rest = rest >> 8;
+  }
+
+  return swapped;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a short text keeps its bytes in the object bits; a long one has 8",
+})
+function firstWord(text: Read<string>, narrow: Raw<uint8>): uint64 {
+  if (isShortText(textMeta(text))) {
+    return swappedBytes(rawBits(textObject(text)));
+  }
+
+  const word = unitAt(cellsAt<uint64>(narrow, 0), 0).toUint64();
+
+  return swappedBytes(word);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the meta bits of the text are read",
+})
+function isWordCompared(text: Read<string>): boolean {
+  return isShortText(textMeta(text)) || text.length >= 8;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the borrowed string",
+})
+export function isOrderWord(text: Read<string>): boolean {
+  const narrow = textCells<uint8>(text);
+
+  return narrow != undefined && isWordCompared(text);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller checked isOrderWord, so the text has 8 bytes to read",
+})
+export function orderWord(text: Read<string>): uint64 {
+  const narrow = textCells<uint8>(text);
+  if (narrow == undefined) {
+    return 0;
+  }
+
+  return firstWord(text, narrow);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the meta bits of the text are read",
+})
+export function isShortOrder(text: Read<string>): boolean {
+  return isShortText(textMeta(text));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the two borrowed strings",
+})
+export function compare(first: Read<string>, second: Read<string>): int {
+  let count = first.length;
+
+  if (second.length < count) {
+    count = second.length;
+  }
+
+  const rest = first.length - second.length;
+  const narrow = textCells<uint8>(first);
+  const other = textCells<uint8>(second);
+  if (narrow != undefined && other != undefined) {
+    if (isWordCompared(first) && isWordCompared(second)) {
+      const left = firstWord(first, narrow);
+      const right = firstWord(second, other);
+      if (left < right) {
+        return -1;
+      }
+      if (left > right) {
+        return 1;
+      }
+      if (isShortText(textMeta(first)) && isShortText(textMeta(second))) {
+        return rest;
+      }
+    }
+
+    return orderOf(narrow, other, count, rest);
+  }
+  if (narrow != undefined) {
+    return compareBy(narrow, second, count, rest);
+  }
+
+  const wide = textCells<uint16>(first);
+  if (wide != undefined) {
+    return compareBy(wide, second, count, rest);
+  }
+
+  return rest;
+}

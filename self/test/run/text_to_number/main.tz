@@ -1,0 +1,175 @@
+function number(text: string): void {
+  const read = Number(text);
+  if (read.isOk()) {
+    const value = read.value;
+    const zero = 0.0;
+
+    if (value == zero) {
+      console.log(`ok ${1.0 / value}`);
+    } else {
+      console.log(`ok ${value}`);
+    }
+  } else {
+    console.log(`err ${read.error.code} ${read.error.message}`);
+  }
+}
+
+function integer(text: string, radix: int): void {
+  const read = parseInt(text, radix);
+  if (read.isOk()) {
+    console.log(`ok ${read.value}`);
+  } else {
+    console.log(`err ${read.error.code} ${read.error.message}`);
+  }
+}
+
+function main(): void {
+  number("");
+  number(" ");
+  number("0");
+  number("-0");
+  number("+0");
+  number("1");
+  number("-1");
+  number("+1");
+  number("42");
+  number(" 42 ");
+  number("\u0009\u000a 7 \u000d");
+  number("\u00a0 8 \u3000");
+  number("\ufeff9");
+  number("3.14");
+  number(".5");
+  number("5.");
+  number("-.5");
+  number("1e3");
+  number("1E3");
+  number("1e+3");
+  number("1e-3");
+  number("1e");
+  number("1e+");
+  number("e5");
+  number(".");
+  number("..1");
+  number("1.2.3");
+  number("0x10");
+  number("0X1f");
+  number("0xg");
+  number("0x");
+  number("0o17");
+  number("0o8");
+  number("0b101");
+  number("0b2");
+  number("-0x10");
+  number("Infinity");
+  number("-Infinity");
+  number("+Infinity");
+  number("infinity");
+  number("Infinityx");
+  number("NaN");
+  number("1e308");
+  number("1.7976931348623157e308");
+  number("1.7976931348623159e308");
+  number("1e309");
+  number("-1e309");
+  number("5e-324");
+  number("2e-324");
+  number("1e-400");
+  number("0e99999");
+  number("0.1");
+  number("0.2");
+  number("0.30000000000000004");
+  number("123456789012345678");
+  number("1234567890123456789");
+  number("12345678901234567890");
+  number("9007199254740993");
+  number("9007199254740992");
+  number("18446744073709551616");
+  number("0.000000000000000000000000000001");
+  number("1000000000000000000000000000000");
+  number("10000000000000000000000000000000000000000000000000000000000000000000000.5");
+  number("33333333333333333333333333333333333333333333333333333333333333333333333333333333");
+  number("0.33333333333333333333333333333333333333333333333333333333333333333333333333333333");
+  number("1e22");
+  number("1e23");
+  number("4.35");
+  number("2.5e-3");
+  number("  -12.75e1  ");
+  number("12abc");
+  number("abc");
+  number("1 2");
+  number("\uff11\uff12");
+  number("12\u00e9");
+  number("\u00e912");
+  number("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+  number("0b1111111111111111111111111111111111111111111111111111111111111111111111");
+  number("00012");
+  number("-00.0012");
+  number("1_000");
+  number("+-1");
+  number("--1");
+  number("0.0e0");
+  number("7e22");
+  number("8e-23");
+  number("1.5e-22");
+  integer("", 0);
+  integer("0", 0);
+  integer("42", 0);
+  integer("  42abc", 0);
+  integer("-42", 0);
+  integer("+42", 0);
+  integer("0x1F", 0);
+  integer("0X1f", 16);
+  integer("0x1f", 10);
+  integer("1f", 16);
+  integer("z", 36);
+  integer("Z", 36);
+  integer("10", 2);
+  integer("12", 2);
+  integer("2", 2);
+  integer("777", 8);
+  integer("9223372036854775807", 0);
+  integer("-9223372036854775808", 0);
+  integer("9223372036854775808", 0);
+  integer("-9223372036854775809", 0);
+  integer("99999999999999999999999", 0);
+  integer("abc", 0);
+  integer("  ", 0);
+  integer("-", 0);
+  integer("3.9", 0);
+  integer("-0", 0);
+  integer("12", 1);
+  integer("12", 37);
+  integer("\u00a012", 0);
+  integer("12\u00e9", 0);
+  integer("\u00e912", 0);
+  integer("ffffffffffffffff", 16);
+  integer("7fffffffffffffff", 16);
+  integer("-8000000000000000", 16);
+  integer("0x", 0);
+  integer("0x", 16);
+  integer("  0b11", 0);
+  integer("1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111", 0);
+  integer("\uff11", 0);
+
+  let value = 0.7;
+  let total = 0.0;
+
+  for (let index = 0; index < 300; index++) {
+    value = value * 1.37 + 0.011;
+    if (value > 1e200) {
+      value = 0.3;
+    }
+
+    const read = Number(`${value}`);
+    const back = Number(`${1.0 / value}`);
+
+    if (read.isOk() && back.isOk()) {
+      total += read.value - value + back.value - 1.0 / value;
+    }
+  }
+
+  console.log(total);
+  console.log(parseInt("123").unwrapOr(0), Number("2.5").unwrapOr(0.0));
+}
+
+main();

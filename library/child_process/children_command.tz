@@ -1,0 +1,442 @@
+
+function quoteUnit(): int {
+  return 34;
+}
+
+function slashUnit(): int {
+  return 92;
+}
+
+function argumentQuoted(line: Mut<UnitBuffer>, arg: Read<string>): void {
+  const count = arg.length;
+  if (count == 0) {
+    line.push(quoteUnit());
+    line.push(quoteUnit());
+
+    return;
+  }
+
+  let isNeeded = false;
+  let isSpecial = false;
+
+  for (let index = 0; index < count; index++) {
+    const unit = arg.charCodeAt(index) ?? 0;
+
+    if (unit == 32 || unit == 9 || unit == quoteUnit()) {
+      isNeeded = true;
+    }
+    if (unit == quoteUnit() || unit == slashUnit()) {
+      isSpecial = true;
+    }
+  }
+  if (!isNeeded) {
+    line.pushText(arg);
+
+    return;
+  }
+  if (!isSpecial) {
+    line.push(quoteUnit());
+    line.pushText(arg);
+    line.push(quoteUnit());
+
+    return;
+  }
+
+  const reversed: int[] = [];
+  let isQuoteHit = true;
+
+  for (let index = count; index > 0; index--) {
+    const unit = arg.charCodeAt(index - 1) ?? 0;
+
+    reversed.push(unit);
+
+    if (isQuoteHit && unit == slashUnit()) {
+      reversed.push(slashUnit());
+    } else if (unit == quoteUnit()) {
+      isQuoteHit = true;
+      reversed.push(slashUnit());
+    } else {
+      isQuoteHit = false;
+    }
+  }
+
+  line.push(quoteUnit());
+
+  for (let index = reversed.length; index > 0; index--) {
+    line.push(reversed[index - 1] ?? 0);
+  }
+
+  line.push(quoteUnit());
+}
+
+function commandLine(file: Read<string>, args: Read<string[]>): UnitBuffer {
+  const line = new UnitBuffer();
+
+  argumentQuoted(line, file);
+
+  for (const arg of args) {
+    line.push(32);
+    argumentQuoted(line, arg);
+  }
+
+  line.push(0);
+
+  return line;
+}
+
+function isTrailingUnit(unit: int): boolean {
+  return unit == 46 || unit == 32 || (unit >= 9 && unit <= 13);
+}
+
+function isNameUnit(unit: int): boolean {
+  if (unit >= 97 && unit <= 122) {
+    return true;
+  }
+  if (unit >= 65 && unit <= 90) {
+    return true;
+  }
+
+  return unit >= 48 && unit <= 57;
+}
+
+function isBatchFile(file: Read<string>): boolean {
+  let end = file.length;
+
+  while (end > 0 && isTrailingUnit(file.charCodeAt(end - 1) ?? 0)) {
+    end -= 1;
+  }
+
+  let start = end;
+
+  while (start > 0 && isNameUnit(file.charCodeAt(start - 1) ?? 0)) {
+    start -= 1;
+  }
+  if (start == end || start == 0 || end - start != 3) {
+    return false;
+  }
+  if (file.charCodeAt(start - 1) != 46) {
+    return false;
+  }
+
+  const extension = file.slice(start, end).toLowerCase();
+
+  return extension == "bat" || extension == "cmd";
+}
+
+class ChildEnvironment {
+  private readonly pool: UnitBuffer;
+  private readonly starts: int[];
+  private readonly lengths: int[];
+  private readonly names: int[];
+  private order: int[];
+
+  public constructor() {
+    this.pool = new UnitBuffer();
+    this.starts = [];
+    this.lengths = [];
+    this.names = [];
+    this.order = [];
+  }
+
+  private added(start: int, length: int, name: int): void {
+    this.order.push(this.starts.length);
+    this.starts.push(start);
+    this.lengths.push(length);
+    this.names.push(name);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+    reason: "the block of the system ends with two zeros and is freed here",
+  })
+  public collected(): void {
+    const system = GetEnvironmentStringsW();
+    if (rawBits(system) == 0) {
+      return;
+    }
+
+    const block = cellsAt<uint16>(system, 0);
+    let at = 0;
+
+    while (unitAt(block, at) != 0) {
+      let end = at;
+      let equals = -1;
+
+      while (unitAt(block, end) != 0) {
+        if (equals < 0 && end > at && unitAt(block, end) == 61) {
+          equals = end;
+        }
+
+        end += 1;
+      }
+      if (unitAt(block, at) != 61 && equals >= 0) {
+        const start = this.pool.count;
+
+        for (let index = at; index < end; index++) {
+          this.pool.push(unitAt(block, index));
+        }
+
+        this.added(start, end - at, equals - at);
+      }
+
+      at = end + 1;
+    }
+
+    FreeEnvironmentStringsW(system);
+  }
+
+  private readonly isNameGreater(first: int, second: int): boolean {
+    const firstStart = this.starts[first] ?? 0;
+    const secondStart = this.starts[second] ?? 0;
+    const firstCount = this.names[first] ?? 0;
+    const secondCount = this.names[second] ?? 0;
+    let same = 0;
+
+    while (same < firstCount && same < secondCount) {
+      const left = this.pool.unitOf(firstStart + same);
+      const right = this.pool.unitOf(secondStart + same);
+      if (left != right) {
+        return left > right;
+      }
+
+      same += 1;
+    }
+
+    return same < firstCount && same == secondCount;
+  }
+
+  private nameSorted(): void {
+    const order: int[] = [];
+
+    for (let entry = 0; entry < this.starts.length; entry++) {
+      order.push(entry);
+
+      let place = order.length - 1;
+
+      while (place > 0) {
+        const before = order[place - 1] ?? 0;
+        if (!this.isNameGreater(before, entry)) {
+          break;
+        }
+        if (place < order.length) {
+          order[place] = before;
+        }
+
+        place -= 1;
+      }
+      if (place >= 0 && place < order.length) {
+        order[place] = entry;
+      }
+    }
+
+    this.order = order;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign],
+    reason: "both ranges are names inside the pool",
+  })
+  private readonly compared(first: int, second: int): int32 {
+    const firstCells = this.pool.unitsFrom(this.starts[first] ?? 0);
+    const secondCells = this.pool.unitsFrom(this.starts[second] ?? 0);
+    const firstCount = (this.names[first] ?? 0).toInt32();
+    const secondCount = (this.names[second] ?? 0).toInt32();
+
+    return CompareStringOrdinal(
+      firstCells,
+      firstCount,
+      secondCells,
+      secondCount,
+      1,
+    );
+  }
+
+  private deduplicated(): void {
+    const kept: int[] = [];
+
+    for (const entry of this.order) {
+      let isSeen = false;
+
+      for (const other of kept) {
+        if (!isSeen && this.compared(other, entry) == 2) {
+          isSeen = true;
+        }
+      }
+      if (!isSeen) {
+        kept.push(entry);
+      }
+    }
+
+    this.order = kept;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Foreign],
+    reason: "the name is written into the pool before it is compared",
+  })
+  private isPresent(name: Read<string>): boolean {
+    const start = this.pool.count;
+
+    this.pool.pushText(name);
+
+    const cells = this.pool.unitsFrom(start);
+    const count = name.length.toInt32();
+    let isFound = false;
+
+    for (const entry of this.order) {
+      const entryCells = this.pool.unitsFrom(this.starts[entry] ?? 0);
+      const entryCount = (this.names[entry] ?? 0).toInt32();
+      const order = CompareStringOrdinal(
+        entryCells,
+        entryCount,
+        cells,
+        count,
+        1,
+      );
+
+      if (order == 2) {
+        isFound = true;
+      }
+    }
+
+    return isFound;
+  }
+
+  private requiredAdded(): void {
+    for (const name of kRequiredNames) {
+      if (!this.isPresent(name)) {
+        const value = environmentValue(name);
+
+        if (value != undefined) {
+          const start = this.pool.count;
+
+          this.pool.pushText(name);
+          this.pool.push(61);
+          this.pool.pushText(value);
+          this.added(start, this.pool.count - start, name.length);
+        }
+      }
+    }
+  }
+
+  private caseSorted(): void {
+    for (let index = 1; index < this.order.length; index++) {
+      const moving = this.order[index] ?? 0;
+      let place = index;
+
+      while (place > 0) {
+        const before = this.order[place - 1] ?? 0;
+        if (this.compared(before, moving) != 3) {
+          break;
+        }
+
+        if (place < this.order.length) {
+          this.order[place] = before;
+        }
+
+        place -= 1;
+      }
+      if (place >= 0 && place < this.order.length) {
+        this.order[place] = moving;
+      }
+    }
+  }
+
+  public prepared(): void {
+    this.collected();
+    this.nameSorted();
+    this.deduplicated();
+    this.requiredAdded();
+    this.caseSorted();
+  }
+
+  public readonly block(): UnitBuffer {
+    const block = new UnitBuffer();
+
+    for (const entry of this.order) {
+      const start = this.starts[entry] ?? 0;
+      const count = this.lengths[entry] ?? 0;
+
+      block.pushRange(this.pool, start, count);
+      block.push(0);
+    }
+
+    block.push(0);
+
+    if (this.order.length == 0) {
+      block.push(0);
+    }
+
+    return block;
+  }
+
+  private readonly isPathEntry(entry: int): boolean {
+    const start = this.starts[entry] ?? 0;
+    if ((this.lengths[entry] ?? 0) < 5) {
+      return false;
+    }
+
+    const name = this.pool.textOf(start, 5).toUpperCase();
+
+    return name == "PATH=";
+  }
+
+  public readonly path(): string | undefined {
+    for (const entry of this.order) {
+      if (this.isPathEntry(entry)) {
+        const start = this.starts[entry] ?? 0;
+        const count = this.lengths[entry] ?? 0;
+
+        return this.pool.textOf(start + 5, count - 5);
+      }
+    }
+
+    return undefined;
+  }
+}
+
+const kRequiredNames: string[] = [
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LOGONSERVER",
+  "PATH",
+  "SYSTEMDRIVE",
+  "SYSTEMROOT",
+  "TEMP",
+  "USERDOMAIN",
+  "USERNAME",
+  "USERPROFILE",
+  "WINDIR",
+];
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign, UnsafeUse.Memory],
+  reason: "the buffer has the size the first call asked for, and one more",
+})
+function processFolder(): string {
+  const none = cellsAt<uint16>(bitsRaw(0), 0);
+  const size = GetCurrentDirectoryW(0, none);
+  const cells = allocate<uint16>(size.toInt() + 1);
+  const got = GetCurrentDirectoryW(size + 1, cells);
+  let count = 0;
+
+  if (got <= size) {
+    count = got.toInt();
+  }
+  if (count >= 260) {
+    putUnit(cells, count, 0);
+
+    const room = (count + 1).toUint32();
+    const short = GetShortPathNameW(cells, cells, room);
+
+    if (short > 0 && short < room) {
+      count = short.toInt();
+    }
+  }
+
+  const text = textOfUnits(cells, count);
+
+  release(cells);
+
+  return text;
+}

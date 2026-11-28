@@ -1,0 +1,46 @@
+function shown(value: double): void {
+  const texts: string[] = [];
+
+  for (const digits of [0, 1, 2, 3, 5, 10, 20]) {
+    texts.push(value.toFixed(digits));
+  }
+
+  console.log(texts.join(" "));
+}
+
+function main(): void {
+  shown(0.0);
+  shown(-0.0);
+  shown(1.0);
+  shown(0.5);
+  shown(1.5);
+  shown(2.5);
+  shown(-1.5);
+  shown(1.005);
+  shown(1.45);
+  shown(123.456);
+  shown(-123.456);
+  shown(0.000001);
+  shown(1e-10);
+  shown(5e-324);
+  shown(1e20);
+  shown(1e21);
+  shown(123456789012345.67);
+  shown(0.1 + 0.2);
+  shown(1.0 / 3.0);
+  console.log((1.0 / 3.0).toFixed(100));
+  console.log((2.0 / 3.0).toFixed(60), (12345.6789).toFixed(4));
+
+  let value = 0.7;
+  const many: string[] = [];
+
+  for (let index = 0; index < 300; index++) {
+    value = value * 1.37 + 0.011;
+    many.push(value.toFixed(index % 7));
+    many.push((1.0 / value).toFixed(index % 13));
+  }
+
+  console.log(many.join(","));
+}
+
+main();

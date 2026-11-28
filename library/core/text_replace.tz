@@ -1,0 +1,286 @@
+function dollar(): int {
+  return 36;
+}
+
+function isMark(unit: int): boolean {
+  return unit == 36 || unit == 38 || unit == 96 || unit == 39;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "index + 1 < fill.count: both cells are inside fill",
+})
+function markAt<R>(fill: Cells<R>, index: int): int {
+  if (unitAt(fill.start, index) != dollar()) {
+    return -1;
+  }
+
+  const next = unitAt(fill.start, index + 1);
+  if (isMark(next)) {
+    return next;
+  }
+
+  return -1;
+}
+
+function markSize(mark: int, found: Piece, count: int): int {
+  if (mark == 36) {
+    return 1;
+  }
+  if (mark == 38) {
+    return found.count;
+  }
+  if (mark == 96) {
+    return found.at;
+  }
+
+  return count - found.at - found.count;
+}
+
+function fillSize<R>(fill: Cells<R>, found: Piece, count: int): int {
+  let size = fill.count;
+  let index = 0;
+
+  while (index + 1 < fill.count) {
+    const mark = markAt(fill, index);
+    if (mark < 0) {
+      index += 1;
+
+      continue;
+    }
+
+    size += markSize(mark, found, count) - 2;
+    index += 2;
+  }
+
+  return size;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "into has room for markSize cells from used; found is inside hay",
+})
+function marked<H, T>(
+  hay: Cells<H>,
+  into: Raw<T>,
+  used: int,
+  found: Piece,
+  mark: int,
+): void {
+  const after = found.at + found.count;
+
+  if (mark == 36) {
+    putUnit(into, used, dollar());
+  } else if (mark == 38) {
+    copyCells(hay.start, found.at, into, used, found.count);
+  } else if (mark == 96) {
+    copyCells(hay.start, 0, into, used, found.at);
+  } else {
+    copyCells(hay.start, after, into, used, hay.count - after);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "into has room for fillSize cells from used; found is inside hay",
+})
+function marksFilled<H, R, T>(
+  hay: Cells<H>,
+  fill: Cells<R>,
+  into: Raw<T>,
+  used: int,
+  found: Piece,
+): int {
+  let plain = 0;
+  let index = 0;
+  let room = used;
+
+  while (index + 1 < fill.count) {
+    const mark = markAt(fill, index);
+    if (mark < 0) {
+      index += 1;
+
+      continue;
+    }
+
+    copyCells(fill.start, plain, into, room, index - plain);
+    room += index - plain;
+    marked(hay, into, room, found, mark);
+    room += markSize(mark, found, hay.count);
+    plain = index + 2;
+    index += 2;
+  }
+
+  copyCells(fill.start, plain, into, room, fill.count - plain);
+
+  return room + fill.count - plain;
+}
+
+function keptPlaces(): int {
+  return 32;
+}
+
+function nextAt<H, N>(hay: Cells<H>, needle: Cells<N>, at: int): int {
+  let step = needle.count;
+
+  if (step == 0) {
+    step = 1;
+  }
+  if (at + step > hay.count) {
+    return -1;
+  }
+
+  return foundMixed(hay, needle, at + step);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first pass counts every cell the second pass writes",
+})
+function replaced<H, N, R, T>(
+  hay: Cells<H>,
+  needle: Cells<N>,
+  fill: Cells<R>,
+  text: Read<string>,
+  isPlain: boolean,
+): string {
+  const first = foundMixed(hay, needle, 0);
+  if (first < 0) {
+    return text;
+  }
+
+  const hasMarks = firstUnit(fill, 0, fill.count, dollar()) >= 0;
+  const matched = needle.count;
+  const places = frameCells<int>(32);
+  let found = 0;
+  let total = hay.count;
+  let at = first;
+
+  while (at >= 0) {
+    if (found < keptPlaces()) {
+      putUnit(places, found, at);
+    }
+
+    found += 1;
+    total -= matched;
+
+    if (hasMarks) {
+      total += fillSize(fill, new Piece(at, matched), hay.count);
+    } else {
+      total += fill.count;
+    }
+
+    at = nextAt(hay, needle, at);
+  }
+
+  const into = textRoom<T>(total);
+  let copied = 0;
+  let used = 0;
+
+  for (let index = 0; index < found; index++) {
+    if (index < keptPlaces()) {
+      at = unitAt(places, index);
+    } else {
+      at = nextAt(hay, needle, at);
+    }
+
+    copyCells(hay.start, copied, into, used, at - copied);
+    used += at - copied;
+
+    if (hasMarks) {
+      used = marksFilled(hay, fill, into, used, new Piece(at, matched));
+    } else {
+      copyCells(fill.start, 0, into, used, fill.count);
+      used += fill.count;
+    }
+
+    copied = at + matched;
+  }
+
+  copyCells(hay.start, copied, into, used, hay.count - copied);
+
+  return textClosed(into, total, isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of replacement live as long as this borrowed string",
+})
+function byFill<H, N>(
+  hay: Cells<H>,
+  needle: Cells<N>,
+  text: Read<string>,
+  replacement: Read<string>,
+  isPlain: boolean,
+): string {
+  const narrow = textCells<uint8>(replacement);
+  if (narrow != undefined) {
+    const fill = new Cells<uint8>(narrow, replacement.length);
+
+    return replaced<H, N, uint8, H>(hay, needle, fill, text, isPlain);
+  }
+
+  const wide = textCells<uint16>(replacement);
+  if (wide != undefined) {
+    const fill = new Cells<uint16>(wide, replacement.length);
+
+    return replaced<H, N, uint16, uint16>(hay, needle, fill, text, isPlain);
+  }
+
+  return text;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of pattern live as long as this borrowed string",
+})
+function byNeedle<H>(
+  hay: Cells<H>,
+  text: Read<string>,
+  pattern: Read<string>,
+  replacement: Read<string>,
+  isPlain: boolean,
+): string {
+  const narrow = textCells<uint8>(pattern);
+  if (narrow != undefined) {
+    const needle = new Cells<uint8>(narrow, pattern.length);
+
+    return byFill(hay, needle, text, replacement, isPlain);
+  }
+
+  const wide = textCells<uint16>(pattern);
+  if (wide != undefined) {
+    const needle = new Cells<uint16>(wide, pattern.length);
+
+    return byFill(hay, needle, text, replacement, isPlain);
+  }
+
+  return text;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the three borrowed strings",
+})
+export function replaceAll(
+  text: Read<string>,
+  pattern: Read<string>,
+  replacement: Read<string>,
+): string {
+  const isPlain = isAscii(text) && isAscii(replacement);
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    const hay = new Cells<uint8>(narrow, text.length);
+
+    return byNeedle(hay, text, pattern, replacement, isPlain);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    const hay = new Cells<uint16>(wide, text.length);
+
+    return byNeedle(hay, text, pattern, replacement, isPlain);
+  }
+
+  return text;
+}

@@ -1,0 +1,31 @@
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+function main(): void {
+  console.log(existsSync("main.tz"), existsSync("missing.tz"), existsSync(""));
+  console.log(existsSync("."), existsSync(".."), existsSync("./main.tz"));
+  console.log(existsSync("a\0b"), existsSync("main.tz/x"));
+
+  const made = mkdtempSync(join(tmpdir(), "tz-exists-"));
+  if (made.isErr()) {
+    return;
+  }
+
+  const folder = made.value;
+  const file = join(folder, "файл с пробелом.txt");
+
+  console.log(existsSync(folder), existsSync(file));
+
+  const written = copyFileSync("main.tz", file);
+  if (written.isOk()) {
+    console.log(existsSync(file), existsSync(file.toUpperCase()));
+  }
+
+  const removed = rmSync(folder, { recursive: true });
+  if (removed.isOk()) {
+    console.log(existsSync(folder), existsSync(file));
+  }
+}
+
+main();

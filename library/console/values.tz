@@ -1,0 +1,184 @@
+import {
+  ArrayBufferHead,
+  ArrayHead,
+  BytesHead,
+  CStringHead,
+  FieldHead,
+  HandleTypeHead,
+  LayoutHead,
+  MapHead,
+  MapLayoutHead,
+  ObjectHead,
+  ResultTypeHead,
+  SiteHead,
+  TypeHead,
+} from "tz:core";
+import { printText } from "tz:inspect";
+import { panic } from "tz:intrinsics";
+import {
+  TextBuilder,
+  fromDouble,
+  fromSigned,
+  fromUnsigned,
+  isOrderWord,
+  isShortOrder,
+  orderWord,
+  textOfBytes,
+} from "tz:text";
+import { sqrt } from "tz:win32/ucrt";
+import {
+  Raw,
+  bitsDouble,
+  allocate,
+  bitsRaw,
+  cellsAt,
+  compared,
+  copyCells,
+  doubleBits,
+  peekAt,
+  putAt,
+  putUnit,
+  rawBits,
+  release,
+  sameCells,
+  textCells,
+  unitAt,
+  viewAt,
+} from "tz:unsafe";
+
+function iteratorName(flags: uint32): string | undefined {
+  if ((flags & 2) != 0) {
+    return "Generator";
+  }
+  if ((flags & 4) != 0) {
+    return "Array Iterator";
+  }
+  if ((flags & 8) != 0) {
+    return "String Iterator";
+  }
+  if ((flags & 16) != 0) {
+    return "Iterator Helper";
+  }
+  if ((flags & 256) != 0) {
+    return "RegExp String Iterator";
+  }
+  if ((flags & 536870912) != 0) {
+    return "AsyncGenerator";
+  }
+
+  return undefined;
+}
+
+function intlInto(out: Mut<TextBuilder>, layout: Raw<uint8>): void {
+  if (nameBytesOf(layout) > 0) {
+    const name = layoutName(layout);
+
+    out.add(`${name} [Intl.${name}] `);
+  }
+
+  out.add("{}");
+}
+
+function objectFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  depth: int,
+): void {
+  const layout = layoutOfObject(object);
+  const flags = flagsOf(layout);
+  const iterator = iteratorName(flags);
+
+  if ((flags & 512) != 0) {
+    stringFormatted(context, out, cTextOf(object));
+  } else if ((flags & 4096) != 0) {
+    dictFormatted(context, out, object, depth);
+  } else if ((flags & 1) != 0) {
+    tupleFormatted(context, out, object, layout, depth);
+  } else if ((flags & 262144) != 0) {
+    out.add(layoutName(layout));
+    out.add(" {}");
+  } else if (iterator != undefined) {
+    out.add(`Object [${iterator}] {}`);
+  } else if ((flags & 2048) != 0) {
+    out.add("DateTimeFormat [Intl.DateTimeFormat] {}");
+  } else if ((flags & 524288) != 0) {
+    bytesFormatted(context, out, object, flags, depth);
+  } else if ((flags & 8388608) != 0) {
+    intlInto(out, layout);
+  } else {
+    fieldsFormatted(context, out, object, layout, depth);
+  }
+}
+
+export function printValue(type: Raw<uint8>, value: Raw<uint8>): void {
+  let shown = type;
+
+  if (kindOf(shown) == 7) {
+    if (!isPresent(shown, value)) {
+      printText("undefined");
+
+      return;
+    }
+
+    shown = innerOf(shown);
+  }
+
+  const kind = kindOf(shown);
+
+  if (kind == 5) {
+    printText(stringAt(value));
+
+    return;
+  }
+  if (kind == 10 && isCText(pointerAt(value, 0))) {
+    printText(cTextOf(pointerAt(value, 0)));
+
+    return;
+  }
+
+  const context = new PrintContext();
+  const out = new TextBuilder();
+
+  formatted(context, out, shown, value, 0);
+  printText(out.taken());
+}
+
+export function joinedValues(
+  array: Raw<uint8>,
+  separator: Read<string>,
+): string {
+  const out = new TextBuilder();
+
+  arrayJoinedInto(out, array, separator);
+
+  return out.taken();
+}
+
+export function printDouble(value: double): void {
+  if (isNegativeZero(value)) {
+    printText("-0");
+
+    return;
+  }
+
+  printText(fromDouble(value));
+}
+
+export function printBoolean(flag: boolean): void {
+  if (flag) {
+    printText("true");
+
+    return;
+  }
+
+  printText("false");
+}
+
+export function printSigned(value: int): void {
+  printText(fromSigned(value));
+}
+
+export function printUnsigned(value: uint64): void {
+  printText(fromUnsigned(value));
+}

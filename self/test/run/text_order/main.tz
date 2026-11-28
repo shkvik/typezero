@@ -1,0 +1,53 @@
+function shown(first: string, second: string): void {
+  console.log(
+    first == second,
+    first != second,
+    first < second,
+    first <= second,
+    first > second,
+    first >= second,
+  );
+}
+
+function main(): void {
+  const long = "the quick brown fox jumps over the lazy dog";
+  const wide = "привет, мир: hello";
+  const glued = "the quick " + "brown fox jumps over the lazy dog";
+  const part = long.substring(4, 40);
+
+  shown("", "");
+  shown("a", "");
+  shown("", "a");
+  shown("abc", "abc");
+  shown("abc", "abd");
+  shown("abd", "abc");
+  shown("ab", "abc");
+  shown(long, glued);
+  shown(long, part);
+  shown(part, "quick brown fox jumps over the lazy d");
+  shown(wide, "привет, мир: hello");
+  shown(wide, "привет, мир: hellO");
+  shown("hello", "привет");
+  shown("привет", "hello");
+  shown("ÿ", "Ā");
+  shown("aé", "aé");
+  shown(long.slice(0, 3), "the");
+  shown("x".repeat(20), "x".repeat(20));
+  shown("x".repeat(20), "x".repeat(19) + "y");
+
+  const words = ["pear", "apple", "Äpfel", "banana", "äpple", "Apple", "zebra", "яблоко"];
+
+  words.sort((first, second) => {
+    if (first < second) {
+      return -1;
+    }
+    if (first > second) {
+      return 1;
+    }
+
+    return 0;
+  });
+  console.log(words.join(" "));
+}
+
+main();

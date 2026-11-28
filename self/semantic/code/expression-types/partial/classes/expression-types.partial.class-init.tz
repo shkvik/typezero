@@ -30,6 +30,9 @@ import {
 import { kFieldSetKey } from "../../const/expression-types.const.tz";
 import { InitFrame } from "../../types/expression-types.types.tz";
 
+const kFixedCells = "Fixed";
+const kRawCells = "Raw";
+
 partial class ExpressionTypes {
   private readonly constructorFrame(): Read<InitFrame> | undefined {
     const frame = this.initFrames[this.initFrames.length - 1];
@@ -559,6 +562,9 @@ partial class ExpressionTypes {
   ): boolean {
     const tree = this.types.program.tree;
 
+    if (this.isFixedCells(instance)) {
+      return true;
+    }
     if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return false;
     }
@@ -634,5 +640,11 @@ partial class ExpressionTypes {
     }
 
     return type;
+  }
+
+  private readonly isFixedCells(instance: InstanceType): boolean {
+    const isCells = instance.name == kFixedCells || instance.name == kRawCells;
+
+    return isCells && this.types.isLibraryModule(instance.module);
   }
 }

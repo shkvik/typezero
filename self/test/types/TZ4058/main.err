@@ -1,0 +1,6 @@
+main.tz:13:10: error TZ4058: field 'name' of a record laid out as in C (Layout.C) has type 'string'; such a record holds numbers of a fixed size, 'double', 'boolean', 'Raw<T>', 'Fixed<T, N>' and other Layout.C records
+  public name: string;
+         ^
+main.tz:14:10: error TZ4058: field 'parts' of a record laid out as in C (Layout.C) has type 'int[]'; such a record holds numbers of a fixed size, 'double', 'boolean', 'Raw<T>', 'Fixed<T, N>' and other Layout.C records
+  public parts: int[];
+         ^

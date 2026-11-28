@@ -1,0 +1,202 @@
+import { Raw } from "tz:unsafe";
+
+@InPlace({ layout: Layout.C })
+export class TextHead {
+  public count: int;
+  public kind: uint32;
+  public reserved: uint32;
+  public capacity: uint32;
+  public used: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class TreeHead {
+  public count: int;
+  public kind: uint32;
+  public reserved: uint32;
+  public leftObject: Raw<uint8>;
+  public leftMeta: uint64;
+  public rightObject: Raw<uint8>;
+  public rightMeta: uint64;
+  public flatObject: Raw<uint8>;
+  public flatMeta: uint64;
+}
+
+@InPlace({ layout: Layout.C })
+export class DecimalHead {
+  public count: int;
+  public exponent: int;
+  public negative: int32;
+  public used: uint32;
+}
+
+export function textLengthBits(): uint64 {
+  return 1073741823;
+}
+
+export function textOffsetShift(): uint64 {
+  return 30;
+}
+
+export function textAsciiBit(): uint64 {
+  return 1152921504606846976;
+}
+
+export function textWideBit(): uint64 {
+  return 2305843009213693952;
+}
+
+export function textTreeBit(): uint64 {
+  return 4611686018427387904;
+}
+
+export function textHeapBit(): uint64 {
+  return 9223372036854775808;
+}
+
+export function isTextTree(meta: uint64): boolean {
+  const both = textTreeBit() | textHeapBit();
+
+  return (meta & both) == both;
+}
+
+export function isTextHeld(meta: uint64): boolean {
+  return (meta & textHeapBit()) != 0;
+}
+
+@InPlace({ layout: Layout.C })
+export class TypeHead {
+  public kind: uint32;
+  public size: uint32;
+  public inner: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+export class HandleTypeHead {
+  public kind: uint32;
+  public size: uint32;
+  public inner: Raw<uint8>;
+  public name: Raw<uint8>;
+  public nameLength: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class ResultTypeHead {
+  public kind: uint32;
+  public size: uint32;
+  public inner: Raw<uint8>;
+  public error: Raw<uint8>;
+  public valueOffset: uint32;
+  public errorOffset: uint32;
+  public okOffset: uint32;
+  public siteOffset: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class FieldHead {
+  public name: Raw<uint8>;
+  public nameLength: uint32;
+  public offset: uint32;
+  public type: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+export class LayoutHead {
+  public drop: Raw<uint8>;
+  public fields: Raw<uint8>;
+  public count: uint32;
+  public flags: uint32;
+  public name: Raw<uint8>;
+  public nameLength: uint32;
+  public classId: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class MapLayoutHead {
+  public drop: Raw<uint8>;
+  public fields: Raw<uint8>;
+  public count: uint32;
+  public flags: uint32;
+  public name: Raw<uint8>;
+  public nameLength: uint32;
+  public classId: uint32;
+  public key: Raw<uint8>;
+  public value: Raw<uint8>;
+  public kind: uint32;
+  public entrySize: uint32;
+  public keyOffset: uint32;
+  public valueOffset: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class ObjectHead {
+  public count: int;
+  public layout: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+export class ArrayHead {
+  public count: int;
+  public type: Raw<uint8>;
+  public data: Raw<uint8>;
+  public length: uint32;
+  public capacity: uint32;
+  public alloc: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+export class MapHead {
+  public count: int;
+  public layout: Raw<uint8>;
+  public entries: Raw<uint8>;
+  public index: Raw<uint8>;
+  public size: uint32;
+  public used: uint32;
+  public capacity: uint32;
+  public indexMask: uint32;
+  public iterating: uint32;
+  public flags: uint32;
+  public nextDead: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+export class BytesHead {
+  public count: int;
+  public layout: Raw<uint8>;
+  public data: Raw<uint8>;
+  public length: int32;
+  public offset: int32;
+  public buffer: Raw<uint8>;
+}
+
+@InPlace({ layout: Layout.C })
+export class ArrayBufferHead {
+  public count: int;
+  public layout: Raw<uint8>;
+  public data: Raw<uint8>;
+  public length: int32;
+  public flags: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class CStringHead {
+  public count: int;
+  public layout: Raw<uint8>;
+  public length: int;
+}
+
+@InPlace({ layout: Layout.C })
+export class SiteHead {
+  public text: Raw<uint8>;
+  public length: uint32;
+}
+
+@InPlace({ layout: Layout.C })
+export class ThreadHead {
+  public failed: Raw<uint8>;
+  public liveObjects: int;
+  public liveArrays: int;
+  public liveStrings: int;
+  public liveDecimals: int;
+  public liveJson: int;
+}

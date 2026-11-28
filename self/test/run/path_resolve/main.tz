@@ -1,0 +1,34 @@
+import { relative, resolve, toNamespacedPath } from "node:path";
+
+function main(): void {
+  console.log(resolve("C:\\x", "y"));
+  console.log(resolve("C:\\x", "D:\\y", "z"));
+  console.log(resolve("\\\\server\\share", "a"));
+  console.log(resolve("\\\\server\\share\\", ".."));
+  console.log(resolve("\\\\.\\COM1"));
+  console.log(resolve("\\\\?\\C:\\x", ".."));
+  console.log(resolve("c:\\", "C:\\y"));
+  console.log(resolve("C:\\a\\\\b\\\\"));
+  console.log(resolve("C:\\привет", "мир"));
+  console.log(resolve("C:\\a", "", "b/../c"));
+  console.log(resolve("E:\\", "..", ".."));
+  console.log(`[${relative("C:/a", "C:/a")}]`);
+  console.log(`[${relative("C:/a/b", "C:/a/b/c")}]`);
+  console.log(`[${relative("C:/a/b/c", "C:/a/b")}]`);
+  console.log(`[${relative("C:\\x", "D:\\y")}]`);
+  console.log(`[${relative("C:\\x\\y", "c:\\X\\z")}]`);
+  console.log(`[${relative("C:\\", "C:\\a")}]`);
+  console.log(`[${relative("C:\\a", "C:\\")}]`);
+  console.log(`[${relative("C:/a/b/c", "C:/a/x/y")}]`);
+  console.log(`[${relative("\\\\s\\h\\a", "\\\\s\\h\\b")}]`);
+  console.log(`[${relative("C:\\İ\\a", "C:\\i̇\\b")}]`);
+  console.log(`[${relative("C:\\Foo", "C:\\foo\\bar")}]`);
+  console.log(`[${toNamespacedPath("").slice(0, 12)}]`);
+  console.log(`[${toNamespacedPath("C:\\x").slice(0, 12)}]`);
+  console.log(`[${toNamespacedPath("\\\\s\\h\\x").slice(0, 12)}]`);
+  console.log(`[${toNamespacedPath("\\\\?\\C:\\x").slice(0, 12)}]`);
+  console.log(`[${toNamespacedPath("\\\\.\\pipe\\p").slice(0, 12)}]`);
+  console.log(`[${toNamespacedPath("C:\\a\\..\\b").slice(0, 12)}]`);
+}
+
+main();

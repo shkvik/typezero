@@ -1,0 +1,188 @@
+function maxCount(): int {
+  return 1073741823;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "cells start … start + total - 1 are in into, filled of them set",
+})
+function doubled<T>(into: Raw<T>, start: int, filled: int, total: int): void {
+  let done = filled;
+
+  while (done < total) {
+    let chunk = done;
+
+    if (total - done < chunk) {
+      chunk = total - done;
+    }
+
+    copyCells(into, start, into, start + done, chunk);
+    done += chunk;
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has hay.count * count cells, every one is written",
+})
+function repeated<C>(hay: Cells<C>, count: int, isPlain: boolean): string {
+  const total = hay.count * count;
+  const into = textRoom<C>(total);
+
+  if (isShort(total)) {
+    let at = 0;
+
+    for (let round = 0; round < count; round++) {
+      for (let index = 0; index < hay.count; index++) {
+        putUnit(into, at, unitAt(hay.start, index));
+        at += 1;
+      }
+    }
+
+    return textClosed(into, total, isPlain);
+  }
+
+  copyCells(hay.start, 0, into, 0, hay.count);
+  doubled(into, 0, hay.count, total);
+
+  return textClosed(into, total, isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of text live as long as this borrowed string",
+})
+export function repeat(text: Read<string>, count: int): string {
+  if (count == 0 || text.length == 0) {
+    return "";
+  }
+  if (count == 1) {
+    return text;
+  }
+  if (count > maxCount()) {
+    const total = text.length * count;
+
+    panic(`string length ${total} exceeds the maximum of ${maxCount()}`);
+  }
+
+  const isPlain = isAscii(text);
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return repeated(new Cells<uint8>(narrow, text.length), count, isPlain);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return repeated(new Cells<uint16>(wide, text.length), count, isPlain);
+  }
+
+  return text;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the room has length cells: the gap of fill and the cells of hay",
+})
+function padded<H, F, T>(
+  hay: Cells<H>,
+  fill: Cells<F>,
+  length: int,
+  atStart: boolean,
+  isPlain: boolean,
+): string {
+  const gap = length - hay.count;
+  const into = textRoom<T>(length);
+  let fillAt = 0;
+  let textAt = gap;
+  let first = fill.count;
+
+  if (!atStart) {
+    fillAt = hay.count;
+    textAt = 0;
+  }
+  if (gap < first) {
+    first = gap;
+  }
+
+  copyCells(hay.start, 0, into, textAt, hay.count);
+  copyCells(fill.start, 0, into, fillAt, first);
+  doubled(into, fillAt, first, gap);
+
+  return textClosed(into, length, isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of fill live as long as this borrowed string",
+})
+function byPad<H>(
+  hay: Cells<H>,
+  fill: Read<string>,
+  length: int,
+  atStart: boolean,
+  isPlain: boolean,
+): string {
+  const narrow = textCells<uint8>(fill);
+  if (narrow != undefined) {
+    const cells = new Cells<uint8>(narrow, fill.length);
+
+    return padded<H, uint8, H>(hay, cells, length, atStart, isPlain);
+  }
+
+  const wide = textCells<uint16>(fill);
+  if (wide != undefined) {
+    const cells = new Cells<uint16>(wide, fill.length);
+
+    return padded<H, uint16, uint16>(hay, cells, length, atStart, isPlain);
+  }
+
+  return "";
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of text live as long as this borrowed string",
+})
+function pad(
+  text: Read<string>,
+  length: int,
+  fill: Read<string>,
+  atStart: boolean,
+): string {
+  if (length <= text.length || fill.length == 0) {
+    return text;
+  }
+
+  const isPlain = isAscii(text) && isAscii(fill);
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    const hay = new Cells<uint8>(narrow, text.length);
+
+    return byPad(hay, fill, length, atStart, isPlain);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    const hay = new Cells<uint16>(wide, text.length);
+
+    return byPad(hay, fill, length, atStart, isPlain);
+  }
+
+  return text;
+}
+
+export function padStart(
+  text: Read<string>,
+  length: int,
+  fill: Read<string>,
+): string {
+  return pad(text, length, fill, true);
+}
+
+export function padEnd(
+  text: Read<string>,
+  length: int,
+  fill: Read<string>,
+): string {
+  return pad(text, length, fill, false);
+}

@@ -1,0 +1,18 @@
+function main(): void {
+  const args = process.argv;
+
+  console.log(args.length);
+  console.log(args[0] == process.execPath, args[1] == process.execPath);
+  console.log(process.execPath.endsWith(".exe"), process.execPath.length > 4);
+  console.log(process.platform);
+
+  for (let index = 2; index < args.length; index++) {
+    console.log(`[${args[index]}]`);
+  }
+
+  const again = process.argv;
+
+  console.log(again.length == args.length);
+}
+
+main();

@@ -1,0 +1,210 @@
+function isHighHalf(unit: int): boolean {
+  return unit >= 55296 && unit <= 56319;
+}
+
+function isLowHalf(unit: int): boolean {
+  return unit >= 56320 && unit <= 57343;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "index is checked to be inside the text",
+})
+export function charAt(text: Read<string>, index: int): string {
+  if (index < 0 || index >= text.length) {
+    return "";
+  }
+
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return pointAt(text, index);
+  }
+
+  return piece(text, index, index + 1);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller checked that index is inside the text",
+})
+export function charCodeAt(text: Read<string>, index: int): int {
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    return unitAt(narrow, index);
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    return unitAt(wide, index);
+  }
+
+  return 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller checked that index is inside the text",
+})
+function pointUnits(text: Read<string>, index: int): int {
+  const wide = textCells<uint16>(text);
+  if (wide == undefined || index + 1 >= text.length) {
+    return 1;
+  }
+
+  const first = unitAt(wide, index);
+  const second = unitAt(wide, index + 1);
+  if (isHighHalf(first) && isLowHalf(second)) {
+    return 2;
+  }
+
+  return 1;
+}
+
+export function codePointAt(text: Read<string>, index: int): int {
+  const first = charCodeAt(text, index);
+  if (pointUnits(text, index) == 1) {
+    return first;
+  }
+
+  const second = charCodeAt(text, index + 1);
+
+  return 65536 + (first - 55296) * 1024 + (second - 56320);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the caller checked that index is inside the text",
+})
+export function pointAt(text: Read<string>, index: int): string {
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    const room = textRoom<uint8>(1);
+
+    putUnit(room, 0, unitAt(narrow, index));
+
+    return textClosed(room, 1, false);
+  }
+
+  return piece(text, index, index + pointUnits(text, index));
+}
+
+function mostParts(): int {
+  return 4294967295;
+}
+
+export function split(
+  text: Read<string>,
+  separator: Read<string>,
+  hasSeparator: boolean,
+  limit: int,
+  hasLimit: boolean,
+): string[] {
+  const parts: string[] = [];
+  let most = mostParts();
+
+  if (hasLimit) {
+    most = limit & mostParts();
+  }
+  if (most == 0) {
+    return parts;
+  }
+  if (!hasSeparator) {
+    parts.push(text);
+
+    return parts;
+  }
+
+  const count = text.length;
+  if (separator.length == 0) {
+    let units = count;
+
+    if (most < units) {
+      units = most;
+    }
+
+    for (let index = 0; index < units; index++) {
+      parts.push(piece(text, index, index + 1));
+    }
+
+    return parts;
+  }
+
+  let from = 0;
+
+  while (parts.length < most) {
+    const found = indexOf(text, separator, from, true);
+    if (found < 0) {
+      parts.push(piece(text, from, count));
+
+      return parts;
+    }
+
+    parts.push(piece(text, from, found));
+    from = found + separator.length;
+  }
+
+  return parts;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the call made count cells of codes",
+})
+export function fromCharCodes(codes: Raw<uint32>, count: int): string {
+  const room = textRoom<uint16>(count);
+
+  for (let index = 0; index < count; index++) {
+    putUnit(room, index, unitAt(codes, index) & 65535);
+  }
+
+  return textClosed(room, count, false);
+}
+
+function isCodePoint(point: double): boolean {
+  if (point < 0.0 || point > 1114111.0) {
+    return false;
+  }
+
+  return Math.trunc(point) == point;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the call made count cells of points; the room has total cells",
+})
+export function fromCodePoints(points: Raw<double>, count: int): string {
+  let total = 0;
+
+  for (let index = 0; index < count; index++) {
+    const point = peekAt(points, index);
+    if (!isCodePoint(point)) {
+      panic(`internal error: fromCodePoint() with the code point ${point}`);
+    }
+
+    total += 1;
+
+    if (point >= 65536.0) {
+      total += 1;
+    }
+  }
+
+  const room = textRoom<uint16>(total);
+  let used = 0;
+
+  for (let index = 0; index < count; index++) {
+    const point = Math.trunc(peekAt(points, index)).toInt();
+
+    if (point < 65536) {
+      putUnit(room, used, point);
+      used += 1;
+    } else {
+      const rest = point - 65536;
+
+      putUnit(room, used, 55296 + (rest >> 10));
+      putUnit(room, used + 1, 56320 + (rest & 1023));
+      used += 2;
+    }
+  }
+
+  return textClosed(room, total, false);
+}

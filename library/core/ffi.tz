@@ -1,5 +1,91 @@
+import {
+  Raw,
+  allocate,
+  copyCells,
+  putUnit,
+  release,
+  textCells,
+  textClosed,
+  textRoom,
+} from "tz:unsafe";
+
 export class Out<T> {
   public value?: T
 
   public constructor() {}
+}
+
+export class Fixed<T, N> {
+  private constructor() {}
+
+  public readonly length(): int {
+    return 0;
+  }
+
+  public readonly at(index: int): T | undefined {
+    return undefined;
+  }
+
+  public set(index: int, value: T): boolean {
+    return false;
+  }
+}
+
+export class wstring {
+  private readonly cells: Raw<uint16>;
+  private readonly count: int;
+
+  public constructor(cells: Own<Raw<uint16>>, count: int) {
+    this.cells = cells;
+    this.count = count;
+  }
+
+  public readonly length(): int {
+    return this.count;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells hold count units and a zero after them",
+  })
+  public readonly toString(): string {
+    const room = textRoom<uint16>(this.count);
+
+    copyCells(this.cells, 0, room, 0, this.count);
+
+    return textClosed(room, this.count, false);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells came from allocate and nothing else holds them",
+  })
+  public [Symbol.dispose](): void {
+    release(this.cells);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new cells have text.length + 1 places, all of them written",
+})
+export function wideOf(text: Read<string>): wstring | undefined {
+  if (text.includes("\0")) {
+    return undefined;
+  }
+
+  const count = text.length;
+  const cells = allocate<uint16>(count + 1);
+  const narrow = textCells<uint8>(text);
+  const wide = textCells<uint16>(text);
+
+  if (narrow != undefined) {
+    copyCells(narrow, 0, cells, 0, count);
+  } else if (wide != undefined) {
+    copyCells(wide, 0, cells, 0, count);
+  }
+
+  putUnit(cells, count, 0);
+
+  return new wstring(cells, count);
 }

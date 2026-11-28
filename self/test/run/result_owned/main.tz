@@ -1,0 +1,24 @@
+type Problem = { kind: "PROBLEM"; code: "ERR_X"; message: string };
+
+function listed(count: int): Result<string[], Problem> {
+  const names: string[] = [];
+
+  for (let index = 0; index < count; index++) {
+    names.push(`name ${index}`);
+  }
+  if (count < 0) {
+    return err({ kind: "PROBLEM", code: "ERR_X", message: "negative" });
+  }
+
+  return ok(names);
+}
+
+function main(): void {
+  const read = listed(5);
+
+  if (read.isOk()) {
+    console.log(read.value.length, read.value.join(","));
+  }
+}
+
+main();

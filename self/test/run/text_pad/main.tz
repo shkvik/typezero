@@ -1,0 +1,48 @@
+function shown(text: string): void {
+  console.log(`[${text}]`, text.length);
+}
+
+function main(): void {
+  const short = "ab";
+  const long = "the quick brown fox";
+  const wide = "привет";
+  const glued = long + " " + wide;
+  const part = long.substring(4, 9);
+
+  shown(short.repeat(0));
+  shown(short.repeat(1));
+  shown(short.repeat(3));
+  shown(short.repeat(4));
+  shown(short.repeat(5));
+  shown(short.repeat(40));
+  shown("".repeat(10));
+  shown(wide.repeat(2));
+  shown(wide.repeat(0));
+  shown(part.repeat(3));
+  shown(glued.repeat(2));
+  shown("ё".repeat(9));
+  shown("x".repeat(8));
+  shown("x".repeat(9));
+
+  shown(short.padStart(5));
+  shown(short.padEnd(5));
+  shown(short.padStart(1));
+  shown(short.padStart(8, "-"));
+  shown(short.padStart(9, "-"));
+  shown(short.padEnd(10, "123"));
+  shown(short.padStart(10, "123"));
+  shown(short.padStart(10, ""));
+  shown(long.padStart(30, "."));
+  shown(long.padEnd(30, "=+"));
+  shown(wide.padStart(10, "*"));
+  shown(wide.padEnd(10, "ab"));
+  shown(short.padStart(7, "мир"));
+  shown(short.padEnd(7, "мир"));
+  shown(wide.padStart(12, "мир"));
+  shown(part.padEnd(12, part));
+  shown(glued.padStart(40, "<>"));
+  shown("".padStart(3, "z"));
+  shown(short.padStart(100, "abc").padEnd(130, "xyz"));
+}
+
+main();

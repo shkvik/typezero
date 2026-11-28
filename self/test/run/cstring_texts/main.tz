@@ -1,0 +1,37 @@
+import { cstring } from "tz:string";
+
+declare function strlen(text: Read<cstring>): uint64;
+declare function getenv(name: Read<cstring>): cstring | undefined;
+
+function shown(text: string): void {
+  const made = text.toCString();
+
+  if (made == undefined) {
+    console.log("no cstring:", text.length);
+
+    return;
+  }
+
+  console.log(strlen(made), text.length);
+}
+
+function main(): void {
+  shown("");
+  shown("hello");
+  shown("привет");
+  shown("smile 😀!");
+  shown("a\0b");
+  shown("x\uD800y");
+  shown("ä plain latin");
+  shown("long text ".repeat(20));
+
+  const name = getenv("OS");
+
+  if (name != undefined) {
+    console.log("OS", strlen(name));
+  }
+
+  console.log(getenv("TZ_NO_SUCH_VARIABLE_HERE") == undefined);
+}
+
+main();

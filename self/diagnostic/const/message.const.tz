@@ -439,6 +439,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExpectedDecoratorName]: {
     text: "expected the name of a decorator after '@', found {found}",
   },
+  [Code.InPlaceLayout]: {
+    text: "@InPlace takes nothing or '{ layout: Layout.C }'",
+  },
   [Code.DecoratorTarget]: {
     text: "a decorator can decorate only a class, a member of a class or a parameter of a method or a constructor",
   },
@@ -3782,7 +3785,7 @@ export const kMessages: Record<Code, Message> = {
     text: "a function in C has no optional parameters",
   },
   [Code.ForeignTakes]: {
-    text: "a function in C cannot take a value of type '{word}'; it takes numbers, 'boolean', 'cstring', handles ('declare class'), arrays of numbers and handles, 'Buffer' and 'Out<T>'",
+    text: "a function in C cannot take a value of type '{word}'; it takes numbers, 'boolean', 'cstring', handles ('declare class'), arrays of numbers and handles, 'Buffer', 'Out<T>' and records laid out as in C (@InPlace({ layout: Layout.C }))",
   },
   [Code.ForeignGives]: {
     text: "a function in C cannot give a value of type '{word}'; it gives numbers, 'boolean', 'cstring' and handles ('declare class')",
@@ -4545,6 +4548,9 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.OwnInPlaceHeritage]: {
     text: "'{word}' lies in place (@InPlace()), so it cannot have '{other}': a value in place carries no description of its class",
+  },
+  [Code.OwnCLayoutField]: {
+    text: "field '{word}' of a record laid out as in C (Layout.C) has type '{other}'; such a record holds numbers of a fixed size, 'double', 'boolean', 'Raw<T>', 'Fixed<T, N>' and other Layout.C records",
   },
   [Code.OwnInPlaceItself]: {
     text: "field '{word}' would put a '{first}' inside a '{first}', and a value in place would have no size; keep that part in an ordinary class",

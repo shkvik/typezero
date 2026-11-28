@@ -154,6 +154,9 @@ export class OwnershipCheck {
     if (module == undefined || lines == undefined) {
       return;
     }
+    if (module.source.isLibrary) {
+      return;
+    }
 
     const place = lines.placeOf(loc);
     const path = module.source.path;

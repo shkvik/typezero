@@ -5,17 +5,17 @@ import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kDoubleType,
   kFailedSlot,
   kFlagType,
   kIntType,
-  kParseInteger,
+  kPanicText,
   kPointerType,
   kStringType,
   kTextCompareC,
-  kTextToNumber,
+  kTextModule,
+  kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private failureMaker(
@@ -222,22 +222,13 @@ partial class Lowering {
       return this.converted(frame, given, double, call.loc);
     }
 
-    const maker = this.failureMaker(this.values.types.store.errorOf(type));
-    if (maker == undefined) {
-      this.notLowered(frame.module, call.loc, "a failure of this type");
-
-      return undefined;
-    }
-
-    const params = [kPointerType, kIntType, kPointerType];
-    const callee = this.ir.declare(kTextToNumber, kDoubleType, params);
-    const args = this.textParts(frame, given).concat([maker]);
-    const parsed = frame.made.call(callee, args);
-    const value: IrValue = { type: kDoubleType, value: parsed, tz: double };
+    const target: RuntimeTarget = { module: kTextModule, name: "numberOf" };
+    const loc = call.loc;
+    const found = this.runtimeFunctionCall(frame, target, [], [given], loc);
 
     this.dropping(frame, given);
 
-    return this.caughtResult(frame, value, type, call.loc);
+    return found;
   }
 
   private parsedInteger(frame: Frame, call: CallExpr): IrValue | undefined {
@@ -252,25 +243,47 @@ partial class Lowering {
       return undefined;
     }
 
-    const maker = this.failureMaker(this.values.types.store.errorOf(type));
     const expr = tree.exprOf(argument.exprId);
     const given = this.value(frame, expr);
     const radix = this.integerArgument(frame, call, 1);
-    if (maker == undefined || given == undefined || radix == undefined) {
+    if (given == undefined || radix == undefined) {
       this.notLowered(frame.module, call.loc, "this call of parseInt");
 
       return undefined;
     }
 
-    const params = [kPointerType, kIntType, kIntType, kPointerType];
-    const callee = this.ir.declare(kParseInteger, kIntType, params);
-    const args = this.textParts(frame, given).concat([radix.value, maker]);
-    const parsed = frame.made.call(callee, args);
     const int = this.values.types.store.integer(64, false);
-    const value: IrValue = { type: kIntType, value: parsed, tz: int };
+    const base: IrValue = { type: kIntType, value: radix.value, tz: int };
+    const target: RuntimeTarget = { module: kTextModule, name: "integerOf" };
+    const args = [given, base];
+    const found = this.runtimeFunctionCall(frame, target, [], args, call.loc);
 
     this.dropping(frame, given);
 
-    return this.caughtResult(frame, value, type, call.loc);
+    return found;
+  }
+
+  private panicCalled(frame: Frame, call: CallExpr): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const message = this.value(frame, tree.exprOf(argument.exprId));
+    if (message == undefined || message.type != kStringType) {
+      this.notLowered(frame.module, call.loc, "a panic with this message");
+
+      return undefined;
+    }
+
+    const params = [kPointerType, kIntType];
+    const stopping = this.ir.declare(kPanicText, kVoidType, params);
+
+    frame.made.call(stopping, this.textParts(frame, message));
+    frame.made.unreachable();
+
+    return this.nothing();
   }
 }

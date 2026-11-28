@@ -1,0 +1,60 @@
+function shownOr(text: string | undefined): string {
+  if (text == undefined) {
+    return "-";
+  }
+
+  return `[${text}]`;
+}
+
+function shown(text: string): void {
+  const codes: string[] = [];
+
+  for (let index = -1; index <= text.length; index++) {
+    const code = text.charCodeAt(index);
+    const point = text.codePointAt(index);
+    let unit = -1;
+    let whole = -1;
+
+    if (code != undefined) {
+      unit = code;
+    }
+    if (point != undefined) {
+      whole = point;
+    }
+
+    codes.push(`${text.charAt(index)}:${unit}:${whole}`);
+  }
+
+  console.log(codes.join(" "));
+  console.log(shownOr(text[0]), shownOr(text.at(-1)), shownOr(text.at(1)));
+  console.log(shownOr(text[text.length]), shownOr(text.at(-100)));
+
+  const points: string[] = [];
+
+  for (const point of text) {
+    points.push(point);
+  }
+
+  console.log(points.join("|"), points.length);
+  console.log(
+    text.lastIndexOf("a"),
+    text.lastIndexOf("a", 2),
+    text.lastIndexOf(""),
+    text.lastIndexOf("", 1),
+    text.lastIndexOf("ab"),
+    text.lastIndexOf("мир"),
+    text.lastIndexOf("zzz"),
+    text.lastIndexOf("a", -5),
+  );
+}
+
+function main(): void {
+  shown("");
+  shown("abcab");
+  shown("привет мир, абв ab");
+  shown("emoji 😀 and 🎉 a");
+  shown("lone \ud83d here");
+  shown("ab" + "cab" + " мир " + "ab");
+}
+
+main();

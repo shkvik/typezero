@@ -1,0 +1,89 @@
+import { replace } from "tz:mem";
+
+@InPlace()
+class Bag {
+  public items: string[];
+  public count: int;
+
+  public constructor() {
+    this.items = [];
+    this.count = 0;
+  }
+
+  public add(item: string): void {
+    this.items.push(item);
+    this.count += 1;
+  }
+
+  public readonly joined(): string {
+    return this.items.join(",");
+  }
+}
+
+class Shelf {
+  public bag: Bag;
+  public spare?: Bag;
+
+  public constructor() {
+    this.bag = new Bag();
+  }
+
+  public fill(word: string): void {
+    this.bag.add(word);
+    this.bag.add(word + word);
+  }
+
+  public swapped(): Bag {
+    return replace(this.bag, new Bag());
+  }
+}
+
+function filled(bag: Bag, word: string): void {
+  bag.add(word);
+}
+
+function main(): void {
+  const shelf = new Shelf();
+
+  shelf.fill("a");
+  filled(shelf.bag, "b");
+  console.log(shelf.bag.joined(), shelf.bag.count);
+
+  const old = shelf.swapped();
+
+  console.log(old.joined(), old.count, shelf.bag.count);
+  shelf.bag.add("c");
+  shelf.spare = new Bag();
+
+  const spare = shelf.spare;
+  if (spare != undefined) {
+    spare.add("s");
+    console.log(spare.joined());
+  }
+
+  const bags: Bag[] = [new Bag(), new Bag()];
+
+  for (const bag of bags) {
+    bag.add("q");
+    bag.add("r");
+  }
+
+  bags[1] = replace(shelf.bag, new Bag());
+
+  for (const bag of bags) {
+    console.log(bag.joined(), bag.count);
+  }
+
+  let total = 0;
+  const words = ["x", "yy", "zzz"];
+  const local = new Bag();
+
+  for (const word of words) {
+    local.add(word);
+    total += local.count;
+  }
+
+  console.log(local.joined(), total, shelf.bag.count);
+}
+
+main();

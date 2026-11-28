@@ -25,6 +25,7 @@ import {
   kNoPlace,
   kUnsafeMemory,
   kUnsafeReason,
+  kUnsafeForeign,
   kUnsafeUses,
   kUnsafeUsesName,
 } from "../../const/expression-types.const.tz";
@@ -97,11 +98,14 @@ partial class ExpressionTypes {
     const options = tree.exprAt(mark.optionsId);
     const listed = this.unsafeUses(options);
     const isUsed = this.unsafeUsed.has(fn.id);
+    const isForeign = this.foreignUsed.has(fn.id);
 
     for (const name of listed) {
+      const isMemory = name == kUnsafeMemory && isUsed;
+      const isSystem = name == kUnsafeForeign && isForeign;
       if (!kUnsafeUses.includes(name)) {
         this.errors.write(module, mark.loc, Code.OwnUnsafeUses, { word: name });
-      } else if (name != kUnsafeMemory || !isUsed) {
+      } else if (!isMemory && !isSystem) {
         this.errors.write(module, mark.loc, Code.OwnUnsafeUnused, {
           word: name,
         });
@@ -111,6 +115,11 @@ partial class ExpressionTypes {
     if (isUsed && !listed.includes(kUnsafeMemory)) {
       this.errors.write(module, mark.loc, Code.OwnUnsafeUses, {
         word: kUnsafeMemory,
+      });
+    }
+    if (isForeign && !listed.includes(kUnsafeForeign)) {
+      this.errors.write(module, mark.loc, Code.OwnUnsafeUses, {
+        word: kUnsafeForeign,
       });
     }
   }
@@ -140,13 +149,22 @@ partial class ExpressionTypes {
     return names;
   }
 
-  private unsafeCallCheck(name: NameExpr, module: int): void {
+  private unsafeCallCheck(
+    name: NameExpr,
+    module: int,
+    isForeign: boolean,
+  ): void {
     const open = this.openFunctions.slice();
 
     for (let index = open.length - 1; index >= 0; index--) {
       const fn = open[index];
       if (fn == undefined) {
         continue;
+      }
+      if (fn.unsafe != undefined && isForeign) {
+        this.foreignUsed.add(fn.id);
+
+        return;
       }
       if (fn.unsafe != undefined) {
         this.unsafeUsed.add(fn.id);

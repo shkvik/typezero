@@ -1,0 +1,211 @@
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an int has at most 19 digits; the cells hold 24",
+})
+function reversedDigits(value: int, digits: Raw<uint8>): int {
+  const isNegative = value < 0;
+  let rest = value;
+  let count = 0;
+  let isFirst = !isNegative;
+
+  if (isNegative) {
+    putUnit(digits, 0, 48 - rest % 10);
+    rest = 0 - rest / 10;
+    count = 1;
+  }
+
+  while (isFirst || rest > 0) {
+    putUnit(digits, count, 48 + rest % 10);
+    rest = rest / 10;
+    count += 1;
+    isFirst = false;
+  }
+
+  return count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "out has 20 cells after at; the frame holds 24 cells",
+})
+function signedWritten(value: int, out: Raw<uint8>, at: int): int {
+  const digits = frameCells<uint8>(24);
+  let magnitude: uint64 = 0;
+  let start = 24;
+  let isFirst = true;
+
+  if (value < 0) {
+    const below = 0 - (value + 1);
+
+    magnitude = below.toUint64() + 1;
+  } else {
+    magnitude = value.toUint64();
+  }
+
+  while (isFirst || magnitude != 0) {
+    const digit = (magnitude % 10).toInt();
+
+    start -= 1;
+    putUnit(digits, start, 48 + digit);
+    magnitude = magnitude / 10;
+    isFirst = false;
+  }
+  if (value < 0) {
+    start -= 1;
+    putUnit(digits, start, 45);
+  }
+
+  const count = 24 - start;
+
+  copyCells(digits, start, out, at, count);
+
+  return at + count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an int has at most 19 digits; the frame holds 24 cells",
+})
+export function fromSigned(value: int): string {
+  const digits = frameCells<uint8>(24);
+  const isNegative = value < 0;
+  const count = reversedDigits(value, digits);
+  let total = count;
+  let at = 0;
+
+  if (isNegative) {
+    total += 1;
+  }
+
+  const room = textRoom<uint8>(total);
+
+  if (isNegative) {
+    putUnit(room, 0, 45);
+    at = 1;
+  }
+
+  for (let index = count - 1; index >= 0; index--) {
+    putUnit(room, at, unitAt(digits, index));
+    at += 1;
+  }
+
+  return textClosed(room, total, true);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "used + text.length <= the cells of the room",
+})
+function placedText<T>(text: Read<string>, room: Raw<T>, used: int): int {
+  const count = text.length;
+  const narrow = textCells<uint8>(text);
+  if (narrow != undefined) {
+    copyCells(narrow, 0, room, used, count);
+
+    return used + count;
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide != undefined) {
+    copyCells(wide, 0, room, used, count);
+  }
+
+  return used + count;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the first pass counted every cell the second pass writes",
+})
+function joinedInto<T>(
+  parts: Read<string[]>,
+  separator: Read<string>,
+  total: int,
+  isPlain: boolean,
+): string {
+  const room = textRoom<T>(total);
+  let used = 0;
+  let isFirst = true;
+
+  for (const part of parts) {
+    if (!isFirst) {
+      used = placedText(separator, room, used);
+    }
+
+    used = placedText(part, room, used);
+    isFirst = false;
+  }
+
+  return textClosed(room, total, isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the flags of the borrowed string are read",
+})
+function isWideText(text: Read<string>): boolean {
+  return (textMeta(text) & textWideBit()) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the flags of the borrowed strings are read",
+})
+export function join(parts: Read<string[]>, separator: Read<string>): string {
+  const count = parts.length;
+  if (count == 0) {
+    return "";
+  }
+
+  let total = 0;
+  let isWide = false;
+  let isPlain = true;
+
+  for (const part of parts) {
+    total += part.length;
+    isWide = isWide || isWideText(part);
+    isPlain = isPlain && isAscii(part);
+  }
+
+  if (count > 1) {
+    total += separator.length * (count - 1);
+    isWide = isWide || isWideText(separator);
+    isPlain = isPlain && isAscii(separator);
+  }
+  if (total == 0) {
+    return "";
+  }
+  if (isWide) {
+    return joinedInto<uint16>(parts, separator, total, false);
+  }
+
+  return joinedInto<uint8>(parts, separator, total, isPlain);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a uint64 has at most 20 digits; the frame holds 24 cells",
+})
+export function fromUnsigned(value: uint64): string {
+  const digits = frameCells<uint8>(24);
+  let rest = value;
+  let count = 0;
+  let isFirst = true;
+
+  while (isFirst || rest > 0) {
+    const digit = (rest % 10).toInt();
+
+    putUnit(digits, count, 48 + digit);
+    rest = rest / 10;
+    count += 1;
+    isFirst = false;
+  }
+
+  const room = textRoom<uint8>(count);
+
+  for (let index = 0; index < count; index++) {
+    putUnit(room, index, unitAt(digits, count - 1 - index));
+  }
+
+  return textClosed(room, count, true);
+}

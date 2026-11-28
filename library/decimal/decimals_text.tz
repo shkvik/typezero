@@ -1,0 +1,435 @@
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a short decimal has at most 19 digits and a scale of 30: 52 cells",
+})
+function shortText(coef: int, scale: int): string {
+  let magnitude = magnitudeOf(coef);
+  let places = scale;
+
+  while (places > 0 && magnitude % 10 == 0) {
+    magnitude = magnitude / 10;
+    places -= 1;
+  }
+
+  const digits = frameCells<uint8>(24);
+  let start = 24;
+
+  while (true) {
+    start -= 1;
+    putUnit(digits, start, 48 + (magnitude % 10).toInt());
+    magnitude = magnitude / 10;
+
+    if (magnitude == 0) {
+      break;
+    }
+  }
+
+  const count = 24 - start;
+  const out = frameCells<uint8>(64);
+  let used = 0;
+
+  if (coef < 0) {
+    putUnit(out, 0, 45);
+    used = 1;
+  }
+  if (places == 0) {
+    copyCells(digits, start, out, used, count);
+    used += count;
+  } else if (count > places) {
+    copyCells(digits, start, out, used, count - places);
+    used += count - places;
+    putUnit(out, used, 46);
+    used += 1;
+    copyCells(digits, start + count - places, out, used, places);
+    used += places;
+  } else {
+    putUnit(out, used, 48);
+    putUnit(out, used + 1, 46);
+    used += 2;
+
+    for (let index = 0; index < places - count; index++) {
+      putUnit(out, used, 48);
+      used += 1;
+    }
+
+    copyCells(digits, start, out, used, count);
+    used += count;
+  }
+
+  const room = textRoom<uint8>(used);
+
+  copyCells(out, 0, room, 0, used);
+
+  return textClosed(room, used, true);
+}
+
+function zeros(count: int): string {
+  if (count <= 0) {
+    return "";
+  }
+
+  return "0".repeat(count);
+}
+
+function coefficientText(value: Read<Decimal>): string {
+  if (value.natural.count == 0) {
+    return "0";
+  }
+
+  const parts: string[] = [];
+  const top = value.natural.at(value.natural.count - 1);
+
+  parts.push(`${top}`);
+
+  for (let index = value.natural.count - 2; index >= 0; index--) {
+    const limb = `${value.natural.at(index)}`;
+
+    parts.push(limb.padStart(9, "0"));
+  }
+
+  return parts.join("");
+}
+
+function fixedPoint(digits: Read<string>, exponent: int): string {
+  const count = digits.length;
+  if (exponent < 0) {
+    const lead = zeros(0 - exponent - 1);
+
+    return `0.${lead}${digits}`;
+  }
+  if (exponent + 1 >= count) {
+    const tail = zeros(exponent + 1 - count);
+
+    return `${digits}${tail}`;
+  }
+
+  const whole = digits.slice(0, exponent + 1);
+  const fraction = digits.slice(exponent + 1);
+
+  return `${whole}.${fraction}`;
+}
+
+function exponential(digits: Read<string>, exponent: int): string {
+  let head = digits.slice(0, 1);
+
+  if (digits.length > 1) {
+    const rest = digits.slice(1);
+
+    head = `${head}.${rest}`;
+  }
+  if (exponent < 0) {
+    return `${head}e${exponent}`;
+  }
+
+  return `${head}e+${exponent}`;
+}
+
+function plainText(value: Decimal): string {
+  normalized(value);
+
+  const digits = coefficientText(value);
+  const body = fixedPoint(digits, topOf(value));
+  if (value.isNegative) {
+    return `-${body}`;
+  }
+
+  return body;
+}
+
+function isShortText(meta: uint64): boolean {
+  return isShortMeta(meta) && scaleOf(meta) <= 30;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function toText(given: Read<decimal>): string {
+  const meta = decimalMeta(given);
+  if (isShortText(meta)) {
+    return shortText(decimalCoef(given), scaleOf(meta));
+  }
+
+  return plainText(loaded(given));
+}
+
+function formatted(
+  value: Decimal,
+  hasPlaces: boolean,
+  given: int,
+  mode: int,
+  form: int,
+): string {
+  normalized(value);
+
+  const isNegative = value.isNegative && value.natural.count != 0;
+  const start = topOf(value);
+  let sign = "";
+
+  if (isNegative) {
+    sign = "-";
+  }
+  if (!hasPlaces) {
+    const digits = coefficientText(value);
+    const isWide = start <= -7 || start >= 21;
+    if (form == 1 || (form == 2 && isWide)) {
+      return `${sign}${exponential(digits, start)}`;
+    }
+
+    return `${sign}${fixedPoint(digits, start)}`;
+  }
+
+  decimalRounded(value, given - start - 1, mode);
+  normalized(value);
+
+  const top = topOf(value);
+  let digits = coefficientText(value);
+  const length = digits.length;
+  const isLong = given <= top || top <= -7;
+
+  if (form == 1 || (form == 2 && isLong)) {
+    digits = `${digits}${zeros(given - length)}`;
+
+    return `${sign}${exponential(digits, top)}`;
+  }
+
+  let wanted = given - start;
+
+  if (form == 2 && top > start) {
+    wanted -= 1;
+  }
+
+  let body = fixedPoint(digits, top);
+
+  if (top + 1 > length) {
+    wanted -= 1;
+
+    if (wanted > 0) {
+      body = `${body}.${zeros(wanted)}`;
+    }
+  } else {
+    wanted += top - length;
+
+    if (wanted > 0 && top + 1 == length) {
+      body = `${body}.${zeros(wanted)}`;
+    } else if (wanted > 0) {
+      body = `${body}${zeros(wanted)}`;
+    }
+  }
+
+  return `${sign}${body}`;
+}
+
+function tenPowerWide(exponent: int): uint64 {
+  return tenPowerOf(exponent).toUint64();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a rounded short decimal has at most 20 digits, 18 places and a sign",
+})
+function placedText(
+  magnitude: uint64,
+  places: int,
+  isNegative: boolean,
+): string {
+  const digits = frameCells<uint8>(24);
+  const divisor = tenPowerWide(places);
+  let whole = magnitude / divisor;
+  let fraction = magnitude % divisor;
+  let start = 24;
+
+  for (let index = 0; index < places; index++) {
+    start -= 1;
+    putUnit(digits, start, 48 + (fraction % 10).toInt());
+    fraction = fraction / 10;
+  }
+
+  const fractionStart = start;
+
+  while (true) {
+    start -= 1;
+    putUnit(digits, start, 48 + (whole % 10).toInt());
+    whole = whole / 10;
+
+    if (whole == 0) {
+      break;
+    }
+  }
+
+  const out = frameCells<uint8>(48);
+  let used = 0;
+
+  if (isNegative) {
+    putUnit(out, 0, 45);
+    used = 1;
+  }
+
+  copyCells(digits, start, out, used, fractionStart - start);
+  used += fractionStart - start;
+
+  if (places > 0) {
+    putUnit(out, used, 46);
+    used += 1;
+    copyCells(digits, fractionStart, out, used, places);
+    used += places;
+  }
+
+  const room = textRoom<uint8>(used);
+
+  copyCells(out, 0, room, 0, used);
+
+  return textClosed(room, used, true);
+}
+
+function fixedShort(
+  coef: int,
+  scale: int,
+  places: int,
+  mode: int,
+): string | undefined {
+  if (places < 0 || places > 18 || scale > 18) {
+    return undefined;
+  }
+
+  const isNegative = coef < 0;
+  const magnitude = magnitudeOf(coef);
+  if (scale <= places) {
+    const grown = places - scale;
+    const factor = tenPowerWide(grown);
+    const most: uint64 = 18446744073709551615;
+    if (magnitude > most / factor) {
+      return undefined;
+    }
+
+    return placedText(magnitude * factor, places, isNegative);
+  }
+
+  const divisor = tenPowerWide(scale - places);
+  let kept = magnitude / divisor;
+  const rest = magnitude % divisor;
+  const twice = rest * 2;
+  let half = 0;
+
+  if (twice > divisor) {
+    half = 1;
+  } else if (twice < divisor) {
+    half = -1;
+  }
+
+  const isOdd = kept % 2 == 1;
+  if (isRoundedAway(mode, isNegative, half, rest != 0, isOdd)) {
+    kept += 1;
+  }
+
+  return placedText(kept, places, isNegative);
+}
+
+function startOf(given: Read<decimal>): int {
+  return topOf(loaded(given));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function toFixed(
+  given: Read<decimal>,
+  places: int,
+  hasPlaces: boolean,
+  mode: int,
+): string {
+  if (hasPlaces && (places < 0 - argumentMost() || places > argumentMost())) {
+    outOfRange(places);
+  }
+
+  const checked = modeOf(mode);
+  const meta = decimalMeta(given);
+
+  if (hasPlaces && isShortMeta(meta)) {
+    const coef = decimalCoef(given);
+    const fast = fixedShort(coef, scaleOf(meta), places, checked);
+    if (fast != undefined) {
+      return fast;
+    }
+  }
+
+  let wanted = 0;
+
+  if (hasPlaces) {
+    wanted = places + startOf(given) + 1;
+  }
+
+  return formatted(loaded(given), hasPlaces, wanted, checked, 0);
+}
+
+export function toExponential(
+  given: Read<decimal>,
+  places: int,
+  hasPlaces: boolean,
+  mode: int,
+): string {
+  if (hasPlaces && (places < 0 || places > argumentMost())) {
+    outOfRange(places);
+  }
+
+  const checked = modeOf(mode);
+
+  return formatted(loaded(given), hasPlaces, places + 1, checked, 1);
+}
+
+export function toPrecision(
+  given: Read<decimal>,
+  digits: int,
+  hasDigits: boolean,
+  mode: int,
+): string {
+  if (hasDigits && (digits < 1 || digits > argumentMost())) {
+    outOfRange(digits);
+  }
+
+  const checked = modeOf(mode);
+
+  return formatted(loaded(given), hasDigits, digits, checked, 2);
+}
+
+export function toFormat(
+  given: Read<decimal>,
+  places: int,
+  hasPlaces: boolean,
+  mode: int,
+): string {
+  const fixed = toFixed(given, places, hasPlaces, mode);
+  let body = fixed;
+  let sign = "";
+
+  if (fixed.startsWith("-")) {
+    sign = "-";
+    body = fixed.slice(1);
+  }
+
+  let whole = body.indexOf(".");
+
+  if (whole < 0) {
+    whole = body.length;
+  }
+
+  let first = whole % 3;
+
+  if (first == 0) {
+    first = 3;
+  }
+  if (first > whole) {
+    first = whole;
+  }
+
+  const groups: string[] = [body.slice(0, first)];
+
+  for (let at = first; at < whole; at += 3) {
+    groups.push(body.slice(at, at + 3));
+  }
+
+  const tail = body.slice(whole);
+
+  return `${sign}${groups.join(",")}${tail}`;
+}

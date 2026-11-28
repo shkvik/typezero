@@ -1,0 +1,21 @@
+function shown(text: string): void {
+  console.log(`[${text.toUpperCase()}] [${text.toLowerCase()}]`);
+}
+
+function main(): void {
+  shown("");
+  shown("abc XYZ 123");
+  shown("hello, world! a long enough line to be a buffer");
+  shown("привет, МИР: Ёлка ёж");
+  shown("straße ß ﬁ ŉ");
+  shown("ΟΔΥΣΣΕΥΣ ΣΑ Σ ΑΣ.");
+  shown("İstanbul ı i");
+  shown("ÿ µ À é Ø þ");
+  shown("emoji 😀 𐐀𐐨 ok");
+  shown("mixed" + " Case " + "Glued Together");
+  shown("abc");
+  shown("ABC");
+  console.log("same".toLowerCase() == "same", "ÄÖÜ".toLowerCase(), "äöü".toUpperCase());
+}
+
+main();

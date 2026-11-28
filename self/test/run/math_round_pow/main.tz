@@ -1,0 +1,17 @@
+function main(): void {
+  const values = [0.5, 1.5, 2.5, -0.5, -1.5, -0.4, 0.49999999999999994, 3.7, -3.7, 0.0, 1e300];
+  const rounded: string[] = [];
+
+  for (const value of values) {
+    const near = Math.round(value);
+
+    rounded.push(`${near}:${1.0 / near > 0.0}`);
+  }
+
+  console.log(rounded.join(" "));
+  console.log(2.0 ** 10.0, 2.0 ** 0.5, 10.0 ** -2.0, (-8.0) ** (1.0 / 3.0) == (-8.0) ** (1.0 / 3.0));
+  console.log(2 ** 10, 3 ** 0, 7 ** 1, (-2) ** 3, 10 ** 18, 2 ** 62);
+  console.log(1.0 ** 1e309 == 1.0 ** 1e309, 0.0 ** 0.0);
+}
+
+main();

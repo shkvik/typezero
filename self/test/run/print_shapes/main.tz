@@ -1,0 +1,107 @@
+@InPlace()
+class Pair {
+  public readonly left: int;
+  public readonly right: double;
+
+  public constructor(left: int, right: double) {
+    this.left = left;
+    this.right = right;
+  }
+}
+
+class Empty {
+  public constructor() {}
+}
+
+class Maybe {
+  public readonly note?: string;
+  public readonly count: int;
+
+  public constructor(count: int) {
+    this.count = count;
+  }
+}
+
+type Wide = {
+  alpha: string;
+  beta: string;
+  gamma: string;
+  delta: int[];
+};
+
+function records(): void {
+  const pair = new Pair(3, 4.5);
+  const pairs: Pair[] = [new Pair(1, 1), new Pair(2, -0.5)];
+  const empty = new Empty();
+  const maybe = new Maybe(2);
+  const nothing: { name?: string } = {};
+
+  console.log(pair);
+  console.log(pairs);
+  console.log(empty);
+  console.log(maybe);
+  console.log(nothing);
+}
+
+function widths(): void {
+  const mixed: string[] = [];
+
+  for (let index = 0; index < 9; index++) {
+    mixed.push("漢".repeat(index % 3 + 1));
+  }
+
+  const flags: boolean[] = [true, false, true, true, false, false, true, false];
+  const small: int8[] = [-1, 2, -3, 4, -5, 6, -7];
+  const large: uint64[] = [18446744073709551615, 0, 1];
+
+  console.log(mixed);
+  console.log(flags);
+  console.log(small);
+  console.log(large);
+}
+
+function wideOne(): Wide {
+  return {
+    alpha: "a".repeat(20),
+    beta: "b".repeat(20),
+    gamma: "c".repeat(20),
+    delta: [1, 2, 3],
+  };
+}
+
+function wides(): void {
+  const many: Wide[] = [wideOne(), wideOne()];
+  const result: Result<Wide, string> = ok(wideOne());
+  const failed: Result<int, string> = err("x".repeat(80));
+
+  console.log(many);
+  console.log(result);
+  console.log(failed);
+}
+
+function texts(): void {
+  const long = "line one\nline two\nline three is a bit longer than the others";
+  const nested: string[][] = [[long]];
+  const tuple: [string, int] = [long, 1];
+  const empty: [int, int][] = [];
+
+  console.log(nested);
+  console.log(tuple);
+  console.log(empty);
+}
+
+function bytes(): void {
+  const empty = Buffer.from("", "utf8");
+
+  console.log(empty);
+}
+
+function main(): void {
+  records();
+  widths();
+  wides();
+  texts();
+  bytes();
+}
+
+main();

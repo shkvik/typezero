@@ -1,0 +1,12 @@
+import { homedir, tmpdir } from "node:os";
+
+function main(): void {
+  const home = homedir();
+  const temp = tmpdir();
+
+  console.log(home.length > 2, temp.length > 2);
+  console.log(home.includes("\\"), temp.includes("\\"), temp.endsWith("\\"));
+  console.log(home == homedir(), temp == tmpdir());
+}
+
+main();

@@ -1,0 +1,63 @@
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a cstring has the 24 bytes of CStringHead, its bytes and a zero",
+})
+function cstringRoom(length: int, layout: Raw<uint8>): Raw<uint8> {
+  const object = objectMade(24 + length + 1);
+  const head = viewAt<CStringHead>(object, 0);
+
+  head.count = 1;
+  head.layout = layout;
+  head.length = length;
+  putUnit(object, 24 + length, 0);
+
+  return object;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as the borrowed text of this call",
+})
+export function cstringMade(
+  text: Read<string>,
+  layout: Raw<uint8>,
+): Raw<uint8> {
+  if (text.includes("\0")) {
+    return bitsRaw(0);
+  }
+
+  const narrow = textCells<uint8>(text);
+  const wide = textCells<uint16>(text);
+  const units = new TextUnits(narrow, wide, text.length);
+  const length = utf8Length(units);
+  const object = cstringRoom(length, layout);
+  const room = cellsAt<uint8>(object, 24);
+  const written = utf8Encoded(room, length, units);
+
+  if (written != length) {
+    panic("internal error: a cstring got fewer bytes than counted");
+  }
+
+  return object;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the C text ends with a zero byte",
+})
+export function cstringCopied(
+  text: Raw<uint8>,
+  layout: Raw<uint8>,
+): Raw<uint8> {
+  let length = 0;
+
+  while (unitAt(text, length) != 0) {
+    length += 1;
+  }
+
+  const object = cstringRoom(length, layout);
+
+  copyCells(text, 0, object, 24, length);
+
+  return object;
+}

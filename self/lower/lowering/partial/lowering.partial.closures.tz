@@ -193,7 +193,7 @@ partial class Lowering {
       loc: 0,
       type: this.capturedType(one),
     }));
-    const placed = this.placedFields(fields, 16, 0) ?? [];
+    const placed = this.placedFields(fields, 16, 0, false) ?? [];
     const irs = placed.map((field) => field.ir);
     const types = [kIntType, kPointerType].concat(irs);
     const struct = `{ ${types.join(", ")} }`;

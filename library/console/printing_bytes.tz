@@ -1,0 +1,284 @@
+
+function hexInto(
+  out: Mut<TextBuilder>,
+  data: Raw<uint8>,
+  length: int,
+  limit: int,
+  more: Read<string>,
+): void {
+  const shown = Math.min(length, limit);
+
+  for (let index = 0; index < shown; index++) {
+    const byte = byteAt(data, index);
+
+    if (index > 0) {
+      out.addUnit(32);
+    }
+
+    out.addUnit(hexUnit(kLowerDigits, byte, 4));
+    out.addUnit(hexUnit(kLowerDigits, byte, 0));
+  }
+  if (length > limit) {
+    const rest = length - limit;
+
+    out.add(` ... ${rest} more ${more}${plural(rest)}`);
+  }
+}
+
+function infinityBits(): uint64 {
+  return 9218868437227405312;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the bits of a number are read",
+})
+function halfValue(bits: int): double {
+  const exponent = (bits >> 10) & 31;
+  const mantissa = bits & 1023;
+  let value = mantissa.toDouble() * 5.9604644775390625e-8;
+
+  if (exponent == 31) {
+    value = bitsDouble(infinityBits());
+
+    if (mantissa != 0) {
+      value = value - value;
+    }
+  } else if (exponent != 0) {
+    const power = bitsDouble((exponent - 25 + 1023).toUint64() << 52);
+
+    value = (mantissa + 1024).toDouble() * power;
+  }
+  if ((bits & 32768) != 0) {
+    return -value;
+  }
+
+  return value;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "only the bits of a number are read",
+})
+function singleValue(bits: int): double {
+  const exponent = (bits >> 23) & 255;
+  const mantissa = bits & 8388607;
+  const sign = ((bits >> 31) & 1).toUint64() << 63;
+
+  if (exponent == 255) {
+    const wide = mantissa.toUint64() << 29;
+
+    return bitsDouble(sign | infinityBits() | wide);
+  }
+  if (exponent == 0) {
+    const value = mantissa.toDouble() * 1.401298464324817e-45;
+
+    if (sign != 0) {
+      return -value;
+    }
+
+    return value;
+  }
+
+  const biased = (exponent - 127 + 1023).toUint64() << 52;
+  const wide = mantissa.toUint64() << 29;
+
+  return bitsDouble(sign | biased | wide);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the data holds at least index + 1 elements of the kind",
+})
+function bytesElement(data: Raw<uint8>, kind: int, index: int): double {
+  switch (kind) {
+    case 2:
+      return peekAt(cellsAt<int8>(data, index), 0).toDouble();
+    case 4:
+      return peekAt(cellsAt<int16>(data, index * 2), 0).toDouble();
+    case 5:
+      return peekAt(cellsAt<uint16>(data, index * 2), 0).toDouble();
+    case 6:
+      return peekAt(cellsAt<int32>(data, index * 4), 0).toDouble();
+    case 7:
+      return peekAt(cellsAt<uint32>(data, index * 4), 0).toDouble();
+    case 8:
+      return halfValue(unitAt(cellsAt<uint16>(data, index * 2), 0));
+    case 9:
+      return singleValue(unitAt(cellsAt<uint32>(data, index * 4), 0));
+    case 10:
+      return doubleAt(data, index * 8);
+    default:
+      return byteAt(data, index).toDouble();
+  }
+}
+
+function elementText(number: double, isFloating: boolean): string {
+  if (isFloating && isNegativeZero(number)) {
+    return "-0";
+  }
+  if (isFloating) {
+    return `${number}`;
+  }
+
+  return `${Math.trunc(number).toInt()}`;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "an array buffer has its data and length",
+})
+function arrayBufferFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  buffer: Raw<uint8>,
+  depth: int,
+): void {
+  if (depth > depthLimit()) {
+    out.add("[ArrayBuffer]");
+
+    return;
+  }
+
+  const head = viewAt<ArrayBufferHead>(buffer, 0);
+  const length = head.length.toInt();
+  const next = depth + 1;
+  const contents = new TextBuilder();
+
+  context.currentDepth = next;
+  contents.add("[Uint8Contents]: <");
+  hexInto(contents, head.data, length, arrayLimit(), "byte");
+  contents.addUnit(62);
+
+  const output: string[] = [contents.taken(), `[byteLength]: ${length}`];
+  const base = context.baseOf(keyOf(buffer));
+  const braces = plainBraces("ArrayBuffer {", 125, base);
+
+  singleString(context, out, output, next, braces);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a data view has its buffer, length and offset",
+})
+function dataViewFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  depth: int,
+): void {
+  if (depth > depthLimit()) {
+    out.add("[DataView]");
+
+    return;
+  }
+
+  const head = viewAt<BytesHead>(object, 0);
+  const next = depth + 1;
+  const key = keyOf(object);
+  const output: string[] = [`[byteLength]: ${head.length}`];
+  const entry = new TextBuilder();
+
+  context.seen.push(key);
+  context.currentDepth = next;
+  output.push(`[byteOffset]: ${head.offset}`);
+  entry.add("[buffer]: ");
+  context.indentation += 2;
+  arrayBufferFormatted(context, entry, head.buffer, next);
+  context.indentation -= 2;
+  output.push(entry.taken());
+  context.seen.pop();
+
+  const braces = plainBraces("DataView {", 125, context.baseOf(key));
+
+  singleString(context, out, output, next, braces);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bytes hold length elements of their kind",
+})
+function typedFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  kind: int,
+  depth: int,
+): void {
+  const head = viewAt<BytesHead>(object, 0);
+  const length = head.length.toInt();
+  const name = layoutName(head.layout);
+  const open = `${name}(${length}) [`;
+
+  if (length == 0) {
+    out.add(open);
+    out.addUnit(93);
+
+    return;
+  }
+  if (depth > depthLimit()) {
+    out.addUnit(91);
+    out.add(name);
+    out.addUnit(93);
+
+    return;
+  }
+
+  const next = depth + 1;
+  const key = keyOf(object);
+  const isFloating = kind == 8 || kind == 9 || kind == 10;
+  const shown = Math.min(length, arrayLimit());
+  const output: string[] = [];
+
+  context.seen.push(key);
+  context.currentDepth = next;
+
+  for (let index = 0; index < shown; index++) {
+    const number = bytesElement(head.data, kind, index);
+
+    output.push(elementText(number, isFloating));
+  }
+  if (length > shown) {
+    output.push(moreItems(length - shown));
+  }
+
+  context.seen.pop();
+
+  const braces = arrayBraces(open, context.baseOf(key), true);
+
+  singleString(context, out, output, next, braces);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bytes have their data and length",
+})
+function bytesFormatted(
+  context: Mut<PrintContext>,
+  out: Mut<TextBuilder>,
+  object: Raw<uint8>,
+  flags: uint32,
+  depth: int,
+): void {
+  const kind = (flags >> 24).toInt();
+  const head = viewAt<BytesHead>(object, 0);
+
+  switch (kind) {
+    case 11:
+      out.add("<Buffer ");
+      hexInto(out, head.data, head.length.toInt(), 50, "byte");
+      out.addUnit(62);
+
+      return;
+    case 12:
+      return arrayBufferFormatted(context, out, object, depth);
+    case 14:
+      out.add("{ encoding: 'utf-8' }");
+
+      return;
+    case 13:
+      return dataViewFormatted(context, out, object, depth);
+    default:
+      return typedFormatted(context, out, object, kind, depth);
+  }
+}

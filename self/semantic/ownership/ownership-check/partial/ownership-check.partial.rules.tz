@@ -140,6 +140,11 @@ partial class OwnershipCheck {
     if (!hasLent && receiver != undefined) {
       isLasting = this.isLastingSource(receiver);
     }
+
+    const isSourceless = !hasLent && receiver == undefined;
+    if (info.result == ResultMode.Mut && isSourceless) {
+      return this.freshOperand(loc);
+    }
     if (isBorrow && isLasting) {
       return this.borrowedOperand([], loc);
     }

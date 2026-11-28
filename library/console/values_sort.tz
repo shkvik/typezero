@@ -1,0 +1,361 @@
+
+class SortKeys {
+  public readonly data: Raw<uint8>;
+  public readonly size: int;
+  public readonly isText: boolean;
+  public readonly keys: string[];
+  public readonly empties: boolean[];
+  public readonly words: Raw<uint64>;
+  public readonly forms: Raw<uint8>;
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the word cells are released by the dispose of the keys",
+  })
+  public constructor(
+    data: Raw<uint8>,
+    size: int,
+    isText: boolean,
+    count: int,
+  ) {
+    this.data = data;
+    this.size = size;
+    this.isText = isText;
+    this.keys = [];
+    this.empties = [];
+    this.words = allocate<uint64>(count);
+    this.forms = allocate<uint8>(count);
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "each index is below count",
+  })
+  public wordsFilled(count: int): void {
+    for (let index = 0; index < count; index++) {
+      const text = stringAt(placeAt(this.data, index * this.size));
+      let form = 0;
+
+      if (isOrderWord(text)) {
+        form = 1;
+
+        if (isShortOrder(text)) {
+          form = 2;
+        }
+
+        putAt(this.words, index, orderWord(text));
+      }
+
+      putUnit(this.forms, index, form);
+    }
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "both indexes are below count",
+  })
+  private readonly isWordBefore(first: int, second: int): int {
+    const leftForm = unitAt(this.forms, first);
+    const rightForm = unitAt(this.forms, second);
+    if (leftForm == 0 || rightForm == 0) {
+      return 0;
+    }
+
+    const left = peekAt(this.words, first);
+    const right = peekAt(this.words, second);
+
+    if (left < right) {
+      return 1;
+    }
+    if (left > right) {
+      return 2;
+    }
+    if (leftForm == 2 && rightForm == 2) {
+      return 3;
+    }
+
+    return 0;
+  }
+
+  @Unsafe({
+    uses: [UnsafeUse.Memory],
+    reason: "the cells came from allocate and nothing else holds them",
+  })
+  public [Symbol.dispose](): void {
+    release(this.words);
+    release(this.forms);
+  }
+
+  public readonly isBefore(first: int, second: int): boolean {
+    if (this.isText) {
+      const word = this.isWordBefore(first, second);
+      if (word == 1) {
+        return true;
+      }
+      if (word == 2) {
+        return false;
+      }
+
+      const left = stringAt(placeAt(this.data, first * this.size));
+      const right = stringAt(placeAt(this.data, second * this.size));
+
+      if (word == 3) {
+        return left.length < right.length;
+      }
+
+      return left < right;
+    }
+
+    const isFirstEmpty = this.empties[first] ?? false;
+    const isSecondEmpty = this.empties[second] ?? false;
+
+    if (isFirstEmpty || isSecondEmpty) {
+      return !isFirstEmpty && isSecondEmpty;
+    }
+
+    return (this.keys[first] ?? "") < (this.keys[second] ?? "");
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "order and temp have count cells from from",
+})
+function keysMerged(
+  order: Raw<int>,
+  temp: Raw<int>,
+  from: int,
+  count: int,
+  keys: Read<SortKeys>,
+): void {
+  if (count < 2) {
+    return;
+  }
+
+  const half = count / 2;
+
+  keysMerged(order, temp, from, half, keys);
+  keysMerged(order, temp, from + half, count - half, keys);
+
+  let left = 0;
+  let right = half;
+  let made = 0;
+
+  while (left < half && right < count) {
+    const first = unitAt(order, from + left);
+    const second = unitAt(order, from + right);
+
+    if (keys.isBefore(second, first)) {
+      putUnit(temp, made, second);
+      right += 1;
+    } else {
+      putUnit(temp, made, first);
+      left += 1;
+    }
+
+    made += 1;
+  }
+
+  copyCells(order, from + left, temp, made, half - left);
+  made += half - left;
+  copyCells(order, from + right, temp, made, count - right);
+  copyCells(temp, 0, order, from, count);
+}
+
+function keysFilled(
+  keys: Mut<SortKeys>,
+  type: Raw<uint8>,
+  count: int,
+): void {
+  const builder = new TextBuilder();
+
+  for (let index = 0; index < count; index++) {
+    const value = placeAt(keys.data, index * keys.size);
+    let shown = type;
+    let isEmpty = false;
+
+    if (kindOf(type) == 7) {
+      isEmpty = !isPresent(type, value);
+      shown = innerOf(type);
+    }
+    if (isEmpty) {
+      keys.keys.push("");
+    } else if (kindOf(shown) == 5) {
+      keys.keys.push(stringAt(value).slice(0));
+    } else {
+      valueInto(builder, shown, value, false);
+      keys.keys.push(builder.taken());
+    }
+
+    keys.empties.push(isEmpty);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length cells of its element type",
+})
+export function sortValues(array: Raw<uint8>): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const count = head.length.toInt();
+  if (count < 2) {
+    return;
+  }
+
+  const type = head.type;
+  const data = head.data;
+  const size = sizeOf(type);
+  const keys = new SortKeys(data, size, kindOf(type) == 5, count);
+
+  if (keys.isText) {
+    keys.wordsFilled(count);
+  } else {
+    keysFilled(keys, type, count);
+  }
+
+  const order = allocate<int>(count);
+  const temp = allocate<int>(count);
+
+  for (let index = 0; index < count; index++) {
+    putUnit(order, index, index);
+  }
+
+  keysMerged(order, temp, 0, count, keys);
+
+  const sorted = allocate<uint8>(count * size);
+
+  for (let index = 0; index < count; index++) {
+    const from = unitAt(order, index) * size;
+
+    copyCells(data, from, sorted, index * size, size);
+  }
+
+  copyCells(sorted, 0, data, 0, count * size);
+  release(sorted);
+  release(order);
+  release(temp);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "items and temp have count elements of size bytes",
+})
+function itemsMerged(
+  items: Raw<uint8>,
+  temp: Raw<uint8>,
+  count: int,
+  size: int,
+  compare: Raw<uint8>,
+  context: Raw<uint8>,
+): void {
+  if (count < 2) {
+    return;
+  }
+
+  const half = count / 2;
+  const upper = placeAt(items, half * size);
+
+  itemsMerged(items, temp, half, size, compare, context);
+  itemsMerged(upper, temp, count - half, size, compare, context);
+
+  let left = 0;
+  let right = half;
+  let made = 0;
+
+  while (left < half && right < count) {
+    const first = placeAt(items, left * size);
+    const second = placeAt(items, right * size);
+
+    if (compared(compare, context, first, second) > 0) {
+      copyCells(items, right * size, temp, made * size, size);
+      right += 1;
+    } else {
+      copyCells(items, left * size, temp, made * size, size);
+      left += 1;
+    }
+
+    made += 1;
+  }
+
+  copyCells(items, left * size, temp, made * size, (half - left) * size);
+  made += half - left;
+  copyCells(items, right * size, temp, made * size, (count - right) * size);
+  copyCells(temp, 0, items, 0, count * size);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length cells; compare is the lowered comparison",
+})
+export function sortedWith(
+  array: Raw<uint8>,
+  compare: Raw<uint8>,
+  context: Raw<uint8>,
+): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const count = head.length.toInt();
+  if (count < 2) {
+    return;
+  }
+
+  const type = head.type;
+  const data = head.data;
+  const size = sizeOf(type);
+  const isOptional = kindOf(type) == 7;
+  const items = allocate<uint8>(count * size);
+  const temp = allocate<uint8>(count * size);
+  let defined = 0;
+  let empty = count;
+
+  for (let index = 0; index < count; index++) {
+    const value = placeAt(data, index * size);
+
+    if (isOptional && !isPresent(type, value)) {
+      empty -= 1;
+      copyCells(data, index * size, temp, empty * size, size);
+    } else {
+      copyCells(data, index * size, items, defined * size, size);
+      defined += 1;
+    }
+  }
+
+  for (let index = defined; index < count; index++) {
+    const from = (count - 1 - (index - defined)) * size;
+
+    copyCells(temp, from, items, index * size, size);
+  }
+
+  itemsMerged(items, temp, defined, size, compare, context);
+
+  const after = viewAt<ArrayHead>(array, 0);
+
+  if (after.length.toInt() == count) {
+    copyCells(items, 0, after.data, 0, count * size);
+  }
+
+  release(items);
+  release(temp);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the array holds length cells; each pair is swapped through a room",
+})
+export function reverseValues(array: Raw<uint8>): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const count = head.length.toInt();
+  const data = head.data;
+  const size = sizeOf(head.type);
+  const room = allocate<uint8>(size);
+  const last = count - 1;
+
+  for (let low = 0; low < last - low; low++) {
+    const high = last - low;
+
+    copyCells(data, low * size, room, 0, size);
+    copyCells(data, high * size, data, low * size, size);
+    copyCells(room, 0, data, high * size, size);
+  }
+
+  release(room);
+}

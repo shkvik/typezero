@@ -1,0 +1,90 @@
+import { Fixed } from "tz:ffi";
+
+@InPlace({ layout: Layout.C })
+class Inner {
+  public low: uint16;
+  public high: uint8;
+}
+
+@InPlace({ layout: Layout.C })
+class Sample {
+  public kind: uint8;
+  public count: uint32;
+  public size: uint64;
+  public small: uint16;
+  public inner: Inner;
+  public isSet: boolean;
+
+  public constructor() {
+    this.kind = 0;
+    this.count = 0;
+    this.size = 0;
+    this.small = 0;
+    this.inner = new Inner();
+    this.isSet = false;
+  }
+}
+
+@InPlace({ layout: Layout.C })
+class Named {
+  public size: uint32;
+  public name: Fixed<uint16, 6>;
+  public flags: Fixed<uint8, 3>;
+  public tail: uint16;
+}
+
+declare function memset(into: Sample, value: int32, size: uint64): void;
+declare function memmove(into: Named, from: Read<Named>, size: uint64): void;
+declare function memcmp(
+  first: Read<Sample>,
+  second: Read<Sample>,
+  size: uint64,
+): int32;
+
+function filled(sample: Sample, value: int32): void {
+  memset(sample, value, 24);
+}
+
+function main(): void {
+  const sample = new Sample();
+  const other = new Sample();
+
+  console.log(sample.kind, sample.count, sample.size, sample.small);
+  memset(sample, 1, 24);
+  console.log(sample.kind, sample.count, sample.size, sample.small);
+  console.log(sample.inner.low, sample.inner.high);
+  console.log(memcmp(sample, other, 24) > 0);
+  filled(other, 1);
+  console.log(memcmp(sample, other, 24));
+  other.count = 7;
+  console.log(other.count, memcmp(sample, other, 24) < 0);
+
+  const named = new Named();
+  const copy = new Named();
+  const word = "tz!ok";
+
+  for (let index = 0; index < word.length; index++) {
+    named.name.set(index, (word.charCodeAt(index) ?? 0).toUint16());
+  }
+
+  named.flags.set(0, 7);
+  named.flags.set(2, 9);
+  console.log(named.name.set(6, 1), named.flags.set(3, 1), named.name.length());
+  named.size = 5;
+  named.tail = 65535;
+  memmove(copy, named, 24);
+
+  let text = "";
+
+  for (let index = 0; index < copy.size; index++) {
+    const code: uint16 | undefined = copy.name.at(index);
+    if (code != undefined) {
+      text += String.fromCharCode(code);
+    }
+  }
+
+  console.log(text, copy.flags.at(0), copy.flags.at(1), copy.flags.at(2));
+  console.log(copy.flags.at(3), copy.tail, copy.name.at(5));
+}
+
+main();

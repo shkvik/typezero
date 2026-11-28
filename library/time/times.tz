@@ -1,0 +1,67 @@
+import {
+  FileTime,
+  GetSystemTimePreciseAsFileTime,
+  LargeInteger,
+  QueryPerformanceCounter,
+  QueryPerformanceFrequency,
+} from "tz:win32/kernel32";
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the system fills a whole record",
+})
+function counterNow(): int {
+  const count = new LargeInteger();
+
+  QueryPerformanceCounter(count);
+
+  return count.value;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the system fills a whole record",
+})
+function counterFrequency(): int {
+  const frequency = new LargeInteger();
+
+  QueryPerformanceFrequency(frequency);
+
+  return frequency.value;
+}
+
+const kClockStart: int = counterNow();
+const kClockFrequency: int = counterFrequency();
+
+export function performanceNow(): double {
+  const ticks = counterNow() - kClockStart;
+  const frequency = kClockFrequency;
+  if (frequency <= 0) {
+    return 0.0;
+  }
+
+  const whole = (ticks / frequency).toDouble() * 1000.0;
+  const rest = (ticks % frequency).toDouble() * 1000.0;
+
+  return whole + rest / frequency.toDouble();
+}
+
+function unixTicks(): uint64 {
+  return 116444736000000000;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Foreign],
+  reason: "the system fills a whole record",
+})
+export function dateNow(): int {
+  const time = new FileTime();
+
+  GetSystemTimePreciseAsFileTime(time);
+
+  const high = time.high.toUint64() << 32;
+  const ticks = high | time.low.toUint64();
+  const since = (ticks - unixTicks()) / 10000;
+
+  return since.toInt();
+}

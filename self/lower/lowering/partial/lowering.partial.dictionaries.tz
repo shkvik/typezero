@@ -139,7 +139,8 @@ partial class Lowering {
     valueOffset: int,
   ): LLVMValue {
     const none = this.ir.zero(kPointerType);
-    const drop = this.ir.declare(kMapDrop, kVoidType, [kPointerType]);
+    const dropName = this.dictsHelper(kMapDrop);
+    const drop = this.ir.declare(dropName, kVoidType, [kPointerType]);
     const head = this.ir.constStruct([
       drop.fn,
       none,
@@ -195,7 +196,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const creating = this.ir.declare(kMapNew, kPointerType, [kPointerType]);
+    const creatingName = this.dictsHelper(kMapNew);
+
+    const creating = this.ir.declare(creatingName, kPointerType, [kPointerType]);
     const map = frame.made.call(creating, [layout.descriptor]);
 
     return { type: kPointerType, value: map, tz: type, owned: true };
@@ -294,7 +297,8 @@ partial class Lowering {
     if (this.isString(key.tz)) {
       const text = frame.made.extract(key.value, 0);
       const meta = frame.made.extract(key.value, 1);
-      const finding = this.ir.declare(kMapFindText, kPointerType, [
+      const findingName = this.dictsHelper(kMapFindText);
+      const finding = this.ir.declare(findingName, kPointerType, [
         kPointerType,
         kPointerType,
         kIntType,
@@ -304,7 +308,8 @@ partial class Lowering {
     }
 
     const slot = this.keySlot(frame, key);
-    const finding = this.ir.declare(kMapFind, kPointerType, [
+    const findingName = this.dictsHelper(kMapFind);
+    const finding = this.ir.declare(findingName, kPointerType, [
       kPointerType,
       kPointerType,
     ]);
@@ -327,7 +332,8 @@ partial class Lowering {
     if (this.isString(key.tz)) {
       const text = frame.made.extract(key.value, 0);
       const meta = frame.made.extract(key.value, 1);
-      const adding = this.ir.declare(kMapAddText, kPointerType, [
+      const addingName = this.dictsHelper(kMapAddText);
+      const adding = this.ir.declare(addingName, kPointerType, [
         kPointerType,
         kPointerType,
         kIntType,
@@ -338,7 +344,8 @@ partial class Lowering {
     }
 
     const slot = this.keySlot(frame, key);
-    const adding = this.ir.declare(kMapAdd, kPointerType, [
+    const addingName = this.dictsHelper(kMapAdd);
+    const adding = this.ir.declare(addingName, kPointerType, [
       kPointerType,
       kPointerType,
       kPointerType,
@@ -614,7 +621,8 @@ partial class Lowering {
     if (this.isString(key.tz)) {
       const text = frame.made.extract(key.value, 0);
       const meta = frame.made.extract(key.value, 1);
-      const removing = this.ir.declare(kMapDeleteText, kFlagType, [
+      const removingName = this.dictsHelper(kMapDeleteText);
+      const removing = this.ir.declare(removingName, kFlagType, [
         kPointerType,
         kPointerType,
         kIntType,
@@ -624,7 +632,8 @@ partial class Lowering {
     }
 
     const slot = this.keySlot(frame, key);
-    const removing = this.ir.declare(kMapDelete, kFlagType, [
+    const removingName = this.dictsHelper(kMapDelete);
+    const removing = this.ir.declare(removingName, kFlagType, [
       kPointerType,
       kPointerType,
     ]);

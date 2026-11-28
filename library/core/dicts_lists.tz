@@ -1,0 +1,305 @@
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the map has the 64 bytes of MapHead",
+})
+export function mapMade(layout: Raw<uint8>): Raw<uint8> {
+  const map = objectMade(mapSize());
+  const head = viewAt<MapHead>(map, 0);
+
+  zeroFilled(map, mapSize());
+  head.count = 1;
+  head.layout = layout;
+
+  return map;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the key and the value move out before they are released",
+})
+function entryRemoved(map: Raw<uint8>, entry: Raw<uint8>): void {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const keySize = sizeOf(layout.key);
+  let valueSize = 0;
+
+  if (!rawZero(layout.value)) {
+    valueSize = sizeOf(layout.value);
+  }
+
+  const total = keySize + valueSize;
+  let room = frameCells<uint8>(128);
+  const isHeap = total > 128;
+
+  if (isHeap) {
+    room = allocate<uint8>(total);
+  }
+
+  const key = cellsAt<uint8>(entry, layout.keyOffset.toInt());
+  const value = cellsAt<uint8>(room, keySize);
+
+  copyCells(key, 0, room, 0, keySize);
+  zeroFilled(key, keySize);
+
+  if (valueSize > 0) {
+    const stored = cellsAt<uint8>(entry, layout.valueOffset.toInt());
+
+    copyCells(stored, 0, value, 0, valueSize);
+    zeroFilled(stored, valueSize);
+  }
+
+  wordPut(entry, 4, 0);
+  head.size -= 1;
+
+  if (head.size == 0 && head.iterating == 0) {
+    head.used = 0;
+
+    if (!rawZero(head.index)) {
+      const places = head.indexMask.toInt() + 1;
+
+      zeroFilled(head.index, places * 4);
+    }
+  }
+
+  valueReleased(layout.key, room);
+
+  if (valueSize > 0) {
+    valueReleased(layout.value, value);
+  }
+  if (isHeap) {
+    release(room);
+  }
+}
+
+export function mapDeleted(map: Raw<uint8>, key: Raw<uint8>): int32 {
+  const entry = mapFound(map, key);
+  if (rawZero(entry)) {
+    return 0;
+  }
+
+  entryRemoved(map, entry);
+
+  return 1;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text key is kept in two words in this frame",
+})
+export function mapTextDeleted(
+  map: Raw<uint8>,
+  object: Raw<uint8>,
+  meta: uint64,
+): int32 {
+  const text = frameCells<uint8>(16);
+
+  bitsPut(text, 0, rawBits(object));
+  bitsPut(text, 8, meta);
+
+  return mapDeleted(map, text);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the live entries hold counted keys and values",
+})
+function entriesReleased(map: Raw<uint8>): void {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const isKeyCounted = isManaged(layout.key);
+  let isValueCounted = false;
+
+  if (!rawZero(layout.value)) {
+    isValueCounted = isManaged(layout.value);
+  }
+  if (isKeyCounted || isValueCounted) {
+    const used = head.used.toInt();
+    const keyAt = layout.keyOffset.toInt();
+    const valueAt = layout.valueOffset.toInt();
+
+    for (let position = 0; position < used; position++) {
+      const entry = entryAt(map, position);
+
+      if (!isLiveEntry(entry)) {
+        continue;
+      }
+      if (isKeyCounted) {
+        valueReleased(layout.key, cellsAt<uint8>(entry, keyAt));
+      }
+      if (isValueCounted) {
+        valueReleased(layout.value, cellsAt<uint8>(entry, valueAt));
+      }
+    }
+  }
+
+  release(head.entries);
+  release(head.index);
+}
+
+export function mapDropped(map: Raw<uint8>): void {
+  entriesReleased(map);
+  objectFreed(map);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the copy has the given layout with the same key type",
+})
+export function mapCopied(map: Raw<uint8>, layout: Raw<uint8>): Raw<uint8> {
+  const copy = mapMade(layout);
+  const head = viewAt<MapHead>(map, 0);
+  const from = viewAt<MapLayoutHead>(head.layout, 0);
+  const into = viewAt<MapLayoutHead>(layout, 0);
+  const isFold = isFolded(map);
+  const used = head.used.toInt();
+
+  for (let position = 0; position < used; position++) {
+    const entry = entryAt(map, position);
+
+    if (!isLiveEntry(entry)) {
+      continue;
+    }
+
+    const key = cellsAt<uint8>(entry, from.keyOffset.toInt());
+    let hash = wordAt(entry, 0);
+
+    if (isFold) {
+      hash = keyHash(copy, key);
+    }
+
+    const made = entryAppended(copy, key, hash);
+
+    if (!rawZero(into.value)) {
+      const value = cellsAt<uint8>(entry, from.valueOffset.toInt());
+      const target = cellsAt<uint8>(made, into.valueOffset.toInt());
+
+      copyCells(value, 0, target, 0, sizeOf(into.value));
+      valueRetained(into.value, target);
+    }
+  }
+
+  return copy;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the place holds one item of the type of the array",
+})
+function itemPushed(array: Raw<uint8>, place: Raw<uint8>): void {
+  const head = viewAt<ArrayHead>(array, 0);
+  const length = head.length.toInt();
+
+  if (head.length == head.capacity) {
+    arrayGrown(array, length + 1);
+  }
+
+  const size = sizeOf(head.type);
+
+  copyCells(place, 0, head.data, length * size, size);
+  head.length = (length + 1).toUint32();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the items are the keys or the values of the live entries",
+})
+function entriesListed(
+  map: Raw<uint8>,
+  element: Raw<uint8>,
+  isKeys: boolean,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const count = head.size.toInt();
+  const array = arrayMade(element, 0, count);
+  const used = head.used.toInt();
+  let offset = layout.valueOffset.toInt();
+
+  if (isKeys) {
+    offset = layout.keyOffset.toInt();
+  }
+
+  for (let position = 0; position < used; position++) {
+    const entry = entryAt(map, position);
+
+    if (isLiveEntry(entry)) {
+      const place = cellsAt<uint8>(entry, offset);
+
+      valueRetained(element, place);
+      itemPushed(array, place);
+    }
+  }
+
+  return array;
+}
+
+export function mapKeys(map: Raw<uint8>, element: Raw<uint8>): Raw<uint8> {
+  return entriesListed(map, element, true);
+}
+
+export function mapValues(map: Raw<uint8>, element: Raw<uint8>): Raw<uint8> {
+  return entriesListed(map, element, false);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the pair is a tuple of size bytes with the given layout",
+})
+function pairMade(
+  map: Raw<uint8>,
+  entry: Raw<uint8>,
+  tuple: Raw<uint8>,
+  size: int,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const pair = objectMade(size);
+  const pairHead = viewAt<ObjectHead>(pair, 0);
+  const fields = viewAt<LayoutHead>(tuple, 0);
+  const first = viewAt<FieldHead>(fields.fields, 0);
+  const second = viewAt<FieldHead>(fields.fields, 24);
+  const key = cellsAt<uint8>(pair, first.offset.toInt());
+  const value = cellsAt<uint8>(pair, second.offset.toInt());
+  const storedKey = cellsAt<uint8>(entry, layout.keyOffset.toInt());
+  const storedValue = cellsAt<uint8>(entry, layout.valueOffset.toInt());
+
+  zeroFilled(pair, size);
+  pairHead.count = 1;
+  pairHead.layout = tuple;
+  copyCells(storedKey, 0, key, 0, sizeOf(layout.key));
+  valueRetained(layout.key, key);
+  copyCells(storedValue, 0, value, 0, sizeOf(layout.value));
+  valueRetained(layout.value, value);
+
+  return pair;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "each item is a pointer to a new pair",
+})
+export function mapEntries(
+  map: Raw<uint8>,
+  element: Raw<uint8>,
+  tuple: Raw<uint8>,
+  size: int,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const count = head.size.toInt();
+  const array = arrayMade(element, 0, count);
+  const used = head.used.toInt();
+  const place = frameCells<uint8>(8);
+
+  for (let position = 0; position < used; position++) {
+    const entry = entryAt(map, position);
+
+    if (isLiveEntry(entry)) {
+      const pair = pairMade(map, entry, tuple, size);
+
+      bitsPut(place, 0, rawBits(pair));
+      itemPushed(array, place);
+    }
+  }
+
+  return array;
+}

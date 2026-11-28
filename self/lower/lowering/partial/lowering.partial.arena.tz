@@ -237,8 +237,9 @@ partial class Lowering {
   private isImmortalGlobal(place: Read<Place>, key: string): boolean {
     const isGlobal = place.owner == kNoOwner && !this.letKeys.has(key);
     const isChanged = this.changedGlobals.has(key);
+    const isKept = isGlobal && !isChanged && this.isImmortalKind(place.tz);
 
-    return isGlobal && !isChanged && this.isImmortalKind(place.tz);
+    return isKept && this.immortalGlobals.has(key);
   }
 
   private immortalGlobal(frame: Read<Frame>, place: Place, key: string): void {

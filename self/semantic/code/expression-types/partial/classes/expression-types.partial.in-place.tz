@@ -9,6 +9,8 @@ import {
 
 const kExtendsWord = "extends";
 const kImplementsWord = "implements";
+const kRawClass = "Raw";
+const kFixedClass = "Fixed";
 
 partial class ExpressionTypes {
   private inPlaceChecks(decl: ClassDecl, module: int): void {
@@ -46,7 +48,36 @@ partial class ExpressionTypes {
           first: word,
         });
       }
+      if (decl.isCLayout && !this.isCField(field.type)) {
+        this.errors.write(module, field.loc, Code.OwnCLayoutField, {
+          word: field.name,
+          other: this.types.typeText(field.type),
+        });
+      }
     }
+  }
+
+  public readonly isCLayoutClass(type: Type): boolean {
+    return this.classDeclOf(type)?.isCLayout == true;
+  }
+
+  private isCField(type: Type): boolean {
+    if (type.kind == TypeKind.Int || type.kind == TypeKind.Double) {
+      return true;
+    }
+    if (type.kind == TypeKind.Boolean || type.kind == TypeKind.Error) {
+      return true;
+    }
+    if (type.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const isLibrary = this.types.isLibraryModule(type.module);
+    if (isLibrary && (type.name == kRawClass || type.name == kFixedClass)) {
+      return true;
+    }
+
+    return this.isCLayoutClass(type);
   }
 
   public readonly isInPlaceClass(type: Type): boolean {

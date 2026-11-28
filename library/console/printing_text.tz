@@ -1,0 +1,371 @@
+
+function breakLength(): int {
+  return 80;
+}
+
+function compactLevel(): int {
+  return 3;
+}
+
+function depthLimit(): int {
+  return 2;
+}
+
+function arrayLimit(): int {
+  return 100;
+}
+
+function stringLimit(): int {
+  return 10000;
+}
+
+function lineMinimum(): int {
+  return 16;
+}
+
+const kZeroWidth: int[] = [
+  0, 31, 127, 159, 768, 879, 1155, 1161, 1425, 1469, 1471, 1471, 1473, 1474,
+  1476, 1477, 1479, 1479, 1536, 1541, 1552, 1562, 1564, 1564, 1611, 1631, 1648,
+  1648, 1750, 1757, 1759, 1764, 1767, 1768, 1770, 1773, 1807, 1807, 3633, 3633,
+  3636, 3642, 3655, 3662, 6158, 6158, 6832, 6911, 7616, 7679, 8203, 8207, 8234,
+  8238, 8288, 8292, 8294, 8303, 8400, 8447, 65024, 65039, 65056, 65071, 65279,
+  65279, 65529, 65531, 127995, 127999, 917505, 917505, 917536, 917631, 917760,
+  917999,
+];
+
+const kWide: int[] = [
+  4352, 4447, 8986, 8987, 9001, 9002, 9193, 9196, 9200, 9200, 9203, 9203, 9725,
+  9726, 9748, 9749, 9800, 9811, 9855, 9855, 9875, 9875, 9889, 9889, 9898, 9899,
+  9917, 9918, 9924, 9925, 9934, 9934, 9940, 9940, 9962, 9962, 9970, 9971, 9973,
+  9973, 9978, 9978, 9981, 9981, 9989, 9989, 9994, 9995, 10024, 10024, 10060,
+  10060, 10062, 10062, 10067, 10069, 10071, 10071, 10133, 10135, 10160, 10160,
+  10175, 10175, 11035, 11036, 11088, 11088, 11093, 11093, 11904, 12350, 12353,
+  13311, 13312, 19903, 19968, 40959, 40960, 42191, 43360, 43391, 44032, 55203,
+  63744, 64255, 65040, 65049, 65072, 65135, 65280, 65376, 65504, 65510, 94176,
+  94180, 94208, 101589, 110576, 111355, 126980, 126980, 127183, 127183, 127374,
+  127374, 127377, 127386, 127488, 127569, 127744, 127776, 127789, 127797,
+  127799, 127868, 127870, 127891, 127904, 127946, 127951, 127955, 127968,
+  127984, 127988, 127988, 127992, 128062, 128064, 128064, 128066, 128252,
+  128255, 128317, 128331, 128334, 128336, 128359, 128378, 128378, 128405,
+  128406, 128420, 128420, 128507, 128591, 128640, 128709, 128716, 128716,
+  128720, 128722, 128725, 128727, 128732, 128735, 128747, 128748, 128756,
+  128764, 128992, 129003, 129008, 129008, 129292, 129338, 129340, 129349,
+  129351, 129535, 129648, 129791, 131072, 196605, 196608, 262141,
+];
+
+const kControlTexts: string[] = [
+  "\\x00",
+  "\\x01",
+  "\\x02",
+  "\\x03",
+  "\\x04",
+  "\\x05",
+  "\\x06",
+  "\\x07",
+  "\\b",
+  "\\t",
+  "\\n",
+  "\\x0B",
+  "\\f",
+  "\\r",
+  "\\x0E",
+  "\\x0F",
+  "\\x10",
+  "\\x11",
+  "\\x12",
+  "\\x13",
+  "\\x14",
+  "\\x15",
+  "\\x16",
+  "\\x17",
+  "\\x18",
+  "\\x19",
+  "\\x1A",
+  "\\x1B",
+  "\\x1C",
+  "\\x1D",
+  "\\x1E",
+  "\\x1F",
+];
+
+const kUpperDigits = "0123456789ABCDEF";
+const kLowerDigits = "0123456789abcdef";
+
+function isInRanges(ranges: Read<int[]>, point: int): boolean {
+  let low = 0;
+  let high = ranges.length / 2;
+
+  while (low < high) {
+    const middle = (low + high) / 2;
+    const first = ranges[middle * 2] ?? 0;
+    const last = ranges[middle * 2 + 1] ?? 0;
+
+    if (point < first) {
+      high = middle;
+    } else if (point > last) {
+      low = middle + 1;
+    } else {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isHighSurrogate(unit: int): boolean {
+  return unit >= 55296 && unit <= 56319;
+}
+
+function isLowSurrogate(unit: int): boolean {
+  return unit >= 56320 && unit <= 57343;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of the text hold its length units",
+})
+function textWidth(text: Read<string>): int {
+  const narrow = textCells<uint8>(text);
+  const count = text.length;
+
+  if (narrow != undefined) {
+    let width = 0;
+
+    for (let index = 0; index < count; index++) {
+      const unit = unitAt(narrow, index);
+
+      if (unit > 31 && (unit < 127 || unit > 159)) {
+        width += 1;
+      }
+    }
+
+    return width;
+  }
+
+  const wide = textCells<uint16>(text);
+  if (wide == undefined) {
+    return 0;
+  }
+
+  let width = 0;
+  let index = 0;
+
+  while (index < count) {
+    let point = unitAt(wide, index);
+
+    if (isHighSurrogate(point) && index + 1 < count) {
+      const next = unitAt(wide, index + 1);
+
+      if (isLowSurrogate(next)) {
+        point = 65536 + (point - 55296) * 1024 + (next - 56320);
+        index += 1;
+      }
+    }
+
+    index += 1;
+
+    if (!isInRanges(kZeroWidth, point)) {
+      width += 1;
+
+      if (isInRanges(kWide, point)) {
+        width += 1;
+      }
+    }
+  }
+
+  return width;
+}
+
+function spaces(count: int): string {
+  if (count <= 0) {
+    return "";
+  }
+
+  return " ".repeat(count);
+}
+
+function plural(count: int): string {
+  if (count > 1) {
+    return "s";
+  }
+
+  return "";
+}
+
+function hasUnit(text: Read<string>, from: int, to: int, unit: int): boolean {
+  const found = text.indexOf(String.fromCharCode(unit), from);
+
+  return found >= 0 && found < to;
+}
+
+function hasDollarBrace(text: Read<string>, from: int, to: int): boolean {
+  const found = text.indexOf("${", from);
+
+  return found >= 0 && found + 1 < to;
+}
+
+function quoteFor(text: Read<string>, from: int, to: int): int {
+  if (!hasUnit(text, from, to, 39)) {
+    return 39;
+  }
+  if (!hasUnit(text, from, to, 34)) {
+    return 34;
+  }
+  if (!hasUnit(text, from, to, 96) && !hasDollarBrace(text, from, to)) {
+    return 96;
+  }
+
+  return 39;
+}
+
+function hexUnit(digits: Read<string>, unit: int, shift: int): int {
+  return digits.charCodeAt((unit >> shift) & 15) ?? 0;
+}
+
+function unitEscaped(out: Mut<TextBuilder>, unit: int, quote: int): boolean {
+  if (unit < 32) {
+    out.add(kControlTexts[unit] ?? "");
+
+    return true;
+  }
+  if (unit == 39 && quote == 39) {
+    out.add("\\'");
+
+    return true;
+  }
+  if (unit == 92) {
+    out.add("\\\\");
+
+    return true;
+  }
+  if (unit >= 127 && unit <= 159) {
+    out.add("\\x");
+    out.addUnit(hexUnit(kUpperDigits, unit, 4));
+    out.addUnit(hexUnit(kUpperDigits, unit, 0));
+
+    return true;
+  }
+
+  return false;
+}
+
+function loneEscaped(out: Mut<TextBuilder>, unit: int): void {
+  out.add("\\u");
+  out.addUnit(hexUnit(kLowerDigits, unit, 12));
+  out.addUnit(hexUnit(kLowerDigits, unit, 8));
+  out.addUnit(hexUnit(kLowerDigits, unit, 4));
+  out.addUnit(hexUnit(kLowerDigits, unit, 0));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of the text hold its length units",
+})
+function unitIn(
+  narrow: Raw<uint8> | undefined,
+  wide: Raw<uint16> | undefined,
+  index: int,
+): int {
+  if (narrow != undefined) {
+    return unitAt(narrow, index);
+  }
+  if (wide != undefined) {
+    return unitAt(wide, index);
+  }
+
+  return 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells of the text hold its length units",
+})
+function escapedRange(
+  out: Mut<TextBuilder>,
+  text: Read<string>,
+  from: int,
+  to: int,
+): void {
+  const quote = quoteFor(text, from, to);
+  const narrow = textCells<uint8>(text);
+  const wide = textCells<uint16>(text);
+  let run = from;
+  let index = from;
+
+  out.addUnit(quote);
+
+  while (index < to) {
+    const unit = unitIn(narrow, wide, index);
+    const isQuote = unit == 39 && quote == 39;
+    const isSpecial = unit < 32 || isQuote || unit == 92;
+
+    if (isSpecial || (unit >= 127 && unit <= 159)) {
+      out.addPart(text, run, index);
+      unitEscaped(out, unit, quote);
+      run = index + 1;
+    } else if (unit >= 55296 && unit <= 57343) {
+      const isPair = isHighSurrogate(unit) && index + 1 < to;
+
+      if (isPair && isLowSurrogate(unitIn(narrow, wide, index + 1))) {
+        index += 1;
+      } else {
+        out.addPart(text, run, index);
+        loneEscaped(out, unit);
+        run = index + 1;
+      }
+    }
+
+    index += 1;
+  }
+
+  out.addPart(text, run, to);
+  out.addUnit(quote);
+}
+
+function escapedText(text: Read<string>): string {
+  const out = new TextBuilder();
+
+  escapedRange(out, text, 0, text.length);
+
+  return out.taken();
+}
+
+function stringFormatted(
+  context: Read<PrintContext>,
+  out: Mut<TextBuilder>,
+  text: Read<string>,
+): void {
+  let length = text.length;
+  let remaining = 0;
+
+  if (length > stringLimit()) {
+    remaining = length - stringLimit();
+    length = stringLimit();
+  }
+
+  const room = breakLength() - context.indentation - 4;
+
+  if (length > lineMinimum() && length > room) {
+    let start = 0;
+
+    while (start < length) {
+      let end = text.indexOf("\n", start) + 1;
+
+      if (end <= 0 || end > length) {
+        end = length;
+      }
+      if (start > 0) {
+        out.add(" +\n");
+        out.addSpaces(context.indentation + 2);
+      }
+
+      escapedRange(out, text, start, end);
+      start = end;
+    }
+  } else {
+    escapedRange(out, text, 0, length);
+  }
+  if (remaining > 0) {
+    out.add(`... ${remaining} more character${plural(remaining)}`);
+  }
+}

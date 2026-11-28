@@ -1,0 +1,108 @@
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+
+function codes(text: string): string {
+  const parts: string[] = [];
+
+  for (let index = 0; index < text.length; index++) {
+    parts.push(`${text.charCodeAt(index)}`);
+  }
+
+  return parts.join(".");
+}
+
+function shown(label: string, path: string): void {
+  const read = readFileSync(path, "utf8");
+
+  if (read.isOk()) {
+    console.log(label, read.value.length, codes(read.value.slice(0, 40)));
+  } else {
+    const error = read.error;
+
+    console.log(label, error.kind, error.code, error.syscall);
+    console.log("  ", error.message.replaceAll(resolve("."), "<here>"));
+  }
+}
+
+function encoded(path: string): void {
+  const latin = readFileSync(path, "latin1");
+  const ascii = readFileSync(path, "ascii");
+  const hex = readFileSync(path, "hex");
+  const base = readFileSync(path, "base64");
+  const url = readFileSync(path, "base64url");
+  const wide = readFileSync(path, "utf16le");
+  const ucs = readFileSync(path, "ucs2");
+
+  if (latin.isOk() && ascii.isOk() && hex.isOk()) {
+    console.log(codes(latin.value));
+    console.log(codes(ascii.value));
+    console.log(hex.value);
+  }
+  if (base.isOk() && url.isOk() && wide.isOk() && ucs.isOk()) {
+    console.log(base.value, url.value);
+    console.log(codes(wide.value), wide.value == ucs.value);
+  }
+}
+
+function real(label: string, path: string): void {
+  const found = realpathSync(path);
+
+  if (found.isOk()) {
+    const here = resolve(".");
+
+    console.log(label, found.value.replaceAll(here, "<here>"));
+    console.log("  ", found.value == resolve(path));
+  } else {
+    const error = found.error;
+
+    console.log(label, error.kind, error.code, error.syscall);
+    console.log("  ", error.message.replaceAll(resolve("."), "<here>"));
+  }
+}
+
+function main(): void {
+  shown("plain", "plain.txt");
+  shown("multi", "multi.txt");
+  shown("broken", "broken.bin");
+  shown("empty", "empty.txt");
+  shown("big", "big.txt");
+  shown("missing", "missing.txt");
+  shown("folder", ".");
+  shown("nul", "a\0b");
+  shown("parent", "no/such/folder/x.txt");
+  shown("file as folder", "plain.txt/x");
+  shown("empty name", "");
+  encoded("multi.txt");
+  encoded("wide.bin");
+  encoded("broken.bin");
+  encoded("plain.txt");
+
+  const big = readFileSync("big.txt", "utf8");
+
+  if (big.isOk()) {
+    console.log(big.value.length, big.value.slice(big.value.length - 30));
+  }
+
+  real("file", "plain.txt");
+  real("dot", ".");
+  real("upper", "PLAIN.TXT");
+  real("dots", "./x/../plain.txt");
+  real("missing", "missing.txt");
+  real("missing dir", "nope/plain.txt");
+  real("nul", "a\0b");
+  real("file part", "plain.txt/x");
+
+  const made = mkdtempSync(join(tmpdir(), "tz-read-"));
+
+  if (made.isOk()) {
+    const folder = made.value;
+    const back = realpathSync(folder);
+
+    console.log(back.isOk() && back.value.length > 0);
+    shown("temp folder", folder.replaceAll(folder, "."));
+    rmSync(folder, { recursive: true });
+  }
+}
+
+main();

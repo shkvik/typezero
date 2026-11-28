@@ -1,0 +1,158 @@
+function radixMiddle(): int {
+  return 1100;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bits of a double: its exponent",
+})
+function radixExponent(value: double): int {
+  const bits = doubleBits(value);
+  const biased = ((bits >> 52) & exponentBits()).toInt();
+  if (biased == 0) {
+    return 1 - 1075;
+  }
+
+  return biased - 1075;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the bits of a double: the next one up",
+})
+function nextUp(value: double): double {
+  const bits = doubleBits(value);
+
+  return bitsDouble(bits + 1);
+}
+
+function radixUnit(digit: int): int {
+  if (digit < 10) {
+    return 48 + digit;
+  }
+
+  return 87 + digit;
+}
+
+function radixValue(unit: int): int {
+  if (unit > 57) {
+    return unit - 87;
+  }
+
+  return unit - 48;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cursor stays between the middle and the end of 2200 cells",
+})
+function roundedUp(cells: Raw<uint8>, cursor: int, radix: int): int {
+  let place = cursor;
+
+  while (place > radixMiddle() + 1) {
+    place -= 1;
+
+    const digit = radixValue(unitAt(cells, place));
+    if (digit + 1 < radix) {
+      putUnit(cells, place, radixUnit(digit + 1));
+
+      return place + 1;
+    }
+  }
+
+  return radixMiddle();
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a double has at most 1075 digits on each side of the middle",
+})
+export function toRadix(value: double, radix: int): string {
+  if (radix < 2 || radix > 36) {
+    panic(`internal error: toString() with the radix ${radix}`);
+  }
+
+  const bits = doubleBits(value);
+  const biased = ((bits >> 52) & exponentBits()).toInt();
+  if (radix == 10 || biased == 2047) {
+    return fromDouble(value);
+  }
+
+  const cells = frameCells<uint8>(2200);
+  const base = radix.toDouble();
+  const isNegative = value < 0.0;
+  let start = radixMiddle();
+  let end = radixMiddle();
+  let whole = value;
+
+  if (isNegative) {
+    whole = 0.0 - value;
+  }
+
+  let integer = Math.floor(whole);
+  let fraction = whole - integer;
+  let delta = 0.5 * (nextUp(whole) - whole);
+  const least = nextUp(0.0);
+
+  if (delta < least) {
+    delta = least;
+  }
+  if (fraction >= delta) {
+    putUnit(cells, end, 46);
+    end += 1;
+
+    let going = true;
+
+    while (going) {
+      fraction = fraction * base;
+      delta = delta * base;
+
+      const digit = Math.trunc(fraction).toInt();
+
+      putUnit(cells, end, radixUnit(digit));
+      end += 1;
+      fraction = fraction - digit.toDouble();
+
+      const isOdd = (digit & 1) != 0;
+      const isUp = fraction > 0.5 || (fraction == 0.5 && isOdd);
+      if (isUp && fraction + delta > 1.0) {
+        end = roundedUp(cells, end, radix);
+
+        if (end == radixMiddle()) {
+          integer = integer + 1.0;
+        }
+
+        going = false;
+      } else {
+        going = fraction >= delta;
+      }
+    }
+  }
+  while (radixExponent(integer / base) > 0) {
+    integer = integer / base;
+    start -= 1;
+    putUnit(cells, start, 48);
+  }
+
+  let more = true;
+
+  while (more) {
+    const remainder = integer % base;
+
+    start -= 1;
+    putUnit(cells, start, radixUnit(Math.trunc(remainder).toInt()));
+    integer = (integer - remainder) / base;
+    more = integer > 0.0;
+  }
+  if (isNegative) {
+    start -= 1;
+    putUnit(cells, start, 45);
+  }
+
+  const length = end - start;
+  const room = textRoom<uint8>(length);
+
+  copyCells(cells, start, room, 0, length);
+
+  return textClosed(room, length, true);
+}

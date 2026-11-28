@@ -21,7 +21,9 @@ import {
   kHeaderSize,
   kIntType,
   kNoOwner,
+  kCountsModule,
   kObjectAllocate,
+  kObjectMade,
   kObjectHeader,
   kPointerType,
   kRecordKind,
@@ -159,6 +161,9 @@ partial class Lowering {
     if (expr.kind == ExprKind.Name) {
       return this.recordNamePlace(frame, expr);
     }
+    if (expr.kind == ExprKind.Call && this.isViewCall(frame, expr)) {
+      return this.viewAtAddress(frame, expr);
+    }
     if (expr.kind != ExprKind.Member || expr.optional) {
       return undefined;
     }
@@ -267,6 +272,9 @@ partial class Lowering {
 
     const key = this.placeKey(target.module, target.loc);
     const place = this.places.get(key);
+    if (place != undefined && place.view != undefined) {
+      return this.viewAddress(frame, expr, place);
+    }
     if (place == undefined || place.type == kPointerType) {
       return undefined;
     }
@@ -300,7 +308,6 @@ partial class Lowering {
 
     const isPlaced =
       this.values.isInPlaceClass(type) &&
-      this.values.isCopy(type) &&
       !this.isUnionPart(type) &&
       this.hasPlainFields(type);
 
@@ -406,6 +413,9 @@ partial class Lowering {
   }
 
   private objectIrType(type: Type): string | undefined {
+    if (this.isFixed(type)) {
+      return this.fixedIrType(type);
+    }
     if (!this.isInPlace(type)) {
       return kPointerType;
     }
@@ -414,6 +424,9 @@ partial class Lowering {
   }
 
   private objectSize(type: Type): int {
+    if (this.isFixed(type)) {
+      return this.fixedSize(type);
+    }
     if (!this.isInPlace(type)) {
       return 8;
     }
@@ -609,9 +622,12 @@ partial class Lowering {
     const tz = this.values.types.store.integer(64, false);
     const size = this.ir.integer(kIntType, `${layout.size}`);
     const sizeValue: IrValue = { type: kIntType, value: size, tz };
-    const object = this.runtimeValue(frame, kObjectAllocate, kPointerType, [
-      sizeValue,
-    ]);
+    const making = this.runtimeHelperName(
+      kCountsModule,
+      kObjectMade,
+      kObjectAllocate,
+    );
+    const object = this.runtimeValue(frame, making, kPointerType, [sizeValue]);
     const count = frame.made.field(kObjectHeader, object, 0);
     const kind = frame.made.field(kObjectHeader, object, 1);
 

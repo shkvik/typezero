@@ -10,16 +10,23 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kBufferByteLength,
   kBufferConcat,
-  kBufferIndexOfText,
+  kBufferFromText,
   kBooleanType,
+  kBuffersModule,
+  kBytesLayouts,
   kByteType,
   kFlagType,
   kIntType,
   kPointerType,
+  kStringType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import {
+  BytesCall,
+  Frame,
+  IrValue,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private bufferByteLength(
@@ -42,15 +49,62 @@ partial class Lowering {
       frame,
       tree.exprAt(tree.argumentsOf(call.argsList)[1]?.exprId),
     );
-    const params = [kPointerType, kIntType, kFlagType];
-    const callee = this.ir.declare(kBufferByteLength, kFlagType, params);
-    const args = this.textParts(frame, given).concat([encoding]);
-    const length = frame.made.call(callee, args);
-    const value = frame.made.cast(IrOpcode.SExt, length, kIntType);
+    const code = frame.made.cast(IrOpcode.SExt, encoding, kIntType);
+    const coded: IrValue = { type: kIntType, value: code, tz };
+    const name = "byteLengthOf";
+    const target: RuntimeTarget = { module: kBuffersModule, name };
+    const args = [given, coded];
+    const length = this.runtimeFunctionCall(frame, target, [], args, call.loc);
 
     this.dropping(frame, given);
 
-    return { type: kIntType, value, tz };
+    return length;
+  }
+
+  private bytesMade(
+    frame: Read<Frame>,
+    cName: string,
+    tzName: string,
+    call: Read<BytesCall>,
+  ): LLVMValue {
+    const name = this.runtimeHelperName(kBuffersModule, tzName, cName);
+    if (name == cName) {
+      const callee = this.ir.declare(name, kPointerType, call.params);
+
+      return frame.made.call(callee, call.args);
+    }
+
+    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const params = call.params.concat([kPointerType]);
+    const args = call.args.concat([layouts]);
+    const callee = this.ir.declare(name, kPointerType, params);
+
+    return frame.made.call(callee, args);
+  }
+
+  private bufferOfTextMade(
+    frame: Read<Frame>,
+    given: IrValue,
+    encoding: LLVMValue,
+  ): LLVMValue {
+    const name = this.runtimeHelperName(
+      kBuffersModule,
+      "bufferOfText",
+      kBufferFromText,
+    );
+    if (name == kBufferFromText) {
+      const params = [kPointerType, kIntType, kFlagType];
+      const callee = this.ir.declare(name, kPointerType, params);
+      const args = this.textParts(frame, given).concat([encoding]);
+
+      return frame.made.call(callee, args);
+    }
+
+    const layouts = this.ir.external(kBytesLayouts, kPointerType);
+    const params = [kStringType, kFlagType, kPointerType];
+    const callee = this.ir.declare(name, kPointerType, params);
+
+    return frame.made.call(callee, [given.value, encoding, layouts]);
   }
 
   private bufferConcat(
@@ -65,9 +119,11 @@ partial class Lowering {
     }
 
     const params = [kPointerType, kIntType, kFlagType];
-    const callee = this.ir.declare(kBufferConcat, kPointerType, params);
     const hasTotal = this.ir.integer(kFlagType, `${total.given}`);
-    const value = frame.made.call(callee, [list.value, total.value, hasTotal]);
+    const value = this.bytesMade(frame, kBufferConcat, "buffersJoined", {
+      params,
+      args: [list.value, total.value, hasTotal],
+    });
 
     this.dropping(frame, list);
 
@@ -101,42 +157,41 @@ partial class Lowering {
       frame,
       tree.exprAt(tree.argumentsOf(call.argsList)[2]?.exprId),
     );
-    const params = [
-      kPointerType,
-      kPointerType,
-      kIntType,
-      kIntType,
-      kFlagType,
-      kFlagType,
-      kFlagType,
+    const int = this.values.types.store.integer(64, false);
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
+    const hasFrom = this.ir.integer(kBooleanType, `${from.given}`);
+    const mode = this.ir.integer(kIntType, `${this.searchMode(member.name)}`);
+    const code = frame.made.cast(IrOpcode.SExt, encoding, kIntType);
+    const args: IrValue[] = [
+      { type: kPointerType, value: bytes.value, tz: int },
+      given,
+      { type: kIntType, value: from.value, tz: int },
+      { type: kBooleanType, value: hasFrom, tz: boolean },
+      { type: kIntType, value: code, tz: int },
+      { type: kIntType, value: mode, tz: int },
     ];
-    const callee = this.ir.declare(kBufferIndexOfText, kFlagType, params);
-    const hasFrom = this.ir.integer(kFlagType, `${from.given}`);
-    const mode = this.ir.integer(kFlagType, `${this.searchMode(member.name)}`);
-    const args = [bytes.value]
-      .concat(this.textParts(frame, given))
-      .concat([from.value, hasFrom, encoding, mode]);
-    const found = frame.made.call(callee, args);
+    const name = "bufferTextFound";
+    const target: RuntimeTarget = { module: kBuffersModule, name };
+    const found = this.runtimeFunctionCall(frame, target, [], args, call.loc);
 
     this.dropping(frame, given);
     this.dropping(frame, bytes);
 
+    if (found == undefined) {
+      return undefined;
+    }
     if (member.name == "includes") {
-      const zero = this.ir.zero(kFlagType);
+      const zero = this.ir.zero(kIntType);
       const value = frame.made.integerCompare(
         IrIntPredicate.NotEqual,
-        found,
+        found.value,
         zero,
       );
-      const tz = this.values.types.store.plain(TypeKind.Boolean);
 
-      return { type: kBooleanType, value, tz };
+      return { type: kBooleanType, value, tz: boolean };
     }
 
-    const value = frame.made.cast(IrOpcode.SExt, found, kIntType);
-    const tz = this.values.types.store.integer(64, false);
-
-    return { type: kIntType, value, tz };
+    return found;
   }
 
   private doubleWritten(

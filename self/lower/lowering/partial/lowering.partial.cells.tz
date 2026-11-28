@@ -15,22 +15,23 @@ import {
   kBooleanType,
   kByteCell,
   kByteType,
-  kCellsFind,
   kFlagType,
   kIntType,
   kLengthMask,
   kMemoryCompare,
+  kMemoryFind,
+  kTextModule,
+  kWideFound,
   kMemoryMove,
   kPointerType,
   kStringType,
   kTextAsciiBit,
   kTextBufferHead,
-  kTextCells,
-  kTextClosed,
+  kTextClosedMade,
   kTextHighBits,
   kTextFormBits,
   kTextOffsetShift,
-  kTextRoom,
+  kTextRoomMade,
   kTextShortAscii,
   kTextShortCount,
   kTextShortBits,
@@ -39,7 +40,12 @@ import {
   kVoidType,
   kWideCell,
 } from "../const/lowering.const.tz";
-import { CellPair, Frame, IrValue } from "../types/lowering.types.tz";
+import {
+  CellPair,
+  Frame,
+  IrValue,
+  RuntimeTarget,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private textCellsOf(
@@ -77,11 +83,18 @@ partial class Lowering {
     made.conditionalBranch(isTree, slow, fast);
     made.open(slow);
 
-    const width = this.pick(isWide, "1", "0");
-    const params = [kPointerType, kFlagType];
-    const finding = this.ir.declare(kTextCells, kPointerType, params);
-    const flag = this.ir.integer(kFlagType, width);
-    const found = made.call(finding, [address, flag]);
+    const text = made.load(kStringType, address);
+    const string = this.values.types.store.plain(TypeKind.String);
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
+    const wide = this.ir.integer(kBooleanType, this.pick(isWide, "1", "0"));
+    const given: IrValue[] = [
+      { type: kStringType, value: text, tz: string },
+      { type: kBooleanType, value: wide, tz: boolean },
+    ];
+    const target: RuntimeTarget = { module: kTextModule, name: "treeCells" };
+    const cells = this.runtimeFunctionCall(frame, target, [], given, call.loc);
+    const found = cells?.value ?? this.ir.zero(kPointerType);
+    const after = made.currentBlock();
 
     made.branch(end);
     made.open(fast);
@@ -91,7 +104,7 @@ partial class Lowering {
     made.branch(end);
     made.open(end);
 
-    const value = made.phi(kPointerType, [found, flat], [slow, fast]);
+    const value = made.phi(kPointerType, [found, flat], [after, fast]);
 
     return this.rawMade(call, value);
   }
@@ -210,14 +223,72 @@ partial class Lowering {
       return undefined;
     }
 
-    const width = this.pick(isByte, "0", "1");
-    const params = [kPointerType, kFlagType, kIntType, kIntType, kIntType];
-    const finding = this.ir.declare(kCellsFind, kIntType, params);
-    const flag = this.ir.integer(kFlagType, width);
-    const value = frame.made.call(finding, [raw, flag, from, end, unit]);
     const tz = this.values.types.store.integer(64, false);
 
+    if (!isByte) {
+      const target: RuntimeTarget = { module: kTextModule, name: kWideFound };
+      const given: IrValue[] = [
+        { type: kPointerType, value: raw, tz },
+        { type: kIntType, value: from, tz },
+        { type: kIntType, value: end, tz },
+        { type: kIntType, value: unit, tz },
+      ];
+
+      return this.runtimeFunctionCall(frame, target, [], given, call.loc);
+    }
+
+    const value = this.byteFound(frame, raw, from, end, unit);
+
     return { type: kIntType, value, tz };
+  }
+
+  private byteFound(
+    frame: Read<Frame>,
+    raw: LLVMValue,
+    from: LLVMValue,
+    end: LLVMValue,
+    unit: LLVMValue,
+  ): LLVMValue {
+    const made = frame.made;
+    const count = made.binary(IrOpcode.Sub, end, from);
+    const zero = this.ir.zero(kIntType);
+    const limit = this.ir.integer(kIntType, "255");
+    const isEmpty = made.integerCompare(
+      IrIntPredicate.SignedLessOrEqual,
+      count,
+      zero,
+    );
+    const isWide = made.integerCompare(
+      IrIntPredicate.UnsignedGreater,
+      unit,
+      limit,
+    );
+    const isMissed = made.binary(IrOpcode.Or, isEmpty, isWide);
+    const search = made.block("find.search");
+    const missed = made.block("find.missed");
+    const done = made.block("find.done");
+
+    made.conditionalBranch(isMissed, missed, search);
+    made.open(search);
+
+    const start = made.element(kByteCell, raw, from);
+    const byte = made.cast(IrOpcode.Trunc, unit, kFlagType);
+    const params = [kPointerType, kFlagType, kIntType];
+    const finding = this.ir.declare(kMemoryFind, kPointerType, params);
+    const found = made.call(finding, [start, byte, count]);
+    const foundBits = made.cast(IrOpcode.PtrToInt, found, kIntType);
+    const rawBits = made.cast(IrOpcode.PtrToInt, raw, kIntType);
+    const offset = made.binary(IrOpcode.Sub, foundBits, rawBits);
+    const isNone = made.integerCompare(IrIntPredicate.Equal, foundBits, zero);
+    const none = this.ir.integer(kIntType, "-1");
+    const index = made.select(isNone, none, offset);
+
+    made.branch(done);
+    made.open(missed);
+    made.branch(done);
+    made.open(done);
+
+    return made.phi(kIntType, [index, none], [search, missed]);
   }
 
   private cellsCompared(
@@ -380,13 +451,18 @@ partial class Lowering {
       return undefined;
     }
 
-    const width = this.pick(isByte, "0", "1");
-    const flag = this.ir.integer(kFlagType, width);
-    const ascii = frame.made.cast(IrOpcode.ZExt, known.value, kFlagType);
-    const params = [kPointerType, kFlagType, kIntType, kFlagType];
-    const args = [raw, flag, count, ascii];
+    const int = this.values.types.store.integer(64, false);
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
+    const isWide = this.ir.integer(kBooleanType, this.pick(isByte, "0", "1"));
+    const closing: IrValue[] = [
+      { type: kPointerType, value: raw, tz: int },
+      { type: kIntType, value: count, tz: int },
+      { type: kBooleanType, value: isWide, tz: boolean },
+      known,
+    ];
+    const target: RuntimeTarget = { module: kTextModule, name: kTextClosedMade };
     if (!isByte) {
-      return this.textOut(frame, kTextClosed, params, args);
+      return this.runtimeFunctionCall(frame, target, [], closing, call.loc);
     }
 
     const made = frame.made;
@@ -400,12 +476,16 @@ partial class Lowering {
     const long = made.block("close.long");
     const short = made.block("close.short");
     const end = made.block("close.end");
-    const all = [kPointerType].concat(params);
-    const closing = this.ir.declare(kTextClosed, kVoidType, all);
 
     made.conditionalBranch(isLong, long, short);
     made.open(long);
-    made.call(closing, [out].concat(args));
+
+    const closed = this.runtimeFunctionCall(frame, target, [], closing, call.loc);
+
+    if (closed != undefined) {
+      made.store(closed.value, out);
+    }
+
     made.branch(end);
     made.open(short);
     made.store(this.shortText(frame, raw, count), out);
@@ -536,18 +616,22 @@ partial class Lowering {
     made.conditionalBranch(isLong, long, end);
     made.open(long);
 
-    const width = this.pick(isByte, "0", "1");
-    const flag = this.ir.integer(kFlagType, width);
-    const making = this.ir.declare(kTextRoom, kPointerType, [
-      kFlagType,
-      kIntType,
-    ]);
-    const held = made.call(making, [flag, count]);
+    const int = this.values.types.store.integer(64, false);
+    const boolean = this.values.types.store.plain(TypeKind.Boolean);
+    const isWide = this.ir.integer(kBooleanType, this.pick(isByte, "0", "1"));
+    const making: IrValue[] = [
+      { type: kIntType, value: count, tz: int },
+      { type: kBooleanType, value: isWide, tz: boolean },
+    ];
+    const target: RuntimeTarget = { module: kTextModule, name: kTextRoomMade };
+    const room = this.runtimeFunctionCall(frame, target, [], making, call.loc);
+    const held = room?.value ?? this.ir.zero(kPointerType);
+    const after = made.currentBlock();
 
     made.branch(end);
     made.open(end);
 
-    const value = made.phi(kPointerType, [short, held], [before, long]);
+    const value = made.phi(kPointerType, [short, held], [before, after]);
 
     return this.rawMade(call, value);
   }
@@ -565,5 +649,60 @@ partial class Lowering {
     }
 
     return frame.made.element(cell, raw, index);
+  }
+
+  private textPiece(
+    frame: Frame,
+    call: CallExpr,
+    isMeta: boolean,
+  ): IrValue | undefined {
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const text = this.value(frame, tree.exprOf(argument.exprId));
+    if (text == undefined || text.type != kStringType) {
+      return undefined;
+    }
+
+    const tz =
+      this.typeOf(call) ?? this.values.types.store.integer(64, true);
+    if (isMeta) {
+      const meta = frame.made.extract(text.value, 1);
+
+      this.dropping(frame, text);
+
+      return { type: kIntType, value: meta, tz };
+    }
+
+    const object = frame.made.extract(text.value, 0);
+
+    this.dropping(frame, text);
+
+    return { type: kPointerType, value: object, tz };
+  }
+
+  private textJoined(frame: Frame, call: CallExpr): IrValue | undefined {
+    const object = this.rawArgument(frame, call, 0);
+    const tree = this.values.types.program.tree;
+
+    const argument = tree.argumentsOf(call.argsList)[1];
+    if (object == undefined || argument == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, tree.exprOf(argument.exprId));
+    if (given == undefined || given.type != kIntType) {
+      return undefined;
+    }
+
+    const half = frame.made.insert(this.ir.zero(kStringType), object, 0);
+    const value = frame.made.insert(half, given.value, 1);
+    const tz = this.values.types.store.plain(TypeKind.String);
+
+    return { type: kStringType, value, tz, owned: true };
   }
 }

@@ -13,21 +13,19 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
-  kCharCodesText,
-  kCodePointsText,
-  kDateNow,
   kDoubleType,
   kIntType,
   kMathAbsolute,
   kMathCeil,
   kMathFloor,
-  kMathRound,
+  kMathsModule,
   kMathTrunc,
-  kPerformanceNow,
   kPointerType,
   kStaticHolders,
+  kTextModule,
+  kTimeModule,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue } from "../types/lowering.types.tz";
+import { Frame, IrValue, RuntimeTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private readonly isStaticHolder(frame: Read<Frame>, expr: Expr): boolean {
@@ -72,18 +70,17 @@ partial class Lowering {
       case "String.fromCodePoint":
         return this.codePointsText(frame, call);
       case "performance.now": {
-        const callee = this.ir.declare(kPerformanceNow, kDoubleType, []);
-        const value = frame.made.call(callee, []);
-        const tz = this.values.types.store.plain(TypeKind.Double);
+        const name = "performanceNow";
+        const target: RuntimeTarget = { module: kTimeModule, name };
 
-        return { type: kDoubleType, value, tz };
+        return this.runtimeFunctionCall(frame, target, [], [], call.loc);
       }
+      case "JSON.stringify":
+        return this.jsonStringified(frame, call);
       case "Date.now": {
-        const callee = this.ir.declare(kDateNow, kIntType, []);
-        const value = frame.made.call(callee, []);
-        const tz = this.values.types.store.integer(64, false);
+        const target: RuntimeTarget = { module: kTimeModule, name: "dateNow" };
 
-        return { type: kIntType, value, tz };
+        return this.runtimeFunctionCall(frame, target, [], [], call.loc);
       }
       default:
         this.notLowered(frame.module, call.loc, `a call of ${key}`);
@@ -246,9 +243,7 @@ partial class Lowering {
       return this.converted(frame, inside, result, call.loc);
     }
 
-    const runtime = this.roundingRuntime(name);
-    const callee = this.ir.declare(runtime, kDoubleType, [kDoubleType]);
-    const rounded = frame.made.call(callee, [inside.value]);
+    const rounded = this.roundedValue(frame, name, inside, call.loc);
     const double = this.values.types.store.plain(TypeKind.Double);
     if (this.isDouble(result)) {
       return { type, value: rounded, tz: result };
@@ -259,14 +254,31 @@ partial class Lowering {
     return this.integerFitted(frame, value, this.widened(result));
   }
 
+  private roundedValue(
+    frame: Read<Frame>,
+    name: string,
+    inside: IrValue,
+    loc: int,
+  ): LLVMValue {
+    if (name == "round") {
+      const target: RuntimeTarget = { module: kMathsModule, name };
+      const found = this.runtimeFunctionCall(frame, target, [], [inside], loc);
+
+      return found?.value ?? inside.value;
+    }
+
+    const runtime = this.roundingRuntime(name);
+    const callee = this.ir.declare(runtime, kDoubleType, [kDoubleType]);
+
+    return frame.made.call(callee, [inside.value]);
+  }
+
   private readonly roundingRuntime(name: string): string {
     switch (name) {
       case "floor":
         return kMathFloor;
       case "ceil":
         return kMathCeil;
-      case "round":
-        return kMathRound;
       default:
         return kMathTrunc;
     }
@@ -290,10 +302,7 @@ partial class Lowering {
       }
     }
 
-    const size = this.ir.integer(kIntType, `${count}`);
-    const params = [kPointerType, kIntType];
-
-    return this.textOut(frame, kCharCodesText, params, [slot, size]);
+    return this.cellsText(frame, "fromCharCodes", slot, count, call.loc);
   }
 
   private codePointsText(frame: Frame, call: CallExpr): IrValue | undefined {
@@ -314,9 +323,23 @@ partial class Lowering {
       }
     }
 
-    const size = this.ir.integer(kIntType, `${count}`);
-    const params = [kPointerType, kIntType];
+    return this.cellsText(frame, "fromCodePoints", slot, count, call.loc);
+  }
 
-    return this.textOut(frame, kCodePointsText, params, [slot, size]);
+  private cellsText(
+    frame: Read<Frame>,
+    name: string,
+    slot: LLVMValue,
+    count: int,
+    loc: int,
+  ): IrValue | undefined {
+    const unknown = this.values.types.store.plain(TypeKind.Unknown);
+    const int = this.values.types.store.integer(64, false);
+    const size = this.ir.integer(kIntType, `${count}`);
+    const cells: IrValue = { type: kPointerType, value: slot, tz: unknown };
+    const total: IrValue = { type: kIntType, value: size, tz: int };
+    const target: RuntimeTarget = { module: kTextModule, name };
+
+    return this.runtimeFunctionCall(frame, target, [], [cells, total], loc);
   }
 }

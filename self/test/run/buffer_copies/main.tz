@@ -1,0 +1,15 @@
+function shown(label: string, bytes: Read<Buffer>): void {
+  console.log(label, bytes.length, bytes.toString("hex"));
+}
+
+function main(): void {
+  const text = Buffer.from("abc, мир");
+  const copy = Buffer.from(text);
+  const part = Buffer.from(text.subarray(2, 6));
+
+  shown("copy", copy);
+  shown("part", part);
+  shown("empty", Buffer.from(Buffer.alloc(0)));
+}
+
+main();

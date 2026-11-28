@@ -1,0 +1,650 @@
+function textsSame(first: Read<string>, second: Read<string>): boolean {
+  return first == second;
+}
+
+function decimalsSame(first: Read<decimal>, second: Read<decimal>): boolean {
+  return first == second;
+}
+
+function textsFoldedSame(first: Read<string>, second: Read<string>): boolean {
+  if (first.length != second.length) {
+    return false;
+  }
+
+  for (let index = 0; index < first.length; index++) {
+    const left = foldedUnit(first.charCodeAt(index), true);
+    const right = foldedUnit(second.charCodeAt(index), true);
+
+    if (left != right) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both places hold a text",
+})
+function textPlacesSame(
+  first: Raw<uint8>,
+  second: Raw<uint8>,
+  isFold: boolean,
+): boolean {
+  const left = cellsAt<string>(first, 0);
+  const right = cellsAt<string>(second, 0);
+
+  if (isFold) {
+    return textsFoldedSame(peekAt(left, 0), peekAt(right, 0));
+  }
+
+  return textsSame(peekAt(left, 0), peekAt(right, 0));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both places hold a decimal",
+})
+function decimalPlacesSame(first: Raw<uint8>, second: Raw<uint8>): boolean {
+  const left = cellsAt<decimal>(first, 0);
+  const right = cellsAt<decimal>(second, 0);
+
+  return decimalsSame(peekAt(left, 0), peekAt(right, 0));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "both values have the shape their type description gives",
+})
+function valuesSame(
+  type: Raw<uint8>,
+  first: Raw<uint8>,
+  second: Raw<uint8>,
+  isFold: boolean,
+): boolean {
+  const kind = kindOf(type);
+
+  if (isIntegerKind(kind)) {
+    return integerBits(kind, first) == integerBits(kind, second);
+  }
+  if (kind == 3) {
+    return doubleKeyBits(first) == doubleKeyBits(second);
+  }
+  if (kind == 4) {
+    return (unitAt(first, 0) != 0) == (unitAt(second, 0) != 0);
+  }
+  if (kind == 5) {
+    return textPlacesSame(first, second, isFold);
+  }
+  if (kind == 11) {
+    return decimalPlacesSame(first, second);
+  }
+  if (kind == 9) {
+    const isSameCode = bitsAt(first, 0) == bitsAt(second, 0);
+
+    return isSameCode && bitsAt(first, 8) == bitsAt(second, 8);
+  }
+  if (kind == 7) {
+    return optionalsSame(type, first, second, isFold);
+  }
+  if (kind == 15) {
+    return wordAt(first, 0) == wordAt(second, 0);
+  }
+  if (kind == 14) {
+    return unionsSame(type, first, second, isFold);
+  }
+
+  return bitsAt(first, 0) == bitsAt(second, 0);
+}
+
+function optionalsSame(
+  type: Raw<uint8>,
+  first: Raw<uint8>,
+  second: Raw<uint8>,
+  isFold: boolean,
+): boolean {
+  const hasFirst = isPresent(type, first);
+  const hasSecond = isPresent(type, second);
+
+  if (!hasFirst || !hasSecond) {
+    return hasFirst == hasSecond;
+  }
+
+  return valuesSame(innerOf(type), first, second, isFold);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a union value keeps its tag first and the part after eight bytes",
+})
+function unionsSame(
+  type: Raw<uint8>,
+  first: Raw<uint8>,
+  second: Raw<uint8>,
+  isFold: boolean,
+): boolean {
+  const tag = wordAt(first, 0);
+
+  if (tag != wordAt(second, 0)) {
+    return false;
+  }
+  if (tag == 0) {
+    return true;
+  }
+
+  const part = slotOf(type, tag.toInt());
+  const left = cellsAt<uint8>(first, 8);
+  const right = cellsAt<uint8>(second, 8);
+
+  return valuesSame(part, left, right, isFold);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a map starts with MapHead and points to its layout",
+})
+function isFolded(map: Raw<uint8>): boolean {
+  const head = viewAt<MapHead>(map, 0);
+
+  return (head.flags & foldFlag()) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entries of a map are entrySize bytes each",
+})
+function entryAt(map: Raw<uint8>, position: int): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const size = layout.entrySize.toInt();
+
+  return cellsAt<uint8>(head.entries, position * size);
+}
+
+function isLiveEntry(entry: Raw<uint8>): boolean {
+  return wordAt(entry, 4) != 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the key of a map has the type its layout gives",
+})
+function keyHash(map: Raw<uint8>, key: Raw<uint8>): uint32 {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const isFold = isFolded(map);
+
+  return valueHash(layout.key, key, isFold);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entry keeps its key at the offset of the layout",
+})
+function entryMatches(
+  map: Raw<uint8>,
+  entry: Raw<uint8>,
+  key: Raw<uint8>,
+  hash: uint32,
+): boolean {
+  if (wordAt(entry, 0) != hash || !isLiveEntry(entry)) {
+    return false;
+  }
+
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const stored = cellsAt<uint8>(entry, layout.keyOffset.toInt());
+  const isFold = isFolded(map);
+
+  return valuesSame(layout.key, stored, key, isFold);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the index has indexMask + 1 places of four bytes",
+})
+function hashedFound(
+  map: Raw<uint8>,
+  key: Raw<uint8>,
+  hash: uint32,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+
+  if (rawZero(head.index)) {
+    const used = head.used.toInt();
+
+    for (let position = 0; position < used; position++) {
+      const entry = entryAt(map, position);
+
+      if (entryMatches(map, entry, key, hash)) {
+        return entry;
+      }
+    }
+
+    return bitsRaw(0);
+  }
+
+  const mask = head.indexMask.toInt();
+  let slot = hash.toInt() & mask;
+  let position = wordAt(head.index, slot * 4).toInt();
+
+  while (position != 0) {
+    const entry = entryAt(map, position - 1);
+
+    if (entryMatches(map, entry, key, hash)) {
+      return entry;
+    }
+
+    slot = (slot + 1) & mask;
+    position = wordAt(head.index, slot * 4).toInt();
+  }
+
+  return bitsRaw(0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the index has indexMask + 1 places of four bytes",
+})
+function indexInserted(map: Raw<uint8>, hash: uint32, position: int): void {
+  const head = viewAt<MapHead>(map, 0);
+  const mask = head.indexMask.toInt();
+  let slot = hash.toInt() & mask;
+
+  while (wordAt(head.index, slot * 4) != 0) {
+    slot = (slot + 1) & mask;
+  }
+
+  wordPut(head.index, slot * 4, (position + 1).toUint32());
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the index is made again for the live entries",
+})
+function indexRebuilt(map: Raw<uint8>): void {
+  const head = viewAt<MapHead>(map, 0);
+
+  release(head.index);
+  head.index = bitsRaw(0);
+  head.indexMask = 0;
+
+  const capacity = head.capacity.toInt();
+  if (capacity <= smallMost()) {
+    return;
+  }
+
+  let size = 16;
+
+  while (size < 2 * capacity) {
+    size = size * 2;
+  }
+
+  head.index = allocate<uint8>(size * 4);
+  zeroFilled(head.index, size * 4);
+  head.indexMask = (size - 1).toUint32();
+
+  const used = head.used.toInt();
+
+  for (let position = 0; position < used; position++) {
+    const entry = entryAt(map, position);
+
+    if (isLiveEntry(entry)) {
+      indexInserted(map, wordAt(entry, 0), position);
+    }
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "live entries move down over the dead ones",
+})
+function entriesCompacted(map: Raw<uint8>): void {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const size = layout.entrySize.toInt();
+  const used = head.used.toInt();
+  let to = 0;
+
+  for (let position = 0; position < used; position++) {
+    const entry = entryAt(map, position);
+
+    if (isLiveEntry(entry)) {
+      if (to != position) {
+        copyCells(head.entries, position * size, head.entries, to * size, size);
+      }
+
+      to += 1;
+    }
+  }
+
+  head.used = to.toUint32();
+  indexRebuilt(map);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entries move to a room twice as big",
+})
+function roomMade(map: Raw<uint8>): void {
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const isQuiet = head.iterating == 0;
+  const used = head.used.toInt();
+  const count = head.size.toInt();
+
+  if (isQuiet && count <= used / 2 && used >= smallMost()) {
+    entriesCompacted(map);
+
+    return;
+  }
+
+  const size = layout.entrySize.toInt();
+  let capacity = 4;
+
+  if (head.capacity != 0) {
+    capacity = head.capacity.toInt() * 2;
+  }
+  if (capacity > entriesMost()) {
+    const most = entriesMost();
+
+    panic(`a dictionary cannot hold more than ${most} entries`);
+  }
+
+  const entries = allocate<uint8>(capacity * size);
+
+  if (used > 0) {
+    copyCells(head.entries, 0, entries, 0, used * size);
+  }
+
+  release(head.entries);
+  head.entries = entries;
+  head.capacity = capacity.toUint32();
+
+  if (isQuiet && count < used) {
+    entriesCompacted(map);
+  } else {
+    indexRebuilt(map);
+  }
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a tree text gets its flat copy before it is kept as a key",
+})
+function keyFlattened(place: Raw<uint8>): void {
+  const meta = bitsAt(place, 8);
+  const forms = treeBit() | heapBit();
+  if ((meta & forms) != forms) {
+    return;
+  }
+
+  const cells = cellsAt<string>(place, 0);
+  const isWide = (meta & wideBit()) != 0;
+
+  treeCells(peekAt(cells, 0), isWide);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the new entry is zero bytes before the key is copied in",
+})
+function entryAppended(
+  map: Raw<uint8>,
+  key: Raw<uint8>,
+  hash: uint32,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+
+  if (head.used == head.capacity) {
+    roomMade(map);
+  }
+
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const position = head.used.toInt();
+  const entry = entryAt(map, position);
+  const stored = cellsAt<uint8>(entry, layout.keyOffset.toInt());
+  const keyKind = kindOf(layout.key);
+
+  head.used = (position + 1).toUint32();
+  zeroFilled(entry, layout.entrySize.toInt());
+  wordPut(entry, 0, hash);
+  wordPut(entry, 4, 1);
+  copyCells(key, 0, stored, 0, sizeOf(layout.key));
+
+  if (keyKind == 5) {
+    keyFlattened(stored);
+  } else if (keyKind == 3 && (bitsAt(stored, 0) & magnitudeBits()) == 0) {
+    bitsPut(stored, 0, 0);
+  }
+
+  valueRetained(layout.key, stored);
+
+  if (!rawZero(head.index)) {
+    indexInserted(map, hash, position);
+  }
+
+  head.size += 1;
+
+  return entry;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the key has the type of the keys of the map",
+})
+export function mapFound(map: Raw<uint8>, key: Raw<uint8>): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  if (head.size == 0) {
+    return bitsRaw(0);
+  }
+
+  return hashedFound(map, key, keyHash(map, key));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "added holds four bytes: 1 when the key is new",
+})
+export function mapAdded(
+  map: Raw<uint8>,
+  key: Raw<uint8>,
+  added: Raw<uint8>,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const hash = keyHash(map, key);
+  let entry = bitsRaw(0);
+
+  if (head.size != 0) {
+    entry = hashedFound(map, key, hash);
+  }
+  if (!rawZero(entry)) {
+    wordPut(added, 0, 0);
+
+    return entry;
+  }
+
+  wordPut(added, 0, 1);
+
+  return entryAppended(map, key, hash);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the entry keeps a text key at the offset of the layout",
+})
+function shortKeyMatches(
+  map: Raw<uint8>,
+  entry: Raw<uint8>,
+  hash: uint32,
+  text: Raw<uint8>,
+): boolean {
+  if (wordAt(entry, 0) != hash || !isLiveEntry(entry)) {
+    return false;
+  }
+
+  const head = viewAt<MapHead>(map, 0);
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const stored = cellsAt<uint8>(entry, layout.keyOffset.toInt());
+  const storedMeta = bitsAt(stored, 8);
+  const isSameObject = bitsAt(stored, 0) == bitsAt(text, 0);
+
+  if (isSameObject && storedMeta == bitsAt(text, 8)) {
+    return true;
+  }
+  if (isInlineMeta(storedMeta)) {
+    return false;
+  }
+
+  return textPlacesSame(stored, text, false);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text key is kept in two words in this frame",
+})
+function shortSmallFound(
+  map: Raw<uint8>,
+  text: Raw<uint8>,
+  hash: uint32,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const used = head.used.toInt();
+
+  for (let position = 0; position < used; position++) {
+    const entry = entryAt(map, position);
+
+    if (shortKeyMatches(map, entry, hash, text)) {
+      return entry;
+    }
+  }
+
+  return bitsRaw(0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the index has indexMask + 1 places of four bytes",
+})
+function shortProbed(
+  map: Raw<uint8>,
+  text: Raw<uint8>,
+  hash: uint32,
+  first: int,
+): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const mask = head.indexMask.toInt();
+  let slot = first;
+  let position = wordAt(head.index, slot * 4).toInt();
+
+  while (position != 0) {
+    const entry = entryAt(map, position - 1);
+
+    if (shortKeyMatches(map, entry, hash, text)) {
+      return entry;
+    }
+
+    slot = (slot + 1) & mask;
+    position = wordAt(head.index, slot * 4).toInt();
+  }
+
+  return bitsRaw(0);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text key is kept in two words in this frame",
+})
+function textSlowlyFound(map: Raw<uint8>, text: Raw<uint8>): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const meta = bitsAt(text, 8);
+  const isPlain = isInlineMeta(meta) && !isFolded(map);
+
+  if (isPlain && rawZero(head.index)) {
+    const hash = inlineHash(bitsAt(text, 0), meta);
+
+    return shortSmallFound(map, text, hash);
+  }
+
+  return mapFound(map, text);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text key is kept in two words in this frame",
+})
+function textFoundAt(map: Raw<uint8>, text: Raw<uint8>): Raw<uint8> {
+  const head = viewAt<MapHead>(map, 0);
+  const meta = bitsAt(text, 8);
+  const isPlain = isInlineMeta(meta) && !isFolded(map);
+
+  if (!isPlain || rawZero(head.index)) {
+    return textSlowlyFound(map, text);
+  }
+
+  const object = bitsAt(text, 0);
+  const hash = inlineHash(object, meta);
+  const slot = hash.toInt() & head.indexMask.toInt();
+  const position = wordAt(head.index, slot * 4).toInt();
+
+  if (position == 0) {
+    return bitsRaw(0);
+  }
+
+  const layout = viewAt<MapLayoutHead>(head.layout, 0);
+  const entry = entryAt(map, position - 1);
+  const stored = cellsAt<uint8>(entry, layout.keyOffset.toInt());
+  const isSame = bitsAt(stored, 0) == object && bitsAt(stored, 8) == meta;
+
+  if (wordAt(entry, 0) == hash && isSame && isLiveEntry(entry)) {
+    return entry;
+  }
+
+  return shortProbed(map, text, hash, slot);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text key is kept in two words in this frame",
+})
+export function mapTextFound(
+  map: Raw<uint8>,
+  object: Raw<uint8>,
+  meta: uint64,
+): Raw<uint8> {
+  const text = frameCells<uint8>(16);
+
+  bitsPut(text, 0, rawBits(object));
+  bitsPut(text, 8, meta);
+
+  return textFoundAt(map, text);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text key is kept in two words in this frame",
+})
+export function mapTextAdded(
+  map: Raw<uint8>,
+  object: Raw<uint8>,
+  meta: uint64,
+  added: Raw<uint8>,
+): Raw<uint8> {
+  const text = frameCells<uint8>(16);
+
+  bitsPut(text, 0, rawBits(object));
+  bitsPut(text, 8, meta);
+
+  const entry = textFoundAt(map, text);
+
+  if (!rawZero(entry)) {
+    wordPut(added, 0, 0);
+
+    return entry;
+  }
+
+  wordPut(added, 0, 1);
+
+  return entryAppended(map, text, keyHash(map, text));
+}

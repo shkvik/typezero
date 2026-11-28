@@ -1,0 +1,800 @@
+function isSignCode(unit: int): boolean {
+  return unit == 43 || unit == 45;
+}
+
+function isDigitCode(unit: int): boolean {
+  return unit >= 48 && unit <= 57;
+}
+
+function unitsOf(text: Read<string>): int[] {
+  const units: int[] = [];
+
+  for (let index = 0; index < text.length; index++) {
+    units.push(text.charCodeAt(index) ?? 0);
+  }
+
+  return units;
+}
+
+function unitOf(units: Read<int[]>, at: int): int {
+  return units[at] ?? 0;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every read is below to",
+})
+function isPlainCells<C>(cells: Raw<C>, from: int, to: int): boolean {
+  let at = from;
+
+  if (at < to && unitAt(cells, at) == 45) {
+    at += 1;
+  }
+
+  let whole = 0;
+  let fraction = 0;
+
+  while (at < to && isDigitCode(unitAt(cells, at))) {
+    at += 1;
+    whole += 1;
+  }
+  if (at < to && unitAt(cells, at) == 46) {
+    at += 1;
+
+    while (at < to && isDigitCode(unitAt(cells, at))) {
+      at += 1;
+      fraction += 1;
+    }
+    if (whole == 0 && fraction == 0) {
+      return false;
+    }
+  } else if (whole == 0) {
+    return false;
+  }
+  if (at < to && (unitAt(cells, at) | 32) == 101) {
+    at += 1;
+
+    if (at < to && isSignCode(unitAt(cells, at))) {
+      at += 1;
+    }
+
+    const start = at;
+
+    while (at < to && isDigitCode(unitAt(cells, at))) {
+      at += 1;
+    }
+    if (at == start) {
+      return false;
+    }
+  }
+
+  return at == to;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+function isPlainUnits(units: Read<int[]>, from: int, to: int): boolean {
+  return isPlainCells(arrayCells(units), from, to);
+}
+
+const kSpaceUnits: int[] = [160, 5760, 8232, 8233, 8239, 8287, 12288, 65279];
+
+function isSpaceUnit(unit: int): boolean {
+  if (unit == 32 || (unit >= 9 && unit <= 13)) {
+    return true;
+  }
+  if (unit < 128) {
+    return false;
+  }
+  if (kSpaceUnits.includes(unit)) {
+    return true;
+  }
+
+  return unit >= 8192 && unit <= 8202;
+}
+
+function baseDigit(unit: int, base: int): int {
+  let value = 99;
+
+  if (isDigitCode(unit)) {
+    value = unit - 48;
+  } else if (unit >= 97 && unit <= 122) {
+    value = unit - 87;
+  }
+  if (value < base) {
+    return value;
+  }
+
+  return -1;
+}
+
+function lowered(unit: int): int {
+  if (unit >= 65 && unit <= 90) {
+    return unit + 32;
+  }
+
+  return unit;
+}
+
+function isMixedCase(units: Read<int[]>, from: int, to: int): boolean {
+  let isUpper = false;
+  let isLower = false;
+
+  for (let at = from; at < to; at++) {
+    const unit = unitOf(units, at);
+
+    isUpper = isUpper || (unit >= 65 && unit <= 90);
+    isLower = isLower || (unit >= 97 && unit <= 122);
+  }
+
+  return isUpper && isLower;
+}
+
+class BaseReading {
+  public value: Natural;
+  public fraction: int;
+  public isValid: boolean;
+
+  public constructor(value: Own<Natural>, fraction: int, isValid: boolean) {
+    this.value = value;
+    this.fraction = fraction;
+    this.isValid = isValid;
+  }
+}
+
+function baseRead(
+  units: Read<int[]>,
+  from: int,
+  to: int,
+  base: int,
+): BaseReading {
+  const value = new Natural(0);
+  let fraction = 0;
+  let isDot = false;
+  let isAfterDigit = false;
+  let isAny = false;
+  let isBroken = false;
+
+  for (let at = from; at < to && !isBroken; at++) {
+    const unit = lowered(unitOf(units, at));
+    const digit = baseDigit(unit, base);
+
+    if (digit >= 0) {
+      naturalScaled(value, base, digit);
+
+      if (isDot) {
+        fraction += 1;
+      }
+
+      isAfterDigit = true;
+      isAny = true;
+      continue;
+    }
+    if (unit == 95 && isAfterDigit && at + 1 < to) {
+      isAfterDigit = false;
+      continue;
+    }
+    if (unit == 46 && (at == from || (!isDot && isAfterDigit))) {
+      if (at + 1 == to) {
+        break;
+      }
+
+      isDot = true;
+      isAfterDigit = false;
+      continue;
+    }
+
+    isBroken = true;
+  }
+  if (isBroken) {
+    return new BaseReading(value, 0, false);
+  }
+
+  return new BaseReading(value, fraction, isAny || isDot);
+}
+
+function isBaseValid(
+  units: Read<int[]>,
+  from: int,
+  to: int,
+  base: int,
+): boolean {
+  if (isMixedCase(units, from, to)) {
+    return false;
+  }
+
+  return baseRead(units, from, to, base).isValid;
+}
+
+function baseParsed(
+  units: Read<int[]>,
+  from: int,
+  to: int,
+  base: int,
+  isNegative: boolean,
+): Decimal | undefined {
+  if (isMixedCase(units, from, to)) {
+    return undefined;
+  }
+
+  const reading = baseRead(units, from, to, base);
+  if (!reading.isValid) {
+    return undefined;
+  }
+  if (reading.fraction == 0) {
+    const natural = naturalCopy(reading.value);
+    const isSigned = natural.count != 0 && isNegative;
+    const made = new Decimal(natural, 0, isSigned);
+
+    normalized(made);
+
+    return made;
+  }
+
+  const top = new Decimal(naturalCopy(reading.value), 0, isNegative);
+  const bottom = new Decimal(naturalOf(1), 0, false);
+
+  for (let index = 0; index < reading.fraction; index++) {
+    naturalScaled(bottom.natural, base, 0);
+  }
+
+  const made = decimalQuotient(top, bottom, divisionPlaces(), roundHalfUp());
+
+  normalized(made);
+
+  return made;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "every read is below to",
+})
+function validParsed<C>(
+  cells: Raw<C>,
+  from: int,
+  to: int,
+  isNegative: boolean,
+): Decimal {
+  let mantissa = from;
+
+  while (mantissa < to && (unitAt(cells, mantissa) | 32) != 101) {
+    mantissa += 1;
+  }
+
+  let exponent = 0;
+
+  if (mantissa < to) {
+    let at = mantissa + 1;
+    let isLess = false;
+
+    if (at < to && isSignCode(unitAt(cells, at))) {
+      isLess = unitAt(cells, at) == 45;
+      at += 1;
+    }
+
+    while (at < to) {
+      if (exponent < 1099511627776) {
+        exponent = exponent * 10 + unitAt(cells, at) - 48;
+      }
+
+      at += 1;
+    }
+    if (isLess) {
+      exponent = 0 - exponent;
+    }
+  }
+
+  let point = -1;
+  let count = 0;
+
+  for (let at = from; at < mantissa; at++) {
+    if (unitAt(cells, at) == 46) {
+      point = count;
+    } else {
+      count += 1;
+    }
+  }
+  if (point < 0) {
+    point = count;
+  }
+
+  const natural = new Natural(mantissa / 9 + 2);
+  let limb = 0;
+  let scale = 1;
+
+  for (let at = mantissa - 1; at >= from; at--) {
+    const unit = unitAt(cells, at);
+
+    if (unit == 46) {
+      continue;
+    }
+
+    limb += (unit - 48) * scale;
+    scale = scale * 10;
+
+    if (scale == limbBase()) {
+      natural.put(natural.count, limb);
+      natural.count += 1;
+      limb = 0;
+      scale = 1;
+    }
+  }
+  if (scale > 1) {
+    natural.put(natural.count, limb);
+    natural.count += 1;
+  }
+
+  natural.trim();
+
+  const isSigned = natural.count != 0 && isNegative;
+  const made = new Decimal(natural, exponent - (count - point), isSigned);
+
+  normalized(made);
+
+  return made;
+}
+
+function isNamed(
+  units: Read<int[]>,
+  from: int,
+  to: int,
+  word: string,
+): boolean {
+  if (to - from != word.length) {
+    return false;
+  }
+
+  for (let at = 0; at < word.length; at++) {
+    if (unitOf(units, from + at) != (word.charCodeAt(at) ?? 0)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isSpecialName(units: Read<int[]>, from: int, to: int): boolean {
+  if (isNamed(units, from, to, "Infinity")) {
+    return true;
+  }
+
+  return isNamed(units, from, to, "NaN");
+}
+
+class Trimmed {
+  public readonly from: int;
+  public readonly to: int;
+  public readonly isNegative: boolean;
+
+  public constructor(from: int, to: int, isNegative: boolean) {
+    this.from = from;
+    this.to = to;
+    this.isNegative = isNegative;
+  }
+}
+
+function trimmedOf(units: Read<int[]>): Trimmed {
+  let from = 0;
+  let to = units.length;
+
+  while (from < to && isSpaceUnit(unitOf(units, from))) {
+    from += 1;
+  }
+  if (from < to && unitOf(units, from) == 43) {
+    if (!(from + 1 < to && unitOf(units, from + 1) == 45)) {
+      from += 1;
+    }
+  }
+
+  while (to > from && isSpaceUnit(unitOf(units, to - 1))) {
+    to -= 1;
+  }
+
+  const isNegative = to > from && unitOf(units, from) == 45;
+
+  return new Trimmed(from, to, isNegative);
+}
+
+function baseOf(units: Read<int[]>, from: int, to: int): int {
+  if (to - from <= 2 || unitOf(units, from) != 48) {
+    return 0;
+  }
+  if (unitOf(units, from + 2) == 46) {
+    return 0;
+  }
+
+  const kind = unitOf(units, from + 1) | 32;
+  if (kind == 120) {
+    return 16;
+  }
+  if (kind == 98) {
+    return 2;
+  }
+  if (kind == 111) {
+    return 8;
+  }
+
+  return 0;
+}
+
+function cleaned(units: Read<int[]>, from: int, to: int): int[] {
+  const clean: int[] = [];
+
+  for (let at = from; at < to; at++) {
+    const unit = unitOf(units, at);
+    const isBetween =
+      at > from &&
+      isDigitCode(unitOf(units, at - 1)) &&
+      at + 1 < to &&
+      isDigitCode(unitOf(units, at + 1));
+
+    if (unit == 95 && isBetween) {
+      continue;
+    }
+
+    clean.push(unit);
+  }
+
+  return clean;
+}
+
+function isTextValid(units: Read<int[]>): boolean {
+  if (isPlainUnits(units, 0, units.length)) {
+    return true;
+  }
+
+  const trimmed = trimmedOf(units);
+  let body = trimmed.from;
+
+  if (trimmed.isNegative) {
+    body += 1;
+  }
+
+  const end = trimmed.to;
+  if (isSpecialName(units, body, end)) {
+    return false;
+  }
+
+  const base = baseOf(units, body, end);
+  if (base != 0) {
+    return isBaseValid(units, body + 2, end, base);
+  }
+
+  const clean = cleaned(units, trimmed.from, end);
+
+  return isPlainUnits(clean, 0, clean.length);
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+function parsedUnits(units: Read<int[]>): Decimal | undefined {
+  if (isPlainUnits(units, 0, units.length)) {
+    const isNegative = unitOf(units, 0) == 45;
+    let from = 0;
+
+    if (isNegative) {
+      from = 1;
+    }
+
+    return validParsed(arrayCells(units), from, units.length, isNegative);
+  }
+
+  const trimmed = trimmedOf(units);
+  const isNegative = trimmed.isNegative;
+  let body = trimmed.from;
+
+  if (isNegative) {
+    body += 1;
+  }
+
+  const end = trimmed.to;
+  if (isSpecialName(units, body, end)) {
+    return undefined;
+  }
+
+  const base = baseOf(units, body, end);
+  if (base != 0) {
+    return baseParsed(units, body + 2, end, base, isNegative);
+  }
+
+  const clean = cleaned(units, trimmed.from, end);
+  if (!isPlainUnits(clean, 0, clean.length)) {
+    return undefined;
+  }
+
+  let from = 0;
+
+  if (isNegative) {
+    from = 1;
+  }
+
+  return validParsed(arrayCells(clean), from, clean.length, isNegative);
+}
+
+function utf8Size(point: int): int {
+  if (point < 128) {
+    return 1;
+  }
+  if (point < 2048) {
+    return 2;
+  }
+  if (point < 65536) {
+    return 3;
+  }
+
+  return 4;
+}
+
+function convertMessage(units: Read<int[]>): string {
+  let size = 0;
+  let shown = "";
+  let at = 0;
+
+  while (at < units.length && size + 4 < 160) {
+    let point = unitOf(units, at);
+    const next = unitOf(units, at + 1);
+    const isHigh = point >= 55296 && point <= 56319;
+    const isPair = isHigh && at + 1 < units.length && next >= 56320;
+
+    if (isPair && next <= 57343) {
+      const high = point;
+
+      point = 65536 + ((high - 55296) << 10) + (next - 56320);
+      at += 1;
+      shown = `${shown}${String.fromCharCode(high, next)}`;
+    } else if (point >= 55296 && point <= 57343) {
+      point = 65533;
+      shown = `${shown}${String.fromCharCode(point)}`;
+    } else {
+      shown = `${shown}${String.fromCharCode(point)}`;
+    }
+
+    size += utf8Size(point);
+    at += 1;
+  }
+
+  let dots = "";
+
+  if (size + 4 >= 160) {
+    dots = "...";
+  }
+
+  return `Cannot convert ${shown}${dots} to a decimal`;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the cells live as long as this borrowed string",
+})
+function plainParsed(text: Read<string>): Decimal | undefined {
+  const count = text.length;
+  const narrow = textCells<uint8>(text);
+  if (narrow == undefined || !isPlainCells(narrow, 0, count)) {
+    return undefined;
+  }
+
+  const isNegative = unitAt(narrow, 0) == 45;
+  let from = 0;
+
+  if (isNegative) {
+    from = 1;
+  }
+
+  return validParsed(narrow, from, count, isNegative);
+}
+
+export function fromText(text: Read<string>): decimal {
+  const plain = plainParsed(text);
+  if (plain != undefined) {
+    return stored(plain);
+  }
+
+  const units = unitsOf(text);
+  const found = parsedUnits(units);
+  if (found == undefined) {
+    const message = convertMessage(units);
+
+    panic(`internal error: ${message}`);
+  }
+
+  return stored(found);
+}
+
+export function fromTextChecked(
+  text: Read<string>,
+): Result<decimal, DecimalError> {
+  const plain = plainParsed(text);
+  if (plain != undefined) {
+    return ok(stored(plain));
+  }
+
+  const units = unitsOf(text);
+  if (!isTextValid(units)) {
+    const message = convertMessage(units);
+    const given = `${text}`;
+
+    const code = "ERR_INVALID_DECIMAL";
+
+    return err({ kind: "DECIMAL_ERROR", code, message, text: given });
+  }
+
+  const found = parsedUnits(units);
+  if (found == undefined) {
+    const message = convertMessage(units);
+
+    panic(`internal error: ${message}`);
+  }
+
+  return ok(stored(found));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "the text of a double has at most 26 cells; the frame holds 32",
+})
+export function fromDouble(value: double): decimal {
+  const cells = frameCells<uint8>(32);
+  const count = doubleText(value, cells, 0);
+  const lead = unitAt(cells, 0);
+  const isSpecial = lead == 78 || lead == 73;
+  if (isSpecial || (lead == 45 && unitAt(cells, 1) == 73)) {
+    const tail = "cannot be converted to a decimal because it is not finite";
+
+    panic(`The number ${value} ${tail}`);
+  }
+
+  const whole = Math.trunc(value);
+  if (whole == value && Math.abs(value) < 9007199254740992.0) {
+    return decimalOf(Math.trunc(whole).toInt(), 0);
+  }
+
+  const isNegative = lead == 45;
+  let from = 0;
+
+  if (isNegative) {
+    from = 1;
+  }
+
+  return stored(validParsed(cells, from, count, isNegative));
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function fromUnsigned(value: uint64): decimal {
+  const most: uint64 = 9223372036854775807;
+  if (value <= most) {
+    return decimalOf(value.toInt(), 0);
+  }
+
+  return stored(new Decimal(naturalOf(value), 0, false));
+}
+
+const kExactPowers: double[] = [
+  1e0,
+  1e1,
+  1e2,
+  1e3,
+  1e4,
+  1e5,
+  1e6,
+  1e7,
+  1e8,
+  1e9,
+  1e10,
+  1e11,
+  1e12,
+  1e13,
+  1e14,
+  1e15,
+  1e16,
+  1e17,
+  1e18,
+  1e19,
+  1e20,
+  1e21,
+  1e22,
+];
+
+function largest(): double {
+  return 1.7976931348623157e308;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory, UnsafeUse.Foreign],
+  reason: "the cells hold the ascii text and a zero after it",
+})
+function textDouble(text: Read<string>): double {
+  const count = text.length;
+  const cells = allocate<uint8>(count + 1);
+
+  for (let index = 0; index < count; index++) {
+    putUnit(cells, index, text.charCodeAt(index) ?? 48);
+  }
+
+  putUnit(cells, count, 0);
+
+  const end = frameCells<uint64>(1);
+  const value = strtod(cells, end);
+
+  release(cells);
+
+  return value;
+}
+
+@Unsafe({
+  uses: [UnsafeUse.Memory],
+  reason: "a decimal is read and made only through its two words",
+})
+export function toDouble(given: Read<decimal>): double {
+  const coef = decimalCoef(given);
+  const meta = decimalMeta(given);
+  const scale = scaleOf(meta);
+  const bound: uint64 = 9007199254740992;
+  if (isShortMeta(meta) && scale <= 22 && magnitudeOf(coef) <= bound) {
+    const power = kExactPowers[scale] ?? 1.0;
+
+    return coef.toDouble() / power;
+  }
+
+  const value = loaded(given);
+  let sign = "";
+
+  if (value.isNegative) {
+    sign = "-";
+  }
+
+  const digits = coefficientText(value);
+  const parsed = textDouble(`${sign}${digits}e${value.exponent}`);
+  if (parsed > largest()) {
+    return largest();
+  }
+  if (parsed < 0.0 - largest()) {
+    return 0.0 - largest();
+  }
+
+  return parsed;
+}
+
+const kModeNames: string[] = [
+  "up",
+  "down",
+  "ceil",
+  "floor",
+  "half-up",
+  "half-down",
+  "half-even",
+  "half-ceil",
+  "half-floor",
+];
+
+export function modeNamed(name: Read<string>): int {
+  for (let index = 0; index < kModeNames.length; index++) {
+    if (kModeNames[index] == name) {
+      return index;
+    }
+  }
+
+  let shown = "";
+
+  for (let index = 0; index < name.length && index < 40; index++) {
+    const unit = name.charCodeAt(index) ?? 63;
+
+    if (unit < 128 && unit >= 32) {
+      shown = `${shown}${String.fromCharCode(unit)}`;
+    } else {
+      shown = `${shown}?`;
+    }
+  }
+
+  panic(`internal error: the rounding mode '${shown}'`);
+}

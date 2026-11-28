@@ -54,10 +54,6 @@ typedef struct {
   size_t length, capacity;
 } TzBuf;
 
-const void *tz_str_cells(TzStr *text, int32_t two);
-void *tz_str_room(int32_t two, int64_t count);
-void tz_str_closed(TzStr *out, void *cells, int32_t two, int64_t count, int32_t ascii);
-int64_t tz_cells_find(const void *cells, int32_t two, int64_t from, int64_t end, int64_t unit);
 void tz_buf_init(TzBuf *b);
 void tz_buf_free(TzBuf *b);
 void tz_buf_push(TzBuf *b, uint16_t unit);

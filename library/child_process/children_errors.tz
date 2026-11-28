@@ -1,0 +1,318 @@
+const kChildCodes: string[] = [
+  "UNKNOWN",
+  "ENOENT",
+  "EACCES",
+  "EPERM",
+  "EINVAL",
+  "E2BIG",
+  "ENOMEM",
+  "ETIMEDOUT",
+  "ENOBUFS",
+  "EPIPE",
+  "EOF",
+  "ENOTSUP",
+  "ENOSYS",
+  "ESRCH",
+  "EBADF",
+  "EAGAIN",
+  "EMFILE",
+  "ENAMETOOLONG",
+  "ENOTDIR",
+  "EIO",
+  "EFTYPE",
+  "EBUSY",
+  "ECANCELED",
+  "ECHARSET",
+  "EEXIST",
+  "EFAULT",
+  "EISDIR",
+  "ELOOP",
+  "ENOSPC",
+  "ENOTEMPTY",
+  "EROFS",
+  "EXDEV",
+  "ETXTBSY",
+  "ENOEXEC",
+];
+
+const kChildWindowsErrors: int[] = [
+  1, 2, 3, 4, 5, 6, 8, 13, 14, 15, 17, 19, 23, 31, 32, 33, 39, 50, 80, 82, 87,
+  109, 110, 111, 112, 121, 122, 123, 126, 145, 156, 161, 183, 193, 203, 205,
+  206, 208, 230, 231, 232, 233, 267, 277, 740, 995, 998, 1004, 1100, 1101, 1102,
+  1103, 1104, 1106, 1111, 1113, 1117, 1129, 1165, 1166, 1314, 1393, 1464, 1920,
+  1921, 4392,
+];
+
+const kChildWindowsCodes: int[] = [
+  26, 1, 1, 16, 3, 14, 6, 4, 6, 1, 31, 30, 19, 19, 21, 21, 28, 11, 24, 28, 4,
+  10, 19, 17, 28, 7, 4, 1, 1, 29, 19, 1, 24, 20, 1, 19, 17, 5, 9, 21, 15, 9, 1,
+  28, 2, 22, 25, 14, 28, 19, 19, 19, 19, 19, 19, 23, 19, 19, 19, 19, 3, 19, 4,
+  2, 27, 1,
+];
+
+function noError(): int {
+  return -1;
+}
+
+function missingCode(): int {
+  return 1;
+}
+
+function deniedCode(): int {
+  return 2;
+}
+
+function notPermittedCode(): int {
+  return 3;
+}
+
+function invalidCode(): int {
+  return 4;
+}
+
+function tooBigCode(): int {
+  return 5;
+}
+
+function noMemoryCode(): int {
+  return 6;
+}
+
+function timedOutCode(): int {
+  return 7;
+}
+
+function noBuffersCode(): int {
+  return 8;
+}
+
+function brokenCode(): int {
+  return 9;
+}
+
+function endCode(): int {
+  return 10;
+}
+
+function tryAgainCode(): int {
+  return 15;
+}
+
+function tooManyFilesCode(): int {
+  return 16;
+}
+
+function nameTooLongCode(): int {
+  return 17;
+}
+
+function inputOutputCode(): int {
+  return 19;
+}
+
+function wrongFormatCode(): int {
+  return 20;
+}
+
+function badAddressCode(): int {
+  return 25;
+}
+
+function notExecutableCode(): int {
+  return 33;
+}
+
+function codeOfWindows(error: uint32): int {
+  const wanted = error.toInt();
+
+  for (let at = 0; at < kChildWindowsErrors.length; at++) {
+    if (kChildWindowsErrors[at] == wanted) {
+      return kChildWindowsCodes[at] ?? 0;
+    }
+  }
+
+  return 0;
+}
+
+function programName(file: Read<string>): string {
+  if (file.length == 0 || file.includes("\0")) {
+    return "a program";
+  }
+
+  return file;
+}
+
+function hasSeparator(file: Read<string>): boolean {
+  return file.includes("/") || file.includes("\\");
+}
+
+function zeroError(file: Read<string>, argument: string): SpawnTextError {
+  const name = programName(file);
+  const text = "has a zero character in it";
+  const message = `could not run ${name}: ${argument} ${text}`;
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_ZERO_CHARACTER",
+    code: "ERR_INVALID_ARG_VALUE",
+    message,
+    argument,
+  };
+}
+
+function emptyError(): SpawnTextError {
+  return {
+    kind: "SPAWN_TEXT_ERROR_EMPTY_NAME",
+    code: "ERR_INVALID_ARG_VALUE",
+    message: "could not run a program: its name is empty",
+  };
+}
+
+function windowsNote(system: uint32): string {
+  if (system == 0) {
+    return "";
+  }
+
+  return ` (Windows error ${system})`;
+}
+
+function systemError(
+  message: string,
+  error: int,
+  command: string,
+  args: Own<string[]>,
+): SpawnTextError {
+  const syscall = "spawn";
+
+  if (error == inputOutputCode()) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_SYSTEM",
+      code: "EIO",
+      message,
+      syscall,
+      command,
+      args,
+    };
+  }
+  if (error == badAddressCode()) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_SYSTEM",
+      code: "EFAULT",
+      message,
+      syscall,
+      command,
+      args,
+    };
+  }
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_SYSTEM",
+    code: "UNKNOWN",
+    message,
+    syscall,
+    command,
+    args,
+  };
+}
+
+function missingError(
+  prefix: string,
+  command: string,
+  args: Own<string[]>,
+): SpawnTextError {
+  const syscall = "spawn";
+
+  if (hasSeparator(command)) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_PROGRAM_FILE_NOT_FOUND",
+      code: "ENOENT",
+      message: `${prefix}there is no such file`,
+      syscall,
+      command,
+      args,
+    };
+  }
+
+  const advice = "install it or give the full path";
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_PROGRAM_NOT_FOUND_IN_PATH",
+    code: "ENOENT",
+    message: `${prefix}there is no such program in PATH; ${advice}`,
+    syscall,
+    command,
+    args,
+  };
+}
+
+function permissionError(
+  prefix: string,
+  error: int,
+  system: uint32,
+  command: string,
+  args: Own<string[]>,
+): SpawnTextError {
+  const syscall = "spawn";
+
+  if (error == deniedCode() && system == 740) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_NEEDS_ADMINISTRATOR",
+      code: "EACCES",
+      message: `${prefix}it needs to run as administrator`,
+      syscall,
+      command,
+      args,
+    };
+  }
+
+  const message = `${prefix}no permission`;
+
+  if (error == deniedCode()) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_NO_PERMISSION",
+      code: "EACCES",
+      message,
+      syscall,
+      command,
+      args,
+    };
+  }
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_NO_PERMISSION",
+    code: "EPERM",
+    message,
+    syscall,
+    command,
+    args,
+  };
+}
+
+function formatError(
+  prefix: string,
+  error: int,
+  command: string,
+  args: Own<string[]>,
+): SpawnTextError {
+  const syscall = "spawn";
+  const message = `${prefix}it is not a program`;
+
+  if (error == wrongFormatCode()) {
+    return {
+      kind: "SPAWN_TEXT_ERROR_NOT_A_PROGRAM",
+      code: "EFTYPE",
+      message,
+      syscall,
+      command,
+      args,
+    };
+  }
+
+  return {
+    kind: "SPAWN_TEXT_ERROR_NOT_A_PROGRAM",
+    code: "ENOEXEC",
+    message,
+    syscall,
+    command,
+    args,
+  };
+}

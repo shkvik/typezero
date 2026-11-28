@@ -1,0 +1,110 @@
+import { wideOf } from "tz:ffi";
+import { SpawnTextError, SpawnTextResult } from "tz:child_process/errors";
+import { environmentValue, textOfUnits } from "tz:files";
+import { textOfBytes } from "tz:text";
+import { memset } from "tz:win32/ucrt";
+import {
+  AssignProcessToJobObject,
+  CancelIoEx,
+  CloseHandle,
+  CompareStringOrdinal,
+  ConnectNamedPipe,
+  CreateEventW,
+  CreateFileW,
+  CreateJobObjectW,
+  CreateNamedPipeW,
+  CreateProcessW,
+  DeleteProcThreadAttributeList,
+  FreeEnvironmentStringsW,
+  GetCurrentDirectoryW,
+  GetCurrentProcess,
+  GetCurrentProcessId,
+  GetEnvironmentStringsW,
+  GetExitCodeProcess,
+  GetFileAttributesW,
+  GetLastError,
+  GetOverlappedResult,
+  GetShortPathNameW,
+  InitializeProcThreadAttributeList,
+  NeedCurrentDirectoryForExePathW,
+  ProcessInformation,
+  ReadFile,
+  ResetEvent,
+  SetInformationJobObject,
+  StartupInfo,
+  TerminateProcess,
+  UpdateProcThreadAttribute,
+  WaitForMultipleObjects,
+} from "tz:win32/kernel32";
+import {
+  Raw,
+  allocate,
+  bitsRaw,
+  cellsAt,
+  copyCells,
+  frameCells,
+  peekAt,
+  putAt,
+  putUnit,
+  rawBits,
+  reallocate,
+  release,
+  unitAt,
+} from "tz:unsafe";
+
+function spawnResult(
+  pid: int,
+  status: int,
+  stdout: string,
+  stderr: string,
+): SpawnTextResult {
+  const output: (string | undefined)[] = [undefined, stdout, stderr];
+
+  return { pid, status, output, stdout, stderr };
+}
+
+function zeroArgument(args: Read<string[]>): int {
+  for (let index = 0; index < args.length; index++) {
+    const isZero = args[index]?.includes("\0") ?? false;
+
+    if (isZero) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+export function spawnText(
+  file: Read<string>,
+  args: Read<string[]>,
+  encoding: int,
+): Result<SpawnTextResult, SpawnTextError> {
+  if (file.includes("\0")) {
+    return err(zeroError(file, "file"));
+  }
+  if (file.length == 0) {
+    return err(emptyError());
+  }
+
+  const zeroAt = zeroArgument(args);
+  if (zeroAt >= 0) {
+    return err(zeroError(file, `args[${zeroAt}]`));
+  }
+
+  const run = new ChildRun();
+
+  childStarted(run, file, args);
+
+  const stdout = run.output.textIn(encoding);
+  const stderr = run.errors.textIn(encoding);
+
+  if (run.failure() == noError()) {
+    return ok(spawnResult(run.pid, run.status, stdout, stderr));
+  }
+  if (!run.isStarted) {
+    return err(runError(file, args, run, undefined, undefined));
+  }
+
+  return err(runError(file, args, run, stdout, stderr));
+}
